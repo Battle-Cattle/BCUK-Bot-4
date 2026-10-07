@@ -9,6 +9,7 @@ import { requireMod } from '../middleware';
 import { SFX_FOLDER, SFX_MAX_FILE_MB } from '../../shared/config';
 import { safeResolve } from '../../shared/pathUtils';
 import { parsePositiveIntId, parsePositiveBigIntId, parseCheckboxField } from './validation';
+import { detectAudioType } from './uploadFileTypes';
 import { createMulterErrorRedirectHandler, makeUploadMiddleware } from './uploadMiddleware';
 
 const log = createLogger('Web');
@@ -25,67 +26,6 @@ export const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: MAX_FILE_BYTES },
 });
-
-/**
- * True if `buf` starts with a complete, well-formed 10-byte ID3v2 header:
- * the "ID3" tag, a version byte that isn't the reserved 0xFF, and a syncsafe
- * size (each of the 4 size bytes has its top bit clear). Checking the full
- * header — not just the 3-byte tag — avoids misidentifying truncated/junk
- * payloads as MP3.
- */
-function isValidId3Header(buf: Buffer): boolean {
-  if (buf.length < 10) return false;
-  if (!buf.subarray(0, 3).equals(Buffer.from([0x49, 0x44, 0x33]))) return false;
-  if (buf[3] === 0xff || buf[4] === 0xff) return false;
-  // buf.length >= 10 is checked above, so bytes 6-9 exist.
-  return (buf[6]! & 0x80) === 0 && (buf[7]! & 0x80) === 0 && (buf[8]! & 0x80) === 0 && (buf[9]! & 0x80) === 0;
-}
-
-const RIFF_MAGIC = Buffer.from([0x52, 0x49, 0x46, 0x46]); // "RIFF"
-const WAVE_MAGIC = Buffer.from([0x57, 0x41, 0x56, 0x45]); // "WAVE"
-const OGG_MAGIC = Buffer.from([0x4f, 0x67, 0x67, 0x53]); // "OggS"
-
-/**
- * True if `buf` contains `bytes` starting at `offset` (false if `buf` is too short).
- * @param buf - The buffer to inspect.
- * @param bytes - The expected byte sequence.
- * @param offset - Byte offset in `buf` to compare at; defaults to 0.
- */
-export function startsWithBytes(buf: Buffer, bytes: Buffer, offset = 0): boolean {
-  return buf.length >= offset + bytes.length && buf.subarray(offset, offset + bytes.length).equals(bytes);
-}
-
-/**
- * True if `buf` starts with a valid MPEG audio frame header: 11-bit sync (0xFF then top 3 bits of
- * byte 1) followed by a valid version/layer/bitrate/sample-rate. Validates the full 4-byte header
- * and rejects the reserved bit combinations so junk like `FF E0 00 00` — which only matches the
- * sync — isn't mistaken for MP3.
- */
-export function isValidMpegFrameHeader(buf: Buffer): boolean {
-  if (buf.length < 4) return false;
-  const byte0 = buf[0]!, byte1 = buf[1]!, byte2 = buf[2]!; // length >= 4 checked above
-  if (byte0 !== 0xff || (byte1 & 0xe0) !== 0xe0) return false;
-  const versionBits = (byte1 >> 3) & 0x03; // 0x01 = reserved MPEG version
-  const layerBits = (byte1 >> 1) & 0x03; // 0x00 = reserved layer
-  const bitrateBits = (byte2 >> 4) & 0x0f; // 0x0f = bad/invalid bitrate
-  const sampleRateBits = (byte2 >> 2) & 0x03; // 0x03 = reserved sample rate
-  return versionBits !== 0x01 && layerBits !== 0x00 && bitrateBits !== 0x0f && sampleRateBits !== 0x03;
-}
-
-/**
- * Detect an audio file's type from its magic bytes, independent of the
- * client-supplied MIME type. Supports the three accepted formats.
- * - WAV: `RIFF` at offset 0 and `WAVE` at offset 8
- * - OGG: `OggS` at offset 0
- * - MP3: a complete 10-byte ID3v2 header at offset 0, or a valid MPEG audio
- *   frame header (see {@link isValidMpegFrameHeader})
- */
-export function detectAudioType(buf: Buffer): 'mp3' | 'ogg' | 'wav' | null {
-  if (startsWithBytes(buf, RIFF_MAGIC) && startsWithBytes(buf, WAVE_MAGIC, 8)) return 'wav';
-  if (startsWithBytes(buf, OGG_MAGIC)) return 'ogg';
-  if (isValidId3Header(buf) || isValidMpegFrameHeader(buf)) return 'mp3';
-  return null;
-}
 
 /**
  * Build a safe stored filename from the upload's original name, preserving it so

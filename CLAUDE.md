@@ -41,7 +41,7 @@ npm test      # Vitest
 - **`src/commands/`** — command routing/cooldowns/handlers shared by both platforms.
 - **`src/audio/`** — voice playback and SFX (see Voice adapter design decision below).
 - **`src/web/`** — Express app (`server.ts`) + route/controller files under `web/routes/` (see Web Server below).
-- **`src/shared/`** — cross-cutting utilities: `config.ts` (env vars), `logger.ts`, `crypto.ts`, `mutationQueue.ts`, `statusStore.ts`, `textTemplate.ts`.
+- **`src/shared/`** — cross-cutting utilities: `config.ts` (env vars), `logger.ts`, `crypto.ts`, `mutationQueue.ts`, `userMutationQueue.ts` (per-user write serialisation), `runtimeRegistry.ts` (runtime-injection slots), `statusStore.ts`, `textTemplate.ts`.
 - **`src/types/`** — Express `Request`/session type augmentation.
 - **`src/test-utils/`** — shared test fixtures/mocks.
 
@@ -85,7 +85,7 @@ Auth middleware (`src/web/middleware.ts`), applied in this order:
 - **Import DB functions from `src/db.ts` only**, never `src/db/*` directly. The facade wraps some functions with cache-invalidation side effects (`upsertUser`, `updateTwitchBotEnabled`).
 - **BIGINT columns are strings** (`bigNumberStrings: true` on the pool) — never coerce to `Number`. This protects against precision loss on values that can exceed `Number.MAX_SAFE_INTEGER`, like Discord snowflakes — it does not apply to a BIGINT result you can prove is bounded well within that range (e.g. `COUNT(*)` on a small admin table). If you do parse one of those back to a number, say so at the call site (why this particular value is bounded) — don't let it read like the same blind coercion the rule forbids elsewhere. See `getRowCount` in `src/db/utils.ts` for the pattern.
 - **Blank Twitch names → `NULL`** — `user.twitch_name` has a unique index; empty strings collide.
-- **`mutationQueue`** for concurrent-unsafe DB writes — user mutations serialise through it.
+- **`mutationQueue`** for concurrent-unsafe DB writes — user mutations serialise through it via `runUserMutation` in `src/shared/userMutationQueue.ts`.
 - **POST routes redirect to `?error=code`** on failure; GET reads it and passes to EJS. Never render errors from a POST handler.
 - **`src/discord/discordUtils.ts`** has `isDiscordNotFoundError` and `tryDeleteDiscordMessage` — import, don't duplicate.
 
@@ -135,7 +135,7 @@ Auth middleware (`src/web/middleware.ts`), applied in this order:
 
 ## New Command Handler Pattern
 
-Export `registerXRuntime(runtime)` from the handler file to store the platform client — avoids circular imports with `src/index.ts`. Call it from `index.ts` after the client is ready.
+Export `registerXRuntime(runtime)` from the handler file to store the platform client — avoids circular imports with `src/index.ts`. Build the slot with `createRuntimeRegistry()` from `src/shared/runtimeRegistry.ts`. Call it from `index.ts` after the client is ready.
 
 ---
 

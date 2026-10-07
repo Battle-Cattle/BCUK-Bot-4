@@ -16,7 +16,7 @@ vi.mock('../../db', () => ({
   createCode: vi.fn().mockResolvedValue('plain-auth-code'),
   AccessLevel: ACCESS_LEVEL_MOCK,
 }));
-vi.mock('../../discord/discordBot', () => ({
+vi.mock('../../discord/discordApi', () => ({
   fetchMemberDisplayName: vi.fn().mockResolvedValue(null),
 }));
 vi.mock('../csrf', () => ({
@@ -40,8 +40,8 @@ import {
   createCode,
   AccessLevel,
 } from '../../db';
-import { fetchMemberDisplayName } from '../../discord/discordBot';
-import { userMutationQueue } from './adminUserMutationQueue';
+import { fetchMemberDisplayName } from '../../discord/discordApi';
+import { userMutationQueue } from '../../shared/userMutationQueue';
 
 function buildApp(sessionOverrides: Record<string, unknown> = {}, captureSession?: (session: any) => void) {
   const app = express();

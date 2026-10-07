@@ -10,17 +10,19 @@ import { executeHealthCommandForDiscord } from '../commands/healthCommandHandler
 import { forgetGuild as forgetGuildVoiceState, disconnect as disconnectAllVoice } from '../audio/audioPlayer';
 import { forgetGuildRefreshState } from './guildRefreshState';
 import { isRegisteredGuild, reloadGuildRegistry } from './guildRegistry';
-import { sendOwnerAlert } from './ownerAlerts';
 import { upsertGuild, getGuildById, findUser, upsertUser, setMemberAccessLevel, AccessLevel } from '../db';
-import { runUserMutation } from '../web/routes/adminUserMutationQueue';
+import { runUserMutation } from '../shared/userMutationQueue';
 import { createLogger } from '../shared/logger';
 import { getDiscordClient, setDiscordClient } from './discordClientStore';
+import { logShardError } from './discordShardErrorLog';
+import {
+  recordShardActivity, setGatewayConnected, clearWatchdogRecovery, startGatewayWatchdog, stopGatewayWatchdog,
+  type GatewayWatchdogHooks,
+} from './discordGatewayWatchdog';
 
 const log = createLogger('Discord');
 
 let bootingClient: Client | null = null;
-
-export { getDiscordClient };
 
 // ─── Reconnect backoff ──────────────────────────────────────────────────────
 //
@@ -55,161 +57,15 @@ function scheduleReconnect(reason: string): void {
   }, delay).unref();
 }
 
-/** How often a given shard's gateway connection errors are actually logged — see {@link logShardError}. */
-const SHARD_ERROR_LOG_INTERVAL_MS = 60_000;
-
-/** Per-shard state for {@link logShardError}: when it last actually logged, and how many errors it has swallowed since. */
-const shardErrorLogState = new Map<number, { lastLoggedAt: number; suppressedCount: number }>();
-
-/**
- * Logs a `shardError` at `error` and DMs the owner, throttled to at most one line/DM per
- * shard per {@link SHARD_ERROR_LOG_INTERVAL_MS}. During a Discord-side gateway hiccup (e.g.
- * repeated `Unexpected server response: 503`), discord.js's automatic reconnect can retry —
- * and this event can fire — many times a second; logging (and alerting on) every one of those
- * verbatim has filled multiple log files in a single incident without adding any information
- * discord.js's own retry wasn't already handling. Errors swallowed during the throttle window
- * are counted and folded into the next line/DM that does get sent. Still worth surfacing as an
- * error (unlike 'shardReconnecting') because a shard that keeps erroring is a real, ongoing
- * connectivity problem worth a human looking at, even though discord.js itself will keep
- * retrying without help.
- * @param shardId - The shard that reported the error.
- * @param err - The gateway connection error.
- */
-function logShardError(shardId: number, err: Error): void {
-  const now = Date.now();
-  const state = shardErrorLogState.get(shardId);
-  if (state && now - state.lastLoggedAt < SHARD_ERROR_LOG_INTERVAL_MS) {
-    state.suppressedCount++;
-    return;
-  }
-  const suppressed = state?.suppressedCount ?? 0;
-  const suffix = suppressed > 0 ? ` (${suppressed} more suppressed in the last ${SHARD_ERROR_LOG_INTERVAL_MS / 1000}s)` : '';
-  log.error(`Shard ${shardId} gateway connection error:${suffix}`, err);
-  shardErrorLogState.set(shardId, { lastLoggedAt: now, suppressedCount: 0 });
-  void sendOwnerAlert(`🔴 Shard ${shardId} gateway connection error${suffix}: ${err.message}`);
-}
-
-// ─── Gateway stall watchdog ─────────────────────────────────────────────────
-//
-// discord.js's own WebSocketManager is documented (see registerConnectionHandlers's docstring)
-// as retrying every recoverable gateway disconnect on its own, forever, without our help. In
-// practice that retry loop can itself get stuck — observed in production as a run of
-// 'shardReconnecting'/'shardError' events during a sustained `Unexpected server response: 503`
-// incident, followed by total silence: no further 'shardReconnecting', 'shardError', 'shardReady'
-// or 'shardDisconnect' for many minutes, well beyond discord.js's own reconnect backoff (which
-// caps out well under a minute). Because that failure mode never reaches 'shardDisconnect' (no
-// close code — the socket never even opened), the self-heal in registerConnectionHandlers never
-// fires either, leaving the process alive-but-permanently-disconnected until someone notices and
-// restarts it manually. This watchdog is the fallback: if no shard activity of any kind is seen
-// for GATEWAY_STALL_THRESHOLD_MS while not fully connected, force a fresh login exactly as
-// 'shardDisconnect' does.
-
-/** How often {@link checkGatewayStall} polls for a stuck gateway reconnect loop. */
-const GATEWAY_STALL_CHECK_INTERVAL_MS = 30_000;
-
-/**
- * How long the gateway may go without any shard activity (reconnect attempt, error, ready,
- * resume) before {@link checkGatewayStall} treats discord.js's own retry loop as stuck and forces
- * a fresh login. Well above discord.js's own reconnect backoff ceiling, so a slow-but-still-live
- * retry cycle never false-positives.
- */
-const GATEWAY_STALL_THRESHOLD_MS = 120_000;
-
-let lastShardActivityAt = Date.now();
-let gatewayWatchdogTimer: NodeJS.Timeout | null = null;
-
-/**
- * Tracks live gateway connectivity for {@link checkGatewayStall} — distinct from
- * `getDiscordClient()` returning non-null, which only means a `Client` was *at some point*
- * promoted to ready and stays in the store until `stopDiscordBot()`/`shardDisconnect` explicitly
- * clear it. A `shardError` on an already-ready client does *not* clear it, so gating the watchdog
- * on client existence would silently defeat it for exactly the incident it exists to catch: a
- * previously-ready shard that errors out and then goes silent. Mirrors `recordDiscordConnected`'s
- * true/false transitions one-for-one, kept separately so this module's stall detection doesn't
- * depend on `healthStore`'s snapshot shape.
- */
-let gatewayConnected = false;
-
-/**
- * Set from the moment {@link checkGatewayStall} forces a recovery, and normally cleared as soon as
- * that recovery's replacement `login()` call settles (see {@link registerClientReadyHandler} and
- * the login failure handler in {@link startDiscordBot}) — one way (success) or the other (failure,
- * which hands off to the ordinary backoff retry). Guards against compounding restarts: without it,
- * a replacement login that never settles would still leave `lastShardActivityAt` stale once its
- * stall window re-elapses, so the next tick would tear it down and start yet another one on top of
- * it, indefinitely, with no backoff — risking Discord's identify rate limits. While
- * {@link isWatchdogRecoveryPending} reads true, {@link checkGatewayStall} stands down and waits for
- * the outstanding attempt instead of piling on another.
- *
- * discord.js's own `Client.login()` can resolve once the socket handshake starts, *before*
- * `clientReady` — so a replacement login can settle (successfully, from `login()`'s point of view)
- * without ever firing `clientReady` or rejecting, if the shard then hangs before reaching ready.
- * Neither of this guard's two clear sites would ever run in that case, so it's tracked as a
- * timestamp rather than a plain boolean and treated as cleared once
- * {@link WATCHDOG_RECOVERY_TIMEOUT_MS} has elapsed — bounding the worst case to "eventually retries
- * again" instead of "permanently disabled for the rest of the process's life".
- */
-let watchdogRecoveryPendingSince: number | null = null;
-
-/**
- * How long {@link watchdogRecoveryPendingSince} is honored before {@link isWatchdogRecoveryPending}
- * treats it as expired regardless of whether the recovery's login ever explicitly settled. Minutes,
- * not seconds — comfortably longer than any legitimate identify/ready handshake — so this only ever
- * kicks in for the pathological case the docstring above describes.
- */
-const WATCHDOG_RECOVERY_TIMEOUT_MS = 5 * 60_000;
-
-/** Whether a watchdog-triggered recovery is still within its bounded pending window (see {@link watchdogRecoveryPendingSince}). */
-function isWatchdogRecoveryPending(): boolean {
-  return watchdogRecoveryPendingSince !== null && Date.now() - watchdogRecoveryPendingSince < WATCHDOG_RECOVERY_TIMEOUT_MS;
-}
-
-/** Stamps `lastShardActivityAt` with the current time — called from every shard lifecycle event. */
-function recordShardActivity(): void {
-  lastShardActivityAt = Date.now();
-}
-
-/**
- * Polled every {@link GATEWAY_STALL_CHECK_INTERVAL_MS}: if the gateway isn't currently connected
- * (see {@link gatewayConnected}), no recovery from a previous stall is still outstanding (see
- * {@link isWatchdogRecoveryPending}), and no shard activity has been recorded for
- * {@link GATEWAY_STALL_THRESHOLD_MS}, discord.js's own reconnect loop is presumed stuck. Logs, DMs
- * the owner, and forces a fresh login the same way `shardDisconnect` does (including tearing down
- * orphaned voice connections first).
- *
- * Skipped while a login-failure backoff retry is pending (`reconnectTimer`): that backoff (up to
- * {@link RECONNECT_MAX_DELAY_MS}) can legitimately outlast the stall threshold, and forcing a login
- * here would cancel it, defeat the backoff and re-alert the owner on every check.
- */
-function checkGatewayStall(): void {
-  if (gatewayConnected || isWatchdogRecoveryPending() || reconnectTimer !== null) return;
-  const stalledForMs = Date.now() - lastShardActivityAt;
-  if (stalledForMs < GATEWAY_STALL_THRESHOLD_MS) return;
-  const stalledForSec = Math.round(stalledForMs / 1000);
-  log.error(`No Discord gateway activity for ${stalledForSec}s — the reconnect loop appears stuck; forcing a fresh login.`);
-  void sendOwnerAlert(`🔴 Discord gateway reconnect appears stuck (no activity for ${stalledForSec}s) — forcing a fresh login.`);
-  disconnectAllVoice();
-  stopDiscordBot();
-  // Set *after* stopDiscordBot() — which unconditionally clears this, so an intentional stop
-  // overlapping a previous recovery never leaves it stuck pending — and before startDiscordBot(),
-  // with nothing async in between, so this recovery's own guard can't be clobbered by that clear.
-  watchdogRecoveryPendingSince = Date.now();
-  startDiscordBot();
-}
-
-/** Starts the gateway stall watchdog interval, if not already running. Unref'd so it never blocks process exit. */
-function startGatewayWatchdog(): void {
-  if (gatewayWatchdogTimer) return;
-  gatewayWatchdogTimer = setInterval(checkGatewayStall, GATEWAY_STALL_CHECK_INTERVAL_MS).unref();
-}
-
-/** Stops and clears the gateway stall watchdog interval, if running. */
-function stopGatewayWatchdog(): void {
-  if (gatewayWatchdogTimer) {
-    clearInterval(gatewayWatchdogTimer);
-    gatewayWatchdogTimer = null;
-  }
-}
+/** Bot callbacks for the gateway stall watchdog (see `discordGatewayWatchdog.ts`). */
+const watchdogHooks: GatewayWatchdogHooks = {
+  isReconnectPending: () => reconnectTimer !== null,
+  stop: () => {
+    disconnectAllVoice();
+    stopDiscordBot();
+  },
+  start: () => startDiscordBot(),
+};
 
 /** Resolve callbacks awaiting the next `clientReady` — see {@link waitForDiscordReady}. */
 let readyWaiters: Array<() => void> = [];
@@ -244,88 +100,6 @@ export function waitForDiscordReady(timeoutMs: number): Promise<void> {
 /** Test-only: how many {@link waitForDiscordReady} callers are still waiting on `clientReady`. */
 export function __getReadyWaiterCountForTests(): number {
   return readyWaiters.length;
-}
-
-/**
- * Resolve a guild by ID from the discord.js cache, falling back to a fetch.
- * @throws if the client is not ready.
- */
-async function getGuild(guildId: string): Promise<Guild> {
-  const client = getDiscordClient();
-  if (!client) {
-    throw new Error('Discord client is not ready');
-  }
-  const cached = client.guilds.cache.get(guildId);
-  if (cached) return cached;
-  return client.guilds.fetch(guildId);
-}
-
-/**
- * Fetch the display name of a Discord guild member.
- * Returns null if the client is not ready, the guild is unavailable, or the member is not found.
- *
- * @param discordId - Discord user snowflake ID to look up.
- * @param guildId - Guild to look the member up in.
- * @param force - When true, bypasses the guild member cache and fetches fresh from the API.
- * @returns The member's server display name, or null on any failure.
- */
-export async function fetchMemberDisplayName(
-  discordId: string,
-  guildId: string,
-  force = false,
-): Promise<string | null> {
-  if (!getDiscordClient()) return null;
-  try {
-    const guild = await getGuild(guildId);
-    const member = await guild.members.fetch({ user: discordId, force });
-    return member.displayName;
-  } catch (err) {
-    log.warn(`Failed to fetch display name for ${discordId}:`, err);
-    return null;
-  }
-}
-
-/**
- * Fetches a user's global Discord profile (username and avatar hash) via the bot client.
- * Used by passkey login, which has no Discord OAuth `@me` response to read these from.
- * @param discordId - Discord user ID to look up.
- * @returns The user's username and avatar hash (null avatar if they use the default one),
- *   or null if the bot isn't ready or the fetch fails.
- */
-export async function fetchDiscordUserProfile(
-  discordId: string,
-): Promise<{ username: string; avatar: string | null } | null> {
-  const client = getDiscordClient();
-  if (!client) return null;
-  try {
-    const user = await client.users.fetch(discordId);
-    return { username: user.username, avatar: user.avatar };
-  } catch (err) {
-    log.warn(`Failed to fetch Discord profile for ${discordId}:`, err);
-    return null;
-  }
-}
-
-/**
- * Sends a direct message from the bot to a user, with all mentions disabled. Used for passkey
- * enrollment codes and security notices, which must reach the account owner rather than
- * whoever holds a web session.
- * @param discordId - Discord user ID to message.
- * @param content - Message text.
- * @returns True if the message was sent; false if the bot isn't ready or Discord refused it
- *   (e.g. the user doesn't accept DMs from the bot).
- */
-export async function sendDiscordDirectMessage(discordId: string, content: string): Promise<boolean> {
-  const client = getDiscordClient();
-  if (!client) return false;
-  try {
-    const user = await client.users.fetch(discordId);
-    await user.send({ content, allowedMentions: { parse: [] } });
-    return true;
-  } catch (err) {
-    log.warn(`Failed to send Discord DM to ${discordId}:`, err);
-    return false;
-  }
 }
 
 /**
@@ -469,8 +243,8 @@ function registerClientReadyHandler(client: Client): void {
     log.info(`Logged in as ${c.user.tag}`);
     setDiscordReady(c.user.tag);
     recordDiscordConnected(true);
-    gatewayConnected = true;
-    watchdogRecoveryPendingSince = null;
+    setGatewayConnected(true);
+    clearWatchdogRecovery();
     const waiters = readyWaiters;
     readyWaiters = [];
     waiters.forEach((resolve) => { resolve(); });
@@ -529,30 +303,30 @@ function registerConnectionHandlers(client: Client): void {
     // stay true from the prior clientReady and never let the watchdog catch a reconnect loop that
     // never progresses past this event.
     recordDiscordConnected(false);
-    gatewayConnected = false;
+    setGatewayConnected(false);
     log.warn(`Shard ${shardId} lost its connection and is reconnecting...`);
   });
   client.on('shardError', (err, shardId) => {
     recordShardActivity();
     recordDiscordConnected(false);
-    gatewayConnected = false;
+    setGatewayConnected(false);
     logShardError(shardId, err);
   });
   client.on('shardReady', () => {
     recordShardActivity();
     recordDiscordConnected(true);
-    gatewayConnected = true;
+    setGatewayConnected(true);
   });
   client.on('shardResume', () => {
     recordShardActivity();
     recordDiscordConnected(true);
-    gatewayConnected = true;
+    setGatewayConnected(true);
   });
   client.on('shardDisconnect', (event, shardId) => {
     recordShardActivity();
     log.error(`Shard ${shardId} disconnected permanently (code ${event.code}) — reconnecting client.`);
     recordDiscordConnected(false);
-    gatewayConnected = false;
+    setGatewayConnected(false);
     disconnectAllVoice();
     stopDiscordBot();
     startDiscordBot();
@@ -580,7 +354,7 @@ function registerConnectionHandlers(client: Client): void {
 export function startDiscordBot(): void {
   if (getDiscordClient() || bootingClient) return;
   recordShardActivity();
-  startGatewayWatchdog();
+  startGatewayWatchdog(watchdogHooks);
   const localClient = new Client({
     intents: [
       GatewayIntentBits.Guilds,
@@ -608,7 +382,7 @@ export function startDiscordBot(): void {
     // tracking for a genuinely newer boot attempt already in progress.
     if (bootingClient !== localClient) return;
     bootingClient = null; // clear so a retry can call startDiscordBot() again
-    watchdogRecoveryPendingSince = null;
+    clearWatchdogRecovery();
     scheduleReconnect('login failed');
   });
 }
@@ -620,7 +394,7 @@ export function startDiscordBot(): void {
  * Records the Discord connection as down in `healthStore` before tearing down.
  * Also stops the gateway stall watchdog — restarted fresh by the next {@link startDiscordBot}.
  *
- * Unconditionally clears {@link watchdogRecoveryPendingSince}: any stop — intentional shutdown,
+ * Unconditionally clears the watchdog recovery guard (see `clearWatchdogRecovery`): any stop — intentional shutdown,
  * the `shardDisconnect` self-heal, or the watchdog's own recovery — cancels whatever login was in
  * flight, so the guard must not survive it. `checkGatewayStall()` re-sets it itself immediately
  * after calling this, synchronously and with nothing async in between, so its own recovery's guard
@@ -634,8 +408,8 @@ export function stopDiscordBot(): void {
   clearReconnectTimer();
   stopGatewayWatchdog();
   recordDiscordConnected(false);
-  gatewayConnected = false;
-  watchdogRecoveryPendingSince = null;
+  setGatewayConnected(false);
+  clearWatchdogRecovery();
   existingReady?.destroy().catch((err: unknown) => log.error('Error destroying client:', err));
   existingBooting?.destroy().catch((err: unknown) => log.error('Error destroying booting client:', err));
   log.info('Client destroyed.');

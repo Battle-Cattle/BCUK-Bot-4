@@ -2,7 +2,7 @@ import { createLogger } from '../../shared/logger';
 import { TextChannel, EmbedBuilder } from 'discord.js';
 
 const log = createLogger('TwitchMonitor');
-import { getDiscordClient } from '../../discord/discordBot';
+import { getDiscordClient } from '../../discord/discordClientStore';
 import { getTextChannel, tryDeleteDiscordMessage, tryEditDiscordMessage } from '../../discord/discordUtils';
 import { setStreamerLive, clearStreamerLive, DbStreamerFull } from '../../db';
 import { TwitchStream } from '../twitchApi';

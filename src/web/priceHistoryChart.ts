@@ -1,8 +1,4 @@
-/** One point in a reward's price history, as returned by the DB layer. */
-export interface PriceHistoryPoint {
-  t: number;
-  cost: number;
-}
+import type { PriceHistoryPoint } from '../twitch/pricing/rewardPricingMath';
 
 const WIDTH = 480;
 const HEIGHT = 120;

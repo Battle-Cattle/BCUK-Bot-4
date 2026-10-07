@@ -82,3 +82,23 @@ export function buildTestApp(options: BuildTestAppOptions): Express {
   for (const r of Array.isArray(options.router) ? options.router : [options.router]) app.use(r);
   return app;
 }
+
+/**
+ * Middleware for upload tests whose route redirects *before* reading a large request body (e.g.
+ * a pre-Multer "not a streamer" guard). Defers `res.redirect` until the request body has been fully
+ * read and discarded: otherwise the socket can close while supertest is still writing the body,
+ * and the client sees ECONNRESET instead of the redirect — a timing race that flakes on Windows CI.
+ * Mount it ahead of the router under test via `buildTestApp({ router: [drainBodyBeforeRedirect, router] })`.
+ * @param req - Incoming request whose body is drained before any redirect is sent.
+ * @param res - Response whose `redirect` is wrapped.
+ * @param next - Continues to the router under test.
+ */
+export const drainBodyBeforeRedirect: RequestHandler = (req, res, next) => {
+  const redirect = res.redirect.bind(res) as (...args: unknown[]) => void;
+  res.redirect = ((...args: unknown[]) => {
+    if (req.readableEnded) return redirect(...args);
+    req.on('end', () => redirect(...args));
+    req.resume();
+  }) as Response['redirect'];
+  next();
+};

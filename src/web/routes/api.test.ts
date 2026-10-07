@@ -22,7 +22,7 @@ vi.mock('../../audio/audioPlayer', () => ({
   getCurrentChannelId: vi.fn(),
 }));
 
-vi.mock('../../discord/discordBot', () => ({
+vi.mock('../../discord/discordClientStore', () => ({
   getDiscordClient: vi.fn(),
 }));
 
@@ -40,7 +40,7 @@ import supertest from 'supertest';
 import router from './api';
 import { getGuildScopedStatus } from '../guildScopedStatus';
 import { connect, disconnect, getCurrentChannelId } from '../../audio/audioPlayer';
-import { getDiscordClient } from '../../discord/discordBot';
+import { getDiscordClient } from '../../discord/discordClientStore';
 import { getAvailableVoiceChannels } from '../../discord/discordUtils';
 import { getGuildById } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';

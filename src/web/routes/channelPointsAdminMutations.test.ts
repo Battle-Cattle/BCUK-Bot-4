@@ -24,7 +24,7 @@ vi.mock('../../twitch/twitchApi', () => ({
   updateCustomReward: vi.fn(),
 }));
 
-vi.mock('../../twitch/eventsub/twitchApiEventSub', () => ({
+vi.mock('../../twitch/twitchUserTokens', () => ({
   getValidToken: vi.fn(),
 }));
 
@@ -32,18 +32,11 @@ vi.mock('../../twitch/pricing/rewardPricingService', () => ({
   deleteRewardAndPricing: vi.fn().mockResolvedValue(undefined),
 }));
 
-// This module composes channelPointsAdminPricingMutations's router too; stub it out so this
-// file only exercises the reward-CRUD routes defined directly in channelPointsAdminMutations.
-vi.mock('./channelPointsAdminPricingMutations', async () => {
-  const { Router } = await import('express');
-  return { router: Router() };
-});
-
 import supertest from 'supertest';
 import { router } from './channelPointsAdminMutations';
 import { getStreamerByDiscordId, updatePricingCooldownForReward } from '../../db';
 import { createCustomReward, updateCustomReward } from '../../twitch/twitchApi';
-import { getValidToken } from '../../twitch/eventsub/twitchApiEventSub';
+import { getValidToken } from '../../twitch/twitchUserTokens';
 import { deleteRewardAndPricing } from '../../twitch/pricing/rewardPricingService';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
