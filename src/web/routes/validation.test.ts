@@ -10,6 +10,7 @@ import {
   filterQueryParam,
   parseWeight,
   parseRewardIdParam,
+  toStringArray,
 } from './validation';
 
 describe('parseCheckboxField', () => {
@@ -318,5 +319,29 @@ describe('parseDiscordIdList', () => {
 
   it('trims IDs and drops invalid or non-string entries', () => {
     expect(parseDiscordIdList([` ${A} `, 'not-an-id', 42, B])).toEqual([A, B]);
+  });
+});
+
+// ─── toStringArray ────────────────────────────────────────────────────────────
+
+describe('toStringArray', () => {
+  it('returns the array unchanged when given an array', () => {
+    expect(toStringArray(['a', 'b', 'c'])).toEqual(['a', 'b', 'c']);
+  });
+
+  it('wraps a string in a single-element array', () => {
+    expect(toStringArray('hello')).toEqual(['hello']);
+  });
+
+  it('returns an empty array for undefined', () => {
+    expect(toStringArray(undefined)).toEqual([]);
+  });
+
+  it('returns an empty array for an empty string', () => {
+    expect(toStringArray('')).toEqual([]);
+  });
+
+  it('preserves an empty array input', () => {
+    expect(toStringArray([])).toEqual([]);
   });
 });

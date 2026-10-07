@@ -8,7 +8,7 @@ import { requireStreamer } from './viewHelpers';
 import { logAndRedirectError } from './errorHandling';
 
 /** Redirect target used when the requester isn't a streamer, scoped to the channel-points admin page. */
-const NOT_A_STREAMER_REDIRECT = '/channel-points?error=not_a_streamer';
+export const NOT_A_STREAMER_REDIRECT = '/channel-points?error=not_a_streamer';
 
 /**
  * Shared body for reward-scoped "delete" routes (deleting a reward entirely, or just turning
