@@ -26,7 +26,7 @@ vi.mock('@simplewebauthn/server', () => ({
   verifyAuthenticationResponse: vi.fn(),
 }));
 vi.mock('../../discord/discordApi', () => ({ fetchDiscordUserProfile: vi.fn(), sendDiscordDirectMessage: vi.fn() }));
-vi.mock('./auth', () => ({
+vi.mock('../loginSession', () => ({
   resolveAccessibleGuilds: vi.fn(),
   establishDashboardSession: vi.fn(),
 }));
@@ -40,7 +40,8 @@ vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
 import express from 'express';
 import supertest from 'supertest';
-import router, { sanitizeDeviceLabel, chooseUserHandle } from './passkeys';
+import router from './passkeys';
+import { sanitizeDeviceLabel, chooseUserHandle } from './passkeysShared';
 import {
   findUser,
   findPasskey,
@@ -62,7 +63,7 @@ import {
 } from '@simplewebauthn/server';
 import { fetchDiscordUserProfile, sendDiscordDirectMessage } from '../../discord/discordApi';
 import { hashEnrollmentCode, generateEnrollmentCode } from './passkeysEnrollmentCode';
-import { resolveAccessibleGuilds, establishDashboardSession } from './auth';
+import { resolveAccessibleGuilds, establishDashboardSession } from '../loginSession';
 import { makeSessionUser } from '../../test-utils/fixtures';
 
 const USER = makeSessionUser({ discordId: '42', discordName: 'Alice' });
