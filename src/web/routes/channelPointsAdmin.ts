@@ -4,11 +4,10 @@ import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import { getSessionUser } from '../session';
 import { getStreamerByDiscordId } from '../../db';
-import type { DbStreamerEventSub } from '../../db';
 import { getPricingConfigsForStreamer, getPricingSettingsForStreamer, getPricingHistoryForRewards } from '../../db';
 import type { RewardPricingRow, StreamerPricingSettings } from '../../db';
-import { getCustomRewards, TwitchCustomReward } from '../../twitch/twitchApi';
-import { getValidToken } from '../../twitch/twitchUserTokens';
+import type { TwitchCustomReward } from '../../twitch/twitchApi';
+import { fetchStreamerRewards } from './streamerRewards';
 import { hasAuthFailedSubs } from '../../twitch/eventsub/twitchEventSubSubscriptions';
 import { computePrice } from '../../twitch/pricing/rewardPricingMath';
 import { simulateConstantUsageCycle } from '../../twitch/pricing/rewardPricingSimulation';
@@ -16,6 +15,7 @@ import { renderPriceHistoryChart } from '../priceHistoryChart';
 import { filterQueryParam } from './validation';
 import { renderError, renderView } from './viewHelpers';
 import { router as channelPointsMutationsRouter } from './channelPointsAdminMutations';
+import { router as channelPointsPricingMutationsRouter } from './channelPointsAdminPricingMutations';
 import channelPointsEventsRouter from './channelPointsEvents';
 
 const log = createLogger('ChannelPointsAdmin');
@@ -108,19 +108,6 @@ function previewPriceFor(config: RewardPricingRow): number {
   });
 }
 
-/** Fetches the streamer's live Twitch custom rewards, or an empty list if not connected or on any failure. */
-async function fetchTwitchRewards(streamer: DbStreamerEventSub): Promise<TwitchCustomReward[]> {
-  if (!streamer.twitch_user_id) return [];
-  try {
-    const token = await getValidToken(streamer);
-    if (!token) return [];
-    return await getCustomRewards(streamer.twitch_user_id, token);
-  } catch (err) {
-    log.warn('Failed to fetch Twitch custom rewards:', err);
-    return [];
-  }
-}
-
 /**
  * GET /channel-points — renders the Channel Points management page: the streamer's live
  * Twitch rewards (creatable/editable/deletable from here) merged with any existing dynamic
@@ -139,7 +126,7 @@ router.get('/', requireAuth, csrfProtection, async (req, res) => {
     const needsReconnect = isConnected && !!streamer.twitch_name && hasAuthFailedSubs(streamer.twitch_name);
 
     const [pricingConfigs, twitchRewards, pricingSettings] = streamer && isConnected && !needsReconnect
-      ? await Promise.all([getPricingConfigsForStreamer(streamer.id), fetchTwitchRewards(streamer), getPricingSettingsForStreamer(streamer.id)])
+      ? await Promise.all([getPricingConfigsForStreamer(streamer.id), fetchStreamerRewards(streamer, log), getPricingSettingsForStreamer(streamer.id)])
       : [[], [], null];
 
     const historyHours = parseHistoryHours(req.query.hours);
@@ -223,5 +210,6 @@ router.get('/', requireAuth, csrfProtection, async (req, res) => {
 
 router.use(channelPointsEventsRouter);
 router.use(channelPointsMutationsRouter);
+router.use(channelPointsPricingMutationsRouter);
 
 export default router;
