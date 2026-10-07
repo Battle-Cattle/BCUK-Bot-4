@@ -23,7 +23,7 @@ vi.mock('../../twitch/twitchApi', () => ({
   getCustomRewards: vi.fn(),
 }));
 
-vi.mock('../../twitch/eventsub/twitchApiEventSub', () => ({
+vi.mock('../../twitch/twitchUserTokens', () => ({
   getValidToken: vi.fn(),
 }));
 
@@ -50,7 +50,7 @@ vi.mock('./overlayAdminMutations', async () => {
 import supertest from 'supertest';
 import router, { statusConnections } from './overlayAdmin';
 import { getStreamerByDiscordId, getVideosForStreamer, getRewardsForStreamer } from '../../db';
-import { getValidToken } from '../../twitch/eventsub/twitchApiEventSub';
+import { getValidToken } from '../../twitch/twitchUserTokens';
 import { getCustomRewards } from '../../twitch/twitchApi';
 import { AccessLevel } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';

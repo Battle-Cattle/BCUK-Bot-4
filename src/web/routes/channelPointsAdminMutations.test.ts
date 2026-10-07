@@ -24,7 +24,7 @@ vi.mock('../../twitch/twitchApi', () => ({
   updateCustomReward: vi.fn(),
 }));
 
-vi.mock('../../twitch/eventsub/twitchApiEventSub', () => ({
+vi.mock('../../twitch/twitchUserTokens', () => ({
   getValidToken: vi.fn(),
 }));
 
@@ -43,7 +43,7 @@ import supertest from 'supertest';
 import { router } from './channelPointsAdminMutations';
 import { getStreamerByDiscordId, updatePricingCooldownForReward } from '../../db';
 import { createCustomReward, updateCustomReward } from '../../twitch/twitchApi';
-import { getValidToken } from '../../twitch/eventsub/twitchApiEventSub';
+import { getValidToken } from '../../twitch/twitchUserTokens';
 import { deleteRewardAndPricing } from '../../twitch/pricing/rewardPricingService';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 

@@ -1,5 +1,5 @@
 import type { EventSubConfig, AlertEventType, StreamerEventType, RedemptionProgress } from '../../db';
-import type { CompanionActivityEvent, CompanionActivityEventType } from '../../web/routes/companionEvents';
+import type { CompanionActivityEvent, CompanionActivityEventType } from './twitchEventSubRuntime';
 import {
   getVideosForReward, getStreamerById, findCachedAlertConfig, recordStreamerEvent, getRedemptionProgress, markRedemptionEffect,
 } from '../../db';

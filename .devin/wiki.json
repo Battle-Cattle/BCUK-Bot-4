@@ -118,7 +118,7 @@
     },
     {
       "title": "Twitch Helix API Client",
-      "purpose": "Documents twitchApi.ts: client-credentials OAuth token caching, getUsers(), getStreams(), getChannelInfo(), and getSharedChatSession() with batching, timeout handling, rate-limit retry logic, and 401 token invalidation. Also covers broadcaster-token refresh (getValidToken in twitchApiEventSub.ts) and how getSharedChatSession is used for shared-chat deduplication in multi-twitch broadcasts and timer cooldown grouping.",
+      "purpose": "Documents twitchApi.ts: client-credentials OAuth token caching, getUsers(), getStreams(), getChannelInfo(), and getSharedChatSession() with batching, timeout handling, rate-limit retry logic, and 401 token invalidation. Also covers broadcaster-token refresh (getValidToken in twitchUserTokens.ts) and how getSharedChatSession is used for shared-chat deduplication in multi-twitch broadcasts and timer cooldown grouping.",
       "parent": "Twitch Integrations",
       "page_notes": [
         {

@@ -7,7 +7,7 @@ import {
   DEFAULT_PRICING_COOLDOWN_SECONDS, DbStreamerEventSub,
 } from '../../db';
 import { getCustomRewards } from '../../twitch/twitchApi';
-import { getValidToken } from '../../twitch/eventsub/twitchApiEventSub';
+import { getValidToken } from '../../twitch/twitchUserTokens';
 import { parsePositiveIntId, parseRewardIdParam, parseCheckboxField } from './validation';
 import { requireStreamer } from './viewHelpers';
 import { logAndRedirectError } from './errorHandling';

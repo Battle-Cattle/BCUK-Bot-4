@@ -8,7 +8,7 @@ import type { DbStreamerEventSub } from '../../db';
 import { getPricingConfigsForStreamer, getPricingSettingsForStreamer, getPricingHistoryForRewards } from '../../db';
 import type { RewardPricingRow, StreamerPricingSettings } from '../../db';
 import { getCustomRewards, TwitchCustomReward } from '../../twitch/twitchApi';
-import { getValidToken } from '../../twitch/eventsub/twitchApiEventSub';
+import { getValidToken } from '../../twitch/twitchUserTokens';
 import { hasAuthFailedSubs } from '../../twitch/eventsub/twitchEventSubSubscriptions';
 import { computePrice } from '../../twitch/pricing/rewardPricingMath';
 import { simulateConstantUsageCycle } from '../../twitch/pricing/rewardPricingSimulation';
