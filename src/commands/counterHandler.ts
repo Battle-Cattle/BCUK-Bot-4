@@ -5,7 +5,8 @@ import { findCounterByCommand, incrementCounter } from '../db';
 const log = createLogger('Counter');
 import { resolveCommand } from './commandUtils';
 import { NO_MENTIONS, trySendDiscordReply } from '../discord/discordUtils';
-import { createRuntimeRegistry, type TwitchSendRuntime } from './twitchRuntime';
+import { createRuntimeRegistry } from '../shared/runtimeRegistry';
+import type { TwitchSendRuntime } from './twitchRuntime';
 import { createCooldownGate } from './cooldownGate';
 
 // ─── Cooldown ─────────────────────────────────────────────────────────────────

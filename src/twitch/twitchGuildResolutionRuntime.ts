@@ -1,4 +1,4 @@
-import { createRuntimeRegistry } from '../commands/twitchRuntime';
+import { createRuntimeRegistry } from '../shared/runtimeRegistry';
 
 /** Runtime contract for resolving which guild a Twitch chat command should target. */
 export interface TwitchGuildResolutionRuntime {

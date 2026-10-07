@@ -25,7 +25,7 @@ vi.mock('./pool', () => {
   };
 });
 vi.mock('mysql2/promise', () => ({ default: {} }));
-vi.mock('./commandLocks', () => ({
+vi.mock('./commandWriteGuard', () => ({
   runSerializedCommandWrite: vi.fn(async (_cmds: unknown, _opts: unknown, fn: (conn: unknown) => Promise<unknown>) => fn(mockConnection)),
   isAnyCommandTakenAcrossTables: vi.fn(async () => false),
 }));
@@ -39,6 +39,8 @@ vi.mock('./commandStringUtils', () => ({
     const normalized = command.trim().toLowerCase();
     return normalized.length > 0 ? normalized : null;
   }),
+}));
+vi.mock('./commandErrors', () => ({
   CommandConflictError: class CommandConflictError extends Error {
     constructor(cmds: string[]) { super(String(cmds)); }
   },
@@ -79,7 +81,7 @@ import {
   invalidateArchiveColumnsCache,
   CounterNotFoundError,
 } from './counters';
-import { runSerializedCommandWrite, isAnyCommandTakenAcrossTables } from './commandLocks';
+import { runSerializedCommandWrite, isAnyCommandTakenAcrossTables } from './commandWriteGuard';
 import { assertNotReservedCommand } from './reservedCommands';
 import { makeMockPool } from '../test-utils/mockMysqlPool';
 

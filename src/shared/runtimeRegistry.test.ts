@@ -1,5 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
-import { createRuntimeRegistry, type TwitchSendRuntime } from './twitchRuntime';
+import { createRuntimeRegistry } from './runtimeRegistry';
+/** Minimal runtime shape used to exercise the registry. */
+interface TwitchSendRuntime { send: (channel: string, message: string) => Promise<void> }
+
 
 describe('createRuntimeRegistry', () => {
   it('returns null from get() before anything is registered', () => {

@@ -18,7 +18,7 @@ vi.mock('../../db', () => ({
   getApprovedGuildIdsForKey: vi.fn(),
 }));
 
-vi.mock('../../commands/soundSelector', () => ({
+vi.mock('../../audio/soundSelector', () => ({
   pickWeightedRandom: vi.fn(),
 }));
 
@@ -46,7 +46,7 @@ vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 import supertest from 'supertest';
 import router from './streamdeckSfx';
 import { findCachedSfxTrigger, getAllSfxTriggers, isKeyApprovedForGuild, getApprovedGuildIdsForKey } from '../../db';
-import { pickWeightedRandom } from '../../commands/soundSelector';
+import { pickWeightedRandom } from '../../audio/soundSelector';
 import { playFile, VoiceNotConnectedError } from '../../audio/sfxPlayer';
 import { setVoicePlaying } from '../../shared/statusStore';
 import { getDiscordClient } from '../../discord/discordBot';

@@ -1,7 +1,9 @@
 import mysql from 'mysql2/promise';
 import { timingSafeEqual } from 'node:crypto';
-import type { SqlExecutor } from './commandStringUtils';
 import { getPool } from './pool';
+
+/** A pool or a transaction connection — anything a query helper can run SQL on. */
+export type SqlExecutor = mysql.Pool | mysql.PoolConnection;
 
 /** Converts a MySQL BIT(1) column value (Buffer, number, or boolean) to a boolean. */
 export function fromBit(value: unknown): boolean {
@@ -82,4 +84,27 @@ export function hashesMatch(storedHex: string, incomingHex: string): boolean {
 export async function affectedOrExists(affectedRows: number, existsCheck: () => Promise<boolean>): Promise<boolean> {
   if (affectedRows > 0) return true;
   return existsCheck();
+}
+
+/**
+ * Builds a comma-separated `?` placeholder list for use in a SQL `IN (...)` clause.
+ * @param count Number of placeholders to generate.
+ * @returns A string of `count` placeholders joined by `, `.
+ */
+export function buildInClausePlaceholders(count: number): string {
+  return Array.from({ length: count }, () => '?').join(', ');
+}
+
+/**
+ * Checks whether `error` is a MySQL duplicate-entry error (unique index violation).
+ * @param error Value to check, typically a caught error.
+ * @returns True if `error` is a MySQL `ER_DUP_ENTRY` / errno 1062 error.
+ */
+export function isMysqlDuplicateEntryError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+
+  const mysqlError = error as { code?: string; errno?: number };
+  return mysqlError.code === 'ER_DUP_ENTRY' || mysqlError.errno === 1062;
 }

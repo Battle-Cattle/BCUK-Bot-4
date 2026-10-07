@@ -1,5 +1,5 @@
 import type { AlertEventType, StreamerEventType, TextAnimation } from '../../db';
-import { createRuntimeRegistry } from '../../commands/twitchRuntime';
+import { createRuntimeRegistry } from '../../shared/runtimeRegistry';
 
 // Runtime injection for the overlay push function — avoids a direct import of the
 // web layer from core Twitch handler code.  registerEventSubOverlayRuntime is called

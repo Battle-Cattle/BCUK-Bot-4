@@ -1,17 +1,19 @@
 import mysql from 'mysql2/promise';
 import { getPool, runInTransaction } from './pool';
-import { fromBit, getRowCount } from './utils';
+import { fromBit, getRowCount, rowExists, type SqlExecutor } from './utils';
 import { getOrCreate } from '../shared/mapUtils';
 import { AccessLevel } from './users';
 import type { AccessLevelValue } from './users';
 import { assertNotReservedCommand } from './reservedCommands';
-import { requireTrimmedString, CommandNotFoundError, CommandSelfServiceDeniedError, type SqlExecutor } from './commandStringUtils';
+import { requireTrimmedString } from './commandStringUtils';
+import { CommandNotFoundError, CommandSelfServiceDeniedError } from './commandErrors';
 import { isCommandSelfManageableBy, isCommandUnclaimedBy } from './commandSelfService';
-import { acquireNamedLock, releaseNamedLock, commandExists, runSerializedCommandWrite } from './commandLocks';
+import { acquireNamedLock, releaseNamedLock } from './commandLocks';
+import { runSerializedCommandWrite } from './commandWriteGuard';
 import {
   assertDiscordTriggerAvailable, assertMultiTwitchTriggerAvailable, assertNoSingleTwitchAssignmentOverlap,
-  assignUserToCommandWithinTransaction, assignUsersToCommandWithinTransaction,
 } from './commandConflicts';
+import { assignUserToCommandWithinTransaction, assignUsersToCommandWithinTransaction } from './commandAssignments';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -287,7 +289,7 @@ async function writeCustomCommandRow(
         [normalizedTriggerString, normalizedOutput, isDiscordEnabled ? 1 : 0, isMultiTwitch ? 1 : 0, commandId],
       );
 
-      if (result.affectedRows === 0 && !(await commandExists(commandId, connection))) {
+      if (result.affectedRows === 0 && !(await rowExists(connection, 'custom_command', 'command_id', commandId))) {
         throw new CommandNotFoundError(commandId);
       }
     },
@@ -479,6 +481,3 @@ export async function unassignUserFromCommand(commandId: number, discordId: stri
   );
 }
 
-// Unused in this module but exported so commandLocks.ts helpers remain type-safe
-// when callers import SqlExecutor from db.ts for their own executors.
-export type { SqlExecutor };
