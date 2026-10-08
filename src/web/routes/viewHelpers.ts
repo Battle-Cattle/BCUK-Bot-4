@@ -21,11 +21,12 @@ function getKnownViews(): Set<string> {
 }
 
 /**
- * Keys that must never appear in `renderView`'s `data` argument. Express's EJS integration
- * uses the same object as both template locals and `ejs.compile` options, so an
- * attacker-controlled key here (e.g. `outputFunctionName`) could alter template compilation —
- * a known EJS option-injection class of SSTI. `__proto__`/`constructor`/`prototype` are
- * blocked for the same reason (prototype pollution of the render options object).
+ * Keys that must never appear in `renderView`'s `data` argument. EJS before v7 copied
+ * option-named keys (e.g. `filename`, `async`, `delimiter`) from the template data straight
+ * into its compile options, a known EJS option-injection class of SSTI. EJS 7 no longer does,
+ * but the EJS compile-option names stay blocked as defence in depth, so a template engine
+ * downgrade or swap can't silently reopen that hole. `__proto__`/`constructor`/`prototype` are
+ * blocked against prototype pollution of the object EJS reads its options from.
  */
 const RESERVED_RENDER_DATA_KEYS = new Set([
   '__proto__',
@@ -53,11 +54,10 @@ const RESERVED_RENDER_DATA_KEYS = new Set([
   'scope',
   'beautify',
   'includer',
-  // EJS's `renderFile` special-cases a `settings` key on the data object (for Express 2/3
-  // compat): `settings.views`/`settings['view cache']` set compile options directly, and
-  // `settings['view options']` is shallow-copied into the real options *without* being
-  // filtered by any key list at all. Blocking `settings` outright closes that whole nested
-  // bypass rather than trying to enumerate every option it could smuggle through.
+  // EJS's `renderFile` still reads a `settings` key on the data object (where Express puts its
+  // app settings): `settings.views` sets the include lookup path and `settings['view cache']`
+  // turns on template caching. Blocking `settings` stops a caller overriding either. (EJS
+  // before v7 also copied `settings['view options']` into its options unfiltered.)
   'settings',
 ]);
 
