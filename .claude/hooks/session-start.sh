@@ -16,6 +16,12 @@ if [ -s "$NVM_DIR/nvm.sh" ]; then
   source "$NVM_DIR/nvm.sh"
   nvm install 24 >/dev/null
   nvm use 24 >/dev/null
+  # `nvm use` only affects this hook's own shell. Persist Node 24 onto PATH for the rest of the
+  # session's Bash commands too, so a later `npm ci`/`npm test` doesn't fall back to the
+  # sandbox's default (older) Node/npm.
+  if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
+    echo "export PATH=\"$(dirname "$(nvm which 24)"):\$PATH\"" >> "$CLAUDE_ENV_FILE"
+  fi
 fi
 
 npm install
