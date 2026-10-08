@@ -86,6 +86,14 @@ describe('runReconciliationTick', () => {
     );
   });
 
+  it('lists only rewards this app can manage, since Twitch refuses redemptions for any other', async () => {
+    vi.mocked(getAllStreamerInfo).mockReturnValue(new Map([['uid1', info]]));
+
+    await runReconciliationTick();
+
+    expect(getCustomRewards).toHaveBeenCalledWith('uid1', 'user-token', { onlyManageable: true });
+  });
+
   it('fetches UNFULFILLED redemptions to completion before starting the FULFILLED fetch', async () => {
     vi.mocked(getAllStreamerInfo).mockReturnValue(new Map([['uid1', info]]));
     const events: string[] = [];

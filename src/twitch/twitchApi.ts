@@ -294,11 +294,19 @@ function customRewardUrl(broadcasterId: string, rewardId?: string): string {
  * synchronous admin action, so a transient network error is worth retrying rather than surfacing.
  * @param broadcasterId - Twitch user ID whose custom rewards to list.
  * @param userToken - Broadcaster OAuth user token with the channel:manage:redemptions scope.
+ * @param options.onlyManageable - List only rewards this app's client ID created (Helix
+ *   `only_manageable_rewards`). Twitch only lets an app read or update redemptions of those, so a
+ *   caller that goes on to fetch redemptions should set this rather than query rewards it can't use.
  * @returns The broadcaster's custom rewards, or `[]` on a 403.
  * @throws If Twitch returns a non-OK, non-403 status.
  */
-export async function getCustomRewards(broadcasterId: string, userToken: string): Promise<TwitchCustomReward[]> {
-  const res = await fetchHelixWithRetry(customRewardUrl(broadcasterId), authHeaders(userToken));
+export async function getCustomRewards(
+  broadcasterId: string,
+  userToken: string,
+  options?: { onlyManageable?: boolean },
+): Promise<TwitchCustomReward[]> {
+  const url = customRewardUrl(broadcasterId) + (options?.onlyManageable ? '&only_manageable_rewards=true' : '');
+  const res = await fetchHelixWithRetry(url, authHeaders(userToken));
   if (res.status === 403) return [];
   if (!res.ok) throw new Error(`[TwitchAPI] getCustomRewards failed: ${res.status}`);
   const data = await res.json() as { data: TwitchCustomReward[] };
