@@ -164,23 +164,6 @@ export async function restoreBotChatTokenIfOwnedByConnection(
 }
 
 /**
- * Null out the bot's own Twitch chat OAuth token (used when a refresh fails and the token must
- * be considered revoked, forcing a fresh `/admin/bot-auth` connect). Also bumps `connection_id`,
- * for the same reason {@link saveBotChatTokenIfLatestAttempt} does, and clears
- * `attempt_started_at` so any future connect attempt is guaranteed to win
- * {@link saveBotChatTokenIfLatestAttempt}'s comparison rather than being compared against a stale
- * timestamp from before the clear.
- */
-export async function clearBotChatToken(): Promise<void> {
-  await getPool().execute(
-    `UPDATE twitch_bot_chat_token
-     SET twitch_user_id=NULL, access_token=NULL, refresh_token=NULL, token_expiry=NULL,
-         connection_id=connection_id + 1, attempt_started_at=NULL
-     WHERE id=1`,
-  );
-}
-
-/**
  * Encrypt and persist a refreshed token, but only if the singleton row's `connection_id` still
  * matches `expectedConnectionId` — a conditional (compare-and-swap) write, enforced atomically by
  * the database rather than any in-process check. `twitchBot.ts`'s `RefreshingAuthProvider.onRefresh`

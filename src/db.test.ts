@@ -16,7 +16,6 @@ vi.mock('./db/users', () => ({
   findUser: vi.fn(),
   findUserByTwitchName: vi.fn(),
   findOwnerUser: vi.fn(),
-  getAllUsers: vi.fn(),
   updateDiscordName: vi.fn(),
   getTwitchEnabledChannels: vi.fn(),
   getAllTwitchLinkedUsers: vi.fn(),
@@ -61,7 +60,6 @@ vi.mock('./db/reservedCommands', () => ({
 
 vi.mock('./db/counters', () => ({
   CounterNotFoundError: class extends Error {},
-  getAllCounters: vi.fn(),
   getCounterCount: vi.fn(),
   isCounterCommandTaken: vi.fn(),
   addCounter: vi.fn(),
@@ -108,7 +106,6 @@ vi.mock('./db/twitchBotAuth', () => ({
   getBotChatToken: vi.fn(),
   saveBotChatTokenIfLatestAttempt: vi.fn(),
   restoreBotChatTokenIfOwnedByConnection: vi.fn(),
-  clearBotChatToken: vi.fn(),
   saveBotChatTokenIfOwnedBy: vi.fn(),
   clearBotChatTokenIfOwnedBy: vi.fn(),
 }));
@@ -157,11 +154,8 @@ vi.mock('./db/alertConfigCache', () => ({
 vi.mock('./db/overlayVideos', () => ({
   getVideosForStreamer: vi.fn(),
   addVideo: vi.fn(),
-  getVideoById: vi.fn(),
   deleteVideo: vi.fn(),
   getRewardsForStreamer: vi.fn(),
-  upsertReward: vi.fn(),
-  setRewardVideos: vi.fn(),
   deleteReward: vi.fn(),
   getVideosForReward: vi.fn(),
 }));

@@ -68,22 +68,6 @@ export async function addVideo(streamerId: number, name: string, filename: strin
 }
 
 /**
- * Looks up an overlay video by id, scoped to the owning streamer.
- * @param videoId Primary key of the `overlay_video` row.
- * @param streamerId DB row ID of the owning streamer.
- * @returns The video, or null if no matching row exists.
- */
-export async function getVideoById(videoId: number, streamerId: number): Promise<OverlayVideo | null> {
-  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    `SELECT id, streamer_id, name, filename, created_at
-     FROM overlay_video
-     WHERE id = ? AND streamer_id = ?`,
-    [videoId, streamerId],
-  );
-  return rows[0] ? mapVideo(rows[0]) : null;
-}
-
-/**
  * Delete an overlay video row, scoped to the owning streamer.
  * @param videoId Primary key of the `overlay_video` row.
  * @param streamerId DB row ID of the owning streamer.
@@ -148,22 +132,6 @@ export async function getRewardsForStreamer(streamerId: number): Promise<Overlay
 }
 
 /**
- * Inserts an overlay reward for a streamer's Twitch channel-point reward, or returns the existing
- * row's id if one already exists for this streamer+reward.
- * @param streamerId DB row ID of the owning streamer.
- * @param twitchRewardId Twitch channel-point reward id.
- * @returns The reward row's primary key.
- */
-export async function upsertReward(streamerId: number, twitchRewardId: string): Promise<number> {
-  const [result] = await getPool().execute<mysql.ResultSetHeader>(
-    `INSERT INTO overlay_reward (streamer_id, twitch_reward_id) VALUES (?, ?)
-     ON DUPLICATE KEY UPDATE id=LAST_INSERT_ID(id)`,
-    [streamerId, twitchRewardId],
-  );
-  return result.insertId;
-}
-
-/**
  * Replaces the set of videos assigned to an already-verified reward, on the caller's
  * transaction connection. Throws if any video in `videos` doesn't belong to `streamerId`, so the
  * caller's transaction rolls back the whole replacement.
@@ -197,32 +165,6 @@ async function replaceRewardVideosOnConn(
     `INSERT INTO overlay_reward_video (reward_id, video_id, weight) VALUES ${placeholders}`,
     params,
   );
-}
-
-/**
- * Replaces the set of videos assigned to a reward with `videos`, scoped to the owning streamer.
- * A no-op if `rewardId` doesn't belong to `streamerId`. Throws if any video in `videos` doesn't
- * belong to `streamerId`, rolling back the whole replacement.
- * @param rewardId Primary key of the `overlay_reward` row.
- * @param streamerId DB row ID of the owning streamer.
- * @param videos The videos (and their weights) to assign to the reward.
- */
-export async function setRewardVideos(
-  rewardId: number,
-  streamerId: number,
-  videos: Array<{ videoId: number; weight: number }>,
-): Promise<void> {
-  await withTransactionOrNotFound(async (conn, notFound) => {
-    // Verify reward belongs to this streamer
-    const [check] = await conn.execute<mysql.RowDataPacket[]>(
-      `SELECT id FROM overlay_reward WHERE id = ? AND streamer_id = ?`,
-      [rewardId, streamerId],
-    );
-    if (check.length === 0) {
-      notFound();
-    }
-    await replaceRewardVideosOnConn(conn, rewardId, streamerId, videos);
-  });
 }
 
 /**

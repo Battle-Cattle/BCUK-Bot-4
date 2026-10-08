@@ -39,11 +39,8 @@ import { getPool } from './pool';
 import {
   getVideosForStreamer,
   addVideo,
-  getVideoById,
   deleteVideo,
   getRewardsForStreamer,
-  upsertReward,
-  setRewardVideos,
   saveRewardWithVideos,
   deleteReward,
   getVideosForReward,
@@ -103,31 +100,6 @@ describe('addVideo', () => {
     vi.mocked(getPool).mockReturnValue(pool as any);
     await addVideo(5, 'MyVid', 'vid.mp4');
     expect(pool.execute.mock.calls[0]![1]).toEqual([5, 'MyVid', 'vid.mp4']);
-  });
-});
-
-// ─── getVideoById ─────────────────────────────────────────────────────────────
-
-describe('getVideoById', () => {
-  it('returns null when no rows found', async () => {
-    vi.mocked(getPool).mockReturnValue(makePool([]) as any);
-    expect(await getVideoById(1, 1)).toBeNull();
-  });
-
-  it('maps the found row', async () => {
-    const now = new Date();
-    const row = { id: 5, streamer_id: 2, name: 'Clip', filename: 'clip.mp4', created_at: now };
-    vi.mocked(getPool).mockReturnValue(makePool([row]) as any);
-    const v = await getVideoById(5, 2);
-    expect(v!.id).toBe(5);
-    expect(v!.name).toBe('Clip');
-  });
-
-  it('queries with videoId and streamerId', async () => {
-    const pool = makePool([]);
-    vi.mocked(getPool).mockReturnValue(pool as any);
-    await getVideoById(7, 3);
-    expect(pool.execute.mock.calls[0]![1]).toEqual([7, 3]);
   });
 });
 
@@ -218,119 +190,6 @@ describe('getRewardsForStreamer', () => {
   });
 });
 
-// ─── upsertReward ─────────────────────────────────────────────────────────────
-
-describe('upsertReward', () => {
-  it('returns the insertId', async () => {
-    const pool = makePool();
-    pool.execute.mockResolvedValue([{ insertId: 5 }, []]);  // ResultSetHeader format
-    vi.mocked(getPool).mockReturnValue(pool as any);
-    expect(await upsertReward(1, 'reward123')).toBe(5);
-  });
-
-  it('passes streamerId and twitchRewardId to execute', async () => {
-    const pool = makePool();
-    pool.execute.mockResolvedValue([{ insertId: 1 }, []]);
-    vi.mocked(getPool).mockReturnValue(pool as any);
-    await upsertReward(7, 'rewardXYZ');
-    expect(pool.execute.mock.calls[0]![1]).toEqual([7, 'rewardXYZ']);
-  });
-});
-
-// ─── setRewardVideos ──────────────────────────────────────────────────────────
-
-describe('setRewardVideos', () => {
-  it('rolls back and returns when reward does not belong to streamer', async () => {
-    const pool = makePool();
-    const conn = pool._conn;
-    conn.execute.mockResolvedValueOnce([[], []]);  // ownership check: no rows
-    vi.mocked(getPool).mockReturnValue(pool as any);
-    await setRewardVideos(1, 99, [{ videoId: 5, weight: 2 }]);
-    expect(conn.rollback).toHaveBeenCalled();
-    expect(conn.commit).not.toHaveBeenCalled();
-  });
-
-  it('commits when all videos belong to streamer', async () => {
-    const pool = makePool();
-    const conn = pool._conn;
-    conn.execute
-      .mockResolvedValueOnce([[{ id: 1 }], []])         // ownership check: rows
-      .mockResolvedValueOnce([{ affectedRows: 1 }, []])  // DELETE: ResultSetHeader
-      .mockResolvedValueOnce([[{ id: 5 }], []])          // validate-SELECT IN: owned video ids
-      .mockResolvedValueOnce([{ affectedRows: 1 }, []]);  // INSERT: ResultSetHeader
-    vi.mocked(getPool).mockReturnValue(pool as any);
-    await setRewardVideos(1, 1, [{ videoId: 5, weight: 2 }]);
-    expect(conn.commit).toHaveBeenCalled();
-  });
-
-  it('throws when a video does not belong to the streamer', async () => {
-    const pool = makePool();
-    const conn = pool._conn;
-    conn.execute
-      .mockResolvedValueOnce([[{ id: 1 }], []])         // ownership check: rows
-      .mockResolvedValueOnce([{ affectedRows: 1 }, []])  // DELETE: ResultSetHeader
-      .mockResolvedValueOnce([[], []]);                  // validate-SELECT IN: no owned videos match
-    vi.mocked(getPool).mockReturnValue(pool as any);
-    await expect(setRewardVideos(1, 1, [{ videoId: 999, weight: 1 }])).rejects.toThrow('does not belong to streamer');
-    expect(conn.rollback).toHaveBeenCalled();
-  });
-
-  it('releases connection on error', async () => {
-    const pool = makePool();
-    const conn = pool._conn;
-    conn.execute
-      .mockResolvedValueOnce([[{ id: 1 }], []])
-      .mockRejectedValueOnce(new Error('DB crash'));
-    vi.mocked(getPool).mockReturnValue(pool as any);
-    await expect(setRewardVideos(1, 1, [])).rejects.toThrow('DB crash');
-    expect(conn.release).toHaveBeenCalled();
-  });
-
-  it('clamps weight to minimum of 1 via Math.max', async () => {
-    const pool = makePool();
-    const conn = pool._conn;
-    conn.execute
-      .mockResolvedValueOnce([[{ id: 1 }], []])         // ownership check
-      .mockResolvedValueOnce([{ affectedRows: 1 }, []])  // DELETE
-      .mockResolvedValueOnce([[{ id: 5 }], []])          // validate-SELECT IN
-      .mockResolvedValueOnce([{ affectedRows: 1 }, []]); // INSERT
-    vi.mocked(getPool).mockReturnValue(pool as any);
-    await setRewardVideos(1, 1, [{ videoId: 5, weight: 0 }]);
-    const insertParams: unknown[] = conn.execute.mock.calls[3]![1];
-    expect(insertParams[2]).toBe(1);  // Math.max(1, 0) = 1
-  });
-
-  it('issues a single validate query and a single multi-row insert regardless of video count', async () => {
-    const pool = makePool();
-    const conn = pool._conn;
-    conn.execute
-      .mockResolvedValueOnce([[{ id: 1 }], []])                              // ownership check
-      .mockResolvedValueOnce([{ affectedRows: 1 }, []])                       // DELETE
-      .mockResolvedValueOnce([[{ id: 5 }, { id: 6 }, { id: 7 }], []])         // validate-SELECT IN
-      .mockResolvedValueOnce([{ affectedRows: 3 }, []]);                      // INSERT
-    vi.mocked(getPool).mockReturnValue(pool as any);
-    await setRewardVideos(1, 1, [
-      { videoId: 5, weight: 1 },
-      { videoId: 6, weight: 2 },
-      { videoId: 7, weight: 3 },
-    ]);
-    expect(conn.execute).toHaveBeenCalledTimes(4);
-    expect(conn.commit).toHaveBeenCalled();
-  });
-
-  it('does not query or insert when videos is empty', async () => {
-    const pool = makePool();
-    const conn = pool._conn;
-    conn.execute
-      .mockResolvedValueOnce([[{ id: 1 }], []])         // ownership check
-      .mockResolvedValueOnce([{ affectedRows: 1 }, []]); // DELETE
-    vi.mocked(getPool).mockReturnValue(pool as any);
-    await setRewardVideos(1, 1, []);
-    expect(conn.execute).toHaveBeenCalledTimes(2);
-    expect(conn.commit).toHaveBeenCalled();
-  });
-});
-
 // ─── saveRewardWithVideos ─────────────────────────────────────────────────────
 
 describe('saveRewardWithVideos', () => {
@@ -368,6 +227,61 @@ describe('saveRewardWithVideos', () => {
       .rejects.toThrow('does not belong to streamer');
     expect(conn.rollback).toHaveBeenCalledTimes(1);
     expect(conn.commit).not.toHaveBeenCalled();
+    expect(conn.release).toHaveBeenCalled();
+  });
+
+  it('clamps weight to a minimum of 1', async () => {
+    const pool = makePool();
+    const conn = pool._conn;
+    conn.execute
+      .mockResolvedValueOnce([{ insertId: 42 }, []])     // upsert reward
+      .mockResolvedValueOnce([{ affectedRows: 0 }, []])  // DELETE
+      .mockResolvedValueOnce([[{ id: 5 }], []])          // validate-SELECT IN
+      .mockResolvedValueOnce([{ affectedRows: 1 }, []]); // INSERT
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await saveRewardWithVideos(1, 'reward-uuid', [{ videoId: 5, weight: 0 }]);
+    expect(conn.execute.mock.calls[3]![1]).toEqual([42, 5, 1]);  // Math.max(1, 0) = 1
+  });
+
+  it('issues a single validate query and a single multi-row insert regardless of video count', async () => {
+    const pool = makePool();
+    const conn = pool._conn;
+    conn.execute
+      .mockResolvedValueOnce([{ insertId: 42 }, []])                  // upsert reward
+      .mockResolvedValueOnce([{ affectedRows: 0 }, []])               // DELETE
+      .mockResolvedValueOnce([[{ id: 5 }, { id: 6 }, { id: 7 }], []]) // validate-SELECT IN
+      .mockResolvedValueOnce([{ affectedRows: 3 }, []]);              // INSERT
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await saveRewardWithVideos(1, 'reward-uuid', [
+      { videoId: 5, weight: 1 },
+      { videoId: 6, weight: 2 },
+      { videoId: 7, weight: 3 },
+    ]);
+    expect(conn.execute).toHaveBeenCalledTimes(4);
+    expect(conn.commit).toHaveBeenCalled();
+  });
+
+  it('does not validate or insert videos when the list is empty', async () => {
+    const pool = makePool();
+    const conn = pool._conn;
+    conn.execute
+      .mockResolvedValueOnce([{ insertId: 42 }, []])     // upsert reward
+      .mockResolvedValueOnce([{ affectedRows: 0 }, []]); // DELETE
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    expect(await saveRewardWithVideos(1, 'reward-uuid', [])).toBe(42);
+    expect(conn.execute).toHaveBeenCalledTimes(2);
+    expect(conn.commit).toHaveBeenCalled();
+  });
+
+  it('rolls back and releases the connection when a query fails', async () => {
+    const pool = makePool();
+    const conn = pool._conn;
+    conn.execute
+      .mockResolvedValueOnce([{ insertId: 42 }, []])
+      .mockRejectedValueOnce(new Error('DB crash'));
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await expect(saveRewardWithVideos(1, 'reward-uuid', [])).rejects.toThrow('DB crash');
+    expect(conn.rollback).toHaveBeenCalled();
     expect(conn.release).toHaveBeenCalled();
   });
 });

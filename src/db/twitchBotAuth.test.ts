@@ -16,7 +16,7 @@ import { getPool } from './pool';
 import { encryptToken, decryptToken } from '../shared/crypto';
 import {
   getBotChatToken, saveBotChatTokenIfLatestAttempt, restoreBotChatTokenIfOwnedByConnection,
-  clearBotChatToken, saveBotChatTokenIfOwnedBy, clearBotChatTokenIfOwnedBy,
+  saveBotChatTokenIfOwnedBy, clearBotChatTokenIfOwnedBy,
 } from './twitchBotAuth';
 import { makeMockPool } from '../test-utils/mockMysqlPool';
 
@@ -220,28 +220,6 @@ describe('restoreBotChatTokenIfOwnedByConnection', () => {
     const pool = { execute: vi.fn().mockResolvedValue([{ affectedRows: 0 }, []]) };
     vi.mocked(getPool).mockReturnValue(pool as any);
     expect(await restoreBotChatTokenIfOwnedByConnection(2, 'old-uid', 'a', 'r', null)).toBe(false);
-  });
-});
-
-// ─── clearBotChatToken ──────────────────────────────────────────────────────
-
-describe('clearBotChatToken', () => {
-  it('executes an UPDATE nulling all token fields for the singleton row', async () => {
-    const pool = { execute: vi.fn().mockResolvedValue([{ affectedRows: 1 }, []]) };
-    vi.mocked(getPool).mockReturnValue(pool as any);
-    await clearBotChatToken();
-    const [sql] = pool.execute.mock.calls[0] as [string];
-    expect(sql.toUpperCase()).toContain('UPDATE');
-    expect(sql).toContain('WHERE id=1');
-  });
-
-  it('also bumps connection_id and clears attempt_started_at', async () => {
-    const pool = { execute: vi.fn().mockResolvedValue([{ affectedRows: 1 }, []]) };
-    vi.mocked(getPool).mockReturnValue(pool as any);
-    await clearBotChatToken();
-    const [sql] = pool.execute.mock.calls[0] as [string];
-    expect(sql).toContain('connection_id=connection_id + 1');
-    expect(sql).toContain('attempt_started_at=NULL');
   });
 });
 

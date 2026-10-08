@@ -100,7 +100,7 @@ export async function removeOverride(guildId: string, commandId: number): Promis
 
 export {
   AccessLevel, ACCESS_LEVEL_LABELS,
-  findUser, findUsersByIds, findUserByTwitchName, findOwnerUser, getAllUsers, getGuildMemberUsers,
+  findUser, findUsersByIds, findUserByTwitchName, findOwnerUser, getGuildMemberUsers,
   updateDiscordName, getTwitchEnabledChannels, getAllTwitchLinkedUsers,
 } from './db/users';
 export type { AccessLevelValue, DbUser } from './db/users';
@@ -173,7 +173,6 @@ export type {
   DbCustomCommand, DbCustomCommandAssignedUser, DbCustomCommandWithAssignments,
 } from './db/customCommands';
 export {
-  invalidateCustomCommandLookupCache,
   getCustomCommandForTwitchChannel, getCustomCommandForDiscord,
 } from './db/customCommandCache';
 
@@ -307,7 +306,7 @@ export { ReservedCommandError } from './db/reservedCommands';
 
 // ─── Counter commands ───────────────────────────────────────────────────────
 
-export { CounterNotFoundError, getAllCounters, getCountersForGuild, getCounterCount, isCounterCommandTaken } from './db/counters';
+export { CounterNotFoundError, getCountersForGuild, getCounterCount, isCounterCommandTaken } from './db/counters';
 export { getCounterHistory } from './db/counterArchive';
 export { findCounterByCommand } from './db/counterCache';
 
@@ -413,7 +412,7 @@ export type { DbStreamerEventSub, EventSubConfig } from './db/eventSub';
 
 export {
   getBotChatToken, saveBotChatTokenIfLatestAttempt, restoreBotChatTokenIfOwnedByConnection,
-  clearBotChatToken, saveBotChatTokenIfOwnedBy, clearBotChatTokenIfOwnedBy,
+  saveBotChatTokenIfOwnedBy, clearBotChatTokenIfOwnedBy,
 } from './db/twitchBotAuth';
 export type { BotChatToken } from './db/twitchBotAuth';
 
@@ -651,8 +650,8 @@ export async function deleteSfxFile(id: number): Promise<string | null> {
 // ─── Overlay videos ─────────────────────────────────────────────────────────
 
 export {
-  getVideosForStreamer, addVideo, getVideoById, deleteVideo,
-  getRewardsForStreamer, upsertReward, setRewardVideos, saveRewardWithVideos, deleteReward,
+  getVideosForStreamer, addVideo, deleteVideo,
+  getRewardsForStreamer, saveRewardWithVideos, deleteReward,
   getVideosForReward,
 } from './db/overlayVideos';
 
