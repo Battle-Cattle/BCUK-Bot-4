@@ -9,8 +9,6 @@ vi.mock('../../db', () => ({
   getStreamerByDiscordId: vi.fn(),
   addVideo: vi.fn(),
   deleteVideo: vi.fn(),
-  upsertReward: vi.fn(),
-  setRewardVideos: vi.fn(),
   deleteReward: vi.fn(),
   AccessLevel: ACCESS_LEVEL_MOCK,
 }));

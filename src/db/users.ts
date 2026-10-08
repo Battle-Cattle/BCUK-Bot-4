@@ -118,14 +118,6 @@ export async function findOwnerUser(): Promise<DbUser | null> {
   return rows[0] ? mapUser(rows[0]) : null;
 }
 
-/** Returns every user row, ordered by access level (highest first) then name. */
-export async function getAllUsers(): Promise<DbUser[]> {
-  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    `SELECT ${USER_SELECT} FROM \`user\` ORDER BY access_level DESC, discord_name ASC`,
-  );
-  return rows.map(mapUser);
-}
-
 /**
  * Returns the members of one guild as user records, with `access_level` sourced
  * from the per-guild `guild_member` row (not the legacy global column). Backs the

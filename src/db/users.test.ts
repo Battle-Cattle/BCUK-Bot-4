@@ -16,7 +16,6 @@ import {
   findUsersByIds,
   findUserByTwitchName,
   findOwnerUser,
-  getAllUsers,
   getGuildMemberUsers,
   upsertUserRecord,
   updateDiscordName,
@@ -219,30 +218,6 @@ describe('findOwnerUser', () => {
     await findOwnerUser();
     const sql: string = vi.mocked(pool.execute).mock.calls[0]![0] as string;
     expect(sql).toContain('is_owner = 1');
-  });
-});
-
-// ─── getAllUsers ──────────────────────────────────────────────────────────────
-
-describe('getAllUsers', () => {
-  it('returns an empty array when no rows', async () => {
-    vi.mocked(getPool).mockReturnValue(makePool([[]]) as any);
-    const result = await getAllUsers();
-    expect(result).toEqual([]);
-  });
-
-  it('maps multiple rows', async () => {
-    const rows = [
-      { discord_id: '1', discord_name: 'A', is_twitch_bot_enabled: 0, twitch_name: null, access_level: 3, is_owner: 1 },
-      { discord_id: '2', discord_name: 'B', is_twitch_bot_enabled: 1, twitch_name: 'b', access_level: 0, is_owner: 0 },
-    ];
-    vi.mocked(getPool).mockReturnValue(makePool([rows]) as any);
-    const result = await getAllUsers();
-    expect(result).toHaveLength(2);
-    expect(result[0]!.discord_id).toBe('1');
-    expect(result[1]!.is_twitch_bot_enabled).toBe(true);
-    expect(result[0]!.is_owner).toBe(true);
-    expect(result[1]!.is_owner).toBe(false);
   });
 });
 
