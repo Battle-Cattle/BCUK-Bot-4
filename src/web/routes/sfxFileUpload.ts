@@ -22,7 +22,7 @@ const MAX_FILE_BYTES = SFX_MAX_FILE_MB * 1024 * 1024;
 // storeUploadedSound() validates the actual bytes via detectAudioType. Filtering
 // on mimetype here would reject valid audio with a generic/incorrect header.
 /** Multer instance buffering a single uploaded sound in memory, capped at SFX_MAX_FILE_MB. */
-export const upload = multer({
+const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: MAX_FILE_BYTES },
 });

@@ -18,11 +18,9 @@ const router = Router();
 const KNOWN_ERRORS: ReadonlySet<StreamsErrorCode> = new Set(STREAMS_ERROR_CODES);
 const KNOWN_SUCCESSES = new Set<string>([]);
 
-export const ERROR_MESSAGES = STREAMS_ERROR_MESSAGES;
-
-/** Looks up a `streams` page error code in {@link ERROR_MESSAGES}, for use as an EJS template helper. */
+/** Looks up a `streams` page error code in {@link STREAMS_ERROR_MESSAGES}, for use as an EJS template helper. */
 function getFriendlyError(key: string): string {
-  return getFriendlyErrorMessage(ERROR_MESSAGES, key);
+  return getFriendlyErrorMessage(STREAMS_ERROR_MESSAGES, key);
 }
 
 // ─── View ─────────────────────────────────────────────────────────────────────

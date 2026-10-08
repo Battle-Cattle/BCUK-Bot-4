@@ -27,7 +27,7 @@ const MAX_FILE_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
 // No fileFilter: client-supplied MIME type is unreliable (some browsers send
 // application/octet-stream). detectVideoType() validates via magic bytes instead,
 // mirroring the audio upload approach.
-export const upload = multer({
+const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: MAX_FILE_BYTES },
 });

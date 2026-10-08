@@ -8,7 +8,7 @@ import { buildReconnectUrl, rejectionReason, routeEventSubMessage, type EventSub
 const log = createLogger('EventSub');
 
 /** Default Twitch EventSub WebSocket URL. */
-export const EVENTSUB_WS_URL = 'wss://eventsub.wss.twitch.tv/ws';
+const EVENTSUB_WS_URL = 'wss://eventsub.wss.twitch.tv/ws';
 const RECONNECT_BACKOFF_MAX_MS = 30_000;
 /** Upper bound on how long a WebSocket may sit in CONNECTING before this connection gives up on
  *  it and force-reconnects — see {@link StreamerConnection.connect}. Without this, a socket whose
