@@ -68,11 +68,9 @@ describe('renderView', () => {
     expect(() => renderView(res, 'error', { scope: {} })).toThrow(/reserved key/);
   });
 
-  it('throws when data contains a "settings" key (EJS renderFile\'s Express compat bypass)', () => {
+  it('throws when data contains a "settings" key (read by EJS renderFile for views/view cache)', () => {
     const { res } = mockRes();
-    expect(() => renderView(res, 'error', { settings: { 'view options': { outputFunctionName: 'x' } } })).toThrow(
-      /reserved key/,
-    );
+    expect(() => renderView(res, 'error', { settings: { views: '/tmp' } })).toThrow(/reserved key/);
   });
 
   it('throws when data contains a prototype-pollution key', () => {
