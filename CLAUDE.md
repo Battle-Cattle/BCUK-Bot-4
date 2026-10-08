@@ -49,7 +49,7 @@ npm test      # Vitest
 
 ## Tech Stack
 
-- **Runtime:** discord.js v14, tmi.js (Twitch chat), `mediaplex` (Opus), express v5 + `express-session`/`express-mysql-session`, `mysql2`, `helmet`, `winston`.
+- **Runtime:** discord.js v14, `@twurple/chat` + `@twurple/auth` (Twitch chat), `mediaplex` (Opus), express v5 + `express-session`/`express-mysql-session`, `mysql2`, `helmet`, `winston`.
 - **TypeScript:** `strict: true` plus `noUncheckedIndexedAccess` (so `rows[0]` is `T | undefined` — guard it, or use `!` only where a nearby check guarantees it, with a comment saying which), target ES2024, `moduleResolution: NodeNext`. `package.json` pins `"engines": { "node": ">=24" }` — see Node/npm version above.
 - **ESLint** (flat config, type-aware): `no-floating-promises`, `no-misused-promises`, and `no-console` are all **errors**, not warnings — these affect how code must be written (await/void everything, use `logger` not `console.*`). `no-explicit-any` is a warning; relaxed for `*.test.ts`. `eslint-plugin-jsdoc` enforces the Docstrings rule below (`require-jsdoc` on function declarations, methods and module-level arrow functions; `check-param-names` catches stale `@param`s), and `@vitest/eslint-plugin` guards tests (no `.only`/`.skip`, no assertion-free tests).
 - **Test/build scripts:** `npm run build` (`tsc -p tsconfig.build.json`), `npm run lint`, `npm run check:circular` (madge).

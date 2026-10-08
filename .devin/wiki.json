@@ -96,7 +96,7 @@
     },
     {
       "title": "Twitch Integrations",
-      "purpose": "Overview of everything under src/twitch/: the tmi.js chat bot, the Helix API client, EventSub real-time events, the legacy live/offline polling monitor, the dynamic channel-point pricing engine, and scheduled timer commands. Links to child pages for each subsystem.",
+      "purpose": "Overview of everything under src/twitch/: the Twurple chat bot, the Helix API client, EventSub real-time events, the legacy live/offline polling monitor, the dynamic channel-point pricing engine, and scheduled timer commands. Links to child pages for each subsystem.",
       "parent": null,
       "page_notes": [
         {
@@ -107,7 +107,7 @@
     },
     {
       "title": "Twitch Chat Bot",
-      "purpose": "Explains the tmi.js-based Twitch IRC client: joined-channel set management and periodic reconciliation against the DB (twitchChannelMembership.ts/twitchChannelReconciliationPoll.ts), per-channel chat-activity rate tracking used to gate timer commands (twitchChatActivity.ts), the outbound send queue/rate limiter (twitchSendQueue.ts), and Twitch-chat-to-Discord-guild resolution for routing chat-triggered commands into the correct guild's voice channel.",
+      "purpose": "Explains the Twurple-based (`@twurple/chat`) Twitch IRC client: joined-channel set management and periodic reconciliation against the DB (twitchChannelMembership.ts/twitchChannelReconciliationPoll.ts), per-channel chat-activity rate tracking used to gate timer commands (twitchChatActivity.ts), the outbound send queue/rate limiter (twitchSendQueue.ts), and Twitch-chat-to-Discord-guild resolution for routing chat-triggered commands into the correct guild's voice channel.",
       "parent": "Twitch Integrations",
       "page_notes": [
         {
