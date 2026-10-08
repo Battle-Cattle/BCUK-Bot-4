@@ -14,7 +14,6 @@
     "test:coverage": "vitest run --coverage",
     "lint": "eslint .",
     "check:circular": "node scripts/checkCircularDeps.js",
-    "graphify:hook": "graphify hook install",
     "deploy": "bash deploy.sh"
   },
   "dependencies": {
@@ -32,7 +31,6 @@
     "express-session": "^1.19.0",
     "ffmpeg-static": "^5.2.0",
     "helmet": "^8.3.0",
-    "libsodium-wrappers": "^0.8.4",
     "mediaplex": "^1.0.0",
     "multer": "^2.3.0",
     "mysql2": "^3.23.1",
@@ -64,7 +62,6 @@
     "@types/multer": "^2.3.0",
     "@types/node": "^26.6.4",
     "@types/supertest": "^7.2.1",
-    "@types/ws": "^8.18.2",
     "@vitest/coverage-v8": "^5.0.3",
     "@vitest/eslint-plugin": "^1.6.27",
     "eslint": "^10.12.0",
