@@ -346,6 +346,51 @@ Expected constraints:
 - Composite primary key `(guild_id, command_id)`.
 - Both foreign keys use `ON DELETE CASCADE`, so deleting a catalog command or a guild removes its override rows.
 
+## `overlay_video`
+
+Videos a streamer has uploaded for the channel-point video overlay. Created by `migrations/overlay_videos.sql`.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | `INT` PK auto-increment | |
+| `streamer_id` | `INT` | FK to `streamer.id` ON DELETE CASCADE |
+| `name` | `VARCHAR(255)` | Display name shown in the overlay admin page |
+| `filename` | `VARCHAR(255)` | Stored file name, a random UUID plus extension; served without auth, so the name is what keeps it unguessable |
+| `created_at` | `TIMESTAMP` | Defaults to `CURRENT_TIMESTAMP` |
+
+Expected behavior:
+
+- Deletes are scoped by `streamer_id`, and `deleteVideo` returns the row's `filename` so the caller can remove the file from disk.
+
+## `overlay_reward`
+
+A streamer's Twitch channel-point rewards that trigger overlay videos. Independent of `reward_pricing`. Created by `migrations/overlay_videos.sql`.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | `INT` PK auto-increment | |
+| `streamer_id` | `INT` | FK to `streamer.id` ON DELETE CASCADE |
+| `twitch_reward_id` | `VARCHAR(255)` | Twitch's reward ID |
+
+Expected constraints:
+
+- `UNIQUE KEY uq_reward (streamer_id, twitch_reward_id)`.
+
+## `overlay_reward_video`
+
+Join table assigning videos to an overlay reward. A reward can have several videos, and one is picked at random by `weight` when it is redeemed (same pattern as SFX). Created by `migrations/overlay_videos.sql`.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `reward_id` | `INT` | FK to `overlay_reward.id` ON DELETE CASCADE |
+| `video_id` | `INT` | FK to `overlay_video.id` ON DELETE CASCADE |
+| `weight` | `INT` | Relative pick weight; defaults to 1, and the app clamps it to at least 1 |
+
+Expected constraints and behavior:
+
+- `PRIMARY KEY (reward_id, video_id)`.
+- Saving a reward's videos replaces all its rows in one transaction, and only accepts video IDs owned by the same streamer.
+
 ## `alert_config`
 
 Per-streamer, per-event-type configuration for the customisable alerts overlay (a browser-source SSE overlay separate from the existing channel-point video overlay). Created by `migrations/alerts_overlay.sql`.
@@ -398,17 +443,33 @@ Expected constraints:
 
 ## `streamdeck_api_keys`
 
-Per-user Streamdeck API keys. Defined in `schema.sql`. For existing deployments where this table was created externally (before the multi-guild migration), `migrations/multi_guild.sql` conditionally adds the `guild_id` column.
+Per-user Streamdeck API keys: one key per user, shared across every guild they can access. Per-guild approval state lives in `streamdeck_key_guild_status`. Defined in `schema.sql`; `migrations/streamdeck_multi_guild.sql` split the older one-guild-per-key shape (with `guild_id`/`status`/`requested_at`/`approved_at`/`approved_by` on this table) into the two tables.
 
 | Column | Type | Notes |
 | --- | --- | --- |
 | `discord_id` | `BIGINT` PK | Key owner (one key per user) |
-| `key_hash` | `VARCHAR(...)` | SHA-256 hash of the plaintext key |
-| `guild_id` | `BIGINT` | FK to `guild.guild_id`; the guild this key acts on |
-| `status` | `ENUM`/`VARCHAR` | `pending`, `approved`, `revoked`, or `denied` |
-| `requested_at` | `DATETIME` | When the key was requested |
+| `key_hash` | `VARCHAR(64)` | Hex SHA-256 hash of the plaintext key |
+| `created_at` | `DATETIME` | When the key was issued or last regenerated |
+
+## `streamdeck_key_guild_status`
+
+Per-guild approval state for a Streamdeck key: the same key can be pending in one guild, approved in another and revoked or denied in a third. Created by `migrations/streamdeck_multi_guild.sql`.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `discord_id` | `BIGINT` | FK to `streamdeck_api_keys.discord_id` ON DELETE CASCADE |
+| `guild_id` | `BIGINT` | FK to `guild.guild_id` ON DELETE CASCADE |
+| `status` | `ENUM('pending','approved','revoked','denied')` | Defaults to `pending` |
+| `requested_at` | `DATETIME` | When access to this guild was requested |
 | `approved_at` | `DATETIME` nullable | When approved |
-| `approved_by` | `BIGINT` nullable | Approver's `discord_id` |
+| `approved_by` | `BIGINT` nullable | Approver's `discord_id`; FK to `user.discord_id` ON DELETE SET NULL |
+
+Expected constraints and behavior:
+
+- `PRIMARY KEY (discord_id, guild_id)`.
+- Re-requesting access upserts the row but leaves a `denied` row unchanged, so a denied user can't re-queue themselves (`src/db/streamdeckKeys.ts`).
+- An `approved` row alone doesn't grant access: lookups also require the key owner to still be a `guild_member` of that guild (or `user.is_owner`), because removing a member doesn't revoke their Streamdeck approvals.
+- On older deployments `discord_id` may be `VARCHAR(64)` to match a pre-`BIGINT` `streamdeck_api_keys.discord_id`; see the comment at the top of the migration.
 
 ## `twitch_user_commands`
 
