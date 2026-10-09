@@ -132,6 +132,27 @@ CREATE TABLE IF NOT EXISTS streamer (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ---------------------------------------------------------------------------
+-- twitch_bot_chat_token
+-- Refreshing OAuth token for the bot's own Twitch chat account: a single
+-- bot-wide credential, not per-streamer. Singleton row (id pinned to 1).
+-- connection_id increments on every save and is the compare-and-swap key for
+-- refresh writes, so a superseded auth provider can't overwrite the current
+-- token. attempt_started_at orders concurrent OAuth callbacks by when the
+-- owner started them (see saveBotChatTokenIfLatestAttempt()).
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS twitch_bot_chat_token (
+  id                  TINYINT      NOT NULL DEFAULT 1,
+  twitch_user_id      VARCHAR(50)  NULL,
+  access_token        TEXT         NULL, -- AES-256-GCM encrypted, same as streamer.eventsub_access_token
+  refresh_token       TEXT         NULL, -- AES-256-GCM encrypted
+  token_expiry        BIGINT       NULL, -- Unix milliseconds
+  connection_id       BIGINT       NOT NULL DEFAULT 1,
+  attempt_started_at  BIGINT       NULL, -- Unix milliseconds
+  PRIMARY KEY (id),
+  CONSTRAINT chk_twitch_bot_chat_token_singleton CHECK (id = 1)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------------------
 -- streamer_event_config
 -- Per-streamer EventSub notification settings and message templates.
 -- ---------------------------------------------------------------------------
@@ -351,6 +372,9 @@ CREATE TABLE IF NOT EXISTS reward_pricing (
   demand            DECIMAL(9,6) NOT NULL DEFAULT 0.000000,
   demand_updated_at BIGINT       NOT NULL,
   last_pushed_cost  INT          NULL,
+  -- Twitch id of the last redemption whose increment was applied to demand; the idempotency
+  -- guard that stops a retried redemption double-applying. NULL until the first redemption sync.
+  last_redemption_id VARCHAR(64) NULL,
   -- Set (and enabled forced to 0) when Twitch returns 403 on an update — the reward was
   -- created outside this app (dashboard or another client_id) and can never be managed by it.
   twitch_unsupported TINYINT(1)  NOT NULL DEFAULT 0,
@@ -413,9 +437,13 @@ CREATE TABLE IF NOT EXISTS streamer_event_log (
   event_type   ENUM('follow','sub','resub','giftsub','raid','redemption') NOT NULL,
   display_name VARCHAR(255) NOT NULL,
   detail       VARCHAR(500) NULL,
+  -- Twitch redemption id, set only for 'redemption' rows: a retried INSERT for the same
+  -- redemption collides on the unique key instead of logging it twice. NULL otherwise.
+  redemption_id VARCHAR(64) NULL,
   occurred_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   KEY idx_streamer_event_log_recent (streamer_id, occurred_at),
+  UNIQUE KEY uq_streamer_event_log_redemption (redemption_id),
   FOREIGN KEY (streamer_id) REFERENCES streamer(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -501,6 +529,58 @@ CREATE TABLE IF NOT EXISTS companion_oauth_codes (
   expires_at   DATETIME    NOT NULL,
   used_at      DATETIME    NULL,
   PRIMARY KEY (code_hash),
+  FOREIGN KEY (discord_id) REFERENCES `user`(discord_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------------------
+-- webauthn_credentials
+-- Passkeys for fingerprint / face / device-PIN sign-in to the web panel.
+-- IDs and handles are base64url, stored ascii_bin because they're case-sensitive.
+-- user_handle is random per user and shared by all their passkeys; it's stored
+-- rather than derived from an app secret so secret rotation never invalidates them.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS webauthn_credentials (
+  credential_id VARCHAR(512) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  discord_id    BIGINT        NOT NULL,
+  user_handle   VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  public_key    VARBINARY(1024) NOT NULL,
+  sign_count    INT UNSIGNED  NOT NULL DEFAULT 0,
+  transports    VARCHAR(255)  NULL,
+  device_label  VARCHAR(100)  NOT NULL,
+  created_at    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_used_at  DATETIME      NULL,
+  PRIMARY KEY (credential_id),
+  KEY idx_webauthn_credentials_discord_id (discord_id),
+  FOREIGN KEY (discord_id) REFERENCES `user`(discord_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------------------
+-- webauthn_challenges
+-- Outstanding WebAuthn challenges. Consumption is a conditional DELETE, so a
+-- challenge can be redeemed exactly once even by concurrent requests.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS webauthn_challenges (
+  challenge   VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  purpose     ENUM('register', 'login') NOT NULL,
+  expires_at  DATETIME     NOT NULL,
+  PRIMARY KEY (challenge),
+  KEY idx_webauthn_challenges_expires_at (expires_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------------------
+-- passkey_enrollment_codes
+-- One-time codes the bot DMs to a user before they can add a passkey, so a
+-- hijacked web session alone can't enrol one. One outstanding code per user;
+-- only a SHA-256 digest of the code is stored.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS passkey_enrollment_codes (
+  discord_id  BIGINT           NOT NULL,
+  code_hash   CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  attempts    TINYINT UNSIGNED NOT NULL DEFAULT 0,
+  sent_at     DATETIME         NOT NULL,
+  expires_at  DATETIME         NOT NULL,
+  PRIMARY KEY (discord_id),
+  KEY idx_passkey_enrollment_codes_expires_at (expires_at),
   FOREIGN KEY (discord_id) REFERENCES `user`(discord_id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
