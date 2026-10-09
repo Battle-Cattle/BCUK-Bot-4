@@ -66,14 +66,34 @@ describe('POST /streams/streamers/add — array and missing input handling', () 
     expect(res.headers.location).toContain('error=missing_fields');
   });
 
-  it('uses the first element when group_id is an array', async () => {
+  it('redirects with invalid_id and does not add when group_id is repeated', async () => {
     vi.mocked(findUser).mockResolvedValue({ twitch_name: 'streamer', discord_id: '100000000000000001' } as any);
     const res = await supertest(buildApp())
       .post('/streams/streamers/add')
       .send('discord_id=100000000000000001&group_id=1&group_id=2');
     expect(res.status).toBe(302);
-    expect(res.headers.location).not.toContain('error');
-    expect(vi.mocked(addStreamer)).toHaveBeenCalledWith('100000000000000001', 1, GUILD_ID);
+    expect(res.headers.location).toContain('error=invalid_id');
+    expect(addStreamer).not.toHaveBeenCalled();
+  });
+
+  it('redirects with invalid_id when group_id is not a positive integer', async () => {
+    const res = await supertest(buildApp())
+      .post('/streams/streamers/add')
+      .send('discord_id=100000000000000001&group_id=abc');
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toContain('error=invalid_id');
+    expect(findUser).not.toHaveBeenCalled();
+  });
+
+  it('redirects with missing_fields and does not add when the user has no Twitch name', async () => {
+    vi.mocked(findUser).mockResolvedValue({ twitch_name: null, discord_id: '100000000000000001' } as any);
+    const res = await supertest(buildApp())
+      .post('/streams/streamers/add')
+      .send('discord_id=100000000000000001&group_id=1');
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toContain('error=missing_fields');
+    expect(getMemberAccessLevel).not.toHaveBeenCalled();
+    expect(addStreamer).not.toHaveBeenCalled();
   });
 
   it('redirects with missing_fields when discord_id is absent', async () => {

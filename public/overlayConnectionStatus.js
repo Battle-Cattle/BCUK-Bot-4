@@ -1,15 +1,13 @@
 (function () {
-  const script = document.currentScript;
-  const eventsUrl = script ? script.dataset.eventsUrl : '';
-  if (!eventsUrl) return;
-
+  const eventsUrl = document.currentScript?.dataset.eventsUrl;
   const dot = document.getElementById('overlay-status-dot');
   const text = document.getElementById('overlay-status-text');
-  if (!dot || !text) return;
+  if (!eventsUrl || !dot || !text) return;
 
   connectSse(eventsUrl, function (data) {
-    if (!data || typeof data.connected !== 'boolean') return;
-    dot.className = data.connected ? 'dot dot--online' : 'dot dot--offline';
+    if (typeof data?.connected !== 'boolean') return;
+    dot.classList.toggle('dot--online', data.connected);
+    dot.classList.toggle('dot--offline', !data.connected);
     text.textContent = data.connected ? 'Connected' : 'Not connected';
   });
 })();

@@ -46,6 +46,16 @@ describe('pickWeightedRandom', () => {
     expect(pickWeightedRandom(files)).toBe('a.mp3');
   });
 
+  it('falls back to the last file when rounding leaves a remainder after every subtraction', () => {
+    // total = 0.1 + 0.2 = 0.30000000000000004; subtracting 0.1 then 0.2 from it leaves ~2.8e-17 > 0.
+    vi.spyOn(Math, 'random').mockReturnValue(1);
+    const files: WeightedFile[] = [
+      { file: 'a.mp3', weight: 0.1 },
+      { file: 'b.mp3', weight: 0.2 },
+    ];
+    expect(pickWeightedRandom(files)).toBe('b.mp3');
+  });
+
   it('heavily-weighted file wins almost all draws', () => {
     const files: WeightedFile[] = [
       { file: 'rare.mp3', weight: 1 },
