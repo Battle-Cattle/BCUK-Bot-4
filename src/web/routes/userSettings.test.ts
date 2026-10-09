@@ -40,7 +40,7 @@ vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
 import express from 'express';
 import supertest from 'supertest';
-import router, { buildEventSubConfig, hasOverlongMessage } from './userSettings';
+import router, { buildEventSubConfig, findBotEnabledStreamer, hasOverlongMessage } from './userSettings';
 import { findUser, getStreamerByDiscordId, saveEventConfig, clearStreamerToken, listPasskeysForUser } from '../../db';
 import { reloadEventSubSubscriptions } from '../../twitch/eventsub/twitchEventSub';
 import { AccessLevel } from '../../db';
@@ -473,6 +473,29 @@ describe('POST /eventsub-config', () => {
     const res = await supertest(buildApp()).post('/eventsub-config').type('form').send({});
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/user/settings?error=eventsub_config_failed');
+  });
+});
+
+describe('findBotEnabledStreamer', () => {
+  const STREAMER = { id: 7 } as Awaited<ReturnType<typeof getStreamerByDiscordId>>;
+
+  it('returns no_streamer_record when the user has no streamer record', async () => {
+    vi.mocked(findUser).mockResolvedValue({ is_twitch_bot_enabled: true } as any);
+    expect(await findBotEnabledStreamer('1')).toEqual({ error: 'no_streamer_record' });
+  });
+
+  it('returns eventsub_not_bot_enabled when the twitch bot is disabled', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(STREAMER);
+    vi.mocked(findUser).mockResolvedValue({ is_twitch_bot_enabled: false } as any);
+    expect(await findBotEnabledStreamer('1')).toEqual({ error: 'eventsub_not_bot_enabled' });
+  });
+
+  it('returns the streamer when it exists and the twitch bot is enabled', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(STREAMER);
+    vi.mocked(findUser).mockResolvedValue({ is_twitch_bot_enabled: true } as any);
+    expect(await findBotEnabledStreamer('1')).toEqual({ streamer: STREAMER });
+    expect(findUser).toHaveBeenCalledWith('1');
+    expect(getStreamerByDiscordId).toHaveBeenCalledWith('1');
   });
 });
 

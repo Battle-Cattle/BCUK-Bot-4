@@ -1,7 +1,7 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import { randomBytes } from 'crypto';
-import { findUser, getStreamerByDiscordId, saveEventConfig, clearStreamerToken, listPasskeysForUser, EventSubConfig } from '../../db';
+import { findUser, getStreamerByDiscordId, saveEventConfig, clearStreamerToken, listPasskeysForUser, EventSubConfig, DbStreamerEventSub } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import { getSessionUser } from '../session';
@@ -115,6 +115,26 @@ router.get('/', requireAuth, csrfProtection, async (req, res) => {
   }
 });
 
+/**
+ * Loads the streamer record for a Discord user and checks they're allowed to manage
+ * EventSub, i.e. they have a streamer record and the Twitch bot is enabled for them.
+ * @param discordId - The logged-in user's Discord ID.
+ * @returns The streamer on success, or the `?error=` code to redirect with
+ *   (`no_streamer_record` or `eventsub_not_bot_enabled`).
+ */
+export async function findBotEnabledStreamer(
+  discordId: string,
+): Promise<{ streamer: DbStreamerEventSub } | { error: 'no_streamer_record' | 'eventsub_not_bot_enabled' }> {
+  const [dbUser, streamer] = await Promise.all([
+    findUser(discordId),
+    getStreamerByDiscordId(discordId),
+  ]);
+
+  if (!streamer) return { error: 'no_streamer_record' };
+  if (!dbUser?.is_twitch_bot_enabled) return { error: 'eventsub_not_bot_enabled' };
+  return { streamer };
+}
+
 // GET /user/twitch-connect — initiates Twitch OAuth for the logged-in user
 
 /**
@@ -130,15 +150,9 @@ router.get('/', requireAuth, csrfProtection, async (req, res) => {
  */
 router.get('/twitch-connect', requireAuth, async (req, res) => {
   try {
-    const discordId = getSessionUser(req).discordId;
-
-    const [dbUser, streamer] = await Promise.all([
-      findUser(discordId),
-      getStreamerByDiscordId(discordId),
-    ]);
-
-    if (!streamer) return res.redirect('/user/settings?error=no_streamer_record');
-    if (!dbUser?.is_twitch_bot_enabled) return res.redirect('/user/settings?error=eventsub_not_bot_enabled');
+    const result = await findBotEnabledStreamer(getSessionUser(req).discordId);
+    if ('error' in result) return res.redirect(`/user/settings?error=${result.error}`);
+    const { streamer } = result;
 
     if (!TWITCH_CLIENT_ID || !TWITCH_EVENTSUB_REDIRECT_URI || !EVENTSUB_TOKEN_SECRET) {
       log.error('TWITCH_CLIENT_ID, TWITCH_EVENTSUB_REDIRECT_URI, or EVENTSUB_TOKEN_SECRET is not configured');
@@ -253,15 +267,9 @@ export function buildEventSubConfig(
  */
 router.post('/eventsub-config', requireAuth, csrfProtection, async (req, res) => {
   try {
-    const discordId = getSessionUser(req).discordId;
-
-    const [dbUser, streamer] = await Promise.all([
-      findUser(discordId),
-      getStreamerByDiscordId(discordId),
-    ]);
-
-    if (!streamer) return res.redirect('/user/settings?error=no_streamer_record');
-    if (!dbUser?.is_twitch_bot_enabled) return res.redirect('/user/settings?error=eventsub_not_bot_enabled');
+    const result = await findBotEnabledStreamer(getSessionUser(req).discordId);
+    if ('error' in result) return res.redirect(`/user/settings?error=${result.error}`);
+    const { streamer } = result;
 
     const body = req.body as Record<string, string | undefined>;
     if (hasOverlongMessage(body)) return res.redirect('/user/settings?error=eventsub_config_failed');
