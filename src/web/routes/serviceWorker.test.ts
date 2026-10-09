@@ -115,6 +115,20 @@ describe('GET /service-worker.js', () => {
   });
 });
 
+describe('STATIC_ASSETS precache list', () => {
+  const publicDir = path.join(__dirname, '../../../public');
+
+  it('only lists files that exist under public/ (cache.addAll rejects the whole install on any 404)', () => {
+    const source = fs.readFileSync(path.join(publicDir, 'service-worker.js'), 'utf8');
+    const block = /const STATIC_ASSETS = \[([\s\S]*?)\];/.exec(source);
+    expect(block).not.toBeNull();
+    const assets = [...block![1]!.matchAll(/'([^']+)'/g)].map((m) => m[1]!);
+    expect(assets.length).toBeGreaterThan(0);
+    const missing = assets.filter((asset) => !fs.existsSync(path.join(publicDir, asset)));
+    expect(missing).toEqual([]);
+  });
+});
+
 describe('path traversal containment', () => {
   let tempDir: string;
   let outsideDir: string;
