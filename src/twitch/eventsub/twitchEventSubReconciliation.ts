@@ -3,7 +3,7 @@ import { getStreamerById, DEFAULT_EVENT_CONFIG, pruneRedemptionLedger } from '..
 import { getAllStreamerInfo, type StreamerInfo } from './twitchEventSubDispatch';
 import { getValidToken } from '../twitchUserTokens';
 import { getCustomRewards, getRewardRedemptions, TwitchRewardRedemption } from '../twitchApi';
-import { handleRedemption, RedemptionEvent } from './twitchEventSubHandler';
+import { handleRedemption, RedemptionEvent } from './twitchEventSubRedemption';
 import {
   RECONCILIATION_POLL_INTERVAL_MS,
   MAX_CURSOR_LAG_MS,
