@@ -1,3 +1,6 @@
+// Facade for the DB layer: callers import from here only, never `src/db/*` directly. Pure
+// re-exports, except that writes to cached tables are re-exported from the `db/*Writes.ts`
+// wrappers (which invalidate the matching lookup cache) instead of the raw DB modules.
 export type { RefreshingLookupCache } from './db/lookupCache';
 export {
   createManagedLookupCache,
@@ -5,33 +8,7 @@ export {
   DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS,
 } from './db/lookupCache';
 export { getPool, closePool } from './db/pool';
-import { getPool as getDbPool } from './db/pool';
-
-/**
- * Verifies DB connectivity by acquiring a pooled connection and pinging it, mirroring the
- * check `index.ts`'s startup sequence already performs. Deliberately doesn't touch
- * `healthStore` itself — callers (e.g. the periodic health-check interval in `index.ts`)
- * record the outcome, keeping this module free of any dependency on `shared/healthStore`.
- * The connection is always released back to the pool once acquired, even if the ping itself
- * throws — otherwise a failing ping would leak a pooled connection on every failure.
- * @returns true if the ping succeeded, false if acquiring a connection or pinging it failed.
- */
-export async function pingDb(): Promise<boolean> {
-  let conn;
-  try {
-    conn = await getDbPool().getConnection();
-  } catch {
-    return false;
-  }
-  try {
-    await conn.ping();
-    return true;
-  } catch {
-    return false;
-  } finally {
-    conn.release();
-  }
-}
+export { pingDb } from './db/health';
 
 // ─── Guilds ──────────────────────────────────────────────────────────────────
 
@@ -47,54 +24,7 @@ export {
 
 export { getOverridesForGuild } from './db/guildCommandOverrides';
 export type { DbGuildCommandOverride } from './db/guildCommandOverrides';
-
-import {
-  upsertOverride as upsertOverrideRecord,
-  removeOverride as removeOverrideRecord,
-} from './db/guildCommandOverrides';
-
-/**
- * Runs `operation`, then unconditionally calls `invalidate`. Shared by the facade wrappers
- * below that always need a post-write cache invalidation — the underlying DB modules
- * (`users.ts`, `guildCommandOverrides.ts`, `customCommands.ts`, `counters.ts`, `alertConfig.ts`,
- * `sfx.ts`) are pure DB layers with no cache knowledge of their own.
- * @param operation - The DB write to perform.
- * @param invalidate - The cache-invalidation callback to run once `operation` succeeds.
- * @returns The value returned by `operation`.
- */
-async function withInvalidation<T>(operation: () => Promise<T>, invalidate: () => void): Promise<T> {
-  const result = await operation();
-  invalidate();
-  return result;
-}
-
-/**
- * Inserts or updates a guild's override for a catalog command and invalidates
- * the custom-command lookup cache, since overrides affect Discord command resolution.
- * @param guildId - BIGINT snowflake as a string.
- * @param commandId - The catalog command's command_id.
- * @param override.isDisabled - When true, the command does not fire in this guild.
- * @param override.output - Replacement Discord output, or null to use the catalog output.
- * @returns Resolves once the upsert (and cache invalidation) completes.
- */
-export async function upsertOverride(
-  guildId: string,
-  commandId: number,
-  override: { isDisabled: boolean; output: string | null },
-): Promise<void> {
-  await withInvalidation(() => upsertOverrideRecord(guildId, commandId, override), invalidateCustomCommandLookupCache);
-}
-
-/**
- * Removes a guild's override for a command and invalidates the custom-command
- * lookup cache. No-op if the override is absent.
- * @param guildId - BIGINT snowflake as a string.
- * @param commandId - The catalog command's command_id.
- * @returns Resolves once the deletion (and cache invalidation) completes.
- */
-export async function removeOverride(guildId: string, commandId: number): Promise<void> {
-  await withInvalidation(() => removeOverrideRecord(guildId, commandId), invalidateCustomCommandLookupCache);
-}
+export { upsertOverride, removeOverride } from './db/guildCommandOverrideWrites';
 
 // ─── User / access-level ────────────────────────────────────────────────────
 
@@ -104,68 +34,10 @@ export {
   updateDiscordName, getTwitchEnabledChannels, getAllTwitchLinkedUsers,
 } from './db/users';
 export type { AccessLevelValue, DbUser } from './db/users';
-
-import { upsertUserRecord, setTwitchBotEnabledRecord, deleteUnlinkedUserRecord } from './db/users';
-
-// Wrappers add cache invalidation — users.ts is a pure DB layer with no cache knowledge.
-
-/**
- * Upserts a user record and invalidates the custom-command lookup cache when
- * the `twitchName` field is provided (including explicit null to clear it).
- * @param discordId - Discord snowflake as a string.
- * @param discordName - Display name to store; blank after trimming is stored as null.
- * @param accessLevel - Legacy global access level; must be one of `AccessLevel`'s values.
- * @param twitchName - Twitch channel name to set, or null to clear it; omit to leave unchanged.
- * @returns Resolves once the upsert (and any cache invalidation) completes.
- */
-export async function upsertUser(
-  discordId: string,
-  discordName: string,
-  accessLevel: number,
-  twitchName?: string | null,
-): Promise<void> {
-  const twitchNameProvided = await upsertUserRecord(discordId, discordName, accessLevel, twitchName);
-  if (twitchNameProvided) {
-    invalidateCustomCommandLookupCache();
-  }
-}
-
-/**
- * Sets whether a user's Twitch bot integration is enabled and invalidates the
- * custom-command lookup cache.
- * @param discordId - Discord snowflake as a string.
- * @param enabled - True to enable the Twitch bot for this user, false to disable it.
- * @returns Resolves once the update (and cache invalidation) completes.
- */
-export async function updateTwitchBotEnabled(discordId: string, enabled: boolean): Promise<void> {
-  await withInvalidation(() => setTwitchBotEnabledRecord(discordId, enabled), invalidateCustomCommandLookupCache);
-}
-
-/**
- * Deletes a user row that nothing else references — no guild membership, streamer record,
- * command/timer assignment or tokens (see `deleteUnlinkedUserRecord`) — and invalidates the
- * custom-command lookup cache.
- * @param discordId - Discord snowflake as a string.
- * @returns True if the row was deleted; false if it didn't exist or is still referenced.
- */
-export async function deleteUnlinkedUser(discordId: string): Promise<boolean> {
-  return withInvalidation(() => deleteUnlinkedUserRecord(discordId), invalidateCustomCommandLookupCache);
-}
+export { upsertUser, updateTwitchBotEnabled, deleteUnlinkedUser } from './db/userWrites';
 
 // ─── Custom commands ────────────────────────────────────────────────────────
 
-import { invalidateCustomCommandLookupCache } from './db/customCommandCache';
-import {
-  addCustomCommand as addCustomCommandRecord,
-  updateCustomCommand as updateCustomCommandRecord,
-  removeCustomCommand as removeCustomCommandRecord,
-  updateOwnCustomCommand as updateOwnCustomCommandRecord,
-  removeOwnCustomCommand as removeOwnCustomCommandRecord,
-  discardOwnNewCustomCommand as discardOwnNewCustomCommandRecord,
-  assignUserToCommand as assignUserToCommandRecord,
-  assignUsersToCommand as assignUsersToCommandRecord,
-  unassignUserFromCommand as unassignUserFromCommandRecord,
-} from './db/customCommands';
 export { getAllCustomCommandsWithAssignments, getCustomCommandCount } from './db/customCommands';
 export { isCommandSelfManageableBy } from './db/commandSelfService';
 export { isTimerSelfManageableBy } from './db/timerSelfService';
@@ -175,131 +47,11 @@ export type {
 export {
   getCustomCommandForTwitchChannel, getCustomCommandForDiscord,
 } from './db/customCommandCache';
-
-// customCommands.ts is now a pure DB layer with no cache knowledge (breaks its import cycle
-// with customCommandCache.ts); these wrappers add the cache invalidation that used to live
-// there, reusing the same withInvalidation() helper already used above for users.ts/
-// guildCommandOverrides.ts.
-
-/**
- * Creates a new custom command and invalidates the custom-command lookup cache.
- * @param triggerString - Full prefixed command string (e.g. `!clap`).
- * @param output - Response text.
- * @param isDiscordEnabled - When true, the command responds in Discord.
- * @param isMultiTwitch - When true, the command can be assigned to multiple Twitch streamers.
- * @returns The auto-incremented `command_id` of the newly created row.
- */
-export async function addCustomCommand(
-  triggerString: string, output: string, isDiscordEnabled: boolean, isMultiTwitch: boolean,
-): Promise<number> {
-  return withInvalidation(
-    () => addCustomCommandRecord(triggerString, output, isDiscordEnabled, isMultiTwitch),
-    invalidateCustomCommandLookupCache,
-  );
-}
-
-/**
- * Updates an existing custom command and invalidates the custom-command lookup cache.
- * @param commandId - ID of the command to update.
- * @param triggerString - New trigger string.
- * @param output - New response text.
- * @param isDiscordEnabled - Whether the command responds in Discord.
- * @param isMultiTwitch - Whether the command can be assigned to multiple Twitch streamers.
- * @returns Resolves once the update (and cache invalidation) completes.
- */
-export async function updateCustomCommand(
-  commandId: number, triggerString: string, output: string, isDiscordEnabled: boolean, isMultiTwitch: boolean,
-): Promise<void> {
-  return withInvalidation(
-    () => updateCustomCommandRecord(commandId, triggerString, output, isDiscordEnabled, isMultiTwitch),
-    invalidateCustomCommandLookupCache,
-  );
-}
-
-/**
- * Deletes a custom command and invalidates the custom-command lookup cache.
- * @param commandId - ID of the command to delete.
- * @returns Resolves once the deletion (and cache invalidation) completes.
- */
-export async function removeCustomCommand(commandId: number): Promise<void> {
-  return withInvalidation(() => removeCustomCommandRecord(commandId), invalidateCustomCommandLookupCache);
-}
-
-/**
- * Streamer self-service update (Twitch-only, owner-checked under a lock) that invalidates the
- * custom-command lookup cache. A denied update throws before the cache is invalidated.
- * @param commandId - ID of the command to update.
- * @param triggerString - New trigger string.
- * @param output - New response text.
- * @param discordId - Discord ID of the streamer making the change.
- * @returns Resolves once the update (and cache invalidation) completes.
- */
-export async function updateOwnCustomCommand(
-  commandId: number, triggerString: string, output: string, discordId: string,
-): Promise<void> {
-  return withInvalidation(
-    () => updateOwnCustomCommandRecord(commandId, triggerString, output, discordId),
-    invalidateCustomCommandLookupCache,
-  );
-}
-
-/**
- * Streamer self-service delete (owner-checked under a lock) that invalidates the custom-command
- * lookup cache. A denied delete throws before the cache is invalidated.
- * @param commandId - ID of the command to delete.
- * @param discordId - Discord ID of the streamer making the change.
- * @returns Resolves once the deletion (and cache invalidation) completes.
- */
-export async function removeOwnCustomCommand(commandId: number, discordId: string): Promise<void> {
-  return withInvalidation(() => removeOwnCustomCommandRecord(commandId, discordId), invalidateCustomCommandLookupCache);
-}
-
-/**
- * Cleans up a streamer's just-created command after a failed self-assignment, only while it is
- * still unclaimed (checked under a lock), and invalidates the custom-command lookup cache. A denied
- * cleanup throws before the cache is invalidated.
- * @param commandId - ID of the command to discard.
- * @param discordId - Discord ID of the streamer who created it.
- * @returns Resolves once the deletion (and cache invalidation) completes.
- */
-export async function discardOwnNewCustomCommand(commandId: number, discordId: string): Promise<void> {
-  return withInvalidation(() => discardOwnNewCustomCommandRecord(commandId, discordId), invalidateCustomCommandLookupCache);
-}
-
-/**
- * Assigns a Discord user to a custom command and invalidates the custom-command lookup cache.
- * @param commandId - ID of the command to assign the user to.
- * @param discordId - Discord snowflake of the user to assign.
- * @returns Resolves once the assignment (and cache invalidation) completes.
- */
-export async function assignUserToCommand(commandId: number, discordId: string): Promise<void> {
-  return withInvalidation(() => assignUserToCommandRecord(commandId, discordId), invalidateCustomCommandLookupCache);
-}
-
-/**
- * Assigns multiple Discord users to a custom command and invalidates the custom-command
- * lookup cache.
- * @param commandId - ID of the command to assign the users to.
- * @param discordIds - Discord snowflakes of the users to assign.
- * @returns Resolves once the assignment (and cache invalidation) completes.
- */
-export async function assignUsersToCommand(commandId: number, discordIds: string[]): Promise<void> {
-  return withInvalidation(() => assignUsersToCommandRecord(commandId, discordIds), invalidateCustomCommandLookupCache);
-}
-
-/**
- * Removes a Discord user's assignment from a custom command and invalidates the
- * custom-command lookup cache.
- * @param commandId - ID of the command to remove the assignment from.
- * @param discordId - Discord snowflake of the user to unassign.
- * @returns Resolves once the removal (and cache invalidation) completes.
- */
-export async function unassignUserFromCommand(commandId: number, discordId: string): Promise<void> {
-  return withInvalidation(
-    () => unassignUserFromCommandRecord(commandId, discordId),
-    invalidateCustomCommandLookupCache,
-  );
-}
+export {
+  addCustomCommand, updateCustomCommand, removeCustomCommand,
+  updateOwnCustomCommand, removeOwnCustomCommand, discardOwnNewCustomCommand,
+  assignUserToCommand, assignUsersToCommand, unassignUserFromCommand,
+} from './db/customCommandWrites';
 export { CommandNotFoundError, CommandSelfServiceDeniedError, CommandConflictError } from './db/commandErrors';
 export { isMysqlDuplicateEntryError } from './db/utils';
 export { ReservedCommandError } from './db/reservedCommands';
@@ -309,82 +61,10 @@ export { ReservedCommandError } from './db/reservedCommands';
 export { CounterNotFoundError, getCountersForGuild, getCounterCount, isCounterCommandTaken } from './db/counters';
 export { getCounterHistory } from './db/counterArchive';
 export { findCounterByCommand } from './db/counterCache';
-
-import {
-  addCounter as addCounterRecord,
-  updateCounter as updateCounterRecord,
-  removeCounter as removeCounterRecord,
-  resetCounterCurrentValue as resetCounterCurrentValueRecord,
-  incrementCounter as incrementCounterRecord,
-} from './db/counters';
-import { archiveAndResetYearlyCounters as archiveAndResetYearlyCountersRecord } from './db/counterArchive';
-import type { UpdateCounterInput, CounterFieldsInput } from './db/counters';
-import { invalidateCounterLookupCache } from './db/counterCache';
-
-// counters.ts is now a pure DB layer with no cache knowledge (breaks its import cycle with
-// counterCache.ts); these wrappers add the cache invalidation that used to live there.
-
-/**
- * Creates a new counter and invalidates the counter lookup cache.
- * @param guildId - The guild this counter belongs to.
- * @param input - The counter's initial fields.
- * @returns Resolves once the insert (and cache invalidation) completes.
- */
-export async function addCounter(guildId: string, input: CounterFieldsInput): Promise<void> {
-  await withInvalidation(
-    () => addCounterRecord(guildId, input),
-    invalidateCounterLookupCache,
-  );
-}
-
-/**
- * Updates an existing counter's fields and invalidates the counter lookup cache.
- * @param guildId - The guild the counter must belong to.
- * @param input - The counter's id and updated fields.
- * @returns Resolves once the update (and cache invalidation) completes.
- */
-export async function updateCounter(guildId: string, input: UpdateCounterInput): Promise<void> {
-  await withInvalidation(() => updateCounterRecord(guildId, input), invalidateCounterLookupCache);
-}
-
-/**
- * Deletes a counter by id and invalidates the counter lookup cache.
- * @param guildId - The guild the counter must belong to.
- * @param id - The counter's numeric id.
- * @returns Resolves once the deletion (and cache invalidation) completes.
- */
-export async function removeCounter(guildId: string, id: number): Promise<void> {
-  await withInvalidation(() => removeCounterRecord(guildId, id), invalidateCounterLookupCache);
-}
-
-/**
- * Resets a counter's current value to 0 and invalidates the counter lookup cache.
- * @param guildId - The guild the counter must belong to.
- * @param id - The counter's numeric id.
- * @returns Resolves once the update (and cache invalidation) completes.
- */
-export async function resetCounterCurrentValue(guildId: string, id: number): Promise<void> {
-  await withInvalidation(() => resetCounterCurrentValueRecord(guildId, id), invalidateCounterLookupCache);
-}
-
-/**
- * Atomically increments a counter's current value and invalidates the counter lookup cache.
- * @param id - The counter's numeric id.
- * @returns The counter's current value after the increment.
- */
-export async function incrementCounter(id: number): Promise<number> {
-  return withInvalidation(() => incrementCounterRecord(id), invalidateCounterLookupCache);
-}
-
-/**
- * Archives and resets every yearly-reset counter for the given year, and invalidates the
- * counter lookup cache.
- * @param year - Calendar year to archive into.
- * @returns The number of counters archived and reset.
- */
-export async function archiveAndResetYearlyCounters(year: number): Promise<number> {
-  return withInvalidation(() => archiveAndResetYearlyCountersRecord(year), invalidateCounterLookupCache);
-}
+export {
+  addCounter, updateCounter, removeCounter, resetCounterCurrentValue, incrementCounter,
+  archiveAndResetYearlyCounters,
+} from './db/counterWrites';
 
 // ─── Stream monitor ──────────────────────────────────────────────────────────
 
@@ -422,79 +102,7 @@ export type { AlertEventType, TextAnimation } from './db/alertConfig';
 export { ALERT_EVENT_TYPES, ALERT_TEXT_ANIMATIONS } from './db/alertConfig';
 export { getAlertConfigsForStreamer, getAlertConfig, getEnabledAlertEventTypesBatch } from './db/alertConfig';
 export { findCachedAlertConfig } from './db/alertConfigCache';
-
-import {
-  initAlertConfigs as initAlertConfigsRecord,
-  saveAlertConfig as saveAlertConfigRecord,
-  setAlertImage as setAlertImageRecord,
-  setAlertSound as setAlertSoundRecord,
-} from './db/alertConfig';
-import type { AlertEventType, TextAnimation } from './db/alertConfig';
-import { invalidateAlertConfigLookupCache } from './db/alertConfigCache';
-
-// alertConfig.ts is now a pure DB layer with no cache knowledge (breaks its import cycle with
-// alertConfigCache.ts); these wrappers add the cache invalidation that used to live there.
-
-/**
- * Inserts default (disabled) alert config rows for all event types for a streamer and
- * invalidates the alert config lookup cache.
- * @param streamerId - DB row ID of the streamer to initialise alert config for.
- * @returns Resolves once the insert (and cache invalidation) completes.
- */
-export async function initAlertConfigs(streamerId: number): Promise<void> {
-  await withInvalidation(() => initAlertConfigsRecord(streamerId), invalidateAlertConfigLookupCache);
-}
-
-/**
- * Upserts a streamer's alert config for one event type and invalidates the alert config
- * lookup cache.
- * @param streamerId - DB row ID of the streamer.
- * @param eventType - The alert event type being configured.
- * @param config - The fields to persist.
- * @returns Resolves once the upsert (and cache invalidation) completes.
- */
-export async function saveAlertConfig(
-  streamerId: number,
-  eventType: AlertEventType,
-  config: { enabled: boolean; message_template: string; duration_ms: number; text_animation: TextAnimation },
-): Promise<void> {
-  await withInvalidation(
-    () => saveAlertConfigRecord(streamerId, eventType, config),
-    invalidateAlertConfigLookupCache,
-  );
-}
-
-/**
- * Sets (or clears) a streamer's alert image and invalidates the alert config lookup cache.
- * @param streamerId - DB row ID of the streamer.
- * @param eventType - The alert event type being configured.
- * @param filename - The new stored filename, or null to clear the image.
- * @returns The previous filename, or null if there was none.
- */
-export async function setAlertImage(
-  streamerId: number, eventType: AlertEventType, filename: string | null,
-): Promise<string | null> {
-  return withInvalidation(
-    () => setAlertImageRecord(streamerId, eventType, filename),
-    invalidateAlertConfigLookupCache,
-  );
-}
-
-/**
- * Sets (or clears) a streamer's alert sound and invalidates the alert config lookup cache.
- * @param streamerId - DB row ID of the streamer.
- * @param eventType - The alert event type being configured.
- * @param filename - The new stored filename, or null to clear the sound.
- * @returns The previous filename, or null if there was none.
- */
-export async function setAlertSound(
-  streamerId: number, eventType: AlertEventType, filename: string | null,
-): Promise<string | null> {
-  return withInvalidation(
-    () => setAlertSoundRecord(streamerId, eventType, filename),
-    invalidateAlertConfigLookupCache,
-  );
-}
+export { initAlertConfigs, saveAlertConfig, setAlertImage, setAlertSound } from './db/alertConfigWrites';
 
 // ─── Streamer event log ──────────────────────────────────────────────────────
 
@@ -512,140 +120,11 @@ export {
 } from './db/sfx';
 export type { SfxLookupResult } from './db/sfxCache';
 export { findCachedSfxTrigger } from './db/sfxCache';
-
-import {
-  createSfxTrigger as createSfxTriggerRecord,
-  updateSfxTrigger as updateSfxTriggerRecord,
-  deleteSfxTrigger as deleteSfxTriggerRecord,
-  addSfxFile as addSfxFileRecord,
-  updateSfxFile as updateSfxFileRecord,
-  deleteSfxFile as deleteSfxFileRecord,
-  createCategory as createCategoryRecord,
-  renameCategory as renameCategoryRecord,
-  deleteCategory as deleteCategoryRecord,
-} from './db/sfx';
-import { invalidateSfxLookupCache } from './db/sfxCache';
-
-/**
- * Creates a new SFX category and invalidates the SFX lookup cache.
- * @param name - Category name.
- * @returns The new category id.
- */
-export async function createCategory(name: string): Promise<number> {
-  return withInvalidation(() => createCategoryRecord(name), invalidateSfxLookupCache);
-}
-
-/**
- * Renames an SFX category and invalidates the SFX lookup cache if it existed.
- * @param id - Category id.
- * @param name - New category name.
- * @returns true if the category exists, false if no category with that id existed.
- */
-export async function renameCategory(id: number, name: string): Promise<boolean> {
-  const renamed = await renameCategoryRecord(id, name);
-  if (renamed) invalidateSfxLookupCache();
-  return renamed;
-}
-
-/**
- * Deletes an SFX category and invalidates the SFX lookup cache if it existed. Triggers/sounds
- * referencing it keep working — the FK is ON DELETE SET NULL, so their category_id becomes
- * NULL (uncategorised), which is why the cache (which snapshots category_id) must be invalidated.
- * @param id - Category id.
- * @returns true if the category existed, false otherwise.
- */
-export async function deleteCategory(id: number): Promise<boolean> {
-  const deleted = await deleteCategoryRecord(id);
-  if (deleted) invalidateSfxLookupCache();
-  return deleted;
-}
-
-// sfx.ts is now a pure DB layer with no cache knowledge (breaks its import cycle with
-// sfxCache.ts); these wrappers add the cache invalidation that used to live there.
-
-/**
- * Creates a new SFX trigger and invalidates the SFX lookup cache.
- * @param command - Full prefixed command string, e.g. `!clap`.
- * @param categoryId - Category id, or null for uncategorised.
- * @param description - Optional public description, or null.
- * @param hidden - Whether the trigger is hidden from the public listing.
- * @returns The new trigger id.
- */
-export async function createSfxTrigger(
-  command: string, categoryId: number | null, description: string | null, hidden: boolean,
-): Promise<bigint> {
-  return withInvalidation(
-    () => createSfxTriggerRecord(command, categoryId, description, hidden),
-    invalidateSfxLookupCache,
-  );
-}
-
-/**
- * Updates an existing SFX trigger and invalidates the SFX lookup cache if it existed.
- * @param id - Trigger id.
- * @param command - Full prefixed command string, e.g. `!clap`.
- * @param categoryId - Category id, or null for uncategorised.
- * @param description - Optional public description, or null.
- * @param hidden - Whether the trigger is hidden from the public listing.
- * @returns true if the trigger exists, false if no trigger with that id existed.
- */
-export async function updateSfxTrigger(
-  id: bigint, command: string, categoryId: number | null, description: string | null, hidden: boolean,
-): Promise<boolean> {
-  const updated = await updateSfxTriggerRecord(id, command, categoryId, description, hidden);
-  if (updated) invalidateSfxLookupCache();
-  return updated;
-}
-
-/**
- * Deletes an SFX trigger and its sound files, invalidating the SFX lookup cache if it existed.
- * @param id - Trigger id.
- * @returns The relative paths of the deleted sound files, or null if no trigger with that id
- *   existed.
- */
-export async function deleteSfxTrigger(id: bigint): Promise<{ files: string[] } | null> {
-  const result = await deleteSfxTriggerRecord(id);
-  if (result !== null) invalidateSfxLookupCache();
-  return result;
-}
-
-/**
- * Adds a sound file to a trigger and invalidates the SFX lookup cache.
- * @param triggerId - Owning trigger id.
- * @param file - Relative path (within SFX_FOLDER) of the stored audio file.
- * @param weight - Weighted-random selection weight (>= 1).
- * @param hidden - Whether the file is hidden from the public listing.
- * @returns The new sfx row id.
- */
-export async function addSfxFile(
-  triggerId: bigint, file: string, weight: number, hidden: boolean,
-): Promise<number> {
-  return withInvalidation(() => addSfxFileRecord(triggerId, file, weight, hidden), invalidateSfxLookupCache);
-}
-
-/**
- * Updates a sound file's weight/hidden flag, invalidating the SFX lookup cache if it existed.
- * @param id - sfx row id.
- * @param weight - Weighted-random selection weight (>= 1).
- * @param hidden - Whether the file is hidden from the public listing.
- * @returns true if the sfx row exists, false if no sfx row with that id existed.
- */
-export async function updateSfxFile(id: number, weight: number, hidden: boolean): Promise<boolean> {
-  const updated = await updateSfxFileRecord(id, weight, hidden);
-  if (updated) invalidateSfxLookupCache();
-  return updated;
-}
-
-/**
- * Deletes a sound file row, invalidating the SFX lookup cache if it existed.
- * @param id - sfx row id.
- * @returns The deleted file's relative path, or null if no such row existed.
- */
-export async function deleteSfxFile(id: number): Promise<string | null> {
-  const file = await deleteSfxFileRecord(id);
-  if (file !== null) invalidateSfxLookupCache();
-  return file;
-}
+export {
+  createCategory, renameCategory, deleteCategory,
+  createSfxTrigger, updateSfxTrigger, deleteSfxTrigger,
+  addSfxFile, updateSfxFile, deleteSfxFile,
+} from './db/sfxWrites';
 
 // ─── Overlay videos ─────────────────────────────────────────────────────────
 

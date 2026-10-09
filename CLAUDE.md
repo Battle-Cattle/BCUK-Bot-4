@@ -35,7 +35,7 @@ npm test      # Vitest
 ## Directory Structure
 
 - **`src/index.ts`** — entry point (see Startup Sequence below).
-- **`src/db.ts` + `src/db/`** — DB facade + one module per domain (`users.ts`, `guilds.ts`, `customCommands.ts`, `counters.ts`, `sfx.ts`, `streamMonitor.ts`, `eventSub.ts`, etc.), each with a co-located `*.test.ts`. Import from `src/db.ts` only (see Critical Invariants).
+- **`src/db.ts` + `src/db/`** — DB facade + one module per domain (`users.ts`, `guilds.ts`, `customCommands.ts`, `counters.ts`, `sfx.ts`, `streamMonitor.ts`, `eventSub.ts`, etc.), each with a co-located `*.test.ts`. Writes to cached tables get a cache-invalidating `*Writes.ts` wrapper module (`userWrites.ts`, `customCommandWrites.ts`, `counterWrites.ts`, `sfxWrites.ts`, etc., built on `withInvalidation.ts`) that `db.ts` re-exports in place of the raw write. `db.ts` itself is pure re-exports. Import from `src/db.ts` only (see Critical Invariants).
 - **`src/discord/`** — Discord bot bootstrap, guild registry, voice presence.
 - **`src/twitch/`** — Twitch chat bot + Helix API client, with `eventsub/`, `monitor/`, `pricing/`, `timers/` subfolders.
 - **`src/commands/`** — command routing/cooldowns/handlers shared by both platforms.
@@ -82,7 +82,7 @@ Auth middleware (`src/web/middleware.ts`), applied in this order:
 ## Critical Invariants
 
 - **`mediaplex` must be the first import in `src/index.ts`** — registers the Opus provider. Never reorder.
-- **Import DB functions from `src/db.ts` only**, never `src/db/*` directly. The facade wraps some functions with cache-invalidation side effects (`upsertUser`, `updateTwitchBotEnabled`).
+- **Import DB functions from `src/db.ts` only**, never `src/db/*` directly. The facade re-exports some writes from the cache-invalidating `src/db/*Writes.ts` wrappers (`upsertUser`, `updateTwitchBotEnabled`, …) instead of the raw DB modules; `src/db.test.ts` checks that every wrapper is the one exported.
 - **BIGINT columns are strings** (`bigNumberStrings: true` on the pool) — never coerce to `Number`. This protects against precision loss on values that can exceed `Number.MAX_SAFE_INTEGER`, like Discord snowflakes — it does not apply to a BIGINT result you can prove is bounded well within that range (e.g. `COUNT(*)` on a small admin table). If you do parse one of those back to a number, say so at the call site (why this particular value is bounded) — don't let it read like the same blind coercion the rule forbids elsewhere. See `getRowCount` in `src/db/utils.ts` for the pattern.
 - **Blank Twitch names → `NULL`** — `user.twitch_name` has a unique index; empty strings collide.
 - **`mutationQueue`** for concurrent-unsafe DB writes — user mutations serialise through it via `runUserMutation` in `src/shared/userMutationQueue.ts`.
@@ -107,7 +107,7 @@ Auth middleware (`src/web/middleware.ts`), applied in this order:
 
 **Voice adapter:** `audioPlayer.ts` uses a custom `DiscordGatewayAdapterCreator` via `client.on('raw', ...)`. `guild.voiceAdapterCreator` is unused — discord.js v14 incompatibility.
 
-**`customCommands.ts` does not own its cache:** it's a pure DB layer with no cache knowledge, to break its import cycle with `customCommandCache.ts`. `db.ts` owns invalidation instead, via `withInvalidation()`-wrapped write functions that call `invalidateCustomCommandLookupCache()` after the underlying `customCommands.ts` write succeeds (same pattern used for `counters.ts`/`alertConfig.ts`/`sfx.ts`). Don't add a second invalidation call inside `customCommands.ts` itself.
+**`customCommands.ts` does not own its cache:** it's a pure DB layer with no cache knowledge, to break its import cycle with `customCommandCache.ts`. `customCommandWrites.ts` owns invalidation instead (re-exported by `db.ts`), via `withInvalidation()`-wrapped write functions that call `invalidateCustomCommandLookupCache()` after the underlying `customCommands.ts` write succeeds (same pattern used for `counters.ts`/`alertConfig.ts`/`sfx.ts` via `counterWrites.ts`/`alertConfigWrites.ts`/`sfxWrites.ts`). Don't add a second invalidation call inside `customCommands.ts` itself.
 
 **MySQL 8 upsert:** Row-alias form only: `VALUES (...) AS new_row`. Deprecated `VALUES(col)` not used.
 
