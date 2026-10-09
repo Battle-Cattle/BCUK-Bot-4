@@ -174,7 +174,11 @@ describe('normalizeDiscordId', () => {
   });
 
   it('returns null for a non-string', () => {
-    expect(normalizeDiscordId(123 as unknown as string)).toBeNull();
+    expect(normalizeDiscordId(123)).toBeNull();
+  });
+
+  it('returns null for a repeated field arriving as an array', () => {
+    expect(normalizeDiscordId(['12345678901234567', '12345678901234568'])).toBeNull();
   });
 
   it('returns null for a string that is too short (< 17 digits)', () => {

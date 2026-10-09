@@ -90,10 +90,11 @@ export function normalizeSingleTokenRequiredText(value: string | undefined): str
 
 /**
  * Validates and returns a Discord snowflake ID (17–20 digits), or `null` if invalid.
- * @param value - Raw string from a form field.
+ * @param value - Raw form field value; anything that isn't a string (missing, or a repeated
+ *   field arriving as an array) is invalid.
  * @returns The trimmed snowflake string, or `null`.
  */
-export function normalizeDiscordId(value: string | undefined): string | null {
+export function normalizeDiscordId(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   return /^\d{17,20}$/.test(trimmed) ? trimmed : null;
