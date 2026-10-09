@@ -1,6 +1,6 @@
 // Yearly counter archiving: the `value<year>` columns that `archiveAndResetYearlyCounters` fills
 // each 1 January, and `getCounterHistory`, which reads them back. Split from `counters.ts`, which
-// keeps the counter CRUD; the cache invalidation wrapper for the archive run lives in `db.ts`.
+// keeps the counter CRUD; the cache invalidation wrapper for the archive run lives in `counterWrites.ts`.
 import mysql from 'mysql2/promise';
 import { getPool, withTransaction } from './pool';
 import { mapCounter, COUNTER_COLUMNS, type DbCounter } from './counters';

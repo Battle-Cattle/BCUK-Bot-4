@@ -217,7 +217,7 @@
     },
     {
       "title": "Data Access Patterns",
-      "purpose": "Documents the one-module-per-domain layout in src/db/ (users, guilds, guildMembers, guildCommandOverrides, customCommands, counters, sfx, alertConfig, eventLog, eventSub, rewardPricing, rewardPricingHistory, overlayVideos, timerCommands, streamMonitor, streamdeckKeys, companionTokens, companionOAuthCodes), the shared lookupCache.ts invalidation pattern behind the various *Cache.ts modules, the singleton pool with getPool()/closePool(), the SFX aggregate join pattern, transactional command removal, the streamer live/offline state machine, and the AccessLevel permission hierarchy resolved per guild.",
+      "purpose": "Documents the one-module-per-domain layout in src/db/ (users, guilds, guildMembers, guildCommandOverrides, customCommands, counters, sfx, alertConfig, eventLog, eventSub, rewardPricing, rewardPricingHistory, overlayVideos, timerCommands, streamMonitor, streamdeckKeys, companionTokens, companionOAuthCodes), the shared lookupCache.ts invalidation pattern behind the various *Cache.ts modules, the *Writes.ts wrappers (withInvalidation) that db.ts re-exports so writes to cached tables invalidate their lookup cache, the singleton pool with getPool()/closePool(), the SFX aggregate join pattern, transactional command removal, the streamer live/offline state machine, and the AccessLevel permission hierarchy resolved per guild.",
       "parent": "Database Layer",
       "page_notes": [
         {
