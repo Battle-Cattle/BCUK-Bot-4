@@ -14,13 +14,13 @@ vi.mock('../../db', () => ({
 vi.mock('./twitchEventSubDispatch', () => ({ getAllStreamerInfo: vi.fn() }));
 vi.mock('../twitchUserTokens', () => ({ getValidToken: vi.fn() }));
 vi.mock('../twitchApi', () => ({ getCustomRewards: vi.fn(), getRewardRedemptions: vi.fn() }));
-vi.mock('./twitchEventSubHandler', () => ({ handleRedemption: vi.fn() }));
+vi.mock('./twitchEventSubRedemption', () => ({ handleRedemption: vi.fn() }));
 
 import { getStreamerById, pruneRedemptionLedger } from '../../db';
 import { getAllStreamerInfo } from './twitchEventSubDispatch';
 import { getValidToken } from '../twitchUserTokens';
 import { getCustomRewards, getRewardRedemptions } from '../twitchApi';
-import { handleRedemption } from './twitchEventSubHandler';
+import { handleRedemption } from './twitchEventSubRedemption';
 import {
   runReconciliationTick, startEventSubReconciliation, stopEventSubReconciliation,
   __resetReconciliationCursorsForTests,

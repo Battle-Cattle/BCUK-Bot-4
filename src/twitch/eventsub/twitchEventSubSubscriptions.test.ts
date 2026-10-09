@@ -45,10 +45,12 @@ vi.mock('./twitchEventSubHandler', () => ({
   handleResub: vi.fn().mockResolvedValue(undefined),
   handleGiftSub: vi.fn().mockResolvedValue(undefined),
   handleRaid: vi.fn().mockResolvedValue(undefined),
-  handleRedemption: vi.fn().mockResolvedValue(undefined),
   handleStreamOnline: vi.fn().mockResolvedValue(undefined),
   handleStreamOffline: vi.fn().mockResolvedValue(undefined),
   handleChannelUpdate: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock('./twitchEventSubRedemption', () => ({
+  handleRedemption: vi.fn().mockResolvedValue(undefined),
 }));
 
 import { hasAuthFailedSubs, clearAuthFailedSubs } from './twitchEventSubCreate';

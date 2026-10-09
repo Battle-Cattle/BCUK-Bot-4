@@ -25,18 +25,21 @@ vi.mock('./twitchEventSubHandler', () => ({
   handleResub: vi.fn().mockResolvedValue(undefined),
   handleGiftSub: vi.fn().mockResolvedValue(undefined),
   handleRaid: vi.fn().mockResolvedValue(undefined),
-  handleRedemption: vi.fn().mockResolvedValue(undefined),
   handleStreamOnline: vi.fn().mockResolvedValue(undefined),
   handleStreamOffline: vi.fn().mockResolvedValue(undefined),
   handleChannelUpdate: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock('./twitchEventSubRedemption', () => ({
+  handleRedemption: vi.fn().mockResolvedValue(undefined),
 }));
 
 import { setStreamerInfo, removeStreamerFromMap, dispatchNotification, handleRevocation, getAllStreamerInfo } from './twitchEventSubDispatch';
 import { clearStreamerToken, DEFAULT_EVENT_CONFIG } from '../../db';
 import {
   handleStreamOnline, handleStreamOffline, handleChannelUpdate,
-  handleFollow, handleSub, handleResub, handleGiftSub, handleRaid, handleRedemption,
+  handleFollow, handleSub, handleResub, handleGiftSub, handleRaid,
 } from './twitchEventSubHandler';
+import { handleRedemption } from './twitchEventSubRedemption';
 import { registerEventSubReloadRuntime } from './twitchEventSubRuntime';
 
 beforeEach(() => {

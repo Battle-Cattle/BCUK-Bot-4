@@ -129,7 +129,7 @@
     },
     {
       "title": "Twitch EventSub — Real-Time Events",
-      "purpose": "Covers src/twitch/eventsub/: webhook subscription setup and management (twitchEventSubSubscriptions.ts/twitchEventSubSubscriptionGroups.ts), periodic reconciliation against Twitch's live subscription list, redemption dedup, and the runtime-injected hook registry (twitchEventSubRuntime.ts) that fans out follow/sub/resub/giftsub/raid/redemption/stream-status events to the monitor, alerts overlay, channel-point pricing engine, and companion app without circular imports. twitchEventSubDispatch.ts maintains the in-memory streamer map and routes notifications to handlers in twitchEventSubHandler.ts; the webhook receiver itself lives in web/routes/eventsubCallback.ts.",
+      "purpose": "Covers src/twitch/eventsub/: webhook subscription setup and management (twitchEventSubSubscriptions.ts/twitchEventSubSubscriptionGroups.ts), periodic reconciliation against Twitch's live subscription list, redemption dedup, and the runtime-injected hook registry (twitchEventSubRuntime.ts) that fans out follow/sub/resub/giftsub/raid/redemption/stream-status events to the monitor, alerts overlay, channel-point pricing engine, and companion app without circular imports. twitchEventSubDispatch.ts maintains the in-memory streamer map and routes notifications to handlers in twitchEventSubHandler.ts (follow/sub/resub/giftsub/raid/stream status) and twitchEventSubRedemption.ts (channel-point redemptions, with the durable redemption ledger), which share the chat/alert/dashboard/companion side effects in twitchEventSubEffects.ts; the webhook receiver itself lives in web/routes/eventsubCallback.ts.",
       "parent": "Twitch Integrations",
       "page_notes": [
         {

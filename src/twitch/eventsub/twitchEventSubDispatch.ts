@@ -2,10 +2,11 @@ import { createLogger } from '../../shared/logger';
 import { clearStreamerToken, DEFAULT_EVENT_CONFIG } from '../../db';
 import type { EventSubConfig } from '../../db';
 import {
-  handleFollow, handleSub, handleResub, handleGiftSub, handleRaid, handleRedemption,
+  handleFollow, handleSub, handleResub, handleGiftSub, handleRaid,
   handleStreamOnline, handleStreamOffline, handleChannelUpdate,
-  FollowEvent, SubEvent, ResubEvent, GiftSubEvent, RaidEvent, RedemptionEvent,
+  FollowEvent, SubEvent, ResubEvent, GiftSubEvent, RaidEvent,
 } from './twitchEventSubHandler';
+import { handleRedemption, RedemptionEvent } from './twitchEventSubRedemption';
 import { eventSubReloadRuntimeRegistry } from './twitchEventSubRuntime';
 
 const log = createLogger('EventSub');
