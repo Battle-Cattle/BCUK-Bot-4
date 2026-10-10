@@ -46,4 +46,9 @@ describe('fillTemplate', () => {
   it('mixes known substitutions and kept-literal unknowns in "keep" mode', () => {
     expect(fillTemplate('{streamer} — {unknown}', { streamer: 'alice' }, 'keep')).toBe('alice — {unknown}');
   });
+
+  it('treats inherited Object.prototype names as unknown placeholders rather than rendering them', () => {
+    expect(fillTemplate('{constructor} {toString} {__proto__}', { user: 'alice' })).toBe('  ');
+    expect(fillTemplate('{constructor} {hasOwnProperty}', {}, 'keep')).toBe('{constructor} {hasOwnProperty}');
+  });
 });

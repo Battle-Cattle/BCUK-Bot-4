@@ -13,6 +13,11 @@ vi.mock('../guildScopedStatus', () => ({
   getGuildScopedStatus: vi.fn(),
 }));
 
+const { middlewareCallOrder } = vi.hoisted(() => ({ middlewareCallOrder: [] as string[] }));
+vi.mock('../middleware', () => ({
+  requireGuildContext: (_req: any, _res: any, next: any) => { middlewareCallOrder.push('requireGuildContext'); next(); },
+}));
+
 vi.mock('../../shared/logger', () => ({ createLogger: () => ({ error: vi.fn(), warn: vi.fn(), info: vi.fn() }) }));
 
 import supertest from 'supertest';
@@ -29,7 +34,7 @@ const registeredListener = vi.mocked(onStatusChanged).mock.calls[0]?.[0] as (gui
 /** Finds a route's handler function directly from the router's internal stack, bypassing HTTP entirely — needed to control the request's 'close' event deterministically. */
 function getRouteHandler(routePath: string): (req: any, res: any, next: any) => void {
   const layer = (router as any).stack.find((l: any) => l.route?.path === routePath);
-  return layer.route.stack[0].handle;
+  return layer.route.stack.at(-1).handle;
 }
 
 /** Builds a fake Express `res` covering the SSE-specific methods (`setHeader`, `flushHeaders`, `write`, `end`) used by the events route handler. */
@@ -66,6 +71,7 @@ function buildApp(currentGuildId: string | undefined) {
 beforeEach(() => {
   connections.clear();
   vi.clearAllMocks();
+  middlewareCallOrder.length = 0;
 });
 
 describe('MAX_SSE_CONNECTIONS_PER_GUILD', () => {
@@ -75,6 +81,11 @@ describe('MAX_SSE_CONNECTIONS_PER_GUILD', () => {
 });
 
 describe('GET /status/events — auth', () => {
+  it('runs requireGuildContext first, so a stale or revoked currentGuildId is re-checked before attaching', async () => {
+    await supertest(buildApp(undefined)).get('/status/events');
+    expect(middlewareCallOrder).toEqual(['requireGuildContext']);
+  });
+
   it('returns 400 when no guild is selected', async () => {
     const res = await supertest(buildApp(undefined)).get('/status/events');
     expect(res.status).toBe(400);

@@ -2,6 +2,7 @@ import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import { getAllSfxTriggers, getAllCategories, getSfxFileById, AccessLevel } from '../../db';
 import { csrfProtection } from '../csrf';
+import { requireGuildContext } from '../middleware';
 import { SFX_FOLDER, SFX_MAX_FILE_MB, OPENAI_API_KEY } from '../../shared/config';
 import { safeResolve, realPathWithin } from '../../shared/pathUtils';
 import { filterQueryParam, parsePositiveIntId } from './validation';
@@ -43,9 +44,12 @@ const KNOWN_SUCCESS = new Set([
  * server-side requireMod guard on every mutation route. The "Suggest description"
  * button (canSuggestDescriptions) is further restricted to the bot owner while that
  * feature is being trialled, and hidden entirely when OPENAI_API_KEY isn't set,
- * matching the server-side requireOwnerJson guard on its route.
+ * matching the server-side requireOwnerJson guard on its route. Runs `requireGuildContext`
+ * first so both flags come from a freshly re-read access level and owner flag, not the
+ * session's login-time cache — otherwise a demoted Mod would keep seeing controls whose
+ * POSTs now 403.
  */
-router.get('/sfx', csrfProtection, async (req, res) => {
+router.get('/sfx', requireGuildContext, csrfProtection, async (req, res) => {
   await renderOrError({ res, log, logLabel: 'SFX error:', sessionUser: req.session.user, errorMessage: 'Failed to load SFX data.' }, async () => {
     const [triggers, categories] = await Promise.all([getAllSfxTriggers(), getAllCategories()]);
     const canManage = (req.session.user?.accessLevel ?? 0) >= AccessLevel.MOD;

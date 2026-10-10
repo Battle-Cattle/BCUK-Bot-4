@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { requireGuildContext } from '../middleware';
 import { DASHBOARD_STATUS_MAX_SSE_PER_GUILD } from '../../shared/config';
 import { onStatusChanged } from '../../shared/statusStore';
 import { getGuildScopedStatus } from '../guildScopedStatus';
@@ -49,13 +50,15 @@ onStatusChanged(pushStatusUpdate);
  * snapshots for the viewer's current guild, so the dashboard's "Bot Status" cards can update
  * without polling. Mounted behind the parent router's `requireAuth`, so a session user is always
  * present; the guild is taken from the session (never a request param), matching every other
- * guild-scoped route.
+ * guild-scoped route. Runs `requireGuildContext` first, like those routes, so the session's guild
+ * is re-checked against the user's live memberships — a member removed from a guild can't keep
+ * subscribing to its voice status off a stale `currentGuildId`.
  * @param req - Express request; reads `req.session.user.currentGuildId`.
  * @param res - Express response; upgrades to a `text/event-stream` connection kept alive with
  *   periodic pings and torn down on client disconnect; replies 400 if no guild is selected, or
  *   429 if the guild's connection limit is exceeded.
  */
-router.get('/status/events', (req, res) => {
+router.get('/status/events', requireGuildContext, (req, res) => {
   const guildId = req.session.user?.currentGuildId ?? null;
   if (!guildId) {
     res.status(400).end();

@@ -20,6 +20,10 @@ vi.mock('../../db', () => ({
 /** Mocks the shared logger so route handlers don't write real log output during tests. */
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 vi.mock('../../shared/config', () => ({ SFX_MAX_FILE_MB: 10, OPENAI_API_KEY: 'test-openai-key', SFX_FOLDER: SFX_FOLDER_MOCK }));
+const { middlewareCallOrder } = vi.hoisted(() => ({ middlewareCallOrder: [] as string[] }));
+vi.mock('../middleware', () => ({
+  requireGuildContext: (_req: any, _res: any, next: any) => { middlewareCallOrder.push('requireGuildContext'); next(); },
+}));
 vi.mock('../csrf', () => ({
   csrfProtection: (req: any, _res: any, next: any) => {
     req.csrfToken = () => 'test-csrf-token';
@@ -48,12 +52,18 @@ function buildApp(sessionUser: unknown = { discordId: '1', accessLevel: AccessLe
 
 beforeEach(() => {
   vi.clearAllMocks();
+  middlewareCallOrder.length = 0;
   vi.mocked(getAllSfxTriggers).mockResolvedValue([]);
   vi.mocked(getAllCategories).mockResolvedValue([]);
   vi.mocked(getSfxFileById).mockResolvedValue(null);
 });
 
 describe('GET /sfx', () => {
+  it('runs requireGuildContext first, so canManage/canSuggestDescriptions read a fresh access level and owner flag', async () => {
+    await buildApp();
+    expect(middlewareCallOrder).toEqual(['requireGuildContext']);
+  });
+
   it('renders the sfx view with triggers and categories', async () => {
     vi.mocked(getAllCategories).mockResolvedValue([{ id: 1, name: 'Reactions' }]);
     const res = await buildApp();
