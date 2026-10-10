@@ -13,6 +13,11 @@ vi.mock('../guildScopedStatus', () => ({
   getGuildScopedStatus: vi.fn(),
 }));
 
+vi.mock('../../db', () => ({
+  findUser: vi.fn(),
+  getMemberAccessLevel: vi.fn(),
+}));
+
 const { middlewareCallOrder } = vi.hoisted(() => ({ middlewareCallOrder: [] as string[] }));
 vi.mock('../middleware', () => ({
   requireGuildContext: (_req: any, _res: any, next: any) => { middlewareCallOrder.push('requireGuildContext'); next(); },
@@ -21,7 +26,8 @@ vi.mock('../middleware', () => ({
 vi.mock('../../shared/logger', () => ({ createLogger: () => ({ error: vi.fn(), warn: vi.fn(), info: vi.fn() }) }));
 
 import supertest from 'supertest';
-import router, { MAX_SSE_CONNECTIONS_PER_GUILD, connections } from './dashboardStatusEvents';
+import router, { MAX_SSE_CONNECTIONS_PER_GUILD, connections, disconnectGuildStatusConnectionsForMember } from './dashboardStatusEvents';
+import { findUser, getMemberAccessLevel } from '../../db';
 import { onStatusChanged } from '../../shared/statusStore';
 import { getGuildScopedStatus } from '../guildScopedStatus';
 import { buildTestApp } from '../../test-utils/expressTestApp';
@@ -72,6 +78,8 @@ beforeEach(() => {
   connections.clear();
   vi.clearAllMocks();
   middlewareCallOrder.length = 0;
+  vi.mocked(findUser).mockResolvedValue({ discord_id: 'discord1', is_owner: false } as any);
+  vi.mocked(getMemberAccessLevel).mockResolvedValue(0);
 });
 
 describe('MAX_SSE_CONNECTIONS_PER_GUILD', () => {
@@ -146,6 +154,121 @@ describe('GET /status/events — connection lifecycle (direct handler invocation
 
     triggerClose();
     expect(connections.get('guild-A')).toBeUndefined();
+  });
+});
+
+describe('GET /status/events — access re-check after attaching', () => {
+  it('keeps the connection open for a current member', async () => {
+    const handler = getRouteHandler('/status/events');
+    const res = makeSseRes();
+    const { req, triggerClose } = makeSseReq('guild-A');
+
+    await handler(req, res, vi.fn());
+
+    expect(getMemberAccessLevel).toHaveBeenCalledWith('guild-A', 'discord1');
+    expect(res.end).not.toHaveBeenCalled();
+    triggerClose();
+  });
+
+  it('keeps the connection open for a bot owner without a membership row', async () => {
+    vi.mocked(findUser).mockResolvedValue({ discord_id: 'discord1', is_owner: true } as any);
+    vi.mocked(getMemberAccessLevel).mockResolvedValue(null);
+    const handler = getRouteHandler('/status/events');
+    const res = makeSseRes();
+    const { req, triggerClose } = makeSseReq('guild-A');
+
+    await handler(req, res, vi.fn());
+
+    expect(res.end).not.toHaveBeenCalled();
+    triggerClose();
+  });
+
+  it('ends the connection when the membership was removed before it attached', async () => {
+    vi.mocked(getMemberAccessLevel).mockResolvedValue(null);
+    const handler = getRouteHandler('/status/events');
+    const res = makeSseRes();
+    const { req, triggerClose } = makeSseReq('guild-A');
+
+    await handler(req, res, vi.fn());
+
+    expect(res.end).toHaveBeenCalled();
+    triggerClose();
+  });
+
+  it('ends the connection when the user row no longer exists', async () => {
+    vi.mocked(findUser).mockResolvedValue(null);
+    const handler = getRouteHandler('/status/events');
+    const res = makeSseRes();
+    const { req, triggerClose } = makeSseReq('guild-A');
+
+    await handler(req, res, vi.fn());
+
+    expect(res.end).toHaveBeenCalled();
+    triggerClose();
+  });
+
+  it('fails closed, ending the connection, when the re-check itself errors', async () => {
+    vi.mocked(findUser).mockRejectedValue(new Error('DB down'));
+    const handler = getRouteHandler('/status/events');
+    const res = makeSseRes();
+    const { req, triggerClose } = makeSseReq('guild-A');
+
+    await handler(req, res, vi.fn());
+
+    expect(res.end).toHaveBeenCalled();
+    triggerClose();
+  });
+
+  it('does not re-check access when the connection was refused at the limit', async () => {
+    connections.set('guild-A', new Set(Array.from({ length: MAX_SSE_CONNECTIONS_PER_GUILD }, () => ({}) as any)));
+    await supertest(buildApp('guild-A')).get('/status/events');
+    expect(findUser).not.toHaveBeenCalled();
+  });
+});
+
+describe('disconnectGuildStatusConnectionsForMember', () => {
+  it('ends only the removed member\'s connections in that guild', async () => {
+    const handler = getRouteHandler('/status/events');
+    const removed = makeSseRes();
+    const removedReq = makeSseReq('guild-A');
+    const other = makeSseRes();
+    const otherReq = makeSseReq('guild-A');
+    otherReq.req.session.user.discordId = 'discord2';
+    const elsewhere = makeSseRes();
+    const elsewhereReq = makeSseReq('guild-B');
+    await handler(removedReq.req, removed, vi.fn());
+    await handler(otherReq.req, other, vi.fn());
+    await handler(elsewhereReq.req, elsewhere, vi.fn());
+
+    disconnectGuildStatusConnectionsForMember('guild-A', 'discord1');
+
+    expect(removed.end).toHaveBeenCalled();
+    expect(other.end).not.toHaveBeenCalled();
+    expect(elsewhere.end).not.toHaveBeenCalled();
+    removedReq.triggerClose();
+    otherReq.triggerClose();
+    elsewhereReq.triggerClose();
+  });
+
+  it('is a no-op for a guild with no connections', () => {
+    expect(() => disconnectGuildStatusConnectionsForMember('guild-none', 'discord1')).not.toThrow();
+  });
+
+  it('keeps closing the rest when one connection throws on end()', async () => {
+    const handler = getRouteHandler('/status/events');
+    const first = makeSseRes();
+    const firstReq = makeSseReq('guild-A');
+    const second = makeSseRes();
+    const secondReq = makeSseReq('guild-A');
+    await handler(firstReq.req, first, vi.fn());
+    await handler(secondReq.req, second, vi.fn());
+    first.end.mockImplementation(() => { throw new Error('socket gone'); });
+
+    disconnectGuildStatusConnectionsForMember('guild-A', 'discord1');
+
+    expect(second.end).toHaveBeenCalled();
+    firstReq.triggerClose();
+    secondReq.triggerClose();
   });
 });
 
