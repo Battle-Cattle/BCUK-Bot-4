@@ -16,6 +16,7 @@ import { renderView } from './viewHelpers';
 import { renderOrError } from './errorHandling';
 import { runUserMutationForActorAndTarget } from '../../shared/userMutationQueue';
 import adminRefreshRouter from './adminRefresh';
+import { disconnectGuildStatusConnectionsForMember } from './dashboardStatusEvents';
 import { getRefreshState } from '../../discord/guildRefreshState';
 import {
   DuplicateTwitchNameError,
@@ -233,6 +234,7 @@ router.post('/users/update', requireManager, csrfProtection, async (req, res) =>
  * POST /admin/users/remove — removes a member from the current guild. Refuses to
  * let an admin remove themselves, re-checks the acting admin's own current
  * authorization inside the queued operation (see `checkRemoveAuth`'s doc comment),
+ * closes the removed member's open dashboard status streams for the guild,
  * and reloads the guild registry afterwards since removing the last member
  * un-provisions the guild.
  * @param req - Express request; reads `discord_id` from `req.body`.
@@ -258,6 +260,8 @@ router.post('/users/remove', requireAdmin, csrfProtection, async (req, res) => {
     const removeAuthErr = await checkRemoveAuth(sessionUser, guildId);
     if (removeAuthErr) throw new ManagerEditAuthError(removeAuthErr);
     await removeGuildMember(guildId, trimmedDiscordId);
+    // Their open dashboard status streams for this guild were admitted before the removal.
+    disconnectGuildStatusConnectionsForMember(guildId, trimmedDiscordId);
     // Reloaded here, inside the guarded operation — see the /users/add route's comment on
     // reloadRegistrySafe for why (removing the guild's last member un-provisions it, and this
     // must still happen even if the caller times out waiting on the queue).

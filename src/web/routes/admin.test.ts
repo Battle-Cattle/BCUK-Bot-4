@@ -51,6 +51,7 @@ vi.mock('../../shared/mutationQueue', async () => {
   };
 });
 
+vi.mock('./dashboardStatusEvents', () => ({ disconnectGuildStatusConnectionsForMember: vi.fn() }));
 vi.mock('./adminRefresh', async () => {
   const { Router } = await import('express');
   return {
@@ -80,6 +81,7 @@ vi.mock('../../shared/logger', () => ({
 import supertest from 'supertest';
 import router from './admin';
 import { findUser, getMemberAccessLevel, getEffectiveAccessLevelForUser, getGuildMemberUsers, getGuildsForMember, setMemberAccessLevel, removeGuildMember } from '../../db';
+import { disconnectGuildStatusConnectionsForMember } from './dashboardStatusEvents';
 import { reloadGuildRegistry } from '../../discord/guildRegistry';
 import { AccessLevel } from '../../db';
 import { normalizeTwitchChannelName } from '../../twitch/twitchChannelName';
@@ -394,6 +396,17 @@ describe('POST /users/remove', () => {
     expect(res.headers.location).toBe('/admin/users');
     expect(vi.mocked(removeGuildMember)).toHaveBeenCalledWith(GUILD_ID, VALID_ID);
     expect(vi.mocked(reloadGuildRegistry)).toHaveBeenCalled();
+  });
+
+  it('closes the removed member\'s open dashboard status streams for the guild', async () => {
+    await supertest(buildApp()).post('/users/remove').type('form').send({ discord_id: VALID_ID });
+    expect(vi.mocked(disconnectGuildStatusConnectionsForMember)).toHaveBeenCalledWith(GUILD_ID, VALID_ID);
+  });
+
+  it('does not close any status streams when the removal fails', async () => {
+    vi.mocked(removeGuildMember).mockRejectedValue(new Error('unexpected'));
+    await supertest(buildApp()).post('/users/remove').type('form').send({ discord_id: VALID_ID });
+    expect(vi.mocked(disconnectGuildStatusConnectionsForMember)).not.toHaveBeenCalled();
   });
 
   // Regression coverage for the actor-side TOCTOU on removal (CodeRabbit finding on PR #657):
