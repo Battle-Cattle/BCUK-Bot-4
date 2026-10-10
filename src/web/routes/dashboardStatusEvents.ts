@@ -18,6 +18,14 @@ export const connections = new Map<string, Set<Response>>();
 // exactly that user's streams (see disconnectGuildStatusConnectionsForMember).
 const connectionOwners = new WeakMap<Response, string>();
 
+// Connections still awaiting their post-attach access re-check. They're already registered in
+// `connections` (so a concurrent removal can find and close them), but are skipped by status
+// broadcasts until the re-check passes, so a just-removed member never receives a push while it runs.
+const pendingAccessCheck = new WeakSet<Response>();
+
+/** Whether a connection may receive status broadcasts (i.e. it isn't still awaiting its access re-check). */
+const isVerifiedConnection = (res: Response): boolean => !pendingAccessCheck.has(res);
+
 export const MAX_SSE_CONNECTIONS_PER_GUILD = DASHBOARD_STATUS_MAX_SSE_PER_GUILD;
 
 // Serializes each guild's own status pushes so a slower DB round-trip for an older change can
@@ -41,7 +49,7 @@ async function pushStatusUpdate(guildId: string | null): Promise<void> {
   const keys = guildId !== null ? [guildId] : Array.from(connections.keys());
   await Promise.all(keys.map((key) => statusPushQueue.run(key, async () => {
     try {
-      broadcastToChannel(connections, key, await getGuildScopedStatus(key));
+      broadcastToChannel(connections, key, await getGuildScopedStatus(key), isVerifiedConnection);
     } catch (err) {
       log.error(`Failed to push status update for guild ${key}:`, err);
     }
@@ -96,7 +104,8 @@ async function hasLiveGuildAccess(guildId: string, discordId: string): Promise<b
  * right after attaching, since a removal landing between `requireGuildContext`'s read and the
  * attach would otherwise miss this connection in {@link disconnectGuildStatusConnectionsForMember}
  * (it only closes connections registered when it runs); the connection is ended if access is gone,
- * or if the re-check itself fails (an unconfirmed member shouldn't default to trusted).
+ * or if the re-check itself fails (an unconfirmed member shouldn't default to trusted). Until the
+ * re-check passes, the connection is skipped by status broadcasts (see `pendingAccessCheck`).
  * @param req - Express request; reads `req.session.user.currentGuildId`.
  * @param res - Express response; upgrades to a `text/event-stream` connection kept alive with
  *   periodic pings and torn down on client disconnect; replies 400 if no guild is selected, or
@@ -110,12 +119,18 @@ router.get('/status/events', requireGuildContext, async (req, res) => {
     return;
   }
 
+  // Marked pending before attaching, so no broadcast can reach it between registration and the re-check.
+  pendingAccessCheck.add(res);
   const attached = attachSseConnection(req, res, { connections, key: guildId, maxPerChannel: MAX_SSE_CONNECTIONS_PER_GUILD });
   if (!attached) return;
   connectionOwners.set(res, user.discordId);
 
   try {
-    if (!(await hasLiveGuildAccess(guildId, user.discordId))) res.end();
+    if (await hasLiveGuildAccess(guildId, user.discordId)) {
+      pendingAccessCheck.delete(res);
+    } else {
+      res.end();
+    }
   } catch (err) {
     log.error(`Failed to re-verify guild access for discord ${user.discordId} in guild ${guildId} after connecting:`, err);
     res.end();

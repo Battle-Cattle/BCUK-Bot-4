@@ -780,6 +780,19 @@ describe('broadcastToChannel', () => {
     expect(res2.write).toHaveBeenCalledWith('data: {"hello":"world"}\n\n');
   });
 
+  it('skips (without evicting) clients the isEligible filter rejects', () => {
+    const verified = makeRes();
+    const pending = makeRes();
+    connections.set('somekey', new Set([verified as any, pending as any]));
+
+    const result = broadcastToChannel(connections, 'somekey', { hello: 'world' }, (res) => res !== (pending as any));
+
+    expect(verified.write).toHaveBeenCalledWith('data: {"hello":"world"}\n\n');
+    expect(pending.write).not.toHaveBeenCalled();
+    expect(result).toBe(2);
+    expect(connections.get('somekey')?.has(pending as any)).toBe(true);
+  });
+
   it('evicts a client whose write fails and returns the remaining count', () => {
     const good = makeRes();
     const dead = makeRes();

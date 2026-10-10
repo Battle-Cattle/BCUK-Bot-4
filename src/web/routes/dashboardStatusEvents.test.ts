@@ -219,6 +219,39 @@ describe('GET /status/events — access re-check after attaching', () => {
     triggerClose();
   });
 
+  it('withholds status broadcasts until the re-check passes, then delivers them', async () => {
+    let resolveUser!: (user: any) => void;
+    vi.mocked(findUser).mockReturnValue(new Promise((resolve) => { resolveUser = resolve; }));
+    vi.mocked(getGuildScopedStatus).mockResolvedValue({ guildId: 'guild-A' } as any);
+    const handler = getRouteHandler('/status/events');
+    const res = makeSseRes();
+    const { req, triggerClose } = makeSseReq('guild-A');
+
+    const pending = handler(req, res, vi.fn());
+    await registeredListener('guild-A');
+    expect(res.write).not.toHaveBeenCalledWith(expect.stringMatching(/^data: /));
+
+    resolveUser({ discord_id: 'discord1', is_owner: false });
+    await pending;
+    await registeredListener('guild-A');
+    expect(res.write).toHaveBeenCalledWith(`data: ${JSON.stringify({ guildId: 'guild-A' })}\n\n`);
+    triggerClose();
+  });
+
+  it('never broadcasts to a connection whose re-check fails', async () => {
+    vi.mocked(getMemberAccessLevel).mockResolvedValue(null);
+    vi.mocked(getGuildScopedStatus).mockResolvedValue({ guildId: 'guild-A' } as any);
+    const handler = getRouteHandler('/status/events');
+    const res = makeSseRes();
+    const { req, triggerClose } = makeSseReq('guild-A');
+
+    await handler(req, res, vi.fn());
+    await registeredListener('guild-A');
+
+    expect(res.write).not.toHaveBeenCalledWith(expect.stringMatching(/^data: /));
+    triggerClose();
+  });
+
   it('does not re-check access when the connection was refused at the limit', async () => {
     connections.set('guild-A', new Set(Array.from({ length: MAX_SSE_CONNECTIONS_PER_GUILD }, () => ({}) as any)));
     await supertest(buildApp('guild-A')).get('/status/events');

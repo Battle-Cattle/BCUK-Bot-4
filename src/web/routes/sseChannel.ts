@@ -39,14 +39,22 @@ function removeClient<K>(connections: Map<K, Set<Response>>, key: K, res: Respon
  * @param connections - The channel's connections map.
  * @param key - Which key (channel login, Discord ID, streamer ID, etc) to broadcast to.
  * @param payload - The value to JSON-serialize and send as the event's data.
+ * @param isEligible - Optional per-client filter: a client it returns false for is skipped
+ *   (left connected, just not sent this frame) — e.g. one still awaiting an access re-check.
  * @returns The number of clients still connected under `key` after eviction, or null if there
  *   were no connections registered under `key` at all (nothing was sent).
  */
-export function broadcastToChannel<K>(connections: Map<K, Set<Response>>, key: K, payload: unknown): number | null {
+export function broadcastToChannel<K>(
+  connections: Map<K, Set<Response>>,
+  key: K,
+  payload: unknown,
+  isEligible?: (res: Response) => boolean,
+): number | null {
   const clients = connections.get(key);
   if (!clients || clients.size === 0) return null;
   const serialized = JSON.stringify(payload);
   for (const res of clients) {
+    if (isEligible && !isEligible(res)) continue;
     try {
       res.write(`data: ${serialized}\n\n`);
     } catch {
