@@ -214,8 +214,12 @@ function handleTwitchMessage(channel: string, user: string, message: string, msg
       'Followage error',
       log,
     );
+    // Resolved once and shared by the three points/gamble handlers below, rather than each
+    // calling resolveStreamerIdForTwitchChannel (an uncached DB lookup) independently — that
+    // would otherwise run the same query three times per chat message.
+    const streamerIdPromise = resolveStreamerIdForTwitchChannel(normalizedChannel);
     fireAndForget(
-      resolveStreamerIdForTwitchChannel(normalizedChannel).then((streamerId) => {
+      streamerIdPromise.then((streamerId) => {
         // Skip chat-earn for a !gamble message itself — it would otherwise race
         // executeGambleCommandForTwitch below for the same shared points cooldown and almost
         // always win it first, silently dropping the bet (see GAMBLE_COMMAND's doc comment).
@@ -225,13 +229,13 @@ function handleTwitchMessage(channel: string, user: string, message: string, msg
       log,
     );
     fireAndForget(
-      resolveStreamerIdForTwitchChannel(normalizedChannel).then((streamerId) =>
+      streamerIdPromise.then((streamerId) =>
         executePointsCommandForTwitch(normalizedChannel, streamerId, message, user, command)),
       'Points command error',
       log,
     );
     fireAndForget(
-      resolveStreamerIdForTwitchChannel(normalizedChannel).then((streamerId) =>
+      streamerIdPromise.then((streamerId) =>
         executeGambleCommandForTwitch(normalizedChannel, streamerId, message, user, command)),
       'Gamble command error',
       log,
