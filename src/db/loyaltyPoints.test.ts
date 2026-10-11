@@ -241,6 +241,19 @@ describe('resolveGambleOutcome', () => {
     await expect(resolveGambleOutcome(1, 'viewer', 100, false)).rejects.toThrow('db exploded');
     expect(conn.rollback).toHaveBeenCalled();
   });
+
+  it('rolls back the already-applied debit if the winning credit fails', async () => {
+    const pool = makePool();
+    const conn = pool._conn;
+    conn.execute
+      .mockResolvedValueOnce([{ affectedRows: 1 }, []])      // debit succeeds
+      .mockRejectedValueOnce(new Error('credit db exploded')); // credit fails
+    vi.mocked(getPool).mockReturnValue(pool as any);
+
+    await expect(resolveGambleOutcome(1, 'viewer', 100, true)).rejects.toThrow('credit db exploded');
+    expect(conn.rollback).toHaveBeenCalled();
+    expect(conn.commit).not.toHaveBeenCalled();
+  });
 });
 
 // ─── setConfig ────────────────────────────────────────────────────────────────
