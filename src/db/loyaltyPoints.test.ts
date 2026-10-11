@@ -27,7 +27,7 @@ vi.mock('mysql2/promise', () => ({ default: {} }));
 
 import { makeMockPool } from '../test-utils/mockMysqlPool';
 import { getPool } from './pool';
-import { getBalance, getLeaderboard, getConfig, adjustBalance, setConfig, getAllConfigs } from './loyaltyPoints';
+import { getBalance, getLeaderboard, getConfig, adjustBalance, tryDebitBalance, setConfig, getAllConfigs } from './loyaltyPoints';
 
 /** Builds a fake pool via the shared helper, matching this file's `(rows, meta)` call shape. */
 function makePool(rows: unknown[] = [], meta: unknown = {}) {
@@ -152,6 +152,61 @@ describe('adjustBalance', () => {
     vi.mocked(getPool).mockReturnValue(pool as any);
 
     await expect(adjustBalance(1, 'viewer', 5)).rejects.toThrow('db exploded');
+    expect(conn.rollback).toHaveBeenCalled();
+  });
+});
+
+// ─── tryDebitBalance ──────────────────────────────────────────────────────────
+
+describe('tryDebitBalance', () => {
+  it('returns the balance after debiting when sufficient funds exist', async () => {
+    const pool = makePool();
+    const conn = pool._conn;
+    conn.execute
+      .mockResolvedValueOnce([{ affectedRows: 1 }, []])
+      .mockResolvedValueOnce([[{ balance: 900 }], []]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+
+    expect(await tryDebitBalance(1, 'viewer', 100)).toBe(900);
+    expect(conn.commit).toHaveBeenCalled();
+  });
+
+  it('returns null when the balance is insufficient (0 rows affected)', async () => {
+    const pool = makePool();
+    const conn = pool._conn;
+    conn.execute.mockResolvedValueOnce([{ affectedRows: 0 }, []]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+
+    expect(await tryDebitBalance(1, 'viewer', 100)).toBeNull();
+  });
+
+  it('returns null for a viewer with no row at all', async () => {
+    const pool = makePool();
+    const conn = pool._conn;
+    conn.execute.mockResolvedValueOnce([{ affectedRows: 0 }, []]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+
+    expect(await tryDebitBalance(1, 'new-viewer', 1)).toBeNull();
+  });
+
+  it('parses a string balance into a number (LAST_INSERT_ID() is a BIGINT expression)', async () => {
+    const pool = makePool();
+    const conn = pool._conn;
+    conn.execute
+      .mockResolvedValueOnce([{ affectedRows: 1 }, []])
+      .mockResolvedValueOnce([[{ balance: '900' }], []]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+
+    expect(await tryDebitBalance(1, 'viewer', 100)).toBe(900);
+  });
+
+  it('rolls back and rethrows on failure', async () => {
+    const pool = makePool();
+    const conn = pool._conn;
+    conn.execute.mockRejectedValueOnce(new Error('db exploded'));
+    vi.mocked(getPool).mockReturnValue(pool as any);
+
+    await expect(tryDebitBalance(1, 'viewer', 100)).rejects.toThrow('db exploded');
     expect(conn.rollback).toHaveBeenCalled();
   });
 });

@@ -154,6 +154,7 @@ export type { LoyaltyPointsConfig, LoyaltyPointsLeaderboardEntry } from './db/lo
 export {
   getBalance as getLoyaltyPointsBalance,
   adjustBalance as adjustLoyaltyPointsBalance,
+  tryDebitBalance as tryDebitLoyaltyPointsBalance,
   getLeaderboard as getLoyaltyPointsLeaderboard,
   DEFAULT_POINTS_PER_MESSAGE,
   DEFAULT_POINTS_COOLDOWN_SECONDS,

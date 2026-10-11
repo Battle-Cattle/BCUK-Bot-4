@@ -1,5 +1,5 @@
 import { createLogger } from '../shared/logger';
-import { getLoyaltyPointsBalance, adjustLoyaltyPointsBalance, getLoyaltyPointsConfig, DEFAULT_POINTS_COOLDOWN_SECONDS } from '../db';
+import { getLoyaltyPointsBalance, adjustLoyaltyPointsBalance, tryDebitLoyaltyPointsBalance, getLoyaltyPointsConfig, DEFAULT_POINTS_COOLDOWN_SECONDS } from '../db';
 import { resolveCommand, extractArgs } from './commandUtils';
 import { createRuntimeRegistry } from '../shared/runtimeRegistry';
 import type { TwitchSendRuntime } from './twitchRuntime';
@@ -14,6 +14,7 @@ const log = createLogger('Gamble');
  *  cache hit, where gamble's balance lookup is an uncached DB query) — silently dropping the bet. */
 export const GAMBLE_COMMAND = '!gamble';
 const USAGE_MESSAGE = 'Usage: !gamble <amount>, where <amount> is a number (e.g. 100, 1,000, 5k), a percentage of your balance (e.g. 40%), or "all". The amount must be at least 1 and no more than your current balance.';
+const BALANCE_CHANGED_MESSAGE = 'Your balance changed before that bet could be placed — try again.';
 
 // ─── Twitch runtime (registered from index.ts before startTwitchBot) ─────────
 //
@@ -42,20 +43,28 @@ async function resolveBet(streamerId: number, twitchUsername: string, amountToke
 }
 
 /**
- * Flips a 50/50 coin for a validated bet — winning credits the bet amount (doubling it net),
- * losing debits it — and formats the resulting chat reply.
+ * Flips a 50/50 coin for a validated bet and formats the resulting chat reply. The stake is
+ * debited atomically and conditionally (via {@link tryDebitLoyaltyPointsBalance}) before the
+ * coin flip, rather than trusting the balance `bet` was validated against — without that, two
+ * concurrent bets (e.g. two `!gamble all` messages) could both validate against the same
+ * pre-bet balance and both proceed, creating or destroying points beyond what either bet alone
+ * should. A win then credits back `2 * bet` (the returned stake plus the profit); a loss needs
+ * no further write, since the stake is already gone.
  * @param streamerId - The streamer's `streamer.id`.
  * @param twitchUsername - The gambling viewer's Twitch login.
  * @param bet - The already-validated bet amount.
- * @returns The chat reply describing the outcome and new balance.
+ * @returns The chat reply describing the outcome and new balance, or null if the stake couldn't
+ *   be debited (the balance changed since `bet` was validated against it).
  */
-async function resolveGamble(streamerId: number, twitchUsername: string, bet: number): Promise<string> {
-  const won = Math.random() < 0.5;
-  const newBalance = await adjustLoyaltyPointsBalance(streamerId, twitchUsername, won ? bet : -bet);
+async function resolveGamble(streamerId: number, twitchUsername: string, bet: number): Promise<string | null> {
+  const balanceAfterStake = await tryDebitLoyaltyPointsBalance(streamerId, twitchUsername, bet);
+  if (balanceAfterStake === null) return null;
 
-  return won
-    ? `@${twitchUsername} won ${bet} points! New balance: ${newBalance}`
-    : `@${twitchUsername} lost ${bet} points. New balance: ${newBalance}`;
+  const won = Math.random() < 0.5;
+  if (!won) return `@${twitchUsername} lost ${bet} points. New balance: ${balanceAfterStake}`;
+
+  const newBalance = await adjustLoyaltyPointsBalance(streamerId, twitchUsername, 2 * bet);
+  return `@${twitchUsername} won ${bet} points! New balance: ${newBalance}`;
 }
 
 /** Sends `message` to `channel` via the registered Twitch runtime, logging (rather than
@@ -108,5 +117,6 @@ export async function executeGambleCommandForTwitch(
   const cooldownSeconds = config?.cooldownSeconds ?? DEFAULT_POINTS_COOLDOWN_SECONDS;
   if (!tryClaimPointsCooldown(streamerId, username, cooldownSeconds)) return;
 
-  await sendGambleMessage(channel, await resolveGamble(streamerId, username, bet));
+  const result = await resolveGamble(streamerId, username, bet);
+  await sendGambleMessage(channel, result ?? BALANCE_CHANGED_MESSAGE);
 }
