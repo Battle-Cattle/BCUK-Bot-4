@@ -584,4 +584,46 @@ CREATE TABLE IF NOT EXISTS passkey_enrollment_codes (
   FOREIGN KEY (discord_id) REFERENCES `user`(discord_id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- ---------------------------------------------------------------------------
+-- loyalty_points
+-- Per-streamer viewer currency: one row per (streamer, Twitch viewer), earned
+-- passively by chatting (and via sub/resub/gift-sub bonuses), spent via
+-- !gamble. Named "loyalty_points" (not "channel_points") to avoid colliding
+-- with the unrelated existing Twitch Channel Points reward-pricing feature
+-- (reward_pricing / channelPointsAdmin.ts).
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS loyalty_points (
+  id              INT         NOT NULL AUTO_INCREMENT,
+  streamer_id     INT         NOT NULL,
+  twitch_username VARCHAR(64) NOT NULL,
+  balance         INT         NOT NULL DEFAULT 0,
+  updated_at      TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_loyalty_points (streamer_id, twitch_username),
+  KEY idx_loyalty_points_leaderboard (streamer_id, balance DESC),
+  FOREIGN KEY (streamer_id) REFERENCES streamer(id) ON DELETE CASCADE,
+  CONSTRAINT chk_loyalty_points_balance_nonnegative CHECK (balance >= 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------------------------------
+-- loyalty_points_config
+-- Per-streamer earn-rate configuration for loyalty_points. A missing row for
+-- a streamer falls back to the app's default constants (see shared/config.ts)
+-- rather than needing a seed row per streamer.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS loyalty_points_config (
+  streamer_id         INT       NOT NULL,
+  points_per_message  INT       NOT NULL DEFAULT 1,
+  cooldown_seconds    INT       NOT NULL DEFAULT 60,
+  points_per_sub      INT       NOT NULL DEFAULT 100,
+  points_per_gift_sub INT       NOT NULL DEFAULT 100,
+  updated_at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (streamer_id),
+  FOREIGN KEY (streamer_id) REFERENCES streamer(id) ON DELETE CASCADE,
+  CONSTRAINT chk_loyalty_points_config_points_per_message CHECK (points_per_message >= 0),
+  CONSTRAINT chk_loyalty_points_config_cooldown_seconds    CHECK (cooldown_seconds >= 0),
+  CONSTRAINT chk_loyalty_points_config_points_per_sub      CHECK (points_per_sub >= 0),
+  CONSTRAINT chk_loyalty_points_config_points_per_gift_sub CHECK (points_per_gift_sub >= 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 SET FOREIGN_KEY_CHECKS = 1;

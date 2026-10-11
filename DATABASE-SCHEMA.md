@@ -290,6 +290,45 @@ Time-series log of computed price/demand per reward, powering the price history 
 
 Created by `migrations/reward_pricing_history.sql`.
 
+## `loyalty_points`
+
+Per-streamer viewer currency: one row per (streamer, Twitch viewer), earned passively by chatting
+(and via sub/resub/gift-sub bonuses), spent via `!gamble`. Named `loyalty_points` rather than
+`channel_points` to avoid colliding with the unrelated existing Twitch Channel Points
+reward-pricing feature (`reward_pricing` / `channelPointsAdmin.ts`).
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | `INT` PK, auto-increment | |
+| `streamer_id` | `INT` | FK to `streamer.id` ON DELETE CASCADE |
+| `twitch_username` | `VARCHAR(64)` | Viewer's Twitch login |
+| `balance` | `INT` | Current points balance; clamped to `>= 0` by both the app's upsert logic and a `CHECK` constraint |
+| `updated_at` | `TIMESTAMP` | |
+
+Expected constraints:
+
+- `UNIQUE KEY uq_loyalty_points (streamer_id, twitch_username)` — one balance row per viewer per streamer.
+- `KEY idx_loyalty_points_leaderboard (streamer_id, balance DESC)` — accelerates the `!points leaderboard` / web leaderboard query.
+
+Created by `migrations/loyalty_points.sql`.
+
+## `loyalty_points_config`
+
+Per-streamer configuration for `loyalty_points` earn rates. A missing row for a streamer means
+"use the app's default constants" (see `shared/config.ts`) — rows are only created once a
+streamer saves non-default settings from the web panel.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `streamer_id` | `INT` PK | FK to `streamer.id` ON DELETE CASCADE |
+| `points_per_message` | `INT` | Points awarded per chat message, subject to `cooldown_seconds` |
+| `cooldown_seconds` | `INT` | Minimum seconds between chat-earn awards for the same viewer; also the `!gamble` cooldown (shared, not stacked) |
+| `points_per_sub` | `INT` | Awarded on a sub or resub |
+| `points_per_gift_sub` | `INT` | Multiplied by the gift count and awarded to the gifter (not the recipients) |
+| `updated_at` | `TIMESTAMP` | |
+
+Created by `migrations/loyalty_points.sql`.
+
 ## `custom_command`
 
 Stores custom text commands managed through the admin panel. This is a **global catalog** shared across all guilds (no `guild_id`); per-guild deviations (disable / output override) live in `guild_command_override`. On Discord, every catalog command is enabled by default in every guild.
