@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BCUK Bot — Loyalty Points</title>
+  <link rel="stylesheet" href="/style.css">
+  <%- include('partials/pwa-head') %>
+</head>
+<body data-csrf-token="<%= csrfToken %>">
+  <%- include('partials/nav') %>
+
+  <main class="container">
+    <section class="section">
+      <h2 class="section-title">Loyalty Points</h2>
+
+      <% if (error) { %>
+      <% const errorMessages = {
+        not_a_streamer: 'You are not configured as a monitored streamer.',
+        invalid_config: 'Points per message, cooldown, points per sub, and points per gift sub must all be whole numbers of 0 or more.',
+        save_failed:    'Failed to save — please try again.',
+      }; %>
+      <div class="card card-alert-danger" role="alert" aria-live="assertive" aria-atomic="true">
+        <span class="text-danger">&#9888; <%= errorMessages[error] || `Operation failed: ${error.replace(/_/g, ' ')}` %></span>
+      </div>
+      <% } %>
+
+      <% if (!isStreamer) { %>
+      <div class="card card-spaced">
+        <div class="card-body">
+          <p>Loyalty points are earned by viewers chatting on your Twitch channel. Link your Twitch
+            account from <a href="/user/settings">Settings</a> to set up your channel's earn rates and
+            see its leaderboard here.</p>
+        </div>
+      </div>
+      <% } else { %>
+
+      <div class="card card-spaced">
+        <div class="card-header"><span class="card-icon">⚙️</span><span class="card-label">Earn Rates</span></div>
+        <div class="card-body">
+          <p class="muted">Viewers earn points by chatting (subject to the cooldown below) and get a
+            bonus for subs, resubs, and gift subs. Points have no real-world value and aren't
+            redeemable for cash or goods.</p>
+          <form method="POST" action="/loyalty-points/config">
+            <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+            <div class="form-row-wrap form-section-gap">
+              <div class="form-col-grow">
+                <label for="points_per_message" class="form-label">Points per message</label>
+                <input id="points_per_message" class="input full-width" type="number" min="0" step="1" name="points_per_message" value="<%= config.pointsPerMessage %>" required>
+              </div>
+              <div class="form-col-grow">
+                <label for="cooldown_seconds" class="form-label">Chat-earn cooldown (seconds)</label>
+                <input id="cooldown_seconds" class="input full-width" type="number" min="0" step="1" name="cooldown_seconds" value="<%= config.cooldownSeconds %>" required>
+              </div>
+            </div>
+            <div class="form-row-wrap form-section-gap">
+              <div class="form-col-grow">
+                <label for="points_per_sub" class="form-label">Points per sub/resub</label>
+                <input id="points_per_sub" class="input full-width" type="number" min="0" step="1" name="points_per_sub" value="<%= config.pointsPerSub %>" required>
+              </div>
+              <div class="form-col-grow">
+                <label for="points_per_gift_sub" class="form-label">Points per gift sub (× gift count)</label>
+                <input id="points_per_gift_sub" class="input full-width" type="number" min="0" step="1" name="points_per_gift_sub" value="<%= config.pointsPerGiftSub %>" required>
+              </div>
+            </div>
+            <button type="submit" class="btn btn-primary form-section-gap">Save</button>
+          </form>
+        </div>
+      </div>
+
+      <div class="card card-spaced">
+        <div class="card-header"><span class="card-icon">🏆</span><span class="card-label">Leaderboard</span></div>
+        <div class="card-body">
+          <% if (leaderboard.length === 0) { %>
+          <p class="muted">No one has earned any points yet.</p>
+          <% } else { %>
+          <table class="table full-width">
+            <thead>
+              <tr><th>#</th><th>Viewer</th><th>Points</th></tr>
+            </thead>
+            <tbody>
+              <% leaderboard.forEach(function (entry, index) { %>
+              <tr>
+                <td><%= index + 1 %></td>
+                <td><%= entry.twitchUsername %></td>
+                <td><%= entry.balance %></td>
+              </tr>
+              <% }); %>
+            </tbody>
+          </table>
+          <% } %>
+        </div>
+      </div>
+      <% } %>
+    </section>
+  </main>
+  <%- include('partials/pwa-register') %>
+  <%- include('partials/footer') %>
+</body>
+</html>
