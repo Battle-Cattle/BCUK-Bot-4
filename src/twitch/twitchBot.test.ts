@@ -106,6 +106,7 @@ vi.mock('../db', async () => {
     getBotChatToken: vi.fn(),
     saveBotChatTokenIfOwnedBy: vi.fn(),
     clearBotChatTokenIfOwnedBy: vi.fn(),
+    getStreamerByDiscordId: vi.fn(),
     createManagedLookupCache,
     DEFAULT_REFRESH_FAILURE_BACKOFF_MS,
     DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS,
@@ -156,6 +157,10 @@ vi.mock('../commands/followageHandler', () => ({
   executeFollowageForTwitch: vi.fn(),
 }));
 
+vi.mock('../commands/pointsEarnHandler', () => ({
+  awardPointsForChatMessage: vi.fn(),
+}));
+
 vi.mock('./twitchChatActivity', () => ({
   recordChatMessage: vi.fn(),
   forgetChannelChatActivity: vi.fn(),
@@ -181,7 +186,7 @@ import {
   __setConfirmedJoinedChannelsForTests,
 } from './twitchChannelMembership';
 import * as twitchChannelMembership from './twitchChannelMembership';
-import { getTwitchEnabledChannels, getAllTwitchLinkedUsers, findUserByTwitchName, getBotChatToken, saveBotChatTokenIfOwnedBy, clearBotChatTokenIfOwnedBy } from '../db';
+import { getTwitchEnabledChannels, getAllTwitchLinkedUsers, findUserByTwitchName, getBotChatToken, saveBotChatTokenIfOwnedBy, clearBotChatTokenIfOwnedBy, getStreamerByDiscordId } from '../db';
 import { __resetTransientRebuildStateForTests } from './twitchBotAuthProvider';
 import { sendOwnerAlert } from '../discord/ownerAlerts';
 import { resolveGuildIdForDiscordId } from './twitchGuildResolutionRuntime';
@@ -195,6 +200,7 @@ import { executeShoutoutForTwitch } from '../commands/shoutoutHandler';
 import { handleCommand } from '../commands/commandRouter';
 import { executeCountdownForTwitch } from '../commands/countdownHandler';
 import { executeFollowageForTwitch } from '../commands/followageHandler';
+import { awardPointsForChatMessage } from '../commands/pointsEarnHandler';
 import { recordChatMessage } from './twitchChatActivity';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -345,6 +351,7 @@ describe('handleTwitchMessage', () => {
     vi.mocked(getAllTwitchLinkedUsers).mockResolvedValue([{ twitchName: 'streamer', discordId: 'streamer-discord-id' }]);
     vi.mocked(findUserByTwitchName).mockResolvedValue(null);
     vi.mocked(resolveGuildIdForDiscordId).mockReturnValue('guild-A');
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue({ id: 42 } as any);
     __resetTwitchChannelDiscordIdCacheForTests();
   });
 
@@ -378,7 +385,7 @@ describe('handleTwitchMessage', () => {
     expect(recordChatMessage).toHaveBeenCalledWith('streamer');
   });
 
-  it('dispatches all seven executors for a normal message', async () => {
+  it('dispatches all eight executors for a normal message', async () => {
     vi.mocked(executeCustomCommandForTwitch).mockResolvedValue(undefined);
     vi.mocked(executeCounterCommandForTwitch).mockResolvedValue(undefined);
     vi.mocked(executeMultiCommandForTwitch).mockResolvedValue(undefined);
@@ -386,6 +393,7 @@ describe('handleTwitchMessage', () => {
     vi.mocked(handleCommand).mockResolvedValue(undefined);
     vi.mocked(executeCountdownForTwitch).mockResolvedValue(undefined);
     vi.mocked(executeFollowageForTwitch).mockResolvedValue(undefined);
+    vi.mocked(awardPointsForChatMessage).mockResolvedValue(undefined);
 
     sendMessage('#streamer', 'alice', '!cmd', { displayName: 'Alice', userId: 'alice-id', channelId: 'streamer-id' });
 
@@ -400,6 +408,19 @@ describe('handleTwitchMessage', () => {
     expect(executeCounterCommandForTwitch).toHaveBeenCalledWith('streamer', '!cmd', 'Alice', 'guild-A', '!cmd');
     expect(executeCountdownForTwitch).toHaveBeenCalledWith('streamer', '!cmd', '!cmd');
     expect(executeFollowageForTwitch).toHaveBeenCalledWith('streamer', '!cmd', 'streamer-id', { id: 'alice-id', name: 'Alice' }, '!cmd');
+    // Streamer-id resolution (Twitch-channel → discord_id → streamer.id) runs asynchronously
+    // before the points-earn award, same as guild resolution above.
+    await vi.waitFor(() => expect(awardPointsForChatMessage).toHaveBeenCalledOnce());
+    expect(awardPointsForChatMessage).toHaveBeenCalledWith(42, 'alice');
+  });
+
+  it('does not award points when the channel has no linked streamer', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(null);
+
+    sendMessage('#streamer', 'alice', 'hello');
+
+    await vi.waitFor(() => expect(getStreamerByDiscordId).toHaveBeenCalledOnce());
+    expect(awardPointsForChatMessage).not.toHaveBeenCalled();
   });
 
   it('resolves the target guild via the linked streamer\'s active voice presence', async () => {

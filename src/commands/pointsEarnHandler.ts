@@ -1,0 +1,57 @@
+import {
+  getLoyaltyPointsConfig,
+  adjustLoyaltyPointsBalance,
+  DEFAULT_POINTS_PER_MESSAGE,
+  DEFAULT_POINTS_COOLDOWN_SECONDS,
+} from '../db';
+
+// A per-(streamer, viewer) last-earn timestamp, used by both the passive chat-earn path and
+// `!gamble`'s shared cooldown (see tryClaimPointsCooldown below). Unlike `cooldownGate.ts`'s
+// `createCooldownGate()`, this cooldown's duration must be configurable per streamer
+// (`LoyaltyPointsConfig.cooldownSeconds`), which `createCooldownGate()` doesn't support — it's
+// hardcoded to the fixed `GLOBAL_COOLDOWN_MS` constant.
+const lastEarnedAt = new Map<string, number>();
+
+/** Builds this cooldown's composite key: earning is per-streamer, so the same viewer chatting
+ *  on two different streamers' channels must never share a cooldown. */
+function cooldownKey(streamerId: number, twitchUsername: string): string {
+  return `${streamerId}:${twitchUsername}`;
+}
+
+/**
+ * Claims the shared points cooldown for a (streamer, viewer) pair if they're currently off
+ * cooldown, recording the claim time. Used by both passive chat-earn and `!gamble`, so a viewer
+ * can't alternate between the two to bypass either one's cooldown.
+ * @param streamerId - The streamer's `streamer.id`.
+ * @param twitchUsername - The viewer's Twitch login.
+ * @param cooldownSeconds - The streamer's configured (or default) cooldown length.
+ * @returns True if the claim succeeded (caller may proceed); false if still on cooldown.
+ */
+export function tryClaimPointsCooldown(streamerId: number, twitchUsername: string, cooldownSeconds: number): boolean {
+  const key = cooldownKey(streamerId, twitchUsername);
+  const now = Date.now();
+  if (now - (lastEarnedAt.get(key) ?? 0) < cooldownSeconds * 1000) return false;
+  lastEarnedAt.set(key, now);
+  return true;
+}
+
+/** Test-only: clears every recorded points cooldown claim, so tests don't bleed state into
+ *  each other through this module-level map. */
+export function clearPointsCooldowns(): void {
+  lastEarnedAt.clear();
+}
+
+/**
+ * Awards passive chat-earn loyalty points to a viewer if they're off cooldown, using the
+ * streamer's configured rate/cooldown (or the app's defaults if unconfigured). No-ops silently
+ * if the viewer is still on cooldown.
+ * @param streamerId - The streamer's `streamer.id`.
+ * @param twitchUsername - The viewer's Twitch login.
+ * @returns Resolves once the award (or no-op) completes.
+ */
+export async function awardPointsForChatMessage(streamerId: number, twitchUsername: string): Promise<void> {
+  const config = await getLoyaltyPointsConfig(streamerId);
+  const cooldownSeconds = config?.cooldownSeconds ?? DEFAULT_POINTS_COOLDOWN_SECONDS;
+  if (!tryClaimPointsCooldown(streamerId, twitchUsername, cooldownSeconds)) return;
+  await adjustLoyaltyPointsBalance(streamerId, twitchUsername, config?.pointsPerMessage ?? DEFAULT_POINTS_PER_MESSAGE);
+}

@@ -1,6 +1,16 @@
 import mysql from 'mysql2/promise';
 import { getPool, withTransaction } from './pool';
 
+// ─── Defaults ─────────────────────────────────────────────────────────────────
+// Applied when a streamer has no `loyalty_points_config` row. Mirrors
+// `DEFAULT_PRICING_COOLDOWN_SECONDS` in rewardPricing.ts — a plain app default, not an
+// env-configurable value, so it lives here rather than in shared/config.ts.
+
+export const DEFAULT_POINTS_PER_MESSAGE = 1;
+export const DEFAULT_POINTS_COOLDOWN_SECONDS = 60;
+export const DEFAULT_POINTS_PER_SUB = 100;
+export const DEFAULT_POINTS_PER_GIFT_SUB = 100;
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 /** One entry on a streamer's loyalty-points leaderboard. */

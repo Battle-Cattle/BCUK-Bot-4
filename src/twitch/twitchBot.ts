@@ -9,6 +9,7 @@ import { executeMultiCommandForTwitch } from '../commands/multiCommandHandler';
 import { executeShoutoutForTwitch } from '../commands/shoutoutHandler';
 import { executeCountdownForTwitch } from '../commands/countdownHandler';
 import { executeFollowageForTwitch } from '../commands/followageHandler';
+import { awardPointsForChatMessage } from '../commands/pointsEarnHandler';
 import { fireAndForget, extractCommand } from '../commands/commandUtils';
 import { recordChatMessage } from './twitchChatActivity';
 import { setTwitchChannel } from '../shared/statusStore';
@@ -23,6 +24,7 @@ import {
   getAllTwitchLinkedUsers,
   findUserByTwitchName,
   getBotChatToken,
+  getStreamerByDiscordId,
   type RefreshingLookupCache,
 } from '../db';
 import { resolveGuildIdForDiscordId } from './twitchGuildResolutionRuntime';
@@ -142,6 +144,14 @@ async function resolveGuildIdForTwitchCommand(normalizedChannel: string): Promis
   return resolveGuildIdForDiscordId(discordId);
 }
 
+/** Resolves a Twitch channel's `streamer.id`, or null if it isn't linked to a streamer row. */
+async function resolveStreamerIdForTwitchChannel(normalizedChannel: string): Promise<number | null> {
+  const discordId = await resolveDiscordIdForTwitchChannel(normalizedChannel);
+  if (!discordId) return null;
+  const streamer = await getStreamerByDiscordId(discordId);
+  return streamer?.id ?? null;
+}
+
 /**
  * Twurple `onMessage` event handler: records the message for timer commands'
  * `min_messages` gate (see `twitchChatActivity.ts`), then dispatches it to
@@ -200,6 +210,13 @@ function handleTwitchMessage(channel: string, user: string, message: string, msg
     fireAndForget(
       executeFollowageForTwitch(normalizedChannel, message, msg.channelId, { id: msg.userInfo.userId, name: displayName }, command),
       'Followage error',
+      log,
+    );
+    fireAndForget(
+      resolveStreamerIdForTwitchChannel(normalizedChannel).then((streamerId) => {
+        if (streamerId !== null) return awardPointsForChatMessage(streamerId, user);
+      }),
+      'Points earn error',
       log,
     );
   } catch (err) {
