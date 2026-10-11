@@ -1,10 +1,21 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+// Shared across the mock factory (which vitest hoists above these imports) and the test bodies
+// below, so `invalidateLoyaltyPointsConfigLookupCache` can be asserted against the same spy the
+// mocked cache instance actually holds.
+const { invalidateSpy } = vi.hoisted(() => ({ invalidateSpy: vi.fn() }));
+
 vi.mock('./lookupCache', () => ({
-  createManagedLookupCache: vi.fn(({ loadCache }: { loadCache: () => Promise<unknown> }) => ({
-    getCache: () => loadCache(),
-    invalidate: vi.fn(),
-  })),
+  // Mirrors createManagedLookupCache's real shape closely enough to exercise
+  // loyaltyPointsCache.ts's own createEmptyCache callback (real callers rely on it as the
+  // pre-first-load fallback), not just loadCache.
+  createManagedLookupCache: vi.fn((options: { createEmptyCache: () => unknown; loadCache: () => Promise<unknown> }) => {
+    options.createEmptyCache();
+    return {
+      getCache: () => options.loadCache(),
+      invalidate: invalidateSpy,
+    };
+  }),
   DEFAULT_CACHE_TTL_MS: 300_000,
   DEFAULT_REFRESH_FAILURE_BACKOFF_MS: 5_000,
   DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS: 60_000,
@@ -13,7 +24,7 @@ vi.mock('./loyaltyPoints', () => ({
   getAllConfigs: vi.fn(),
 }));
 
-import { getCachedConfig } from './loyaltyPointsCache';
+import { getCachedConfig, invalidateLoyaltyPointsConfigLookupCache } from './loyaltyPointsCache';
 import { getAllConfigs } from './loyaltyPoints';
 import type { LoyaltyPointsConfig } from './loyaltyPoints';
 
@@ -51,5 +62,12 @@ describe('getCachedConfig', () => {
 
     expect(await getCachedConfig(1)).toEqual(configA);
     expect(await getCachedConfig(2)).toEqual(configB);
+  });
+});
+
+describe('invalidateLoyaltyPointsConfigLookupCache', () => {
+  it('invalidates the underlying lookup cache', () => {
+    invalidateLoyaltyPointsConfigLookupCache();
+    expect(invalidateSpy).toHaveBeenCalledOnce();
   });
 });

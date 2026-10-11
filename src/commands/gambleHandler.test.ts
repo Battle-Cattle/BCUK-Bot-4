@@ -7,7 +7,11 @@ vi.mock('../db', () => ({
   DEFAULT_POINTS_COOLDOWN_SECONDS: 60,
 }));
 vi.mock('./pointsEarnHandler', () => ({ tryClaimPointsCooldown: vi.fn() }));
-vi.mock('../shared/logger', () => ({ createLogger: () => ({ info: vi.fn(), error: vi.fn() }) }));
+
+// Shared so a test can assert on the error logged by gambleHandler.ts's module-level `log`
+// instance (created once via `createLogger('Gamble')` at import time).
+const { logErrorSpy } = vi.hoisted(() => ({ logErrorSpy: vi.fn() }));
+vi.mock('../shared/logger', () => ({ createLogger: () => ({ info: vi.fn(), error: logErrorSpy }) }));
 
 import { getLoyaltyPointsBalance, adjustLoyaltyPointsBalance, getLoyaltyPointsConfig } from '../db';
 import { tryClaimPointsCooldown } from './pointsEarnHandler';
@@ -112,5 +116,15 @@ describe('executeGambleCommandForTwitch', () => {
     await executeGambleCommandForTwitch('channel', 1, '!gamble 40%', 'alice', '!gamble');
 
     expect(adjustLoyaltyPointsBalance).toHaveBeenCalledWith(1, 'alice', 80);
+  });
+
+  it('logs rather than throws when sending the result fails', async () => {
+    randomSpy.mockReturnValue(0);
+    const sendError = new Error('send failed');
+    SEND.mockRejectedValue(sendError);
+
+    await expect(executeGambleCommandForTwitch('channel', 1, '!gamble 100', 'alice', '!gamble')).resolves.toBeUndefined();
+
+    expect(logErrorSpy).toHaveBeenCalledWith(expect.stringContaining('Failed to send gamble result'), sendError);
   });
 });

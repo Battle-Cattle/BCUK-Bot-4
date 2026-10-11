@@ -89,6 +89,16 @@ describe('GET /loyalty-points', () => {
     const res = await supertest(buildApp()).get('/loyalty-points?error=save_failed');
     expect(res.body.error).toBe('save_failed');
   });
+
+  it('renders a 500 error page when loading the page throws', async () => {
+    vi.mocked(getStreamerByDiscordId).mockRejectedValue(new Error('db exploded'));
+
+    const res = await supertest(buildApp()).get('/loyalty-points');
+
+    expect(res.status).toBe(500);
+    expect(res.body.view).toBe('error');
+    expect(res.body.message).toBe('Failed to load loyalty points page.');
+  });
 });
 
 // ─── POST /loyalty-points/config ──────────────────────────────────────────────

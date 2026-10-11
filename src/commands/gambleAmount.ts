@@ -20,21 +20,44 @@ export function parseGambleAmount(input: string, balance: number): number | null
   return rounded;
 }
 
-/** Resolves the raw numeric amount a bet token represents, before the min/max range check. */
-function resolveAmount(trimmed: string, balance: number): number | null {
-  if (trimmed.toLowerCase() === 'all') return balance;
+/** Parses the `all`/`ALL` keyword as the full balance; null for anything else. */
+function parseAllKeyword(trimmed: string, balance: number): number | null {
+  return trimmed.toLowerCase() === 'all' ? balance : null;
+}
 
-  if (trimmed.endsWith('%')) {
-    const percent = Number(trimmed.slice(0, -1));
-    if (!Number.isFinite(percent) || percent <= 0) return null;
-    return Math.floor(balance * (percent / 100));
-  }
+/** Parses a trailing-`%` percentage of balance, floored; null if it doesn't end in `%`, or the
+ *  percentage isn't a finite positive number. */
+function parsePercentAmount(trimmed: string, balance: number): number | null {
+  if (!trimmed.endsWith('%')) return null;
+  const percent = Number(trimmed.slice(0, -1));
+  return Number.isFinite(percent) && percent > 0 ? Math.floor(balance * (percent / 100)) : null;
+}
 
-  if (/^[0-9]+[kK]$/.test(trimmed)) {
-    return Number(trimmed.slice(0, -1)) * 1000;
-  }
+/** Parses a `k`/`K`-suffixed integer as ×1000; null for anything else. */
+function parseThousandsSuffixAmount(trimmed: string): number | null {
+  return /^[0-9]+[kK]$/.test(trimmed) ? Number(trimmed.slice(0, -1)) * 1000 : null;
+}
 
+/** Parses a plain (optionally thousands-separated) integer; null for anything else. */
+function parsePlainIntegerAmount(trimmed: string): number | null {
   const withoutCommas = trimmed.replace(/,/g, '');
-  if (!/^[0-9]+$/.test(withoutCommas)) return null;
-  return Number(withoutCommas);
+  return /^[0-9]+$/.test(withoutCommas) ? Number(withoutCommas) : null;
+}
+
+/**
+ * Resolves the raw numeric amount a bet token represents, before the min/max range check, by
+ * trying each accepted format in turn.
+ */
+function resolveAmount(trimmed: string, balance: number): number | null {
+  const parsers: Array<() => number | null> = [
+    () => parseAllKeyword(trimmed, balance),
+    () => parsePercentAmount(trimmed, balance),
+    () => parseThousandsSuffixAmount(trimmed),
+    () => parsePlainIntegerAmount(trimmed),
+  ];
+  for (const parse of parsers) {
+    const result = parse();
+    if (result !== null) return result;
+  }
+  return null;
 }

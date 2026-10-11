@@ -4,7 +4,10 @@ vi.mock('../db', () => ({
   getLoyaltyPointsBalance: vi.fn(),
   getLoyaltyPointsLeaderboard: vi.fn(),
 }));
-vi.mock('../shared/logger', () => ({ createLogger: () => ({ info: vi.fn(), error: vi.fn() }) }));
+// Shared so a test can assert on the error logged by pointsHandler.ts's module-level `log`
+// instance (created once via `createLogger('Points')` at import time).
+const { logErrorSpy } = vi.hoisted(() => ({ logErrorSpy: vi.fn() }));
+vi.mock('../shared/logger', () => ({ createLogger: () => ({ info: vi.fn(), error: logErrorSpy }) }));
 
 import { getLoyaltyPointsBalance, getLoyaltyPointsLeaderboard } from '../db';
 import { executePointsCommandForTwitch, registerPointsTwitchRuntime } from './pointsHandler';
@@ -85,5 +88,14 @@ describe('executePointsCommandForTwitch', () => {
     vi.mocked(getLoyaltyPointsBalance).mockResolvedValue(3);
     await executePointsCommandForTwitch('channel', 1, '!points something', 'alice', '!points');
     expect(SEND).toHaveBeenCalledWith('channel', '@alice has 3 points.');
+  });
+
+  it('logs rather than throws when sending the response fails', async () => {
+    const sendError = new Error('send failed');
+    SEND.mockRejectedValue(sendError);
+
+    await expect(executePointsCommandForTwitch('channel', 1, '!points', 'alice', '!points')).resolves.toBeUndefined();
+
+    expect(logErrorSpy).toHaveBeenCalledWith(expect.stringContaining('Failed to send points response'), sendError);
   });
 });
