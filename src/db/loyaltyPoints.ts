@@ -11,8 +11,8 @@ export const DEFAULT_POINTS_COOLDOWN_SECONDS = 60;
 export const DEFAULT_POINTS_PER_SUB = 100;
 export const DEFAULT_POINTS_PER_GIFT_SUB = 100;
 
-// `loyalty_points.balance` is a plain INT column (see migrations/loyalty_points.sql) — a payout
-// is clamped to this rather than allowed to overflow it.
+// `loyalty_points.balance` is a plain INT column (see migrations/loyalty_points.sql) — every
+// write that can increase it clamps to this rather than allowed to overflow it.
 const MAX_BALANCE = 2_147_483_647;
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -89,7 +89,10 @@ export async function getConfig(streamerId: number): Promise<LoyaltyPointsConfig
 
 /**
  * Atomically adjusts (adds or subtracts) a viewer's loyalty-points balance, creating their row
- * if it doesn't exist yet, and clamps the result to never go below 0. Safe under concurrent
+ * if it doesn't exist yet, and clamps the result to the `balance` column's valid range: never
+ * below 0, never above {@link MAX_BALANCE} (mirrors the clamp {@link resolveGambleOutcome} does
+ * for a winning payout — without it here too, a large configured per-message/sub/gift-sub rate
+ * could push `balance` past the signed `INT` range on an ordinary award). Safe under concurrent
  * calls for the same viewer — the clamp and the read-back both happen inside the same upsert.
  * @param streamerId - The streamer's `streamer.id`.
  * @param twitchUsername - The viewer's Twitch login.
@@ -100,10 +103,10 @@ export async function adjustBalance(streamerId: number, twitchUsername: string, 
   const newBalance = await withTransaction(async (conn) => {
     await conn.execute<mysql.ResultSetHeader>(
       `INSERT INTO loyalty_points (streamer_id, twitch_username, balance)
-       VALUES (?, ?, LAST_INSERT_ID(GREATEST(?, 0)))
+       VALUES (?, ?, LAST_INSERT_ID(LEAST(GREATEST(?, 0), ?)))
        AS new_row
-       ON DUPLICATE KEY UPDATE balance = LAST_INSERT_ID(GREATEST(loyalty_points.balance + ?, 0))`,
-      [streamerId, twitchUsername, delta, delta],
+       ON DUPLICATE KEY UPDATE balance = LAST_INSERT_ID(LEAST(GREATEST(loyalty_points.balance + ?, 0), ?))`,
+      [streamerId, twitchUsername, delta, MAX_BALANCE, delta, MAX_BALANCE],
     );
     const [rows] = await conn.execute<mysql.RowDataPacket[]>('SELECT LAST_INSERT_ID() AS balance');
     // LAST_INSERT_ID() is a BIGINT expression, so the pool's bigNumberStrings setting can return

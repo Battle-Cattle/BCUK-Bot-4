@@ -134,6 +134,22 @@ describe('adjustBalance', () => {
     expect(await adjustBalance(1, 'viewer', -100)).toBe(0);
   });
 
+  it('clamps the result at the INT column maximum on over-increment', async () => {
+    const pool = makePool();
+    const conn = pool._conn;
+    conn.execute
+      .mockResolvedValueOnce([{ affectedRows: 2 }, []])
+      .mockResolvedValueOnce([[{ balance: 2147483647 }], []]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+
+    expect(await adjustBalance(1, 'viewer', 4_000_000_000)).toBe(2147483647);
+    expect(conn.execute).toHaveBeenNthCalledWith(
+      1,
+      expect.stringContaining('LEAST'),
+      [1, 'viewer', 4_000_000_000, 2147483647, 4_000_000_000, 2147483647],
+    );
+  });
+
   it('parses a string balance into a number (LAST_INSERT_ID() is a BIGINT expression)', async () => {
     const pool = makePool();
     const conn = pool._conn;
