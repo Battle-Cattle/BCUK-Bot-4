@@ -5,6 +5,7 @@ vi.mock('../../db', () => ({
   getStreamerById: vi.fn(), findCachedAlertConfig: vi.fn(), recordStreamerEvent: vi.fn(),
 }));
 vi.mock('../../commands/shoutoutHandler', () => ({ buildShoutoutMessage: vi.fn() }));
+vi.mock('../../commands/pointsEarnHandler', () => ({ awardPointsForSub: vi.fn(), awardPointsForGiftSub: vi.fn() }));
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 vi.mock('../monitor/twitchMonitor', () => ({ triggerImmediateLiveCheck: vi.fn().mockResolvedValue(undefined) }));
 
@@ -18,6 +19,7 @@ import {
 } from './twitchEventSubRuntime';
 import { getStreamerById, findCachedAlertConfig, recordStreamerEvent } from '../../db';
 import { buildShoutoutMessage } from '../../commands/shoutoutHandler';
+import { awardPointsForSub, awardPointsForGiftSub } from '../../commands/pointsEarnHandler';
 import { triggerImmediateLiveCheck } from '../monitor/twitchMonitor';
 import { TEST_ALERT_VARS } from '../../web/routes/testAlertVars';
 
@@ -66,6 +68,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(findCachedAlertConfig).mockResolvedValue(null);
   vi.mocked(recordStreamerEvent).mockResolvedValue(101);
+  vi.mocked(awardPointsForSub).mockResolvedValue(undefined);
+  vi.mocked(awardPointsForGiftSub).mockResolvedValue(undefined);
 });
 
 // ---------------------------------------------------------------------------
@@ -112,6 +116,16 @@ describe('handleSub', () => {
   it('does not call injected runtime when is_gift is true even if sub_enabled is true', async () => {
     await handleSub('streamer', { ...baseEvent, is_gift: true }, makeConfig({ sub_enabled: true }), STREAMER_ID);
     expect(mockSend).not.toHaveBeenCalled();
+  });
+
+  it('awards loyalty points to the subscriber', async () => {
+    await handleSub('streamer', { ...baseEvent }, makeConfig(), STREAMER_ID);
+    expect(awardPointsForSub).toHaveBeenCalledWith(STREAMER_ID, 'subuser');
+  });
+
+  it('does not award loyalty points for a gift sub (handled by handleGiftSub instead)', async () => {
+    await handleSub('streamer', { ...baseEvent, is_gift: true }, makeConfig(), STREAMER_ID);
+    expect(awardPointsForSub).not.toHaveBeenCalled();
   });
 
   it('calls injected runtime (mockSend) with {tier} and {tier_name} substituted (Tier 1)', async () => {
@@ -188,6 +202,11 @@ describe('handleResub', () => {
     await handleResub('streamer', baseEvent, makeConfig({ sub_enabled: false }), STREAMER_ID);
     expect(mockSend).not.toHaveBeenCalled();
   });
+
+  it('awards loyalty points to the resubscriber, even when sub_enabled is false', async () => {
+    await handleResub('streamer', baseEvent, makeConfig({ sub_enabled: false }), STREAMER_ID);
+    expect(awardPointsForSub).toHaveBeenCalledWith(STREAMER_ID, 'resubuser');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -230,6 +249,16 @@ describe('handleGiftSub', () => {
       giftsub_message: 'count={count}',
     }), STREAMER_ID);
     expect(mockSend).toHaveBeenCalledWith('streamer', 'count=3');
+  });
+
+  it('awards loyalty points to the gifter, scaled by the gift count', async () => {
+    await handleGiftSub('streamer', { ...baseEvent, total: 3, is_anonymous: false }, makeConfig({ sub_enabled: false }), STREAMER_ID);
+    expect(awardPointsForGiftSub).toHaveBeenCalledWith(STREAMER_ID, 'gifter', 3);
+  });
+
+  it('does not award loyalty points for an anonymous gift sub', async () => {
+    await handleGiftSub('streamer', { ...baseEvent, is_anonymous: true }, makeConfig({ sub_enabled: false }), STREAMER_ID);
+    expect(awardPointsForGiftSub).not.toHaveBeenCalled();
   });
 });
 

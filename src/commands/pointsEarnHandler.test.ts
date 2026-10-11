@@ -5,10 +5,15 @@ vi.mock('../db', () => ({
   adjustLoyaltyPointsBalance: vi.fn(),
   DEFAULT_POINTS_PER_MESSAGE: 1,
   DEFAULT_POINTS_COOLDOWN_SECONDS: 60,
+  DEFAULT_POINTS_PER_SUB: 100,
+  DEFAULT_POINTS_PER_GIFT_SUB: 100,
 }));
 
 import { getLoyaltyPointsConfig, adjustLoyaltyPointsBalance } from '../db';
-import { awardPointsForChatMessage, tryClaimPointsCooldown, clearPointsCooldowns } from './pointsEarnHandler';
+import {
+  awardPointsForChatMessage, tryClaimPointsCooldown, clearPointsCooldowns,
+  awardPointsForSub, awardPointsForGiftSub,
+} from './pointsEarnHandler';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -96,5 +101,46 @@ describe('awardPointsForChatMessage', () => {
     await awardPointsForChatMessage(1, 'viewer');
     await awardPointsForChatMessage(2, 'viewer');
     expect(adjustLoyaltyPointsBalance).toHaveBeenCalledTimes(2);
+  });
+});
+
+// ─── awardPointsForSub ────────────────────────────────────────────────────────
+
+describe('awardPointsForSub', () => {
+  it('awards the default points-per-sub when the streamer has no configuration', async () => {
+    await awardPointsForSub(1, 'subscriber');
+    expect(adjustLoyaltyPointsBalance).toHaveBeenCalledWith(1, 'subscriber', 100);
+  });
+
+  it('awards the streamer\'s configured points-per-sub', async () => {
+    vi.mocked(getLoyaltyPointsConfig).mockResolvedValue({ pointsPerMessage: 1, cooldownSeconds: 60, pointsPerSub: 250, pointsPerGiftSub: 100 });
+    await awardPointsForSub(1, 'subscriber');
+    expect(adjustLoyaltyPointsBalance).toHaveBeenCalledWith(1, 'subscriber', 250);
+  });
+
+  it('is not subject to the chat-earn cooldown', async () => {
+    await awardPointsForSub(1, 'subscriber');
+    await awardPointsForSub(1, 'subscriber');
+    expect(adjustLoyaltyPointsBalance).toHaveBeenCalledTimes(2);
+  });
+});
+
+// ─── awardPointsForGiftSub ────────────────────────────────────────────────────
+
+describe('awardPointsForGiftSub', () => {
+  it('awards the default points-per-gift-sub, scaled by count, when the streamer has no configuration', async () => {
+    await awardPointsForGiftSub(1, 'gifter', 5);
+    expect(adjustLoyaltyPointsBalance).toHaveBeenCalledWith(1, 'gifter', 500);
+  });
+
+  it('awards the streamer\'s configured points-per-gift-sub, scaled by count', async () => {
+    vi.mocked(getLoyaltyPointsConfig).mockResolvedValue({ pointsPerMessage: 1, cooldownSeconds: 60, pointsPerSub: 100, pointsPerGiftSub: 10 });
+    await awardPointsForGiftSub(1, 'gifter', 5);
+    expect(adjustLoyaltyPointsBalance).toHaveBeenCalledWith(1, 'gifter', 50);
+  });
+
+  it('scales correctly for a single gifted sub', async () => {
+    await awardPointsForGiftSub(1, 'gifter', 1);
+    expect(adjustLoyaltyPointsBalance).toHaveBeenCalledWith(1, 'gifter', 100);
   });
 });

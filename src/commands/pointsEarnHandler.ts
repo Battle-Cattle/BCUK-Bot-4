@@ -3,6 +3,8 @@ import {
   adjustLoyaltyPointsBalance,
   DEFAULT_POINTS_PER_MESSAGE,
   DEFAULT_POINTS_COOLDOWN_SECONDS,
+  DEFAULT_POINTS_PER_SUB,
+  DEFAULT_POINTS_PER_GIFT_SUB,
 } from '../db';
 
 // A per-(streamer, viewer) last-earn timestamp, used by both the passive chat-earn path and
@@ -54,4 +56,30 @@ export async function awardPointsForChatMessage(streamerId: number, twitchUserna
   const cooldownSeconds = config?.cooldownSeconds ?? DEFAULT_POINTS_COOLDOWN_SECONDS;
   if (!tryClaimPointsCooldown(streamerId, twitchUsername, cooldownSeconds)) return;
   await adjustLoyaltyPointsBalance(streamerId, twitchUsername, config?.pointsPerMessage ?? DEFAULT_POINTS_PER_MESSAGE);
+}
+
+/**
+ * Awards a sub/resub loyalty-points bonus, using the streamer's configured amount (or the app's
+ * default if unconfigured). Unlike passive chat-earn, this has no cooldown — Twitch itself
+ * already rate-limits how often a viewer can sub/resub.
+ * @param streamerId - The streamer's `streamer.id`.
+ * @param twitchUsername - The subscribing viewer's Twitch login.
+ * @returns Resolves once the award completes.
+ */
+export async function awardPointsForSub(streamerId: number, twitchUsername: string): Promise<void> {
+  const config = await getLoyaltyPointsConfig(streamerId);
+  await adjustLoyaltyPointsBalance(streamerId, twitchUsername, config?.pointsPerSub ?? DEFAULT_POINTS_PER_SUB);
+}
+
+/**
+ * Awards a gift-sub loyalty-points bonus to the gifter, scaled by the number of subs gifted,
+ * using the streamer's configured per-sub amount (or the app's default if unconfigured).
+ * @param streamerId - The streamer's `streamer.id`.
+ * @param gifterUsername - The gifter's Twitch login.
+ * @param count - Number of subs gifted.
+ * @returns Resolves once the award completes.
+ */
+export async function awardPointsForGiftSub(streamerId: number, gifterUsername: string, count: number): Promise<void> {
+  const config = await getLoyaltyPointsConfig(streamerId);
+  await adjustLoyaltyPointsBalance(streamerId, gifterUsername, (config?.pointsPerGiftSub ?? DEFAULT_POINTS_PER_GIFT_SUB) * count);
 }
