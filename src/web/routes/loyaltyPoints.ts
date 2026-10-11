@@ -27,9 +27,14 @@ const LEADERBOARD_SIZE = 50;
 
 const KNOWN_ERRORS = new Set(['not_a_streamer', 'invalid_config', 'save_failed']);
 
+/** Largest value a MySQL signed `INT` column (every `loyalty_points_config` column) can hold. */
+const MAX_SIGNED_INT = 2_147_483_647;
+
 /**
- * Parses a required non-negative integer form field (e.g. points_per_message).
- * Rejects arrays (repeated fields), empty/whitespace input, non-integer input, and negative values.
+ * Parses a required non-negative integer form field (e.g. points_per_message), bounded to what
+ * a signed `INT` column can hold (every `loyalty_points_config` column).
+ * Rejects arrays (repeated fields), empty/whitespace input, non-integer input, negative values,
+ * and values above {@link MAX_SIGNED_INT}.
  * @param value - The raw form field value.
  * @returns The parsed integer, or null if invalid.
  */
@@ -37,7 +42,7 @@ function parseNonNegativeIntField(value: string | string[] | undefined): number 
   if (Array.isArray(value)) return null;
   if (typeof value !== 'string' || !/^\d+$/.test(value)) return null;
   const n = Number(value);
-  return Number.isSafeInteger(n) ? n : null;
+  return Number.isSafeInteger(n) && n <= MAX_SIGNED_INT ? n : null;
 }
 
 /**

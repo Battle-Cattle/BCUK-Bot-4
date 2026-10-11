@@ -8,7 +8,11 @@ import { tryClaimPointsCooldown } from './pointsEarnHandler';
 
 const log = createLogger('Gamble');
 
-const GAMBLE_COMMAND = '!gamble';
+/** The `!gamble` command token. Exported so `twitchBot.ts` can skip the passive chat-earn
+ *  award for a `!gamble` message itself, which would otherwise race `executeGambleCommandForTwitch`
+ *  for the same shared points cooldown and almost always win it first (its config lookup is a
+ *  cache hit, where gamble's balance lookup is an uncached DB query) — silently dropping the bet. */
+export const GAMBLE_COMMAND = '!gamble';
 const USAGE_MESSAGE = 'Usage: !gamble <amount>, where <amount> is a number (e.g. 100, 1,000, 5k), a percentage of your balance (e.g. 40%), or "all". The amount must be at least 1 and no more than your current balance.';
 
 // ─── Twitch runtime (registered from index.ts before startTwitchBot) ─────────

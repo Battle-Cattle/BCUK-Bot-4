@@ -145,6 +145,24 @@ describe('POST /loyalty-points/config', () => {
     expect(res.headers.location).toBe('/loyalty-points?error=invalid_config');
   });
 
+  it('rejects a value above the signed INT column maximum', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(STREAMER as any);
+
+    const res = await supertest(buildApp()).post('/loyalty-points/config').type('form').send({ ...VALID_CONFIG_BODY, points_per_sub: '2147483648' });
+
+    expect(res.headers.location).toBe('/loyalty-points?error=invalid_config');
+    expect(setLoyaltyPointsConfig).not.toHaveBeenCalled();
+  });
+
+  it('accepts a value exactly at the signed INT column maximum', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(STREAMER as any);
+
+    const res = await supertest(buildApp()).post('/loyalty-points/config').type('form').send({ ...VALID_CONFIG_BODY, points_per_sub: '2147483647' });
+
+    expect(res.status).toBe(302);
+    expect(setLoyaltyPointsConfig).toHaveBeenCalledWith(7, expect.objectContaining({ pointsPerSub: 2147483647 }));
+  });
+
   it('accepts a zero value', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(STREAMER as any);
 

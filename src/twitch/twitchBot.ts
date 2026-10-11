@@ -11,7 +11,7 @@ import { executeCountdownForTwitch } from '../commands/countdownHandler';
 import { executeFollowageForTwitch } from '../commands/followageHandler';
 import { awardPointsForChatMessage } from '../commands/pointsEarnHandler';
 import { executePointsCommandForTwitch } from '../commands/pointsHandler';
-import { executeGambleCommandForTwitch } from '../commands/gambleHandler';
+import { executeGambleCommandForTwitch, GAMBLE_COMMAND } from '../commands/gambleHandler';
 import { fireAndForget, extractCommand } from '../commands/commandUtils';
 import { recordChatMessage } from './twitchChatActivity';
 import { setTwitchChannel } from '../shared/statusStore';
@@ -216,7 +216,10 @@ function handleTwitchMessage(channel: string, user: string, message: string, msg
     );
     fireAndForget(
       resolveStreamerIdForTwitchChannel(normalizedChannel).then((streamerId) => {
-        if (streamerId !== null) return awardPointsForChatMessage(streamerId, user);
+        // Skip chat-earn for a !gamble message itself — it would otherwise race
+        // executeGambleCommandForTwitch below for the same shared points cooldown and almost
+        // always win it first, silently dropping the bet (see GAMBLE_COMMAND's doc comment).
+        if (streamerId !== null && command !== GAMBLE_COMMAND) return awardPointsForChatMessage(streamerId, user);
       }),
       'Points earn error',
       log,

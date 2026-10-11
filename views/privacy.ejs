@@ -59,8 +59,7 @@
             <li>If a connected Twitch channel gets a follow, subscription, resub, gift sub, raid, or
               channel-point redemption: the event type, the viewer's Twitch display name, and a short
               detail (for example a raid's viewer count, or a redeemed reward's name). This is shown on
-              the dashboard's live "Recent Events" feed and is the only data we store about Twitch viewers
-              who aren't signed-in users of this site. If you have an active companion app token, the same
+              the dashboard's live "Recent Events" feed. If you have an active companion app token, the same
               events for your own channel are also delivered live to your companion app; a redemption's
               live push additionally includes the reward ID, the redeemer's Twitch login, and any text
               they entered, none of which we store. Your companion app can also fetch a short history of
@@ -69,9 +68,10 @@
             <li>If a connected Twitch channel has Loyalty Points enabled: each viewer's Twitch login and
               their points balance on that channel. This is a separate, bot-run virtual currency from
               Twitch's own Channel Points, has no real-world monetary value, and isn't redeemable for cash
-              or goods. Like the Recent Events feed above, this is the only data we store about Twitch
-              viewers who aren't signed-in users of this site.</li>
+              or goods.</li>
           </ul>
+          <p>The Recent Events feed and Loyalty Points balances above are the only data we store about
+            Twitch viewers who aren't signed-in users of this site.</p>
           <p>We do not record or transcribe voice channel audio, and we do not store the content of Discord
             messages or Twitch chat. The bot reads messages only to spot its own commands. Commands like
             <code>!followage</code> look up the requested information from Twitch at the time and don't

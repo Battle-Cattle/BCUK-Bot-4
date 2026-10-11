@@ -167,6 +167,7 @@ vi.mock('../commands/pointsHandler', () => ({
 
 vi.mock('../commands/gambleHandler', () => ({
   executeGambleCommandForTwitch: vi.fn(),
+  GAMBLE_COMMAND: '!gamble',
 }));
 
 vi.mock('./twitchChatActivity', () => ({
@@ -444,6 +445,16 @@ describe('handleTwitchMessage', () => {
     // rather than being skipped here.
     expect(executePointsCommandForTwitch).toHaveBeenCalledWith('streamer', null, 'hello', 'alice', 'hello');
     expect(executeGambleCommandForTwitch).toHaveBeenCalledWith('streamer', null, 'hello', 'alice', 'hello');
+  });
+
+  it('does not award passive chat-earn points for a !gamble message, so it can\'t race executeGambleCommandForTwitch for the same shared cooldown', async () => {
+    vi.mocked(executeGambleCommandForTwitch).mockResolvedValue(undefined);
+
+    sendMessage('#streamer', 'alice', '!gamble 100');
+
+    await vi.waitFor(() => expect(executeGambleCommandForTwitch).toHaveBeenCalledOnce());
+    expect(executeGambleCommandForTwitch).toHaveBeenCalledWith('streamer', 42, '!gamble 100', 'alice', '!gamble');
+    expect(awardPointsForChatMessage).not.toHaveBeenCalled();
   });
 
   it('resolves the target guild via the linked streamer\'s active voice presence', async () => {
