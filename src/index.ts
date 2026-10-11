@@ -17,6 +17,7 @@ import { startWebPanel } from './web/server';
 import { disconnect } from './audio/audioPlayer';
 import { registerTwitchChatRuntime } from './commands/customCommandHandler';
 import { registerCounterTwitchRuntime } from './commands/counterHandler';
+import { registerPointsTwitchRuntime } from './commands/pointsHandler';
 import { registerMultiTwitchRuntime } from './commands/multiCommandHandler';
 import { registerShoutoutRuntime } from './commands/shoutoutHandler';
 import { registerCountdownTwitchRuntime } from './commands/countdownHandler';
@@ -245,6 +246,7 @@ async function main(): Promise<void> {
     getMultiTwitchDataForChannel,
   });
   registerCounterTwitchRuntime({ send: sayInChannel });
+  registerPointsTwitchRuntime({ send: sayInChannel });
   registerMultiTwitchRuntime({ send: sayInChannel, getActiveChannels, getLoginUserIds: getActiveChannelUserIds });
   registerShoutoutRuntime({ send: sayInChannel });
   registerCountdownTwitchRuntime({ send: sayInChannel });

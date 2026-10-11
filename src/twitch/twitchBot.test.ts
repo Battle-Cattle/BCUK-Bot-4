@@ -161,6 +161,10 @@ vi.mock('../commands/pointsEarnHandler', () => ({
   awardPointsForChatMessage: vi.fn(),
 }));
 
+vi.mock('../commands/pointsHandler', () => ({
+  executePointsCommandForTwitch: vi.fn(),
+}));
+
 vi.mock('./twitchChatActivity', () => ({
   recordChatMessage: vi.fn(),
   forgetChannelChatActivity: vi.fn(),
@@ -201,6 +205,7 @@ import { handleCommand } from '../commands/commandRouter';
 import { executeCountdownForTwitch } from '../commands/countdownHandler';
 import { executeFollowageForTwitch } from '../commands/followageHandler';
 import { awardPointsForChatMessage } from '../commands/pointsEarnHandler';
+import { executePointsCommandForTwitch } from '../commands/pointsHandler';
 import { recordChatMessage } from './twitchChatActivity';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -385,7 +390,7 @@ describe('handleTwitchMessage', () => {
     expect(recordChatMessage).toHaveBeenCalledWith('streamer');
   });
 
-  it('dispatches all eight executors for a normal message', async () => {
+  it('dispatches all nine executors for a normal message', async () => {
     vi.mocked(executeCustomCommandForTwitch).mockResolvedValue(undefined);
     vi.mocked(executeCounterCommandForTwitch).mockResolvedValue(undefined);
     vi.mocked(executeMultiCommandForTwitch).mockResolvedValue(undefined);
@@ -394,6 +399,7 @@ describe('handleTwitchMessage', () => {
     vi.mocked(executeCountdownForTwitch).mockResolvedValue(undefined);
     vi.mocked(executeFollowageForTwitch).mockResolvedValue(undefined);
     vi.mocked(awardPointsForChatMessage).mockResolvedValue(undefined);
+    vi.mocked(executePointsCommandForTwitch).mockResolvedValue(undefined);
 
     sendMessage('#streamer', 'alice', '!cmd', { displayName: 'Alice', userId: 'alice-id', channelId: 'streamer-id' });
 
@@ -412,15 +418,21 @@ describe('handleTwitchMessage', () => {
     // before the points-earn award, same as guild resolution above.
     await vi.waitFor(() => expect(awardPointsForChatMessage).toHaveBeenCalledOnce());
     expect(awardPointsForChatMessage).toHaveBeenCalledWith(42, 'alice');
+    await vi.waitFor(() => expect(executePointsCommandForTwitch).toHaveBeenCalledOnce());
+    expect(executePointsCommandForTwitch).toHaveBeenCalledWith('streamer', 42, '!cmd', 'alice', '!cmd');
   });
 
   it('does not award points when the channel has no linked streamer', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(null);
+    vi.mocked(executePointsCommandForTwitch).mockResolvedValue(undefined);
 
     sendMessage('#streamer', 'alice', 'hello');
 
-    await vi.waitFor(() => expect(getStreamerByDiscordId).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(getStreamerByDiscordId).toHaveBeenCalled());
     expect(awardPointsForChatMessage).not.toHaveBeenCalled();
+    // executePointsCommandForTwitch is still called (same as executeCounterCommandForTwitch's
+    // guildId), with a null streamerId — it no-ops internally rather than being skipped here.
+    expect(executePointsCommandForTwitch).toHaveBeenCalledWith('streamer', null, 'hello', 'alice', 'hello');
   });
 
   it('resolves the target guild via the linked streamer\'s active voice presence', async () => {

@@ -10,6 +10,7 @@ import { executeShoutoutForTwitch } from '../commands/shoutoutHandler';
 import { executeCountdownForTwitch } from '../commands/countdownHandler';
 import { executeFollowageForTwitch } from '../commands/followageHandler';
 import { awardPointsForChatMessage } from '../commands/pointsEarnHandler';
+import { executePointsCommandForTwitch } from '../commands/pointsHandler';
 import { fireAndForget, extractCommand } from '../commands/commandUtils';
 import { recordChatMessage } from './twitchChatActivity';
 import { setTwitchChannel } from '../shared/statusStore';
@@ -217,6 +218,12 @@ function handleTwitchMessage(channel: string, user: string, message: string, msg
         if (streamerId !== null) return awardPointsForChatMessage(streamerId, user);
       }),
       'Points earn error',
+      log,
+    );
+    fireAndForget(
+      resolveStreamerIdForTwitchChannel(normalizedChannel).then((streamerId) =>
+        executePointsCommandForTwitch(normalizedChannel, streamerId, message, user, command)),
+      'Points command error',
       log,
     );
   } catch (err) {
