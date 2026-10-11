@@ -27,7 +27,7 @@ vi.mock('mysql2/promise', () => ({ default: {} }));
 
 import { makeMockPool } from '../test-utils/mockMysqlPool';
 import { getPool } from './pool';
-import { getBalance, getLeaderboard, getConfig, adjustBalance, tryDebitBalance, setConfig, getAllConfigs } from './loyaltyPoints';
+import { getBalance, getLeaderboard, getConfig, adjustBalance, resolveGambleOutcome, setConfig, getAllConfigs } from './loyaltyPoints';
 
 /** Builds a fake pool via the shared helper, matching this file's `(rows, meta)` call shape. */
 function makePool(rows: unknown[] = [], meta: unknown = {}) {
@@ -156,28 +156,60 @@ describe('adjustBalance', () => {
   });
 });
 
-// ─── tryDebitBalance ──────────────────────────────────────────────────────────
+// ─── resolveGambleOutcome ───────────────────────────────────────────────────────
 
-describe('tryDebitBalance', () => {
-  it('returns the balance after debiting when sufficient funds exist', async () => {
+describe('resolveGambleOutcome', () => {
+  it('debits the stake and credits double back on a win, in one transaction', async () => {
+    const pool = makePool();
+    const conn = pool._conn;
+    conn.execute
+      .mockResolvedValueOnce([{ affectedRows: 1 }, []])   // debit
+      .mockResolvedValueOnce([{ affectedRows: 1 }, []])   // credit (2 * bet)
+      .mockResolvedValueOnce([[{ balance: 1100 }], []]);  // SELECT LAST_INSERT_ID()
+    vi.mocked(getPool).mockReturnValue(pool as any);
+
+    expect(await resolveGambleOutcome(1, 'viewer', 100, true)).toBe(1100);
+    expect(conn.execute).toHaveBeenCalledTimes(3);
+    expect(conn.commit).toHaveBeenCalled();
+  });
+
+  it('clamps a winning credit at the INT column maximum rather than overflowing it', async () => {
     const pool = makePool();
     const conn = pool._conn;
     conn.execute
       .mockResolvedValueOnce([{ affectedRows: 1 }, []])
-      .mockResolvedValueOnce([[{ balance: 900 }], []]);
+      .mockResolvedValueOnce([{ affectedRows: 1 }, []])
+      .mockResolvedValueOnce([[{ balance: 2147483647 }], []]);
     vi.mocked(getPool).mockReturnValue(pool as any);
 
-    expect(await tryDebitBalance(1, 'viewer', 100)).toBe(900);
-    expect(conn.commit).toHaveBeenCalled();
+    expect(await resolveGambleOutcome(1, 'viewer', 2_000_000_000, true)).toBe(2147483647);
+    expect(conn.execute).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining('LEAST'),
+      [4_000_000_000, 2147483647, 1, 'viewer'],
+    );
   });
 
-  it('returns null when the balance is insufficient (0 rows affected)', async () => {
+  it('debits the stake and makes no credit write on a loss', async () => {
+    const pool = makePool();
+    const conn = pool._conn;
+    conn.execute
+      .mockResolvedValueOnce([{ affectedRows: 1 }, []])   // debit
+      .mockResolvedValueOnce([[{ balance: 900 }], []]);   // SELECT LAST_INSERT_ID()
+    vi.mocked(getPool).mockReturnValue(pool as any);
+
+    expect(await resolveGambleOutcome(1, 'viewer', 100, false)).toBe(900);
+    expect(conn.execute).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns null when the balance is insufficient, without any credit write', async () => {
     const pool = makePool();
     const conn = pool._conn;
     conn.execute.mockResolvedValueOnce([{ affectedRows: 0 }, []]);
     vi.mocked(getPool).mockReturnValue(pool as any);
 
-    expect(await tryDebitBalance(1, 'viewer', 100)).toBeNull();
+    expect(await resolveGambleOutcome(1, 'viewer', 100, true)).toBeNull();
+    expect(conn.execute).toHaveBeenCalledTimes(1);
   });
 
   it('returns null for a viewer with no row at all', async () => {
@@ -186,7 +218,7 @@ describe('tryDebitBalance', () => {
     conn.execute.mockResolvedValueOnce([{ affectedRows: 0 }, []]);
     vi.mocked(getPool).mockReturnValue(pool as any);
 
-    expect(await tryDebitBalance(1, 'new-viewer', 1)).toBeNull();
+    expect(await resolveGambleOutcome(1, 'new-viewer', 1, false)).toBeNull();
   });
 
   it('parses a string balance into a number (LAST_INSERT_ID() is a BIGINT expression)', async () => {
@@ -197,7 +229,7 @@ describe('tryDebitBalance', () => {
       .mockResolvedValueOnce([[{ balance: '900' }], []]);
     vi.mocked(getPool).mockReturnValue(pool as any);
 
-    expect(await tryDebitBalance(1, 'viewer', 100)).toBe(900);
+    expect(await resolveGambleOutcome(1, 'viewer', 100, false)).toBe(900);
   });
 
   it('rolls back and rethrows on failure', async () => {
@@ -206,7 +238,7 @@ describe('tryDebitBalance', () => {
     conn.execute.mockRejectedValueOnce(new Error('db exploded'));
     vi.mocked(getPool).mockReturnValue(pool as any);
 
-    await expect(tryDebitBalance(1, 'viewer', 100)).rejects.toThrow('db exploded');
+    await expect(resolveGambleOutcome(1, 'viewer', 100, false)).rejects.toThrow('db exploded');
     expect(conn.rollback).toHaveBeenCalled();
   });
 });

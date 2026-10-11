@@ -11,6 +11,10 @@ export const DEFAULT_POINTS_COOLDOWN_SECONDS = 60;
 export const DEFAULT_POINTS_PER_SUB = 100;
 export const DEFAULT_POINTS_PER_GIFT_SUB = 100;
 
+// `loyalty_points.balance` is a plain INT column (see migrations/loyalty_points.sql) — a payout
+// is clamped to this rather than allowed to overflow it.
+const MAX_BALANCE = 2_147_483_647;
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 /** One entry on a streamer's loyalty-points leaderboard. */
@@ -114,31 +118,52 @@ export async function adjustBalance(streamerId: number, twitchUsername: string, 
 }
 
 /**
- * Atomically debits `amount` from a viewer's loyalty-points balance, but only if their current
- * balance is at least `amount` — the debit and the sufficiency check happen in the same
- * conditional UPDATE, so two concurrent debits against the same balance (e.g. two `!gamble all`
- * requests racing each other) can't both succeed against a balance that only covers one of them.
+ * Atomically resolves a `!gamble` bet: debits `bet` from the viewer's balance (conditionally,
+ * failing if their balance is too low), and, only if `won` is true, credits back `2 * bet` (the
+ * returned stake plus profit), all within one
+ * transaction. Keeping both writes in the same transaction is what CodeRabbit's review flagged
+ * as missing from an earlier version of this flow (debit-then-separately-credit): a viewer could
+ * otherwise lose their stake to a debit that committed while a later, separate credit call failed
+ * (for instance after a crash) and left them with no payout. A winning credit that would push the
+ * balance above the column's INT range is clamped to {@link MAX_BALANCE} rather than attempted
+ * and failed, so the single transaction here never has a reason to roll back after the debit
+ * succeeds.
  * @param streamerId - The streamer's `streamer.id`.
- * @param twitchUsername - The viewer's Twitch login.
- * @param amount - The positive amount to debit.
- * @returns The viewer's balance after the debit, or null if their balance was too low (including
- *   a viewer with no row at all, who implicitly has a balance of 0).
+ * @param twitchUsername - The gambling viewer's Twitch login.
+ * @param bet - The already-validated, positive bet amount.
+ * @param won - Whether the coin flip was a win.
+ * @returns The viewer's balance after the bet resolves, or null if their balance was too low to
+ *   cover `bet` (including a viewer with no row at all).
  */
-export async function tryDebitBalance(streamerId: number, twitchUsername: string, amount: number): Promise<number | null> {
-  const newBalance = await withTransaction(async (conn) => {
-    const [result] = await conn.execute<mysql.ResultSetHeader>(
+export async function resolveGambleOutcome(
+  streamerId: number,
+  twitchUsername: string,
+  bet: number,
+  won: boolean,
+): Promise<number | null> {
+  return withTransaction(async (conn) => {
+    const [debitResult] = await conn.execute<mysql.ResultSetHeader>(
       `UPDATE loyalty_points
        SET balance = LAST_INSERT_ID(balance - ?)
        WHERE streamer_id = ? AND twitch_username = ? AND balance >= ?`,
-      [amount, streamerId, twitchUsername, amount],
+      [bet, streamerId, twitchUsername, bet],
     );
-    if (result.affectedRows === 0) return null;
+    if (debitResult.affectedRows === 0) return null;
+
+    if (won) {
+      await conn.execute<mysql.ResultSetHeader>(
+        `UPDATE loyalty_points
+         SET balance = LAST_INSERT_ID(LEAST(balance + ?, ?))
+         WHERE streamer_id = ? AND twitch_username = ?`,
+        [2 * bet, MAX_BALANCE, streamerId, twitchUsername],
+      );
+    }
+
     const [rows] = await conn.execute<mysql.RowDataPacket[]>('SELECT LAST_INSERT_ID() AS balance');
     // See adjustBalance's identical comment: LAST_INSERT_ID() is a BIGINT expression that can
     // come back as a string, safely parsed back here since this is a bounded points balance.
     return Number(rows[0]!.balance); // SELECT LAST_INSERT_ID() always returns one row
   });
-  return newBalance;
 }
 
 /**

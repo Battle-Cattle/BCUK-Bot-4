@@ -1,5 +1,5 @@
 import { createLogger } from '../shared/logger';
-import { getLoyaltyPointsBalance, adjustLoyaltyPointsBalance, tryDebitLoyaltyPointsBalance, getLoyaltyPointsConfig, DEFAULT_POINTS_COOLDOWN_SECONDS } from '../db';
+import { getLoyaltyPointsBalance, resolveLoyaltyPointsGambleOutcome, getLoyaltyPointsConfig, DEFAULT_POINTS_COOLDOWN_SECONDS } from '../db';
 import { resolveCommand, extractArgs } from './commandUtils';
 import { createRuntimeRegistry } from '../shared/runtimeRegistry';
 import type { TwitchSendRuntime } from './twitchRuntime';
@@ -43,13 +43,13 @@ async function resolveBet(streamerId: number, twitchUsername: string, amountToke
 }
 
 /**
- * Flips a 50/50 coin for a validated bet and formats the resulting chat reply. The stake is
- * debited atomically and conditionally (via {@link tryDebitLoyaltyPointsBalance}) before the
- * coin flip, rather than trusting the balance `bet` was validated against — without that, two
- * concurrent bets (e.g. two `!gamble all` messages) could both validate against the same
- * pre-bet balance and both proceed, creating or destroying points beyond what either bet alone
- * should. A win then credits back `2 * bet` (the returned stake plus the profit); a loss needs
- * no further write, since the stake is already gone.
+ * Flips a 50/50 coin for a validated bet and formats the resulting chat reply. The coin flip
+ * happens first, then the stake debit and (on a win) the payout credit happen together in one
+ * atomic call (via {@link resolveLoyaltyPointsGambleOutcome}), rather than trusting the balance
+ * `bet` was validated against and rather than two separate writes — without the first guard, two
+ * concurrent bets (e.g. two `!gamble all` messages) could both validate against the same pre-bet
+ * balance and both proceed; without the second, a debit could commit and a separate payout credit
+ * then fail, leaving the viewer's stake gone with no winnings.
  * @param streamerId - The streamer's `streamer.id`.
  * @param twitchUsername - The gambling viewer's Twitch login.
  * @param bet - The already-validated bet amount.
@@ -57,13 +57,11 @@ async function resolveBet(streamerId: number, twitchUsername: string, amountToke
  *   be debited (the balance changed since `bet` was validated against it).
  */
 async function resolveGamble(streamerId: number, twitchUsername: string, bet: number): Promise<string | null> {
-  const balanceAfterStake = await tryDebitLoyaltyPointsBalance(streamerId, twitchUsername, bet);
-  if (balanceAfterStake === null) return null;
-
   const won = Math.random() < 0.5;
-  if (!won) return `@${twitchUsername} lost ${bet} points. New balance: ${balanceAfterStake}`;
+  const newBalance = await resolveLoyaltyPointsGambleOutcome(streamerId, twitchUsername, bet, won);
+  if (newBalance === null) return null;
 
-  const newBalance = await adjustLoyaltyPointsBalance(streamerId, twitchUsername, 2 * bet);
+  if (!won) return `@${twitchUsername} lost ${bet} points. New balance: ${newBalance}`;
   return `@${twitchUsername} won ${bet} points! New balance: ${newBalance}`;
 }
 
