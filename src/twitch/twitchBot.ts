@@ -11,6 +11,7 @@ import { executeCountdownForTwitch } from '../commands/countdownHandler';
 import { executeFollowageForTwitch } from '../commands/followageHandler';
 import { awardPointsForChatMessage } from '../commands/pointsEarnHandler';
 import { executePointsCommandForTwitch } from '../commands/pointsHandler';
+import { executeGambleCommandForTwitch } from '../commands/gambleHandler';
 import { fireAndForget, extractCommand } from '../commands/commandUtils';
 import { recordChatMessage } from './twitchChatActivity';
 import { setTwitchChannel } from '../shared/statusStore';
@@ -224,6 +225,12 @@ function handleTwitchMessage(channel: string, user: string, message: string, msg
       resolveStreamerIdForTwitchChannel(normalizedChannel).then((streamerId) =>
         executePointsCommandForTwitch(normalizedChannel, streamerId, message, user, command)),
       'Points command error',
+      log,
+    );
+    fireAndForget(
+      resolveStreamerIdForTwitchChannel(normalizedChannel).then((streamerId) =>
+        executeGambleCommandForTwitch(normalizedChannel, streamerId, message, user, command)),
+      'Gamble command error',
       log,
     );
   } catch (err) {
