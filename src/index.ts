@@ -17,6 +17,8 @@ import { startWebPanel } from './web/server';
 import { disconnect } from './audio/audioPlayer';
 import { registerTwitchChatRuntime } from './commands/customCommandHandler';
 import { registerCounterTwitchRuntime } from './commands/counterHandler';
+import { registerPointsTwitchRuntime } from './commands/pointsHandler';
+import { registerGambleTwitchRuntime } from './commands/gambleHandler';
 import { registerMultiTwitchRuntime } from './commands/multiCommandHandler';
 import { registerShoutoutRuntime } from './commands/shoutoutHandler';
 import { registerCountdownTwitchRuntime } from './commands/countdownHandler';
@@ -195,6 +197,38 @@ process.on('uncaughtException', (err) => {
 });
 
 /**
+ * Registers every Twitch/EventSub runtime callback (`src/shared/runtimeRegistry.ts` slots) used
+ * by command handlers and EventSub effects, so they can send/push without importing this file
+ * and creating a circular dependency (see "New Command Handler Pattern" in CLAUDE.md). Must run
+ * before `startTwitchBot()`/`startDiscordBot()`, since the first incoming message could already
+ * need one of these.
+ */
+function registerTwitchRuntimes(): void {
+  registerTwitchChatRuntime({
+    send: sayInChannel,
+    getActiveChannels,
+    getLoginUserIds: getActiveChannelUserIds,
+    getMultiTwitchDataForChannel,
+  });
+  registerCounterTwitchRuntime({ send: sayInChannel });
+  registerPointsTwitchRuntime({ send: sayInChannel });
+  registerGambleTwitchRuntime({ send: sayInChannel });
+  registerMultiTwitchRuntime({ send: sayInChannel, getActiveChannels, getLoginUserIds: getActiveChannelUserIds });
+  registerShoutoutRuntime({ send: sayInChannel });
+  registerCountdownTwitchRuntime({ send: sayInChannel });
+  registerFollowageRuntime({ send: sayInChannel });
+  registerEventSubOverlayRuntime({ pushOverlayEvent });
+  registerEventSubCompanionRuntime({ pushCompanionEvent });
+  registerEventSubAlertRuntime({ pushAlertEvent });
+  registerEventSubDashboardRuntime({ pushDashboardEvent });
+  registerEventSubTwitchRuntime({ send: sayInChannel });
+  registerEventSubReloadRuntime({ triggerReload: reloadEventSubSubscriptions });
+  registerRewardPricingRuntime({ pushPricingUpdate });
+  registerTimerCommandsRuntime({ send: sayInChannel, getLoginUserIds: getActiveChannelUserIds });
+  registerTwitchGuildResolutionRuntime({ resolveGuildIdForDiscordId });
+}
+
+/**
  * Boots the bot: verifies DB connectivity, wires every Twitch/EventSub runtime callback,
  * loads the guild registry, then starts the Discord bot, Twitch bot, web panel, and
  * schedulers, in that order (see the Startup Sequence section of `CLAUDE.md`), finishing with
@@ -238,26 +272,7 @@ async function main(): Promise<void> {
 
   // Wire Twitch send/channel helpers before the bot connects so the first
   // message can already use the execute path (functions capture live state).
-  registerTwitchChatRuntime({
-    send: sayInChannel,
-    getActiveChannels,
-    getLoginUserIds: getActiveChannelUserIds,
-    getMultiTwitchDataForChannel,
-  });
-  registerCounterTwitchRuntime({ send: sayInChannel });
-  registerMultiTwitchRuntime({ send: sayInChannel, getActiveChannels, getLoginUserIds: getActiveChannelUserIds });
-  registerShoutoutRuntime({ send: sayInChannel });
-  registerCountdownTwitchRuntime({ send: sayInChannel });
-  registerFollowageRuntime({ send: sayInChannel });
-  registerEventSubOverlayRuntime({ pushOverlayEvent });
-  registerEventSubCompanionRuntime({ pushCompanionEvent });
-  registerEventSubAlertRuntime({ pushAlertEvent });
-  registerEventSubDashboardRuntime({ pushDashboardEvent });
-  registerEventSubTwitchRuntime({ send: sayInChannel });
-  registerEventSubReloadRuntime({ triggerReload: reloadEventSubSubscriptions });
-  registerRewardPricingRuntime({ pushPricingUpdate });
-  registerTimerCommandsRuntime({ send: sayInChannel, getLoginUserIds: getActiveChannelUserIds });
-  registerTwitchGuildResolutionRuntime({ resolveGuildIdForDiscordId });
+  registerTwitchRuntimes();
 
   // Load the guild registry before the Discord client connects so the
   // messageCreate gate recognises registered guilds from the first message.

@@ -14,6 +14,7 @@ import * as customCommandWrites from './db/customCommandWrites';
 import * as counterWrites from './db/counterWrites';
 import * as alertConfigWrites from './db/alertConfigWrites';
 import * as sfxWrites from './db/sfxWrites';
+import * as loyaltyPointsWrites from './db/loyaltyPointsWrites';
 import { pingDb } from './db/health';
 
 // The facade must hand out the cache-invalidating wrappers, never the raw DB-module writes of
@@ -27,6 +28,7 @@ describe('db facade', () => {
     ['counterWrites', counterWrites],
     ['alertConfigWrites', alertConfigWrites],
     ['sfxWrites', sfxWrites],
+    ['loyaltyPointsWrites', loyaltyPointsWrites],
   ])('re-exports every %s wrapper', (_name, writes) => {
     const entries = Object.entries(writes);
     expect(entries.length).toBeGreaterThan(0);

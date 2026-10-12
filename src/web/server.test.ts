@@ -100,6 +100,7 @@ vi.mock('./routes/streams', () => ({ default: markerRouter('streams') }));
 vi.mock('./routes/commands', () => ({ default: emptyRouter() }));
 vi.mock('./routes/counters', () => ({ default: emptyRouter() }));
 vi.mock('./routes/counterHistory', () => ({ default: emptyRouter() }));
+vi.mock('./routes/loyaltyPoints', () => ({ default: emptyRouter() }));
 vi.mock('./routes/streamdeck', () => ({ default: emptyRouter() }));
 vi.mock('./routes/streamdeckKeys', () => ({ default: emptyRouter() }));
 vi.mock('./routes/userSettings', () => ({ default: emptyRouter() }));

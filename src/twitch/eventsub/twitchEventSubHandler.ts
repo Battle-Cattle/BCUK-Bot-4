@@ -1,5 +1,6 @@
 import type { EventSubConfig } from '../../db';
 import { buildShoutoutMessage } from '../../commands/shoutoutHandler';
+import { awardPointsForSub, awardPointsForGiftSub } from '../../commands/pointsEarnHandler';
 import { createLogger } from '../../shared/logger';
 import { triggerImmediateLiveCheck } from '../monitor/twitchMonitor';
 import {
@@ -98,6 +99,7 @@ export async function handleSub(login: string, event: SubEvent, config: EventSub
   await maybeSendChatMessage(login, config.sub_enabled, config.sub_message, vars);
   await maybePushAlert(login, streamerId, 'sub', vars);
   await recordAndPushDashboardEvent(streamerId, 'sub', event.user_name, tierName(event.tier));
+  await awardPointsForSub(streamerId, event.user_login);
 }
 
 /**
@@ -124,6 +126,7 @@ export async function handleResub(login: string, event: ResubEvent, config: Even
   await maybeSendChatMessage(login, config.sub_enabled, config.resub_message, vars);
   await maybePushAlert(login, streamerId, 'resub', vars);
   await recordAndPushDashboardEvent(streamerId, 'resub', event.user_name, `${tierName(event.tier)} · ${event.cumulative_months} months`);
+  await awardPointsForSub(streamerId, event.user_login);
 }
 
 /**
@@ -152,6 +155,9 @@ export async function handleGiftSub(login: string, event: GiftSubEvent, config: 
   await maybeSendChatMessage(login, config.sub_enabled, config.giftsub_message, vars);
   await maybePushAlert(login, streamerId, 'giftsub', vars);
   await recordAndPushDashboardEvent(streamerId, 'giftsub', gifterDisplay, `${event.total} x ${tierName(event.tier)}`);
+  if (!event.is_anonymous) {
+    await awardPointsForGiftSub(streamerId, event.user_login, event.total);
+  }
 }
 
 /**

@@ -146,6 +146,24 @@ export {
 
 export { recordPricingHistory, getPricingHistoryForRewards } from './db/rewardPricingHistory';
 
+// ─── Loyalty points ─────────────────────────────────────────────────────────
+// Viewer currency (chat-earn, sub/gift-sub bonuses, !gamble) — unrelated to the Twitch Channel
+// Points reward-pricing feature above; named "loyalty points" to avoid confusion with it.
+
+export type { LoyaltyPointsConfig, LoyaltyPointsLeaderboardEntry } from './db/loyaltyPoints';
+export {
+  getBalance as getLoyaltyPointsBalance,
+  adjustBalance as adjustLoyaltyPointsBalance,
+  resolveGambleOutcome as resolveLoyaltyPointsGambleOutcome,
+  getLeaderboard as getLoyaltyPointsLeaderboard,
+  DEFAULT_POINTS_PER_MESSAGE,
+  DEFAULT_POINTS_COOLDOWN_SECONDS,
+  DEFAULT_POINTS_PER_SUB,
+  DEFAULT_POINTS_PER_GIFT_SUB,
+} from './db/loyaltyPoints';
+export { getCachedConfig as getLoyaltyPointsConfig } from './db/loyaltyPointsCache';
+export { setLoyaltyPointsConfig } from './db/loyaltyPointsWrites';
+
 // ─── Timer commands ─────────────────────────────────────────────────────────
 
 export type {

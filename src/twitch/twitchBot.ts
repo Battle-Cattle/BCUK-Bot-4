@@ -9,6 +9,9 @@ import { executeMultiCommandForTwitch } from '../commands/multiCommandHandler';
 import { executeShoutoutForTwitch } from '../commands/shoutoutHandler';
 import { executeCountdownForTwitch } from '../commands/countdownHandler';
 import { executeFollowageForTwitch } from '../commands/followageHandler';
+import { awardPointsForChatMessage } from '../commands/pointsEarnHandler';
+import { executePointsCommandForTwitch } from '../commands/pointsHandler';
+import { executeGambleCommandForTwitch, GAMBLE_COMMAND } from '../commands/gambleHandler';
 import { fireAndForget, extractCommand } from '../commands/commandUtils';
 import { recordChatMessage } from './twitchChatActivity';
 import { setTwitchChannel } from '../shared/statusStore';
@@ -23,6 +26,7 @@ import {
   getAllTwitchLinkedUsers,
   findUserByTwitchName,
   getBotChatToken,
+  getStreamerByDiscordId,
   type RefreshingLookupCache,
 } from '../db';
 import { resolveGuildIdForDiscordId } from './twitchGuildResolutionRuntime';
@@ -142,6 +146,14 @@ async function resolveGuildIdForTwitchCommand(normalizedChannel: string): Promis
   return resolveGuildIdForDiscordId(discordId);
 }
 
+/** Resolves a Twitch channel's `streamer.id`, or null if it isn't linked to a streamer row. */
+async function resolveStreamerIdForTwitchChannel(normalizedChannel: string): Promise<number | null> {
+  const discordId = await resolveDiscordIdForTwitchChannel(normalizedChannel);
+  if (!discordId) return null;
+  const streamer = await getStreamerByDiscordId(discordId);
+  return streamer?.id ?? null;
+}
+
 /**
  * Twurple `onMessage` event handler: records the message for timer commands'
  * `min_messages` gate (see `twitchChatActivity.ts`), then dispatches it to
@@ -200,6 +212,32 @@ function handleTwitchMessage(channel: string, user: string, message: string, msg
     fireAndForget(
       executeFollowageForTwitch(normalizedChannel, message, msg.channelId, { id: msg.userInfo.userId, name: displayName }, command),
       'Followage error',
+      log,
+    );
+    // Resolved once and shared by the three points/gamble handlers below, rather than each
+    // calling resolveStreamerIdForTwitchChannel (an uncached DB lookup) independently — that
+    // would otherwise run the same query three times per chat message.
+    const streamerIdPromise = resolveStreamerIdForTwitchChannel(normalizedChannel);
+    fireAndForget(
+      streamerIdPromise.then((streamerId) => {
+        // Skip chat-earn for a !gamble message itself — it would otherwise race
+        // executeGambleCommandForTwitch below for the same shared points cooldown and almost
+        // always win it first, silently dropping the bet (see GAMBLE_COMMAND's doc comment).
+        if (streamerId !== null && command !== GAMBLE_COMMAND) return awardPointsForChatMessage(streamerId, user);
+      }),
+      'Points earn error',
+      log,
+    );
+    fireAndForget(
+      streamerIdPromise.then((streamerId) =>
+        executePointsCommandForTwitch(normalizedChannel, streamerId, message, user, command)),
+      'Points command error',
+      log,
+    );
+    fireAndForget(
+      streamerIdPromise.then((streamerId) =>
+        executeGambleCommandForTwitch(normalizedChannel, streamerId, message, user, command)),
+      'Gamble command error',
       log,
     );
   } catch (err) {
