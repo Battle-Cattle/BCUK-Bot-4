@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { waitFor } from '../test-utils/waitFor';
 import { mockLogger } from '../test-utils/loggerMock';
 
 // ─── Mocks ──────────────────────────────────────────────────────────────────
@@ -495,7 +496,7 @@ describe('reconnect', () => {
         .mockImplementationOnce(() => new Promise<void>((resolve) => { finishReady = resolve; }) as never);
 
       const pending = mod.connect(client as never, 'guild-A', 'chan-1');
-      await vi.waitFor(() => expect(createdConnections).toHaveLength(1));
+      await waitFor(() => expect(createdConnections).toHaveLength(1));
       const [conn] = createdConnections;
 
       mod.disconnect('guild-A');

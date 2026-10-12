@@ -27,6 +27,15 @@ vi.mock('../middleware', () => ({
   requireAuth: (_req: any, _res: any, next: any) => next(),
 }));
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
+// Keep the real retry logic, but drop the 500ms backoff between attempts so the transient-503
+// tests don't spend a second sleeping. fetchWithRetry.test.ts covers the delay itself.
+vi.mock('../../shared/fetchWithRetry', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../shared/fetchWithRetry')>();
+  return {
+    fetchWithRetry: (...[input, init, log, maxRetries]: Parameters<typeof actual.fetchWithRetry>) =>
+      actual.fetchWithRetry(input, init, log, maxRetries, 0),
+  };
+});
 
 import express from 'express';
 import supertest from 'supertest';
@@ -195,7 +204,7 @@ describe('GET /discord/callback', () => {
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/');
     expect(globalThis.fetch).toHaveBeenCalledTimes(3);
-  }, 10_000);
+  });
 
   it('renders error 500 when the token endpoint keeps returning transient 503s past the retry limit', async () => {
     mockFetch([
@@ -209,7 +218,7 @@ describe('GET /discord/callback', () => {
     expect(res.status).toBe(500);
     expect((res.body as any).view).toBe('error');
     expect(globalThis.fetch).toHaveBeenCalledTimes(3);
-  }, 10_000);
+  });
 
   it('renders error 500 when profile fetch fails', async () => {
     mockFetch([

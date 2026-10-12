@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { waitFor } from '../../test-utils/waitFor';
 
 const { mockLog, mockLogger } = vi.hoisted(() => {
   const mockLog = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
@@ -107,7 +108,7 @@ describe('runReconciliationTick', () => {
     });
 
     const tick = runReconciliationTick();
-    await vi.waitFor(() => expect(events).toContain('start:UNFULFILLED'));
+    await waitFor(() => expect(events).toContain('start:UNFULFILLED'));
     await Promise.resolve();
     await Promise.resolve();
     // The FULFILLED request must not start while UNFULFILLED is still in flight — a redemption

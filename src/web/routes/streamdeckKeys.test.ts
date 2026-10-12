@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { waitFor } from '../../test-utils/waitFor';
 import { mockLogger } from '../../test-utils/loggerMock';
 import { ACCESS_LEVEL_MOCK } from '../../test-utils/accessLevelMock';
 
@@ -216,7 +217,7 @@ describe('POST /streamdeck-key/request', () => {
     // immediately (rather than just holding the unawaited value) is what
     // actually dispatches the request.
     const firstReq = supertest(app).post('/streamdeck-key/request').then((r) => r);
-    await vi.waitFor(() => expect(callOrder).toContain('hasApiKey-start'));
+    await waitFor(() => expect(callOrder).toContain('hasApiKey-start'));
     const secondReq = supertest(app).post('/streamdeck-key/request').then((r) => r);
 
     // Give the second request every chance to (incorrectly) start its own

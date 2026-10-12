@@ -52,6 +52,14 @@ trap rollback ERR
 echo "==> Installing dependencies..."
 retry npm ci
 
+# Vitest's on-disk transform cache (.vitest-cache, see vitest.config.mts) lives outside
+# node_modules so it survives the `npm ci` above and keeps test runs warm across deploys.
+# Drop it whenever the lockfile changed, so a dependency/Vitest upgrade always starts cold.
+if ! git diff --quiet "$PREVIOUS_SHA" HEAD -- package-lock.json; then
+    echo "==> package-lock.json changed — clearing the Vitest transform cache..."
+    rm -rf .vitest-cache
+fi
+
 echo "==> Checking for vulnerabilities..."
 npm audit --audit-level=high
 

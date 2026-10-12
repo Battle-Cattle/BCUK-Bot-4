@@ -12,6 +12,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "test:toolchain": "vitest run --config vitest.toolchain.config.mts",
     "lint": "eslint .",
     "check:circular": "node scripts/checkCircularDeps.js",
     "deploy": "bash deploy.sh"

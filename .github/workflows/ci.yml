@@ -47,15 +47,65 @@ jobs:
       - name: Build (TypeScript)
         run: npm run build
 
-      - name: Lint
-        run: npm run lint
+      # Vitest's on-disk transform cache (see vitest.config.mts). Keyed per commit so every run
+      # saves a fresh copy, restoring the newest one for the same OS + lockfile + Vitest config.
+      - name: Restore Vitest transform cache
+        uses: actions/cache@v4
+        with:
+          path: .vitest-cache
+          key: vitest-${{ runner.os }}-${{ hashFiles('package-lock.json', 'vitest.config.mts') }}-${{ github.sha }}
+          restore-keys: |
+            vitest-${{ runner.os }}-${{ hashFiles('package-lock.json', 'vitest.config.mts') }}-
 
-      - name: Check circular dependencies
+      # Lint (type-aware ESLint) takes about as long as the test suite and is mostly single-threaded,
+      # so on Ubuntu it — plus the circular-dependency and ts-node toolchain checks — runs in the
+      # background while the coverage run streams in the foreground. Background output is captured
+      # and printed afterwards so it can't interleave with Vitest's. Lint and the circular check
+      # are platform-independent, so they run on Ubuntu only.
+      - name: Lint, circular-dependency check, toolchain check and tests with coverage
         if: matrix.os == 'ubuntu-latest'
-        run: npm run check:circular
+        shell: bash
+        run: |
+          LOG_DIR=$(mktemp -d)
+          declare -A PIDS
+          for check in lint check:circular test:toolchain; do
+            npm run "$check" > "$LOG_DIR/$check.log" 2>&1 &
+            PIDS[$check]=$!
+          done
 
-      - name: Run tests with coverage
-        run: npm run test:coverage
+          TEST_STATUS=0
+          npm run test:coverage || TEST_STATUS=$?
+
+          FAILED=()
+          for check in lint check:circular test:toolchain; do
+            STATUS=0
+            wait "${PIDS[$check]}" || STATUS=$?
+            echo "::group::npm run $check (exit $STATUS)"
+            cat "$LOG_DIR/$check.log"
+            echo "::endgroup::"
+            if [ "$STATUS" -ne 0 ]; then
+              echo "::error::npm run $check failed (exit $STATUS)"
+              FAILED+=("$check")
+            fi
+          done
+
+          if [ "$TEST_STATUS" -ne 0 ]; then
+            echo "::error::npm run test:coverage failed (exit $TEST_STATUS)"
+            FAILED+=("test:coverage")
+          fi
+          if [ "${#FAILED[@]}" -ne 0 ]; then
+            echo "Failed: ${FAILED[*]}"
+            exit 1
+          fi
+
+      # Coverage is only uploaded from Ubuntu, so Windows skips the V8 coverage instrumentation.
+      - name: ts-node toolchain check
+        if: matrix.os == 'windows-latest'
+        run: npm run test:toolchain
+
+      - name: Run tests
+        if: matrix.os == 'windows-latest'
+        run: npm test
 
       - name: Upload coverage report
         if: always() && matrix.os == 'ubuntu-latest'

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { waitFor } from '../../test-utils/waitFor';
 
 const { logMock } = vi.hoisted(() => ({
   logMock: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
@@ -1093,7 +1094,7 @@ describe('error handling in subscription setup', () => {
     });
 
     // Waits until the second deletion starts — proves it isn't waiting on the first to settle.
-    await vi.waitFor(() => expect(secondStarted).toBe(true));
+    await waitFor(() => expect(secondStarted).toBe(true));
 
     rejectFirst(new Error('delete failed'));
     await expect(call).resolves.not.toThrow();

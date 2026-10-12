@@ -8,6 +8,10 @@ import path from 'path';
 // `ts.sys`-shaped API ts-node's registration step reads. This spawns a fresh
 // Node process that registers ts-node exactly as the `dev` script does and
 // requires a real project module, so that breakage shows up as a failing test.
+//
+// That registration type-checks the whole project (~7s of CPU), so this file is excluded from
+// `npm test` and runs on its own via `npm run test:toolchain` (vitest.toolchain.config.mts), which
+// CI runs on every push.
 describe('ts-node dev toolchain', () => {
   it('registers and transpiles a real project module without throwing', () => {
     const projectRoot = path.resolve(__dirname, '..', '..');

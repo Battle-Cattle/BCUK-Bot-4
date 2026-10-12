@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { waitFor } from '../../test-utils/waitFor';
 import { EventEmitter } from 'events';
 import { mockLogger } from '../../test-utils/loggerMock';
 import type { SfxFile } from '../../db';
@@ -297,7 +298,7 @@ describe('POST /sfx/trigger/suggest-description', () => {
         .send({ trigger_id: '5' })
         .end((err, res) => (err ? reject(err) : resolve(res)));
     });
-    await vi.waitFor(() => expect(spawn).toHaveBeenCalled());
+    await waitFor(() => expect(spawn).toHaveBeenCalled());
     proc.stdout.emit('data', Buffer.from('transcoded'));
     proc.emit('close', 0);
 
