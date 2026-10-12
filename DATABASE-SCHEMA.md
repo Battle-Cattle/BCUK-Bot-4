@@ -314,13 +314,17 @@ Created by `migrations/loyalty_points.sql`.
 
 ## `loyalty_points_config`
 
-Per-streamer configuration for `loyalty_points` earn rates. A missing row for a streamer means
-"use the app's default constants" (see `shared/config.ts`) — rows are only created once a
-streamer saves non-default settings from the web panel.
+Per-streamer configuration for `loyalty_points` earn rates, and the opt-in switch for the whole
+feature. Loyalty Points is off by default: a missing row, or a row with `enabled = 0`, means no
+points are earned or spendable on that streamer's channel. A streamer must explicitly save a
+config row with `enabled = 1` (via the web panel, which only allows this once the streamer has a
+linked Twitch account, the Twitch chat bot enabled, and is already a monitored streamer) before
+any viewer activity on their channel starts earning points.
 
 | Column | Type | Notes |
 | --- | --- | --- |
 | `streamer_id` | `INT` PK | FK to `streamer.id` ON DELETE CASCADE |
+| `enabled` | `TINYINT(1)` | Opt-in switch; `0` (the default) means the feature is off for this streamer |
 | `points_per_message` | `INT` | Points awarded per chat message, subject to `cooldown_seconds` |
 | `cooldown_seconds` | `INT` | Minimum seconds between chat-earn awards for the same viewer; also the `!gamble` cooldown (shared, not stacked) |
 | `points_per_sub` | `INT` | Awarded on a sub or resub |

@@ -3,10 +3,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 vi.mock('../db', () => ({
   getLoyaltyPointsConfig: vi.fn(),
   adjustLoyaltyPointsBalance: vi.fn(),
-  DEFAULT_POINTS_PER_MESSAGE: 1,
-  DEFAULT_POINTS_COOLDOWN_SECONDS: 60,
-  DEFAULT_POINTS_PER_SUB: 100,
-  DEFAULT_POINTS_PER_GIFT_SUB: 100,
 }));
 
 import { getLoyaltyPointsConfig, adjustLoyaltyPointsBalance } from '../db';
@@ -15,11 +11,13 @@ import {
   awardPointsForSub, awardPointsForGiftSub,
 } from './pointsEarnHandler';
 
+const ENABLED_CONFIG = { enabled: true, pointsPerMessage: 1, cooldownSeconds: 60, pointsPerSub: 100, pointsPerGiftSub: 100 };
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.useFakeTimers();
   clearPointsCooldowns();
-  vi.mocked(getLoyaltyPointsConfig).mockResolvedValue(null);
+  vi.mocked(getLoyaltyPointsConfig).mockResolvedValue(ENABLED_CONFIG);
   vi.mocked(adjustLoyaltyPointsBalance).mockResolvedValue(0);
 });
 
@@ -65,13 +63,20 @@ describe('tryClaimPointsCooldown', () => {
 // ─── awardPointsForChatMessage ────────────────────────────────────────────────
 
 describe('awardPointsForChatMessage', () => {
-  it('awards the default points-per-message when the streamer has no configuration', async () => {
+  it('does not award when the streamer has no configuration (not opted in)', async () => {
+    vi.mocked(getLoyaltyPointsConfig).mockResolvedValue(null);
     await awardPointsForChatMessage(1, 'viewer');
-    expect(adjustLoyaltyPointsBalance).toHaveBeenCalledWith(1, 'viewer', 1);
+    expect(adjustLoyaltyPointsBalance).not.toHaveBeenCalled();
+  });
+
+  it('does not award when the streamer has a config row but enabled is false', async () => {
+    vi.mocked(getLoyaltyPointsConfig).mockResolvedValue({ ...ENABLED_CONFIG, enabled: false });
+    await awardPointsForChatMessage(1, 'viewer');
+    expect(adjustLoyaltyPointsBalance).not.toHaveBeenCalled();
   });
 
   it('awards the streamer\'s configured points-per-message', async () => {
-    vi.mocked(getLoyaltyPointsConfig).mockResolvedValue({ pointsPerMessage: 5, cooldownSeconds: 60, pointsPerSub: 100, pointsPerGiftSub: 100 });
+    vi.mocked(getLoyaltyPointsConfig).mockResolvedValue({ enabled: true, pointsPerMessage: 5, cooldownSeconds: 60, pointsPerSub: 100, pointsPerGiftSub: 100 });
     await awardPointsForChatMessage(1, 'viewer');
     expect(adjustLoyaltyPointsBalance).toHaveBeenCalledWith(1, 'viewer', 5);
   });
@@ -90,7 +95,7 @@ describe('awardPointsForChatMessage', () => {
   });
 
   it('honors the streamer\'s configured cooldown instead of the default', async () => {
-    vi.mocked(getLoyaltyPointsConfig).mockResolvedValue({ pointsPerMessage: 1, cooldownSeconds: 5, pointsPerSub: 100, pointsPerGiftSub: 100 });
+    vi.mocked(getLoyaltyPointsConfig).mockResolvedValue({ enabled: true, pointsPerMessage: 1, cooldownSeconds: 5, pointsPerSub: 100, pointsPerGiftSub: 100 });
     await awardPointsForChatMessage(1, 'viewer');
     vi.advanceTimersByTime(5_000);
     await awardPointsForChatMessage(1, 'viewer');
@@ -107,13 +112,20 @@ describe('awardPointsForChatMessage', () => {
 // ─── awardPointsForSub ────────────────────────────────────────────────────────
 
 describe('awardPointsForSub', () => {
-  it('awards the default points-per-sub when the streamer has no configuration', async () => {
+  it('does not award when the streamer has no configuration (not opted in)', async () => {
+    vi.mocked(getLoyaltyPointsConfig).mockResolvedValue(null);
     await awardPointsForSub(1, 'subscriber');
-    expect(adjustLoyaltyPointsBalance).toHaveBeenCalledWith(1, 'subscriber', 100);
+    expect(adjustLoyaltyPointsBalance).not.toHaveBeenCalled();
+  });
+
+  it('does not award when enabled is false', async () => {
+    vi.mocked(getLoyaltyPointsConfig).mockResolvedValue({ ...ENABLED_CONFIG, enabled: false });
+    await awardPointsForSub(1, 'subscriber');
+    expect(adjustLoyaltyPointsBalance).not.toHaveBeenCalled();
   });
 
   it('awards the streamer\'s configured points-per-sub', async () => {
-    vi.mocked(getLoyaltyPointsConfig).mockResolvedValue({ pointsPerMessage: 1, cooldownSeconds: 60, pointsPerSub: 250, pointsPerGiftSub: 100 });
+    vi.mocked(getLoyaltyPointsConfig).mockResolvedValue({ enabled: true, pointsPerMessage: 1, cooldownSeconds: 60, pointsPerSub: 250, pointsPerGiftSub: 100 });
     await awardPointsForSub(1, 'subscriber');
     expect(adjustLoyaltyPointsBalance).toHaveBeenCalledWith(1, 'subscriber', 250);
   });
@@ -128,13 +140,20 @@ describe('awardPointsForSub', () => {
 // ─── awardPointsForGiftSub ────────────────────────────────────────────────────
 
 describe('awardPointsForGiftSub', () => {
-  it('awards the default points-per-gift-sub, scaled by count, when the streamer has no configuration', async () => {
+  it('does not award when the streamer has no configuration (not opted in)', async () => {
+    vi.mocked(getLoyaltyPointsConfig).mockResolvedValue(null);
     await awardPointsForGiftSub(1, 'gifter', 5);
-    expect(adjustLoyaltyPointsBalance).toHaveBeenCalledWith(1, 'gifter', 500);
+    expect(adjustLoyaltyPointsBalance).not.toHaveBeenCalled();
+  });
+
+  it('does not award when enabled is false', async () => {
+    vi.mocked(getLoyaltyPointsConfig).mockResolvedValue({ ...ENABLED_CONFIG, enabled: false });
+    await awardPointsForGiftSub(1, 'gifter', 5);
+    expect(adjustLoyaltyPointsBalance).not.toHaveBeenCalled();
   });
 
   it('awards the streamer\'s configured points-per-gift-sub, scaled by count', async () => {
-    vi.mocked(getLoyaltyPointsConfig).mockResolvedValue({ pointsPerMessage: 1, cooldownSeconds: 60, pointsPerSub: 100, pointsPerGiftSub: 10 });
+    vi.mocked(getLoyaltyPointsConfig).mockResolvedValue({ enabled: true, pointsPerMessage: 1, cooldownSeconds: 60, pointsPerSub: 100, pointsPerGiftSub: 10 });
     await awardPointsForGiftSub(1, 'gifter', 5);
     expect(adjustLoyaltyPointsBalance).toHaveBeenCalledWith(1, 'gifter', 50);
   });

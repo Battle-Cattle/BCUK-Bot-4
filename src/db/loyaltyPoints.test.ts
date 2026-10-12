@@ -86,14 +86,21 @@ describe('getConfig', () => {
   });
 
   it('maps an existing row to a LoyaltyPointsConfig', async () => {
-    const pool = makePool([{ points_per_message: 2, cooldown_seconds: 30, points_per_sub: 100, points_per_gift_sub: 100 }]);
+    const pool = makePool([{ enabled: 1, points_per_message: 2, cooldown_seconds: 30, points_per_sub: 100, points_per_gift_sub: 100 }]);
     vi.mocked(getPool).mockReturnValue(pool as any);
     expect(await getConfig(1)).toEqual({
+      enabled: true,
       pointsPerMessage: 2,
       cooldownSeconds: 30,
       pointsPerSub: 100,
       pointsPerGiftSub: 100,
     });
+  });
+
+  it('maps enabled = 0 to false', async () => {
+    const pool = makePool([{ enabled: 0, points_per_message: 1, cooldown_seconds: 60, points_per_sub: 100, points_per_gift_sub: 100 }]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    expect(await getConfig(1)).toEqual(expect.objectContaining({ enabled: false }));
   });
 });
 
@@ -275,14 +282,14 @@ describe('resolveGambleOutcome', () => {
 // ─── setConfig ────────────────────────────────────────────────────────────────
 
 describe('setConfig', () => {
-  it('upserts the streamer\'s configuration', async () => {
+  it('upserts the streamer\'s configuration, including the opt-in flag', async () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
-    const config = { pointsPerMessage: 2, cooldownSeconds: 30, pointsPerSub: 150, pointsPerGiftSub: 150 };
+    const config = { enabled: true, pointsPerMessage: 2, cooldownSeconds: 30, pointsPerSub: 150, pointsPerGiftSub: 150 };
 
     await setConfig(1, config);
 
-    expect(pool.execute).toHaveBeenCalledWith(expect.stringContaining('ON DUPLICATE KEY UPDATE'), [1, 2, 30, 150, 150]);
+    expect(pool.execute).toHaveBeenCalledWith(expect.stringContaining('ON DUPLICATE KEY UPDATE'), [1, true, 2, 30, 150, 150]);
   });
 });
 
@@ -296,14 +303,14 @@ describe('getAllConfigs', () => {
 
   it('maps every row to its streamer id and config', async () => {
     const pool = makePool([
-      { streamer_id: 1, points_per_message: 1, cooldown_seconds: 60, points_per_sub: 100, points_per_gift_sub: 100 },
-      { streamer_id: 2, points_per_message: 3, cooldown_seconds: 15, points_per_sub: 50, points_per_gift_sub: 50 },
+      { streamer_id: 1, enabled: 1, points_per_message: 1, cooldown_seconds: 60, points_per_sub: 100, points_per_gift_sub: 100 },
+      { streamer_id: 2, enabled: 0, points_per_message: 3, cooldown_seconds: 15, points_per_sub: 50, points_per_gift_sub: 50 },
     ]);
     vi.mocked(getPool).mockReturnValue(pool as any);
 
     expect(await getAllConfigs()).toEqual([
-      { streamerId: 1, config: { pointsPerMessage: 1, cooldownSeconds: 60, pointsPerSub: 100, pointsPerGiftSub: 100 } },
-      { streamerId: 2, config: { pointsPerMessage: 3, cooldownSeconds: 15, pointsPerSub: 50, pointsPerGiftSub: 50 } },
+      { streamerId: 1, config: { enabled: true, pointsPerMessage: 1, cooldownSeconds: 60, pointsPerSub: 100, pointsPerGiftSub: 100 } },
+      { streamerId: 2, config: { enabled: false, pointsPerMessage: 3, cooldownSeconds: 15, pointsPerSub: 50, pointsPerGiftSub: 50 } },
     ]);
   });
 });

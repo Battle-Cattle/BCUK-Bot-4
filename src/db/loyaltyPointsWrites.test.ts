@@ -7,7 +7,7 @@ import { setConfig as setConfigRecord } from './loyaltyPoints';
 import { invalidateLoyaltyPointsConfigLookupCache } from './loyaltyPointsCache';
 import { setLoyaltyPointsConfig } from './loyaltyPointsWrites';
 
-const CONFIG = { pointsPerMessage: 1, cooldownSeconds: 60, pointsPerSub: 100, pointsPerGiftSub: 100 };
+const CONFIG = { enabled: true, pointsPerMessage: 1, cooldownSeconds: 60, pointsPerSub: 100, pointsPerGiftSub: 100 };
 
 beforeEach(() => {
   vi.clearAllMocks();

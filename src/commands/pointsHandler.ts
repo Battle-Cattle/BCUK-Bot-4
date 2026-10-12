@@ -1,5 +1,5 @@
 import { createLogger } from '../shared/logger';
-import { getLoyaltyPointsBalance, getLoyaltyPointsLeaderboard } from '../db';
+import { getLoyaltyPointsBalance, getLoyaltyPointsLeaderboard, getLoyaltyPointsConfig } from '../db';
 import { resolveCommand, extractArgs } from './commandUtils';
 import { createRuntimeRegistry } from '../shared/runtimeRegistry';
 import type { TwitchSendRuntime } from './twitchRuntime';
@@ -54,7 +54,8 @@ async function buildPointsResponse(streamerId: number, twitchUsername: string, a
 
 /**
  * Handles a Twitch chat message that may be a `!points` command: checks the caller's balance
- * or the channel's leaderboard, and sends the result via the registered Twitch runtime.
+ * or the channel's leaderboard, and sends the result via the registered Twitch runtime. No-ops
+ * silently if the streamer hasn't opted into Loyalty Points for their channel.
  *
  * @param channel - Twitch channel the message was sent in (also the send target).
  * @param streamerId - The channel's linked `streamer.id`, resolved by the caller — no-ops
@@ -75,6 +76,9 @@ export async function executePointsCommandForTwitch(
   const command = resolveCommand(rawMessage, precomputedCommand);
   if (command !== POINTS_COMMAND) return;
   if (!streamerId || !username) return;
+
+  const config = await getLoyaltyPointsConfig(streamerId);
+  if (!config || !config.enabled) return;
 
   const response = await buildPointsResponse(streamerId, username, extractArgs(rawMessage));
 

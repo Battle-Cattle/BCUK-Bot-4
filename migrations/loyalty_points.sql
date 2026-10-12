@@ -15,10 +15,12 @@ CREATE TABLE loyalty_points (
   CONSTRAINT chk_loyalty_points_balance_nonnegative CHECK (balance >= 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Per-streamer earn-rate configuration. Absent row for a streamer falls back to the app's
--- default constants (see shared/config.ts) rather than needing a seed row per streamer.
+-- Per-streamer earn-rate configuration, and the opt-in switch for the whole feature. Absent row
+-- (or enabled = 0) means Loyalty Points is off for that streamer — points only accrue once a
+-- streamer explicitly saves a config row with enabled = 1.
 CREATE TABLE loyalty_points_config (
   streamer_id         INT       NOT NULL PRIMARY KEY,
+  enabled             TINYINT(1) NOT NULL DEFAULT 0,
   points_per_message  INT       NOT NULL DEFAULT 1,
   cooldown_seconds     INT       NOT NULL DEFAULT 60,
   points_per_sub       INT       NOT NULL DEFAULT 100,

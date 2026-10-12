@@ -23,8 +23,13 @@ export interface LoyaltyPointsLeaderboardEntry {
   balance: number;
 }
 
-/** A streamer's loyalty-points earn-rate configuration. */
+/**
+ * A streamer's loyalty-points configuration: the opt-in switch plus earn rates. Loyalty Points is
+ * off by default — `enabled` must be explicitly set to `true` (via the web panel, which only
+ * allows this once its prerequisites are met) before any viewer activity earns or spends points.
+ */
 export interface LoyaltyPointsConfig {
+  enabled: boolean;
   pointsPerMessage: number;
   cooldownSeconds: number;
   pointsPerSub: number;
@@ -34,6 +39,7 @@ export interface LoyaltyPointsConfig {
 /** Maps a raw `loyalty_points_config` table row to a {@link LoyaltyPointsConfig}. */
 function mapLoyaltyPointsConfig(row: mysql.RowDataPacket): LoyaltyPointsConfig {
   return {
+    enabled: !!row.enabled,
     pointsPerMessage: row.points_per_message,
     cooldownSeconds: row.cooldown_seconds,
     pointsPerSub: row.points_per_sub,
@@ -72,14 +78,14 @@ export async function getLeaderboard(streamerId: number, limit: number): Promise
 }
 
 /**
- * Looks up a streamer's loyalty-points earn-rate configuration.
+ * Looks up a streamer's loyalty-points configuration.
  * @param streamerId - The streamer's `streamer.id`.
- * @returns The streamer's configuration, or null if they have no row (callers should fall back
- *   to the app's default constants).
+ * @returns The streamer's configuration, or null if they have no row — callers should treat a
+ *   null result the same as `{ enabled: false, ... }`: Loyalty Points is off for that streamer.
  */
 export async function getConfig(streamerId: number): Promise<LoyaltyPointsConfig | null> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    'SELECT points_per_message, cooldown_seconds, points_per_sub, points_per_gift_sub FROM loyalty_points_config WHERE streamer_id = ?',
+    'SELECT enabled, points_per_message, cooldown_seconds, points_per_sub, points_per_gift_sub FROM loyalty_points_config WHERE streamer_id = ?',
     [streamerId],
   );
   return rows[0] ? mapLoyaltyPointsConfig(rows[0]) : null;
@@ -177,15 +183,16 @@ export async function resolveGambleOutcome(
  */
 export async function setConfig(streamerId: number, config: LoyaltyPointsConfig): Promise<void> {
   await getPool().execute(
-    `INSERT INTO loyalty_points_config (streamer_id, points_per_message, cooldown_seconds, points_per_sub, points_per_gift_sub)
-     VALUES (?, ?, ?, ?, ?)
+    `INSERT INTO loyalty_points_config (streamer_id, enabled, points_per_message, cooldown_seconds, points_per_sub, points_per_gift_sub)
+     VALUES (?, ?, ?, ?, ?, ?)
      AS new_row
      ON DUPLICATE KEY UPDATE
+       enabled = new_row.enabled,
        points_per_message = new_row.points_per_message,
        cooldown_seconds = new_row.cooldown_seconds,
        points_per_sub = new_row.points_per_sub,
        points_per_gift_sub = new_row.points_per_gift_sub`,
-    [streamerId, config.pointsPerMessage, config.cooldownSeconds, config.pointsPerSub, config.pointsPerGiftSub],
+    [streamerId, config.enabled, config.pointsPerMessage, config.cooldownSeconds, config.pointsPerSub, config.pointsPerGiftSub],
   );
 }
 
@@ -196,7 +203,7 @@ export async function setConfig(streamerId: number, config: LoyaltyPointsConfig)
  */
 export async function getAllConfigs(): Promise<{ streamerId: number; config: LoyaltyPointsConfig }[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    'SELECT streamer_id, points_per_message, cooldown_seconds, points_per_sub, points_per_gift_sub FROM loyalty_points_config',
+    'SELECT streamer_id, enabled, points_per_message, cooldown_seconds, points_per_sub, points_per_gift_sub FROM loyalty_points_config',
   );
   return rows.map((row) => ({ streamerId: row.streamer_id, config: mapLoyaltyPointsConfig(row) }));
 }

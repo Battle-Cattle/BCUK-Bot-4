@@ -4,7 +4,6 @@ vi.mock('../db', () => ({
   getLoyaltyPointsBalance: vi.fn(),
   resolveLoyaltyPointsGambleOutcome: vi.fn(),
   getLoyaltyPointsConfig: vi.fn(),
-  DEFAULT_POINTS_COOLDOWN_SECONDS: 60,
 }));
 vi.mock('./pointsEarnHandler', () => ({ tryClaimPointsCooldown: vi.fn() }));
 
@@ -19,6 +18,7 @@ import { executeGambleCommandForTwitch, registerGambleTwitchRuntime } from './ga
 
 const SEND = vi.fn();
 let randomSpy: ReturnType<typeof vi.spyOn>;
+const ENABLED_CONFIG = { enabled: true, pointsPerMessage: 1, cooldownSeconds: 60, pointsPerSub: 100, pointsPerGiftSub: 100 };
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -26,7 +26,7 @@ beforeEach(() => {
   registerGambleTwitchRuntime({ send: SEND });
   vi.mocked(getLoyaltyPointsBalance).mockResolvedValue(1000);
   vi.mocked(resolveLoyaltyPointsGambleOutcome).mockResolvedValue(900);
-  vi.mocked(getLoyaltyPointsConfig).mockResolvedValue(null);
+  vi.mocked(getLoyaltyPointsConfig).mockResolvedValue(ENABLED_CONFIG);
   vi.mocked(tryClaimPointsCooldown).mockReturnValue(true);
   randomSpy = vi.spyOn(Math, 'random');
 });
@@ -44,6 +44,19 @@ describe('executeGambleCommandForTwitch', () => {
 
   it('no-ops when there is no username', async () => {
     await executeGambleCommandForTwitch('channel', 1, '!gamble 100', null, '!gamble');
+    expect(SEND).not.toHaveBeenCalled();
+  });
+
+  it('no-ops when the streamer has not opted into Loyalty Points (no config row)', async () => {
+    vi.mocked(getLoyaltyPointsConfig).mockResolvedValue(null);
+    await executeGambleCommandForTwitch('channel', 1, '!gamble 100', 'alice', '!gamble');
+    expect(SEND).not.toHaveBeenCalled();
+    expect(resolveLoyaltyPointsGambleOutcome).not.toHaveBeenCalled();
+  });
+
+  it('no-ops when the streamer has a config row but enabled is false', async () => {
+    vi.mocked(getLoyaltyPointsConfig).mockResolvedValue({ ...ENABLED_CONFIG, enabled: false });
+    await executeGambleCommandForTwitch('channel', 1, '!gamble 100', 'alice', '!gamble');
     expect(SEND).not.toHaveBeenCalled();
   });
 
@@ -68,14 +81,9 @@ describe('executeGambleCommandForTwitch', () => {
   });
 
   it('uses the streamer\'s configured cooldown', async () => {
-    vi.mocked(getLoyaltyPointsConfig).mockResolvedValue({ pointsPerMessage: 1, cooldownSeconds: 15, pointsPerSub: 100, pointsPerGiftSub: 100 });
+    vi.mocked(getLoyaltyPointsConfig).mockResolvedValue({ enabled: true, pointsPerMessage: 1, cooldownSeconds: 15, pointsPerSub: 100, pointsPerGiftSub: 100 });
     await executeGambleCommandForTwitch('channel', 1, '!gamble 100', 'alice', '!gamble');
     expect(tryClaimPointsCooldown).toHaveBeenCalledWith(1, 'alice', 15);
-  });
-
-  it('falls back to the default cooldown when unconfigured', async () => {
-    await executeGambleCommandForTwitch('channel', 1, '!gamble 100', 'alice', '!gamble');
-    expect(tryClaimPointsCooldown).toHaveBeenCalledWith(1, 'alice', 60);
   });
 
   it('resolves the stake debit and outcome atomically in one call', async () => {

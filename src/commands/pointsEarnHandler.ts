@@ -1,11 +1,4 @@
-import {
-  getLoyaltyPointsConfig,
-  adjustLoyaltyPointsBalance,
-  DEFAULT_POINTS_PER_MESSAGE,
-  DEFAULT_POINTS_COOLDOWN_SECONDS,
-  DEFAULT_POINTS_PER_SUB,
-  DEFAULT_POINTS_PER_GIFT_SUB,
-} from '../db';
+import { getLoyaltyPointsConfig, adjustLoyaltyPointsBalance } from '../db';
 
 // A per-(streamer, viewer) last-earn timestamp, used by both the passive chat-earn path and
 // `!gamble`'s shared cooldown (see tryClaimPointsCooldown below). Unlike `cooldownGate.ts`'s
@@ -45,41 +38,44 @@ export function clearPointsCooldowns(): void {
 
 /**
  * Awards passive chat-earn loyalty points to a viewer if they're off cooldown, using the
- * streamer's configured rate/cooldown (or the app's defaults if unconfigured). No-ops silently
- * if the viewer is still on cooldown.
+ * streamer's configured rate/cooldown. No-ops silently if the streamer hasn't opted into Loyalty
+ * Points (no config row, or `enabled: false`) or if the viewer is still on cooldown.
  * @param streamerId - The streamer's `streamer.id`.
  * @param twitchUsername - The viewer's Twitch login.
  * @returns Resolves once the award (or no-op) completes.
  */
 export async function awardPointsForChatMessage(streamerId: number, twitchUsername: string): Promise<void> {
   const config = await getLoyaltyPointsConfig(streamerId);
-  const cooldownSeconds = config?.cooldownSeconds ?? DEFAULT_POINTS_COOLDOWN_SECONDS;
-  if (!tryClaimPointsCooldown(streamerId, twitchUsername, cooldownSeconds)) return;
-  await adjustLoyaltyPointsBalance(streamerId, twitchUsername, config?.pointsPerMessage ?? DEFAULT_POINTS_PER_MESSAGE);
+  if (!config || !config.enabled) return;
+  if (!tryClaimPointsCooldown(streamerId, twitchUsername, config.cooldownSeconds)) return;
+  await adjustLoyaltyPointsBalance(streamerId, twitchUsername, config.pointsPerMessage);
 }
 
 /**
- * Awards a sub/resub loyalty-points bonus, using the streamer's configured amount (or the app's
- * default if unconfigured). Unlike passive chat-earn, this has no cooldown — Twitch itself
- * already rate-limits how often a viewer can sub/resub.
+ * Awards a sub/resub loyalty-points bonus, using the streamer's configured amount. No-ops
+ * silently if the streamer hasn't opted into Loyalty Points. Unlike passive chat-earn, this has
+ * no cooldown — Twitch itself already rate-limits how often a viewer can sub/resub.
  * @param streamerId - The streamer's `streamer.id`.
  * @param twitchUsername - The subscribing viewer's Twitch login.
- * @returns Resolves once the award completes.
+ * @returns Resolves once the award (or no-op) completes.
  */
 export async function awardPointsForSub(streamerId: number, twitchUsername: string): Promise<void> {
   const config = await getLoyaltyPointsConfig(streamerId);
-  await adjustLoyaltyPointsBalance(streamerId, twitchUsername, config?.pointsPerSub ?? DEFAULT_POINTS_PER_SUB);
+  if (!config || !config.enabled) return;
+  await adjustLoyaltyPointsBalance(streamerId, twitchUsername, config.pointsPerSub);
 }
 
 /**
  * Awards a gift-sub loyalty-points bonus to the gifter, scaled by the number of subs gifted,
- * using the streamer's configured per-sub amount (or the app's default if unconfigured).
+ * using the streamer's configured per-sub amount. No-ops silently if the streamer hasn't opted
+ * into Loyalty Points.
  * @param streamerId - The streamer's `streamer.id`.
  * @param gifterUsername - The gifter's Twitch login.
  * @param count - Number of subs gifted.
- * @returns Resolves once the award completes.
+ * @returns Resolves once the award (or no-op) completes.
  */
 export async function awardPointsForGiftSub(streamerId: number, gifterUsername: string, count: number): Promise<void> {
   const config = await getLoyaltyPointsConfig(streamerId);
-  await adjustLoyaltyPointsBalance(streamerId, gifterUsername, (config?.pointsPerGiftSub ?? DEFAULT_POINTS_PER_GIFT_SUB) * count);
+  if (!config || !config.enabled) return;
+  await adjustLoyaltyPointsBalance(streamerId, gifterUsername, config.pointsPerGiftSub * count);
 }

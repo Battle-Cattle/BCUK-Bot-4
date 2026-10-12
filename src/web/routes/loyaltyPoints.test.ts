@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../../db', () => ({
+  findUser: vi.fn(),
   getStreamerByDiscordId: vi.fn(),
   getLoyaltyPointsLeaderboard: vi.fn(),
   getLoyaltyPointsConfig: vi.fn(),
@@ -28,10 +29,11 @@ vi.mock('../../shared/logger', () => ({
 
 import supertest from 'supertest';
 import router from './loyaltyPoints';
-import { getStreamerByDiscordId, getLoyaltyPointsLeaderboard, getLoyaltyPointsConfig, setLoyaltyPointsConfig } from '../../db';
+import { findUser, getStreamerByDiscordId, getLoyaltyPointsLeaderboard, getLoyaltyPointsConfig, setLoyaltyPointsConfig } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
 const STREAMER = { id: 7, discord_id: '1', twitch_name: 'streamerchannel' };
+const ELIGIBLE_USER = { discord_id: '1', discord_name: 'TestUser', is_twitch_bot_enabled: true, twitch_name: 'streamerchannel', access_level: 0, is_owner: false };
 const SESSION_USER = { discordId: '1', discordName: 'TestUser', discordAvatar: null, isOwner: false, accessLevel: 0, currentGuildId: null, guilds: [] };
 
 /** Builds a supertest-ready app: the loyalty points router with a stubbed session and a JSON-echoing render stub. */
@@ -46,6 +48,7 @@ function buildApp() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(findUser).mockResolvedValue(null);
   vi.mocked(getStreamerByDiscordId).mockResolvedValue(null);
   vi.mocked(getLoyaltyPointsLeaderboard).mockResolvedValue([]);
   vi.mocked(getLoyaltyPointsConfig).mockResolvedValue(null);
@@ -61,12 +64,15 @@ describe('GET /loyalty-points', () => {
     expect(res.status).toBe(200);
     expect(res.body.isStreamer).toBe(false);
     expect(res.body.leaderboard).toEqual([]);
+    expect(res.body.prerequisites).toEqual({ twitchLinked: false, chatBotEnabled: false, isMonitoredStreamer: false });
+    expect(res.body.allPrerequisitesMet).toBe(false);
   });
 
   it('renders the leaderboard and config for a linked streamer', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(STREAMER as any);
+    vi.mocked(findUser).mockResolvedValue(ELIGIBLE_USER as any);
     vi.mocked(getLoyaltyPointsLeaderboard).mockResolvedValue([{ twitchUsername: 'viewer1', balance: 50 }]);
-    vi.mocked(getLoyaltyPointsConfig).mockResolvedValue({ pointsPerMessage: 2, cooldownSeconds: 30, pointsPerSub: 150, pointsPerGiftSub: 150 });
+    vi.mocked(getLoyaltyPointsConfig).mockResolvedValue({ enabled: true, pointsPerMessage: 2, cooldownSeconds: 30, pointsPerSub: 150, pointsPerGiftSub: 150 });
 
     const res = await supertest(buildApp()).get('/loyalty-points');
 
@@ -74,15 +80,27 @@ describe('GET /loyalty-points', () => {
     expect(res.body.isStreamer).toBe(true);
     expect(getLoyaltyPointsLeaderboard).toHaveBeenCalledWith(7, 50);
     expect(res.body.leaderboard).toEqual([{ twitchUsername: 'viewer1', balance: 50 }]);
-    expect(res.body.config).toEqual({ pointsPerMessage: 2, cooldownSeconds: 30, pointsPerSub: 150, pointsPerGiftSub: 150 });
+    expect(res.body.config).toEqual({ enabled: true, pointsPerMessage: 2, cooldownSeconds: 30, pointsPerSub: 150, pointsPerGiftSub: 150 });
+    expect(res.body.prerequisites).toEqual({ twitchLinked: true, chatBotEnabled: true, isMonitoredStreamer: true });
+    expect(res.body.allPrerequisitesMet).toBe(true);
   });
 
-  it('falls back to the app defaults when the streamer has no saved config', async () => {
+  it('falls back to the app defaults (disabled) when the streamer has no saved config', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(STREAMER as any);
 
     const res = await supertest(buildApp()).get('/loyalty-points');
 
-    expect(res.body.config).toEqual({ pointsPerMessage: 1, cooldownSeconds: 60, pointsPerSub: 100, pointsPerGiftSub: 100 });
+    expect(res.body.config).toEqual({ enabled: false, pointsPerMessage: 1, cooldownSeconds: 60, pointsPerSub: 100, pointsPerGiftSub: 100 });
+  });
+
+  it('reports a missing prerequisite when the Twitch chat bot is linked but not enabled', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(STREAMER as any);
+    vi.mocked(findUser).mockResolvedValue({ ...ELIGIBLE_USER, is_twitch_bot_enabled: false } as any);
+
+    const res = await supertest(buildApp()).get('/loyalty-points');
+
+    expect(res.body.prerequisites).toEqual({ twitchLinked: true, chatBotEnabled: false, isMonitoredStreamer: true });
+    expect(res.body.allPrerequisitesMet).toBe(false);
   });
 
   it('surfaces a known error code', async () => {
@@ -118,14 +136,56 @@ describe('POST /loyalty-points/config', () => {
     expect(setLoyaltyPointsConfig).not.toHaveBeenCalled();
   });
 
-  it('saves a valid config and redirects to the page', async () => {
+  it('saves a valid config with enabled defaulting to false when the checkbox is unchecked', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(STREAMER as any);
 
     const res = await supertest(buildApp()).post('/loyalty-points/config').type('form').send(VALID_CONFIG_BODY);
 
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/loyalty-points');
-    expect(setLoyaltyPointsConfig).toHaveBeenCalledWith(7, { pointsPerMessage: 2, cooldownSeconds: 30, pointsPerSub: 150, pointsPerGiftSub: 150 });
+    expect(setLoyaltyPointsConfig).toHaveBeenCalledWith(7, { enabled: false, pointsPerMessage: 2, cooldownSeconds: 30, pointsPerSub: 150, pointsPerGiftSub: 150 });
+  });
+
+  it('turning the feature off is always allowed, even with missing prerequisites', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(STREAMER as any);
+    vi.mocked(findUser).mockResolvedValue(null);
+
+    const res = await supertest(buildApp()).post('/loyalty-points/config').type('form').send(VALID_CONFIG_BODY);
+
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('/loyalty-points');
+    expect(setLoyaltyPointsConfig).toHaveBeenCalledWith(7, expect.objectContaining({ enabled: false }));
+  });
+
+  it('enables the feature when every prerequisite is met', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(STREAMER as any);
+    vi.mocked(findUser).mockResolvedValue(ELIGIBLE_USER as any);
+
+    const res = await supertest(buildApp()).post('/loyalty-points/config').type('form').send({ ...VALID_CONFIG_BODY, enabled: '1' });
+
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('/loyalty-points');
+    expect(setLoyaltyPointsConfig).toHaveBeenCalledWith(7, expect.objectContaining({ enabled: true }));
+  });
+
+  it('rejects enabling when a prerequisite is missing, without saving', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(STREAMER as any);
+    vi.mocked(findUser).mockResolvedValue({ ...ELIGIBLE_USER, is_twitch_bot_enabled: false } as any);
+
+    const res = await supertest(buildApp()).post('/loyalty-points/config').type('form').send({ ...VALID_CONFIG_BODY, enabled: '1' });
+
+    expect(res.headers.location).toBe('/loyalty-points?error=missing_prerequisites');
+    expect(setLoyaltyPointsConfig).not.toHaveBeenCalled();
+  });
+
+  it('rejects enabling when the requester has no linked Twitch account', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(STREAMER as any);
+    vi.mocked(findUser).mockResolvedValue(null);
+
+    const res = await supertest(buildApp()).post('/loyalty-points/config').type('form').send({ ...VALID_CONFIG_BODY, enabled: '1' });
+
+    expect(res.headers.location).toBe('/loyalty-points?error=missing_prerequisites');
+    expect(setLoyaltyPointsConfig).not.toHaveBeenCalled();
   });
 
   it('rejects a missing field', async () => {

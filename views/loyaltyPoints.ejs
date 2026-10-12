@@ -10,27 +10,44 @@
 <body data-csrf-token="<%= csrfToken %>">
   <%- include('partials/nav') %>
 
+  <% const prerequisiteItems = [
+    { met: prerequisites.twitchLinked, label: 'Twitch account linked', hint: 'Link it from Settings.' },
+    { met: prerequisites.chatBotEnabled, label: 'Twitch chat bot enabled', hint: 'Turn it on from Settings.' },
+    { met: prerequisites.isMonitoredStreamer, label: 'Set up as a monitored streamer', hint: 'A bot admin adds your channel to Stream Monitor.' },
+  ]; %>
+
   <main class="container">
     <section class="section">
       <h2 class="section-title">Loyalty Points</h2>
 
       <% if (error) { %>
       <% const errorMessages = {
-        not_a_streamer: 'You are not configured as a monitored streamer.',
-        invalid_config: 'Points per message, cooldown, points per sub, and points per gift sub must all be whole numbers of 0 or more.',
-        save_failed:    'Failed to save — please try again.',
+        not_a_streamer:        'You are not configured as a monitored streamer.',
+        invalid_config:        'Points per message, cooldown, points per sub, and points per gift sub must all be whole numbers of 0 or more.',
+        save_failed:           'Failed to save — please try again.',
+        missing_prerequisites: 'You can\'t enable Loyalty Points yet — see the checklist below for what\'s still missing.',
       }; %>
       <div class="card card-alert-danger" role="alert" aria-live="assertive" aria-atomic="true">
         <span class="text-danger">&#9888; <%= errorMessages[error] || `Operation failed: ${error.replace(/_/g, ' ')}` %></span>
       </div>
       <% } %>
 
+      <div class="card card-spaced">
+        <div class="card-header"><span class="card-icon">✅</span><span class="card-label">Requirements to enable</span></div>
+        <div class="card-body">
+          <ul class="checklist">
+            <% prerequisiteItems.forEach(function (item) { %>
+            <li><%= item.met ? '✅' : '❌' %> <%= item.label %><% if (!item.met) { %> — <span class="muted"><%= item.hint %></span><% } %></li>
+            <% }); %>
+          </ul>
+        </div>
+      </div>
+
       <% if (!isStreamer) { %>
       <div class="card card-spaced">
         <div class="card-body">
-          <p>Loyalty points are earned by viewers chatting on your Twitch channel. Link your Twitch
-            account from <a href="/user/settings">Settings</a> to set up your channel's earn rates and
-            see its leaderboard here.</p>
+          <p>Loyalty Points is an opt-in feature — once the requirements above are all met, you'll be
+            able to turn it on and tune its earn rates here.</p>
         </div>
       </div>
       <% } else { %>
@@ -38,11 +55,20 @@
       <div class="card card-spaced">
         <div class="card-header"><span class="card-icon">⚙️</span><span class="card-label">Earn Rates</span></div>
         <div class="card-body">
-          <p class="muted">Viewers earn points by chatting (subject to the cooldown below) and get a
-            bonus for subs, resubs, and gift subs. Points have no real-world value and aren't
+          <p class="muted">When enabled, viewers earn points by chatting (subject to the cooldown below)
+            and get a bonus for subs, resubs, and gift subs. Points have no real-world value and aren't
             redeemable for cash or goods.</p>
           <form method="POST" action="/loyalty-points/config">
             <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+            <div class="form-row-wrap form-section-gap">
+              <label class="form-label">
+                <input type="checkbox" name="enabled" value="1" <%= config.enabled ? 'checked' : '' %> <%= (!config.enabled && !allPrerequisitesMet) ? 'disabled' : '' %>>
+                Enable Loyalty Points for my channel
+              </label>
+            </div>
+            <% if (!config.enabled && !allPrerequisitesMet) { %>
+            <p class="muted">Enabling is disabled until every requirement above is met.</p>
+            <% } %>
             <div class="form-row-wrap form-section-gap">
               <div class="form-col-grow">
                 <label for="points_per_message" class="form-label">Points per message</label>

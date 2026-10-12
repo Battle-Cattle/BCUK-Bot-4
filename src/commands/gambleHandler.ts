@@ -1,5 +1,5 @@
 import { createLogger } from '../shared/logger';
-import { getLoyaltyPointsBalance, resolveLoyaltyPointsGambleOutcome, getLoyaltyPointsConfig, DEFAULT_POINTS_COOLDOWN_SECONDS } from '../db';
+import { getLoyaltyPointsBalance, resolveLoyaltyPointsGambleOutcome, getLoyaltyPointsConfig } from '../db';
 import { resolveCommand, extractArgs } from './commandUtils';
 import { createRuntimeRegistry } from '../shared/runtimeRegistry';
 import type { TwitchSendRuntime } from './twitchRuntime';
@@ -82,8 +82,9 @@ async function sendGambleMessage(channel: string, message: string): Promise<void
  * Handles a Twitch chat message that may be a `!gamble` command: parses the bet amount (a plain
  * number, `1,000`, `5k`, `40%`, or `all`), enforces the shared points cooldown (the same one
  * passive chat-earn uses, so a viewer can't alternate between the two to dodge either one's
- * cooldown), and sends the result via the registered Twitch runtime. An invalid amount gets a
- * usage reply without consuming the cooldown — only an actual gamble does that.
+ * cooldown), and sends the result via the registered Twitch runtime. No-ops silently (no usage
+ * reply) if the streamer hasn't opted into Loyalty Points. An invalid amount gets a usage reply
+ * without consuming the cooldown — only an actual gamble does that.
  *
  * @param channel - Twitch channel the message was sent in (also the send target).
  * @param streamerId - The channel's linked `streamer.id`, resolved by the caller — no-ops
@@ -105,15 +106,16 @@ export async function executeGambleCommandForTwitch(
   if (command !== GAMBLE_COMMAND) return;
   if (!streamerId || !username) return;
 
+  const config = await getLoyaltyPointsConfig(streamerId);
+  if (!config || !config.enabled) return;
+
   const bet = await resolveBet(streamerId, username, extractArgs(rawMessage));
   if (bet === null) {
     await sendGambleMessage(channel, USAGE_MESSAGE);
     return;
   }
 
-  const config = await getLoyaltyPointsConfig(streamerId);
-  const cooldownSeconds = config?.cooldownSeconds ?? DEFAULT_POINTS_COOLDOWN_SECONDS;
-  if (!tryClaimPointsCooldown(streamerId, username, cooldownSeconds)) return;
+  if (!tryClaimPointsCooldown(streamerId, username, config.cooldownSeconds)) return;
 
   const result = await resolveGamble(streamerId, username, bet);
   await sendGambleMessage(channel, result ?? BALANCE_CHANGED_MESSAGE);

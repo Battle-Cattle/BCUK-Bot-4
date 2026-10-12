@@ -29,7 +29,7 @@ import { getAllConfigs } from './loyaltyPoints';
 import type { LoyaltyPointsConfig } from './loyaltyPoints';
 
 function makeConfig(overrides: Partial<LoyaltyPointsConfig> = {}): LoyaltyPointsConfig {
-  return { pointsPerMessage: 1, cooldownSeconds: 60, pointsPerSub: 100, pointsPerGiftSub: 100, ...overrides };
+  return { enabled: true, pointsPerMessage: 1, cooldownSeconds: 60, pointsPerSub: 100, pointsPerGiftSub: 100, ...overrides };
 }
 
 beforeEach(() => {

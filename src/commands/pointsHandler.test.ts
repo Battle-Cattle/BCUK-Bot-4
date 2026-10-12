@@ -3,16 +3,18 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('../db', () => ({
   getLoyaltyPointsBalance: vi.fn(),
   getLoyaltyPointsLeaderboard: vi.fn(),
+  getLoyaltyPointsConfig: vi.fn(),
 }));
 // Shared so a test can assert on the error logged by pointsHandler.ts's module-level `log`
 // instance (created once via `createLogger('Points')` at import time).
 const { logErrorSpy } = vi.hoisted(() => ({ logErrorSpy: vi.fn() }));
 vi.mock('../shared/logger', () => ({ createLogger: () => ({ info: vi.fn(), error: logErrorSpy }) }));
 
-import { getLoyaltyPointsBalance, getLoyaltyPointsLeaderboard } from '../db';
+import { getLoyaltyPointsBalance, getLoyaltyPointsLeaderboard, getLoyaltyPointsConfig } from '../db';
 import { executePointsCommandForTwitch, registerPointsTwitchRuntime } from './pointsHandler';
 
 const SEND = vi.fn();
+const ENABLED_CONFIG = { enabled: true, pointsPerMessage: 1, cooldownSeconds: 60, pointsPerSub: 100, pointsPerGiftSub: 100 };
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -20,6 +22,7 @@ beforeEach(() => {
   registerPointsTwitchRuntime({ send: SEND });
   vi.mocked(getLoyaltyPointsBalance).mockResolvedValue(0);
   vi.mocked(getLoyaltyPointsLeaderboard).mockResolvedValue([]);
+  vi.mocked(getLoyaltyPointsConfig).mockResolvedValue(ENABLED_CONFIG);
 });
 
 describe('executePointsCommandForTwitch', () => {
@@ -35,6 +38,18 @@ describe('executePointsCommandForTwitch', () => {
 
   it('no-ops when there is no username', async () => {
     await executePointsCommandForTwitch('channel', 1, '!points', null, '!points');
+    expect(SEND).not.toHaveBeenCalled();
+  });
+
+  it('no-ops when the streamer has not opted into Loyalty Points (no config row)', async () => {
+    vi.mocked(getLoyaltyPointsConfig).mockResolvedValue(null);
+    await executePointsCommandForTwitch('channel', 1, '!points', 'alice', '!points');
+    expect(SEND).not.toHaveBeenCalled();
+  });
+
+  it('no-ops when the streamer has a config row but enabled is false', async () => {
+    vi.mocked(getLoyaltyPointsConfig).mockResolvedValue({ ...ENABLED_CONFIG, enabled: false });
+    await executePointsCommandForTwitch('channel', 1, '!points', 'alice', '!points');
     expect(SEND).not.toHaveBeenCalled();
   });
 

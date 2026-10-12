@@ -607,12 +607,14 @@ CREATE TABLE IF NOT EXISTS loyalty_points (
 
 -- ---------------------------------------------------------------------------
 -- loyalty_points_config
--- Per-streamer earn-rate configuration for loyalty_points. A missing row for
--- a streamer falls back to the app's default constants (see shared/config.ts)
--- rather than needing a seed row per streamer.
+-- Per-streamer earn-rate configuration for loyalty_points, and the opt-in
+-- switch for the whole feature. A missing row (or enabled = 0) means Loyalty
+-- Points is off for that streamer — points only accrue once a streamer
+-- explicitly saves a config row with enabled = 1.
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS loyalty_points_config (
   streamer_id         INT       NOT NULL,
+  enabled             TINYINT(1) NOT NULL DEFAULT 0,
   points_per_message  INT       NOT NULL DEFAULT 1,
   cooldown_seconds    INT       NOT NULL DEFAULT 60,
   points_per_sub      INT       NOT NULL DEFAULT 100,
