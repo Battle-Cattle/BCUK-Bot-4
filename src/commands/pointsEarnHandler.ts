@@ -37,6 +37,24 @@ export function clearPointsCooldowns(): void {
 }
 
 /**
+ * Returns how many whole seconds remain before a (streamer, viewer) pair is off the shared points
+ * cooldown, without claiming it. Used to give `!gamble` a concrete "try again in Ns" reply when
+ * {@link tryClaimPointsCooldown} has just failed for it — the claim time this reads is whatever a
+ * prior claim (passive chat-earn, or an earlier `!gamble`) left behind, since a failed claim never
+ * writes to `lastEarnedAt`.
+ * @param streamerId - The streamer's `streamer.id`.
+ * @param twitchUsername - The viewer's Twitch login.
+ * @param cooldownSeconds - The streamer's configured (or default) cooldown length.
+ * @returns Whole seconds remaining, rounded up; 0 if the pair is already off cooldown.
+ */
+export function getRemainingCooldownSeconds(streamerId: number, twitchUsername: string, cooldownSeconds: number): number {
+  const key = cooldownKey(streamerId, twitchUsername);
+  const elapsedMs = Date.now() - (lastEarnedAt.get(key) ?? 0);
+  const remainingMs = cooldownSeconds * 1000 - elapsedMs;
+  return remainingMs > 0 ? Math.ceil(remainingMs / 1000) : 0;
+}
+
+/**
  * Awards passive chat-earn loyalty points to a viewer if they're off cooldown, using the
  * streamer's configured rate/cooldown. No-ops silently if the streamer hasn't opted into Loyalty
  * Points (no config row, or `enabled: false`) or if the viewer is still on cooldown.

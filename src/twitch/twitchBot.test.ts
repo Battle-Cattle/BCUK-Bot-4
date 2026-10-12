@@ -163,6 +163,7 @@ vi.mock('../commands/pointsEarnHandler', () => ({
 
 vi.mock('../commands/pointsHandler', () => ({
   executePointsCommandForTwitch: vi.fn(),
+  POINTS_COMMAND: '!points',
 }));
 
 vi.mock('../commands/gambleHandler', () => ({
@@ -454,6 +455,16 @@ describe('handleTwitchMessage', () => {
 
     await vi.waitFor(() => expect(executeGambleCommandForTwitch).toHaveBeenCalledOnce());
     expect(executeGambleCommandForTwitch).toHaveBeenCalledWith('streamer', 42, '!gamble 100', 'alice', '!gamble');
+    expect(awardPointsForChatMessage).not.toHaveBeenCalled();
+  });
+
+  it('does not award passive chat-earn points for a !points message, so checking your balance can\'t silently claim the shared cooldown and block a following !gamble', async () => {
+    vi.mocked(executePointsCommandForTwitch).mockResolvedValue(undefined);
+
+    sendMessage('#streamer', 'alice', '!points');
+
+    await vi.waitFor(() => expect(executePointsCommandForTwitch).toHaveBeenCalledOnce());
+    expect(executePointsCommandForTwitch).toHaveBeenCalledWith('streamer', 42, '!points', 'alice', '!points');
     expect(awardPointsForChatMessage).not.toHaveBeenCalled();
   });
 

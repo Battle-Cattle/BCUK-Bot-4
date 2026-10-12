@@ -5,7 +5,7 @@ vi.mock('../db', () => ({
   resolveLoyaltyPointsGambleOutcome: vi.fn(),
   getLoyaltyPointsConfig: vi.fn(),
 }));
-vi.mock('./pointsEarnHandler', () => ({ tryClaimPointsCooldown: vi.fn() }));
+vi.mock('./pointsEarnHandler', () => ({ tryClaimPointsCooldown: vi.fn(), getRemainingCooldownSeconds: vi.fn() }));
 
 // Shared so a test can assert on the error logged by gambleHandler.ts's module-level `log`
 // instance (created once via `createLogger('Gamble')` at import time).
@@ -13,7 +13,7 @@ const { logErrorSpy } = vi.hoisted(() => ({ logErrorSpy: vi.fn() }));
 vi.mock('../shared/logger', () => ({ createLogger: () => ({ info: vi.fn(), error: logErrorSpy }) }));
 
 import { getLoyaltyPointsBalance, resolveLoyaltyPointsGambleOutcome, getLoyaltyPointsConfig } from '../db';
-import { tryClaimPointsCooldown } from './pointsEarnHandler';
+import { tryClaimPointsCooldown, getRemainingCooldownSeconds } from './pointsEarnHandler';
 import { executeGambleCommandForTwitch, registerGambleTwitchRuntime } from './gambleHandler';
 
 const SEND = vi.fn();
@@ -28,6 +28,7 @@ beforeEach(() => {
   vi.mocked(resolveLoyaltyPointsGambleOutcome).mockResolvedValue(900);
   vi.mocked(getLoyaltyPointsConfig).mockResolvedValue(ENABLED_CONFIG);
   vi.mocked(tryClaimPointsCooldown).mockReturnValue(true);
+  vi.mocked(getRemainingCooldownSeconds).mockReturnValue(42);
   randomSpy = vi.spyOn(Math, 'random');
 });
 
@@ -73,11 +74,13 @@ describe('executeGambleCommandForTwitch', () => {
     expect(SEND).toHaveBeenCalledWith('channel', expect.stringContaining('Usage: !gamble'));
   });
 
-  it('does not gamble when the cooldown is active', async () => {
+  it('does not gamble when the cooldown is active, and replies with the remaining time', async () => {
     vi.mocked(tryClaimPointsCooldown).mockReturnValue(false);
+    vi.mocked(getRemainingCooldownSeconds).mockReturnValue(42);
     await executeGambleCommandForTwitch('channel', 1, '!gamble 100', 'alice', '!gamble');
-    expect(SEND).not.toHaveBeenCalled();
     expect(resolveLoyaltyPointsGambleOutcome).not.toHaveBeenCalled();
+    expect(getRemainingCooldownSeconds).toHaveBeenCalledWith(1, 'alice', 60);
+    expect(SEND).toHaveBeenCalledWith('channel', '@alice still on cooldown — try again in 42s.');
   });
 
   it('uses the streamer\'s configured cooldown', async () => {

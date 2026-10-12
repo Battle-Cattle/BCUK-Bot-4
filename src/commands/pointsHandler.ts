@@ -6,7 +6,12 @@ import type { TwitchSendRuntime } from './twitchRuntime';
 
 const log = createLogger('Points');
 
-const POINTS_COMMAND = '!points';
+/** The `!points` command token. Exported so `twitchBot.ts` can skip the passive chat-earn award
+ *  for a `!points` message itself — `!points` has no cooldown of its own, but chat-earn and
+ *  `!gamble` share one cooldown, so without this exemption checking your balance would silently
+ *  claim that shared cooldown and block an immediately-following `!gamble` for up to its full
+ *  duration, with no feedback. */
+export const POINTS_COMMAND = '!points';
 const LEADERBOARD_SIZE = 5;
 const LEADERBOARD_SUBCOMMANDS = new Set(['leaderboard', 'top']);
 
