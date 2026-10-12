@@ -1,14 +1,14 @@
 {
   "repo_notes": [
     {
-      "content": "A multi-platform community bot connecting Twitch and Discord (TikTok Live support has been removed). Features per-guild custom commands and counters, soundboard effects, EventSub-driven alerts and dynamic channel-point pricing, scheduled timer commands, a companion app for redemption events, and a web control panel. Discord is now multi-guild: access levels, counters, and command overrides are scoped per guild rather than global.",
+      "content": "A multi-platform community bot connecting Twitch and Discord (TikTok Live support has been removed). Features per-guild custom commands and counters, soundboard effects, EventSub-driven alerts and dynamic channel-point pricing, scheduled timer commands, a per-streamer viewer loyalty points/virtual currency system (chat-earn, sub bonuses, !gamble), a companion app for redemption events, and a web control panel. Discord is now multi-guild: access levels, counters, and command overrides are scoped per guild rather than global.",
       "author": null
     }
   ],
   "pages": [
     {
-      "title": "BCUK Bot — Project Overview",
-      "purpose": "High-level introduction to BCUK Bot 4: what it does, its multi-platform architecture (multi-guild Discord + Twitch), key subsystems (SFX, EventSub/alerts, dynamic channel-point pricing, timers, companion app, web panel), and how the major components relate to each other. Links to all child sections for deeper reading.",
+      "title": "BCUK Bot \u2014 Project Overview",
+      "purpose": "High-level introduction to BCUK Bot 4: what it does, its multi-platform architecture (multi-guild Discord + Twitch), key subsystems (SFX, EventSub/alerts, dynamic channel-point pricing, loyalty points/gambling, timers, companion app, web panel), and how the major components relate to each other. Links to all child sections for deeper reading.",
       "parent": null,
       "page_notes": [
         {
@@ -18,9 +18,9 @@
       ]
     },
     {
-      "title": "Getting Started — Setup and Configuration",
+      "title": "Getting Started \u2014 Setup and Configuration",
       "purpose": "Step-by-step guide for setting up the bot: cloning the repo, installing dependencies, configuring environment variables via .env, setting up the MySQL database (DATABASE-SCHEMA.md is the reference, the DB itself is managed outside this repo), and running in development (npm run dev / ts-node) vs. production (npm run build + tsc) mode.",
-      "parent": "BCUK Bot — Project Overview",
+      "parent": "BCUK Bot \u2014 Project Overview",
       "page_notes": [
         {
           "content": "",
@@ -31,7 +31,7 @@
     {
       "title": "Project Structure and Build System",
       "purpose": "Explains the repository layout under src/ (audio, commands, db, discord, twitch, web, shared, types, test-utils), the TypeScript compilation pipeline (strict mode, ES2024, NodeNext, tsconfig.build.json for prod), and the npm scripts (dev, test, build, lint, check:circular).",
-      "parent": "BCUK Bot — Project Overview",
+      "parent": "BCUK Bot \u2014 Project Overview",
       "page_notes": [
         {
           "content": "",
@@ -41,7 +41,7 @@
     },
     {
       "title": "Core Bot Architecture",
-      "purpose": "Overview of how the bot's core runtime is structured: the main entry point (src/index.ts), the startup sequence (DB ping → Twitch/EventSub runtime wiring → guild registry reload → Discord → Twitch → web panel → schedulers → monitor/EventSub fire-and-forget), graceful shutdown, and how the platform bots and the web panel are wired together via runtime-injection registries to avoid circular imports. Links to child pages for each subsystem.",
+      "purpose": "Overview of how the bot's core runtime is structured: the main entry point (src/index.ts), the startup sequence (DB ping \u2192 Twitch/EventSub runtime wiring \u2192 guild registry reload \u2192 Discord \u2192 Twitch \u2192 web panel \u2192 schedulers \u2192 monitor/EventSub fire-and-forget), graceful shutdown, and how the platform bots and the web panel are wired together via runtime-injection registries to avoid circular imports. Links to child pages for each subsystem.",
       "parent": null,
       "page_notes": [
         {
@@ -74,7 +74,7 @@
     },
     {
       "title": "Discord Bot, Voice Audio, and Multi-Guild Registry",
-      "purpose": "Covers the Discord.js client setup, gateway intents, message/command dispatch, and first-join provisioning (guild owner granted Admin only on brand-new join). Explains voice channel connection lifecycle, playback via ffmpeg/mediaplex, the custom voice adapter (voiceAdapter.ts, since guild.voiceAdapterCreator is unused for a discord.js v14 incompatibility), and voicePresence.ts resolving which registered guild a Discord user's live voice connection belongs to (used to route Twitch-chat-triggered SFX into the right guild). Also documents guildRegistry.ts: the in-memory map of provisioned guilds (≥1 guild_member row), reloaded via reloadGuildRegistry() at startup, on guildCreate, and after admin provisioning changes, fail-safe on DB error.",
+      "purpose": "Covers the Discord.js client setup, gateway intents, message/command dispatch, and first-join provisioning (guild owner granted Admin only on brand-new join). Explains voice channel connection lifecycle, playback via ffmpeg/mediaplex, the custom voice adapter (voiceAdapter.ts, since guild.voiceAdapterCreator is unused for a discord.js v14 incompatibility), and voicePresence.ts resolving which registered guild a Discord user's live voice connection belongs to (used to route Twitch-chat-triggered SFX into the right guild). Also documents guildRegistry.ts: the in-memory map of provisioned guilds (\u22651 guild_member row), reloaded via reloadGuildRegistry() at startup, on guildCreate, and after admin provisioning changes, fail-safe on DB error.",
       "parent": "Core Bot Architecture",
       "page_notes": [
         {
@@ -128,7 +128,7 @@
       ]
     },
     {
-      "title": "Twitch EventSub — Real-Time Events",
+      "title": "Twitch EventSub \u2014 Real-Time Events",
       "purpose": "Covers src/twitch/eventsub/: webhook subscription setup and management (twitchEventSubSubscriptions.ts/twitchEventSubSubscriptionGroups.ts), periodic reconciliation against Twitch's live subscription list, redemption dedup, and the runtime-injected hook registry (twitchEventSubRuntime.ts) that fans out follow/sub/resub/giftsub/raid/redemption/stream-status events to the monitor, alerts overlay, channel-point pricing engine, and companion app without circular imports. twitchEventSubDispatch.ts maintains the in-memory streamer map and routes notifications to handlers in twitchEventSubHandler.ts (follow/sub/resub/giftsub/raid/stream status) and twitchEventSubRedemption.ts (channel-point redemptions, with the durable redemption ledger), which share the chat/alert/dashboard/companion side effects in twitchEventSubEffects.ts; the webhook receiver itself lives in web/routes/eventsubCallback.ts.",
       "parent": "Twitch Integrations",
       "page_notes": [
@@ -139,7 +139,7 @@
       ]
     },
     {
-      "title": "Twitch Stream Monitor — Go-Live Announcements",
+      "title": "Twitch Stream Monitor \u2014 Go-Live Announcements",
       "purpose": "Overview of the legacy polling-based announcement subsystem (src/twitch/monitor/): 60-second polling of the Twitch Helix API across all monitored streamers, Discord embed construction, multi-streamer (\"multitwitch\") announcement grouping, editing/deleting stale announcement posts, and the startup live-check, all independent of EventSub.",
       "parent": "Twitch Integrations",
       "page_notes": [
@@ -161,8 +161,19 @@
       ]
     },
     {
-      "title": "Timer Commands — Scheduled Chat Messages",
-      "purpose": "Documents src/twitch/timers/: Twitch-only auto-posted chat messages assigned from a global catalog to Twitch-linked streamer channels (like custom commands, via an assignment table). timerCommandScheduler.ts runs a 15s tick evaluating each (timer, channel) pair independently against interval/require-live/min-chat-messages gates, with a Shared Chat group cooldown to avoid flooding merged chats; timerCommandFireGate.ts holds the fire decision logic and timerCommandCooldowns.ts the per-row cooldown state. Firing state is in-memory only — a restart re-seeds each pair's clock without a burst of catch-up posts.",
+      "title": "Timer Commands \u2014 Scheduled Chat Messages",
+      "purpose": "Documents src/twitch/timers/: Twitch-only auto-posted chat messages assigned from a global catalog to Twitch-linked streamer channels (like custom commands, via an assignment table). timerCommandScheduler.ts runs a 15s tick evaluating each (timer, channel) pair independently against interval/require-live/min-chat-messages gates, with a Shared Chat group cooldown to avoid flooding merged chats; timerCommandFireGate.ts holds the fire decision logic and timerCommandCooldowns.ts the per-row cooldown state. Firing state is in-memory only \u2014 a restart re-seeds each pair's clock without a burst of catch-up posts.",
+      "parent": "Twitch Integrations",
+      "page_notes": [
+        {
+          "content": "",
+          "author": null
+        }
+      ]
+    },
+    {
+      "title": "Loyalty Points & Gamble",
+      "purpose": "Documents the per-streamer viewer currency: src/db/loyaltyPoints.ts (atomic balance adjust/clamp at 0 and the balance column's INT max, leaderboard, config), a whole-table TTL config cache (loyaltyPointsCache.ts) mirroring counterCache.ts, and a cache-invalidating writes wrapper (loyaltyPointsWrites.ts). Passive chat-earn (pointsEarnHandler.ts) uses a bespoke per-(streamer, viewer) cooldown map, shared with !gamble so a viewer can't alternate between the two to dodge either cooldown. Sub/resub/gift-sub bonuses hook into the existing EventSub handlers (twitchEventSubHandler.ts). !points/!points balance/!points leaderboard (pointsHandler.ts) are uncooled reads. !gamble <amount> (gambleHandler.ts, gambleAmount.ts) is a 50/50 double-or-nothing accepting a plain number, 1,000, 5k, 40%, or all; the stake debit and a win's payout settle atomically in one transaction (resolveGambleOutcome) so a failed payout can't leave a stake debited with nothing credited back.",
       "parent": "Twitch Integrations",
       "page_notes": [
         {
@@ -238,7 +249,7 @@
       ]
     },
     {
-      "title": "Authentication — Discord OAuth2 and Guild Selection",
+      "title": "Authentication \u2014 Discord OAuth2 and Guild Selection",
       "purpose": "Explains the Discord OAuth2 login flow: redirect to Discord, callback code exchange, user whitelist check against the database, session creation, and logout. Covers guild.ts's multi-guild picker for users with access to more than one Discord guild, requireGuildContext auto-selecting for single-guild users, and the CSRF protection middleware.",
       "parent": "Web Management Panel",
       "page_notes": [
@@ -260,7 +271,7 @@
       ]
     },
     {
-      "title": "Dashboard — Bot Status and Live Activity",
+      "title": "Dashboard \u2014 Bot Status and Live Activity",
       "purpose": "Covers the main dashboard page: SSE-driven live status and activity feeds (dashboardEvents.ts/dashboardStatusEvents.ts/healthStatusEvents.ts) replacing simple polling, the status card grid (Discord bot, per-guild voice channel, last played), Twitch channel status display, SFX command table with client-side search, and the Rejoin/Leave Voice button.",
       "parent": "Web Management Panel",
       "page_notes": [
@@ -271,7 +282,7 @@
       ]
     },
     {
-      "title": "Admin Panel — User and Guild Management",
+      "title": "Admin Panel \u2014 User and Guild Management",
       "purpose": "Documents the user and guild provisioning interface: adding/updating/removing users, linking Discord IDs to Twitch names, provisioning/de-provisioning guild members (triggers reloadGuildRegistry), the serialized shared/userMutationQueue.ts for concurrent-unsafe writes, Discord name refresh, and rollback-on-failure logic.",
       "parent": "Web Management Panel",
       "page_notes": [
@@ -282,7 +293,7 @@
       ]
     },
     {
-      "title": "Admin Panel — Stream Monitor Management",
+      "title": "Admin Panel \u2014 Stream Monitor Management",
       "purpose": "Covers the streams admin page: creating/editing/removing stream groups and streamers, toggling Discord announcements, the Live Now table with real-time polling, Discord embed preview rendering, and the fire-and-forget monitor restart chain.",
       "parent": "Web Management Panel",
       "page_notes": [
@@ -293,7 +304,7 @@
       ]
     },
     {
-      "title": "Admin Panel — Custom Commands and Guild Overrides",
+      "title": "Admin Panel \u2014 Custom Commands and Guild Overrides",
       "purpose": "Documents the custom commands management interface: CRUD for the global trigger/output catalog, user assignment via twitch_user_commands, input normalization (lowercase single-token trigger_string, no prefix stripping), and per-guild enable/disable/output overrides on the shared catalog via guild_command_override.",
       "parent": "Web Management Panel",
       "page_notes": [
@@ -304,7 +315,7 @@
       ]
     },
     {
-      "title": "Admin Panel — Counters",
+      "title": "Admin Panel \u2014 Counters",
       "purpose": "Documents the per-guild counter commands management interface: CRUD for trigger/check command pairs, the %d placeholder for current value, optional yearly reset with archived value history (counterHistory.ts), manual value reset, conflict checking against custom commands, and the inline edit panel UI.",
       "parent": "Web Management Panel",
       "page_notes": [
@@ -315,7 +326,7 @@
       ]
     },
     {
-      "title": "Admin Panel — Timer Commands",
+      "title": "Admin Panel \u2014 Timer Commands",
       "purpose": "Documents the timer-command admin pages: CRUD for the global timer catalog (interval, min-messages gate, require-live flag, Manager-gated), and assigning timers from that catalog to specific Twitch-linked streamer channels via timerAssignments.ts.",
       "parent": "Web Management Panel",
       "page_notes": [
@@ -326,7 +337,7 @@
       ]
     },
     {
-      "title": "Admin Panel — Channel Points (Pricing & Video Overlay)",
+      "title": "Admin Panel \u2014 Channel Points (Pricing & Video Overlay)",
       "purpose": "Covers two related but independent web surfaces: the Dynamic Channel Point Pricing config (base cost, max multiplier, decay half-life, cooldown, live price/demand SSE updates via channelPointsEvents.ts, and the pricing-preview simulation), and the older per-reward video overlay (overlayAdmin*.ts, mapping a channel-point reward to a video file served to OBS via overlaySource.ts's SSE push).",
       "parent": "Web Management Panel",
       "page_notes": [
@@ -337,8 +348,8 @@
       ]
     },
     {
-      "title": "Admin Panel — Alerts Overlay",
-      "purpose": "Documents the alerts admin pages: per-streamer, per-event-type (follow/sub/resub/giftsub/raid) configuration of the browser-source alert — enable toggle, message template, image/sound asset upload, on-screen duration, and text animation — plus the reserved-word login validation used by the OBS browser-source endpoint.",
+      "title": "Admin Panel \u2014 Loyalty Points",
+      "purpose": "Documents src/web/routes/loyaltyPoints.ts: the self-service /loyalty-points page (no Mod+ override, matching the Channel Points admin page's model \u2014 a streamer manages only their own channel), showing the top-50 leaderboard and an earn-rate/cooldown config form bounded to the signed INT column max, saved through setLoyaltyPointsConfig (cache-invalidating).",
       "parent": "Web Management Panel",
       "page_notes": [
         {
@@ -348,7 +359,18 @@
       ]
     },
     {
-      "title": "Companion App — Keys and Loopback Auth",
+      "title": "Admin Panel \u2014 Alerts Overlay",
+      "purpose": "Documents the alerts admin pages: per-streamer, per-event-type (follow/sub/resub/giftsub/raid) configuration of the browser-source alert \u2014 enable toggle, message template, image/sound asset upload, on-screen duration, and text animation \u2014 plus the reserved-word login validation used by the OBS browser-source endpoint.",
+      "parent": "Web Management Panel",
+      "page_notes": [
+        {
+          "content": "",
+          "author": null
+        }
+      ]
+    },
+    {
+      "title": "Companion App \u2014 Keys and Loopback Auth",
       "purpose": "Documents the web surface for the companion app: issuing/viewing/revoking a user's companion bearer token, the loopback OAuth login flow the app performs against the web panel, and the SSE endpoint and reward listing the app consumes to show a streamer their own live channel-point redemptions off-dashboard.",
       "parent": "Web Management Panel",
       "page_notes": [
@@ -360,7 +382,7 @@
     },
     {
       "title": "Streamdeck Integration",
-      "purpose": "Documents the Elgato Streamdeck plugin integration: the API key lifecycle (request → pending/auto-approve → approved → revoked/denied), the Bearer-token-authenticated REST endpoints for triggering SFX and connecting/disconnecting voice (bypassing chat cooldown), guild resolution for a given key, the user-facing key management page, and the admin key approval dashboard.",
+      "purpose": "Documents the Elgato Streamdeck plugin integration: the API key lifecycle (request \u2192 pending/auto-approve \u2192 approved \u2192 revoked/denied), the Bearer-token-authenticated REST endpoints for triggering SFX and connecting/disconnecting voice (bypassing chat cooldown), guild resolution for a given key, the user-facing key management page, and the admin key approval dashboard.",
       "parent": "Web Management Panel",
       "page_notes": [
         {
