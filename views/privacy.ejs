@@ -74,8 +74,9 @@
           <p>The Recent Events feed and Loyalty Points balances above are the only data we store about
             Twitch viewers who aren't signed-in users of this site.</p>
           <p>We do not record or transcribe voice channel audio, and we do not store the content of Discord
-            messages or Twitch chat. The bot reads messages to spot its own commands and, on a channel with
-            Loyalty Points enabled, to award chat-earn points — neither process stores the message itself.
+            messages or Twitch chat. The bot reads messages to spot its own commands and, on any Twitch
+            channel linked to a streamer's account, to award Loyalty Points chat-earn — neither process
+            stores the message itself.
             Commands like <code>!followage</code> look up the requested information from Twitch at the time
             and don't store it. The most recent bot command in each channel is kept in memory for moderators
             to see on the dashboard, but it isn't written to a database and is lost on restart.</p>
