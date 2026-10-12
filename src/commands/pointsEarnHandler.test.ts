@@ -8,7 +8,7 @@ vi.mock('../db', () => ({
 import { getLoyaltyPointsConfig, adjustLoyaltyPointsBalance } from '../db';
 import {
   awardPointsForChatMessage, tryClaimPointsCooldown, clearPointsCooldowns,
-  awardPointsForSub, awardPointsForGiftSub,
+  awardPointsForSub, awardPointsForGiftSub, getRemainingCooldownSeconds,
 } from './pointsEarnHandler';
 
 const ENABLED_CONFIG = { enabled: true, pointsPerMessage: 1, cooldownSeconds: 60, pointsPerSub: 100, pointsPerGiftSub: 100 };
@@ -57,6 +57,32 @@ describe('tryClaimPointsCooldown', () => {
     tryClaimPointsCooldown(1, 'viewer', 10);
     vi.advanceTimersByTime(10_000);
     expect(tryClaimPointsCooldown(1, 'viewer', 10)).toBe(true);
+  });
+});
+
+// ─── getRemainingCooldownSeconds ──────────────────────────────────────────────
+
+describe('getRemainingCooldownSeconds', () => {
+  it('returns 0 for a pair that has never claimed the cooldown', () => {
+    expect(getRemainingCooldownSeconds(1, 'viewer', 60)).toBe(0);
+  });
+
+  it('returns the whole seconds remaining, rounded up, right after a claim', () => {
+    tryClaimPointsCooldown(1, 'viewer', 60);
+    vi.advanceTimersByTime(17_400); // 17.4s elapsed => 42.6s remaining
+    expect(getRemainingCooldownSeconds(1, 'viewer', 60)).toBe(43);
+  });
+
+  it('returns 0 once the cooldown has fully elapsed', () => {
+    tryClaimPointsCooldown(1, 'viewer', 60);
+    vi.advanceTimersByTime(60_000);
+    expect(getRemainingCooldownSeconds(1, 'viewer', 60)).toBe(0);
+  });
+
+  it('does not itself claim the cooldown', () => {
+    tryClaimPointsCooldown(1, 'viewer', 60);
+    getRemainingCooldownSeconds(1, 'viewer', 60);
+    expect(tryClaimPointsCooldown(1, 'viewer', 60)).toBe(false);
   });
 });
 
