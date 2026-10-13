@@ -9,8 +9,9 @@ A multi-platform community bot connecting Twitch and Discord. Features custom co
 
 ## Requirements
 
-- Node.js, MySQL
-- `.env` file with credentials for each platform
+- **Node.js 24 or later** (with npm 11+), matching `engines` in `package.json` and CI. Older npm versions can fail `npm ci` on this lockfile.
+- **MySQL 8.0.19 or later.** Upserts use the `INSERT … VALUES (…) AS new_row` row-alias form, which older versions reject. For a fresh install, create the tables from `schema.sql` (`migrations/` upgrades an existing one); `DATABASE-SCHEMA.md` documents each table.
+- A `.env` file with credentials for each platform. Copy `.env.example` and fill it in; it lists every setting the bot reads.
 
 > **Dev environment note:** The `.env` file is the single source of truth for local configuration. dotenv only fills variables that are not already set in the environment — it does **not** override them. If you have any of the bot's variables exported in your shell profile (e.g. `~/.bashrc`, `~/.zshrc`), un-export or remove those entries so the `.env` values are used instead.
 
