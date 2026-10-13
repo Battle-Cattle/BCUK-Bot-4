@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import express, { Router } from 'express';
 import request from 'supertest';
 import { EventEmitter } from 'events';
+import http from 'http';
 import { mockLogger } from '../test-utils/loggerMock';
 
 vi.mock('../shared/config', () => ({
@@ -336,12 +337,45 @@ function buildLimiterTestApp(limiter: express.RequestHandler, sessionUser: unkno
  * @returns Resolves once all `limit` + 1 requests have completed and been asserted.
  */
 async function expectExactThreshold(testApp: express.Express, limit: number): Promise<void> {
-  for (let i = 0; i < limit; i++) {
-    const res = await request(testApp).get('/__limiter_probe');
-    expect(res.status).toBe(200);
+  await withListeningServer(testApp, async (server) => {
+    await expectProbeStatuses(server, limit, 200);
+    await expectProbeStatuses(server, 1, 429);
+  });
+}
+
+/**
+ * Starts `testApp` on one ephemeral loopback port for the duration of `fn`, then closes it.
+ * Passing an app straight to `request()` makes supertest listen on and tear down a fresh server
+ * for every single request, which dominates the cost of the hundreds-of-requests limiter loops
+ * here; reusing one listening server keeps the requests (and limiter keys) identical but cheap.
+ *
+ * @param testApp - App built by {@link buildLimiterTestApp}.
+ * @param fn - Receives the listening server to send requests to.
+ * @returns Resolves once `fn` has finished and the server has closed.
+ */
+async function withListeningServer(testApp: express.Express, fn: (server: http.Server) => Promise<void>): Promise<void> {
+  const server = http.createServer(testApp);
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    await fn(server);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
   }
-  const res = await request(testApp).get('/__limiter_probe');
-  expect(res.status).toBe(429);
+}
+
+/**
+ * Sends `count` sequential probe requests to `server`, asserting each returns `status`.
+ *
+ * @param server - Listening server from {@link withListeningServer}.
+ * @param count - Number of requests to send.
+ * @param status - Expected HTTP status for every one of them.
+ * @returns Resolves once all `count` requests have completed and been asserted.
+ */
+async function expectProbeStatuses(server: http.Server, count: number, status: number): Promise<void> {
+  for (let i = 0; i < count; i++) {
+    const res = await request(server).get('/__limiter_probe');
+    expect(res.status).toBe(status);
+  }
 }
 
 describe('generalLimiter wiring (server.ts)', () => {
@@ -360,20 +394,14 @@ describe('generalLimiter wiring (server.ts)', () => {
 
   it('skips an authenticated caller (per-account throttling is sessionLimiter’s job)', async () => {
     const testApp = buildLimiterTestApp(generalLimiter, { discordId: 'general-limiter-skip-test' });
-    for (let i = 0; i < 105; i++) {
-      const res = await request(testApp).get('/__limiter_probe');
-      expect(res.status).toBe(200);
-    }
+    await withListeningServer(testApp, (server) => expectProbeStatuses(server, 105, 200));
   });
 });
 
 describe('sessionLimiter wiring (server.ts)', () => {
   it('skips an unauthenticated caller (per-IP throttling is generalLimiter’s job)', async () => {
     const testApp = buildLimiterTestApp(sessionLimiter, undefined);
-    for (let i = 0; i < 105; i++) {
-      const res = await request(testApp).get('/__limiter_probe');
-      expect(res.status).toBe(200);
-    }
+    await withListeningServer(testApp, (server) => expectProbeStatuses(server, 105, 200));
   });
 
   it('allows exactly 600 requests then blocks the 601st for an authenticated account', async () => {

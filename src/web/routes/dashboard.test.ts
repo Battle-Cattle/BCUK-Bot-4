@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { waitFor } from '../../test-utils/waitFor';
 import { mockLogger } from '../../test-utils/loggerMock';
 
 /** Mocks the shared logger so route handlers don't write real log output during tests. */
@@ -157,7 +158,7 @@ describe('GET /', () => {
     // the request time to reach the route handler and start every call in the batch, then
     // assert they've all started even though getGuildScopedStatus's own promise is still
     // unresolved.
-    await vi.waitFor(() => expect(getStreamerByDiscordId).toHaveBeenCalled());
+    await waitFor(() => expect(getStreamerByDiscordId).toHaveBeenCalled());
     expect(getSfxTriggerCount).toHaveBeenCalled();
     expect(getCustomCommandCount).toHaveBeenCalled();
     expect(getCounterCount).toHaveBeenCalledWith('guild-A');

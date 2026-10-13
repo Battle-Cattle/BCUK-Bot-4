@@ -1,6 +1,7 @@
 node_modules/
 dist/
 coverage/
+.vitest-cache/
 TEMP/
 .env
 *.js.map

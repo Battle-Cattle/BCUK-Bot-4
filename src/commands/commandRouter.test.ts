@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { waitFor } from '../test-utils/waitFor';
 import path from 'path';
 import type { SfxTrigger, SfxFile, SfxLookupResult } from '../db';
 
@@ -175,7 +176,7 @@ describe('handleCommand', () => {
     vi.mocked(playFile).mockReturnValueOnce(new Promise<void>((resolve) => { resolveFirst = resolve; }));
 
     const first = handleCommand('!ding', 'twitch', GUILD_A);
-    await vi.waitFor(() => expect(vi.mocked(playFile)).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(vi.mocked(playFile)).toHaveBeenCalledTimes(1));
 
     await handleCommand('!ding', 'twitch', GUILD_A);
     expect(vi.mocked(playFile)).toHaveBeenCalledTimes(1); // second was blocked

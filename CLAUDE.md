@@ -26,9 +26,12 @@ npx tsc --noEmit && npm test
 ## Dev
 
 ```bash
-npm run dev   # ts-node src/index.ts
-npm test      # Vitest
+npm run dev             # ts-node src/index.ts
+npm test                # Vitest (everything except the ts-node toolchain smoke test)
+npm run test:toolchain  # ts-node smoke test only — slow (type-checks the project); CI runs it
 ```
+
+Vitest keeps an on-disk transform cache in `.vitest-cache/` (gitignored, outside `node_modules` so it survives `npm ci`); `deploy.sh` and CI drop/re-key it when `package-lock.json` changes. If a run ever looks stale, `rm -rf .vitest-cache`. In tests, prefer `waitFor` from `src/test-utils/waitFor.ts` over `vi.waitFor` (1ms poll instead of 50ms).
 
 ---
 

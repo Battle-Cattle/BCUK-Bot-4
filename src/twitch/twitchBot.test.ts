@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { waitFor } from '../test-utils/waitFor';
 import { mockLogger } from '../test-utils/loggerMock';
 
 // ─── Hoisted state (available inside vi.mock factories) ───────────────────────
@@ -416,19 +417,19 @@ describe('handleTwitchMessage', () => {
     expect(executeShoutoutForTwitch).toHaveBeenCalledWith('streamer', '!cmd', 'Alice', false, '!cmd');
     // Guild resolution (Twitch-channel → discord_id → active voice guild) runs asynchronously
     // before handleCommand and executeCounterCommandForTwitch are invoked.
-    await vi.waitFor(() => expect(handleCommand).toHaveBeenCalledOnce());
+    await waitFor(() => expect(handleCommand).toHaveBeenCalledOnce());
     expect(handleCommand).toHaveBeenCalledWith('!cmd', 'twitch', 'guild-A', '!cmd');
-    await vi.waitFor(() => expect(executeCounterCommandForTwitch).toHaveBeenCalledOnce());
+    await waitFor(() => expect(executeCounterCommandForTwitch).toHaveBeenCalledOnce());
     expect(executeCounterCommandForTwitch).toHaveBeenCalledWith('streamer', '!cmd', 'Alice', 'guild-A', '!cmd');
     expect(executeCountdownForTwitch).toHaveBeenCalledWith('streamer', '!cmd', '!cmd');
     expect(executeFollowageForTwitch).toHaveBeenCalledWith('streamer', '!cmd', 'streamer-id', { id: 'alice-id', name: 'Alice' }, '!cmd');
     // Streamer-id resolution (Twitch-channel → discord_id → streamer.id) runs asynchronously
     // before the points-earn award, same as guild resolution above.
-    await vi.waitFor(() => expect(awardPointsForChatMessage).toHaveBeenCalledOnce());
+    await waitFor(() => expect(awardPointsForChatMessage).toHaveBeenCalledOnce());
     expect(awardPointsForChatMessage).toHaveBeenCalledWith(42, 'alice');
-    await vi.waitFor(() => expect(executePointsCommandForTwitch).toHaveBeenCalledOnce());
+    await waitFor(() => expect(executePointsCommandForTwitch).toHaveBeenCalledOnce());
     expect(executePointsCommandForTwitch).toHaveBeenCalledWith('streamer', 42, '!cmd', 'alice', '!cmd');
-    await vi.waitFor(() => expect(executeGambleCommandForTwitch).toHaveBeenCalledOnce());
+    await waitFor(() => expect(executeGambleCommandForTwitch).toHaveBeenCalledOnce());
     expect(executeGambleCommandForTwitch).toHaveBeenCalledWith('streamer', 42, '!cmd', 'alice', '!cmd');
   });
 
@@ -439,7 +440,7 @@ describe('handleTwitchMessage', () => {
 
     sendMessage('#streamer', 'alice', 'hello');
 
-    await vi.waitFor(() => expect(getStreamerByDiscordId).toHaveBeenCalled());
+    await waitFor(() => expect(getStreamerByDiscordId).toHaveBeenCalled());
     expect(awardPointsForChatMessage).not.toHaveBeenCalled();
     // executePointsCommandForTwitch/executeGambleCommandForTwitch are still called (same as
     // executeCounterCommandForTwitch's guildId), with a null streamerId — they no-op internally
@@ -453,7 +454,7 @@ describe('handleTwitchMessage', () => {
 
     sendMessage('#streamer', 'alice', '!gamble 100');
 
-    await vi.waitFor(() => expect(executeGambleCommandForTwitch).toHaveBeenCalledOnce());
+    await waitFor(() => expect(executeGambleCommandForTwitch).toHaveBeenCalledOnce());
     expect(executeGambleCommandForTwitch).toHaveBeenCalledWith('streamer', 42, '!gamble 100', 'alice', '!gamble');
     expect(awardPointsForChatMessage).not.toHaveBeenCalled();
   });
@@ -463,7 +464,7 @@ describe('handleTwitchMessage', () => {
 
     sendMessage('#streamer', 'alice', '!points');
 
-    await vi.waitFor(() => expect(executePointsCommandForTwitch).toHaveBeenCalledOnce());
+    await waitFor(() => expect(executePointsCommandForTwitch).toHaveBeenCalledOnce());
     expect(executePointsCommandForTwitch).toHaveBeenCalledWith('streamer', 42, '!points', 'alice', '!points');
     expect(awardPointsForChatMessage).not.toHaveBeenCalled();
   });
@@ -473,7 +474,7 @@ describe('handleTwitchMessage', () => {
 
     sendMessage('#streamer', 'alice', '!cmd');
 
-    await vi.waitFor(() => expect(handleCommand).toHaveBeenCalledOnce());
+    await waitFor(() => expect(handleCommand).toHaveBeenCalledOnce());
     expect(getAllTwitchLinkedUsers).toHaveBeenCalled();
     expect(resolveGuildIdForDiscordId).toHaveBeenCalledWith('streamer-discord-id');
   });
@@ -485,7 +486,7 @@ describe('handleTwitchMessage', () => {
 
     sendMessage('#streamer', 'alice', '!cmd');
 
-    await vi.waitFor(() => expect(handleCommand).toHaveBeenCalledOnce());
+    await waitFor(() => expect(handleCommand).toHaveBeenCalledOnce());
     expect(handleCommand).toHaveBeenCalledWith('!cmd', 'twitch', null, '!cmd');
     expect(resolveGuildIdForDiscordId).not.toHaveBeenCalled();
   });
@@ -499,7 +500,7 @@ describe('handleTwitchMessage', () => {
 
     sendMessage('#streamer', 'alice', '!cmd');
 
-    await vi.waitFor(() => expect(handleCommand).toHaveBeenCalledOnce());
+    await waitFor(() => expect(handleCommand).toHaveBeenCalledOnce());
     expect(findUserByTwitchName).toHaveBeenCalledWith('streamer');
     expect(resolveGuildIdForDiscordId).toHaveBeenCalledWith('freshly-linked-discord-id');
   });
@@ -509,7 +510,7 @@ describe('handleTwitchMessage', () => {
 
     sendMessage('#streamer', 'alice', '!cmd');
 
-    await vi.waitFor(() => expect(handleCommand).toHaveBeenCalledOnce());
+    await waitFor(() => expect(handleCommand).toHaveBeenCalledOnce());
     expect(findUserByTwitchName).not.toHaveBeenCalled();
   });
 
@@ -517,7 +518,7 @@ describe('handleTwitchMessage', () => {
     vi.mocked(handleCommand).mockResolvedValue(undefined);
 
     sendMessage('#streamer', 'alice', '!cmd');
-    await vi.waitFor(() => expect(handleCommand).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(handleCommand).toHaveBeenCalledTimes(1));
     expect(getAllTwitchLinkedUsers).toHaveBeenCalledOnce();
 
     vi.mocked(getAllTwitchLinkedUsers).mockResolvedValue([{ twitchName: 'streamer', discordId: 'new-streamer-discord-id' }]);
@@ -527,12 +528,12 @@ describe('handleTwitchMessage', () => {
     // (per the shared lookupCache's stale-while-revalidate strategy) still
     // serves the last-good mapping for this call.
     sendMessage('#streamer', 'alice', '!again');
-    await vi.waitFor(() => expect(handleCommand).toHaveBeenCalledTimes(2));
-    await vi.waitFor(() => expect(getAllTwitchLinkedUsers).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(handleCommand).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(getAllTwitchLinkedUsers).toHaveBeenCalledTimes(2));
 
     // A subsequent lookup picks up the refreshed mapping.
     sendMessage('#streamer', 'alice', '!third');
-    await vi.waitFor(() => expect(handleCommand).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(handleCommand).toHaveBeenCalledTimes(3));
     expect(resolveGuildIdForDiscordId).toHaveBeenLastCalledWith('new-streamer-discord-id');
   });
 
