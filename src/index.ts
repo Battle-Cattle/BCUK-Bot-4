@@ -13,7 +13,7 @@ import { registerTwitchGuildResolutionRuntime } from './twitch/twitchGuildResolu
 import { startTwitchMonitor, stopTwitchMonitor, getMultiTwitchDataForChannel } from './twitch/monitor/twitchMonitor';
 import { startEventSub, stopEventSub, reloadEventSubSubscriptions } from './twitch/eventsub/twitchEventSub';
 import { startEventSubReconciliation, stopEventSubReconciliation } from './twitch/eventsub/twitchEventSubReconciliation';
-import { startWebPanel } from './web/server';
+import { startWebPanel, stopWebPanel } from './web/server';
 import { disconnect } from './audio/audioPlayer';
 import { registerTwitchChatRuntime } from './commands/customCommandHandler';
 import { registerCounterTwitchRuntime } from './commands/counterHandler';
@@ -140,6 +140,8 @@ async function shutdown(signal: string): Promise<void> {
   // ...then announce the shutdown itself, while the Discord client this DM needs is still up —
   // stopDiscordBot() below tears it down.
   await safeStop('owner alert shutdown announcement', announceShutdown);
+  // Stop taking web requests before the components they'd act on start disconnecting.
+  await safeStop('web panel', stopWebPanel);
   stopDbHealthCheck();
   stopCounterScheduler();
   stopChannelReconciliationPoll();
@@ -305,7 +307,14 @@ async function main(): Promise<void> {
   } catch (err) {
     log.error('Twitch bot failed to start — continuing without Twitch chat:', err);
   }
-  startWebPanel();
+  // A listen failure (e.g. EADDRINUSE) is fatal: the likely cause is a previous bot process that
+  // never exited, and this one carrying on beside it would break the single-instance assumption.
+  try {
+    await startWebPanel();
+  } catch (err) {
+    log.error('Web panel failed to start:', err);
+    process.exit(1);
+  }
   startChannelReconciliationPoll();
   startCounterScheduler();
   startRewardPricingScheduler();

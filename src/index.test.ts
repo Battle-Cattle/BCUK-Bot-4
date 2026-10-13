@@ -67,7 +67,7 @@ vi.mock('./twitch/eventsub/twitchEventSubReconciliation', () => ({
   startEventSubReconciliation: vi.fn(),
   stopEventSubReconciliation: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock('./web/server', () => ({ startWebPanel: vi.fn() }));
+vi.mock('./web/server', () => ({ startWebPanel: vi.fn(), stopWebPanel: vi.fn() }));
 vi.mock('./audio/audioPlayer', () => ({ disconnect: vi.fn() }));
 vi.mock('./commands/customCommandHandler', () => ({ registerTwitchChatRuntime: vi.fn() }));
 vi.mock('./commands/counterHandler', () => ({ registerCounterTwitchRuntime: vi.fn() }));
@@ -327,6 +327,19 @@ describe('startup — reward pricing scheduler', () => {
     expect(vi.mocked(startEventSub)).toHaveBeenCalledOnce();
     expect(vi.mocked(announceStartup)).toHaveBeenCalledOnce();
   });
+
+  it('logs and exits(1) without starting the schedulers when the web panel fails to listen', async () => {
+    const { startWebPanel } = await import('./web/server.js');
+    const { startChannelReconciliationPoll } = await import('./twitch/twitchChannelReconciliationPoll.js');
+    const err = Object.assign(new Error('listen EADDRINUSE: address already in use :::3000'), { code: 'EADDRINUSE' });
+    vi.mocked(startWebPanel).mockRejectedValueOnce(err);
+
+    await runMain();
+
+    expect(lastBotLogger!.error).toHaveBeenCalledWith('Web panel failed to start:', err);
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(vi.mocked(startChannelReconciliationPoll)).not.toHaveBeenCalled();
+  });
 });
 
 // ─── Owner "back online" startup DM ────────────────────────────────────────────
@@ -497,6 +510,23 @@ describe('shutdown', () => {
     expect(stopWatcherOrder).toBeLessThan(announceOrder!);
     expect(announceOrder).toBeLessThan(stopDiscordOrder!);
     expect(announceOrder).toBeLessThan(stopTwitchOrder!);
+  });
+
+  it('stops the web panel after the shutdown announcement and before the bots disconnect', async () => {
+    const { announceShutdown } = await import('./discord/ownerAlerts.js');
+    const { stopWebPanel } = await import('./web/server.js');
+    const { stopTwitchBot } = await import('./twitch/twitchBot.js');
+
+    await runMain();
+    process.emit('SIGINT');
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(vi.mocked(stopWebPanel)).toHaveBeenCalledOnce();
+    const [announceOrder] = vi.mocked(announceShutdown).mock.invocationCallOrder;
+    const [stopWebOrder] = vi.mocked(stopWebPanel).mock.invocationCallOrder;
+    const [stopTwitchOrder] = vi.mocked(stopTwitchBot).mock.invocationCallOrder;
+    expect(announceOrder).toBeLessThan(stopWebOrder!);
+    expect(stopWebOrder).toBeLessThan(stopTwitchOrder!);
   });
 
   it('still closes the pool and exits(0) when a teardown step rejects', async () => {

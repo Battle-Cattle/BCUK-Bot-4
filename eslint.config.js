@@ -6,7 +6,7 @@ const vitest = require('@vitest/eslint-plugin');
 
 module.exports = tseslint.config(
   {
-    ignores: ['dist/**', 'node_modules/**', 'coverage/**', '.vitest-cache/**', 'eslint.config.js', 'public/**'],
+    ignores: ['dist/**', 'dist.new/**', 'dist.old/**', 'node_modules/**', 'coverage/**', '.vitest-cache/**', 'eslint.config.js', 'public/**'],
   },
   js.configs.recommended,
   {

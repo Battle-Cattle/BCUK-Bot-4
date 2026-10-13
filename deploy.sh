@@ -12,9 +12,19 @@ cd "$(dirname "$0")"
 
 PREVIOUS_SHA=$(git rev-parse HEAD)
 
-# On any error after git pull, roll back to the previous commit.
+# The build compiles into this staging folder, which only replaces dist/ once the tests have
+# passed (see "Swapping in the new build" below). Building straight into dist/ would leave a
+# rollback with the new, untested code in dist/ for the next `npm start`, and tsc never deletes
+# output for removed sources — a fresh folder per deploy drops those stale files too.
+BUILD_DIR="dist.new"
+
+# On any error after git pull, roll back to the previous commit and the previous build: dist/ is
+# untouched until the swap, and kept as dist.old from then until the deploy succeeds.
 rollback() {
     echo "ERROR: Deployment failed. Rolling back to $PREVIOUS_SHA..."
+    rm -rf "$BUILD_DIR"
+    # Past the swap, dist.old holds the previous build until the deploy succeeds — put it back.
+    if [ -d dist.old ]; then rm -rf dist && mv dist.old dist; fi
     git reset --hard "$PREVIOUS_SHA"
     exit 1
 }
@@ -97,7 +107,8 @@ echo "==> Building and running tests in parallel..."
 BUILD_LOG=$(mktemp)
 trap 'rm -f "$BUILD_LOG"' EXIT
 
-npm run build > "$BUILD_LOG" 2>&1 &
+rm -rf "$BUILD_DIR"
+npm run build -- --outDir "$BUILD_DIR" > "$BUILD_LOG" 2>&1 &
 BUILD_PID=$!
 npm test &
 TEST_PID=$!
@@ -114,6 +125,11 @@ if [ "$BUILD_STATUS" -ne 0 ] || [ "$TEST_STATUS" -ne 0 ]; then
     rollback
 fi
 
+echo "==> Swapping in the new build..."
+rm -rf dist.old  # Left over from an interrupted deploy.
+if [ -d dist ]; then mv dist dist.old; fi
+mv "$BUILD_DIR" dist
+
 echo "==> Pruning dev dependencies..."
 npm prune --omit=dev
 
@@ -126,6 +142,7 @@ npm prune --omit=dev
 git checkout -- package-lock.json
 
 trap - ERR  # Rollback no longer needed — code is good.
+rm -rf dist.old
 
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 
