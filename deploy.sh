@@ -14,19 +14,26 @@ cd "$(dirname "$0")"
 
 [ -f package.json ] || { echo "ERROR: Run this script from the repo root."; exit 1; }
 
+# Resolved the same way scripts/install-systemd-service.sh resolves it for the sudoers rule. sudo
+# matches that rule against the absolute path, and a bare `sudo systemctl` would be looked up on
+# sudo's own secure_path instead, which can land on a different path.
+SYSTEMCTL_BIN="$(command -v systemctl || true)"
+[ -n "$SYSTEMCTL_BIN" ] || { echo "ERROR: systemctl is required (the bot runs as a systemd service)."; exit 1; }
+
 # Check the restart path works before changing anything, so a missing unit or sudo rule fails
 # the deploy up front instead of after the new build is already in place.
-if ! systemctl cat "$SERVICE_NAME" > /dev/null 2>&1; then
+if ! "$SYSTEMCTL_BIN" cat "$SERVICE_NAME" > /dev/null 2>&1; then
     echo "ERROR: systemd service '$SERVICE_NAME' isn't installed."
     echo "       Run once: bash scripts/install-systemd-service.sh (see README \"Running the bot\")."
     exit 1
 fi
-if ! sudo -n -l systemctl restart "$SERVICE_NAME" > /dev/null 2>&1; then
+if ! sudo -n -l "$SYSTEMCTL_BIN" restart "$SERVICE_NAME" > /dev/null 2>&1; then
     echo "ERROR: $(id -un) can't run 'sudo systemctl restart $SERVICE_NAME' without a password."
     echo "       Re-run: bash scripts/install-systemd-service.sh"
     exit 1
 fi
 command -v curl > /dev/null || { echo "ERROR: curl is required for the post-restart health check."; exit 1; }
+command -v ss > /dev/null || { echo "ERROR: ss (iproute2) is required for the post-restart health check."; exit 1; }
 
 PREVIOUS_SHA=$(git rev-parse HEAD)
 
@@ -176,12 +183,19 @@ rm -rf dist.old
 # (grep finding nothing must not trip pipefail) or a blank one falls back to 3000, like config.ts.
 WEB_PORT_SETTING="$( { grep -E '^[[:space:]]*WEB_PORT=' .env 2>/dev/null || true; } \
     | tail -n 1 | cut -d= -f2- | sed -E 's/[[:space:]]+#.*$//' | tr -d "[:space:]\"'")"
-HEALTH_URL="http://127.0.0.1:${WEB_PORT_SETTING:-3000}/healthz"
+WEB_PORT="${WEB_PORT_SETTING:-3000}"
+HEALTH_URL="http://127.0.0.1:${WEB_PORT}/healthz"
+
+# Prints the PIDs listening on WEB_PORT, one per line (nothing if none, or if ss can't see them).
+# deploy.sh runs as the service's own user, so ss can see the bot's PID.
+port_listener_pids() {
+    { ss -Hltnp "sport = :${WEB_PORT}" 2>/dev/null || true; } | { grep -o 'pid=[0-9]*' || true; } | cut -d= -f2 | sort -u
+}
 
 echo "==> Restarting $SERVICE_NAME..."
 # SIGTERM runs the bot's graceful shutdown; systemd waits for it (TimeoutStopSec) before starting
 # the new build.
-sudo -n systemctl restart "$SERVICE_NAME"
+sudo -n "$SYSTEMCTL_BIN" restart "$SERVICE_NAME"
 
 echo "==> Waiting up to ${HEALTH_TIMEOUT_SECONDS}s for $HEALTH_URL..."
 HEALTHY=0
@@ -190,22 +204,35 @@ HEALTHY=0
 HEALTH_DEADLINE=$((SECONDS + HEALTH_TIMEOUT_SECONDS))
 while [ "$SECONDS" -lt "$HEALTH_DEADLINE" ]; do
     if curl -fsS --max-time 2 "$HEALTH_URL" > /dev/null 2>&1; then
-        HEALTHY=1
-        break
+        # A 200 only counts if it came from the unit's own process. Something else on the port, such
+        # as the old screen-session bot left running, would answer while the new one crash-loops on
+        # EADDRINUSE. `restart` waits for the old process to exit, so a different listener is never
+        # the previous build.
+        MAIN_PID="$("$SYSTEMCTL_BIN" show -p MainPID --value "$SERVICE_NAME")"
+        LISTENER_PIDS="$(port_listener_pids)"
+        if [ "${MAIN_PID:-0}" != "0" ] && printf '%s\n' "$LISTENER_PIDS" | grep -qx "$MAIN_PID"; then
+            HEALTHY=1
+            break
+        fi
+        if [ -n "$LISTENER_PIDS" ]; then
+            FOREIGN_PIDS="$(printf '%s' "$LISTENER_PIDS" | tr '\n' ' ')"
+            echo "ERROR: Port $WEB_PORT is held by PID ${FOREIGN_PIDS% }, not $SERVICE_NAME (MainPID $MAIN_PID). Is an old instance (e.g. in screen) still running?"
+            break
+        fi
     fi
     # The unit never gives up on its own (see StartLimitIntervalSec in the unit), so "failed" here
     # means something stopped it for good, e.g. a bad ExecStart; stop waiting and show why. A
     # start that keeps crashing and retrying runs out the deadline instead.
-    if systemctl is-failed --quiet "$SERVICE_NAME"; then
+    if "$SYSTEMCTL_BIN" is-failed --quiet "$SERVICE_NAME"; then
         break
     fi
     sleep 1
 done
 
 if [ "$HEALTHY" -ne 1 ]; then
-    echo "ERROR: $SERVICE_NAME isn't answering $HEALTH_URL after the restart. The new build is in place; the bot may be crash-looping or stopped."
+    echo "ERROR: $SERVICE_NAME didn't come up healthy on $HEALTH_URL after the restart. The new build is in place; the bot may be crash-looping or stopped."
     echo "--- systemctl status $SERVICE_NAME ---"
-    systemctl status "$SERVICE_NAME" --no-pager --lines=0 || true
+    "$SYSTEMCTL_BIN" status "$SERVICE_NAME" --no-pager --lines=0 || true
     echo "--- last 50 log lines (journalctl -u $SERVICE_NAME) ---"
     journalctl -u "$SERVICE_NAME" -n 50 --no-pager || echo "(couldn't read the journal; add this user to the systemd-journal group to see it here)"
     exit 1

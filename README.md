@@ -42,9 +42,9 @@ This installs and enables the unit from `deploy/bcuk-bot.service`, filled in wit
 2. Builds and tests it.
 3. Swaps the new build in.
 4. Restarts the service.
-5. Waits up to 90 seconds for `GET /healthz` on the web panel to answer.
+5. Waits up to 90 seconds for `GET /healthz` on the web panel to answer from the service's own process.
 
-If the bot doesn't come back up, the deploy fails and prints the service status and its last 50 log lines.
+If the bot doesn't come back up, the deploy fails and prints the service status and its last 50 log lines. It also fails straight away if another process holds the web port, such as a copy still running in an old `screen` session. The health check needs `curl` and `ss` (from iproute2).
 
 Day to day:
 

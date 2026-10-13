@@ -49,7 +49,8 @@ sudo install -m 644 "$UNIT_TMP" "/etc/systemd/system/${SERVICE_NAME}.service"
 sudo "$SYSTEMCTL_BIN" daemon-reload
 sudo "$SYSTEMCTL_BIN" enable "$SERVICE_NAME"
 
-# deploy.sh only ever runs `sudo -n systemctl restart bcuk-bot`; allow exactly that, nothing more.
+# deploy.sh only ever runs `sudo -n <this same systemctl path> restart bcuk-bot`; allow exactly
+# that, nothing more. sudo matches the rule against that absolute path.
 echo "==> Allowing $RUN_USER to restart $SERVICE_NAME without a password"
 SUDOERS_TMP="$(mktemp)"
 echo "${RUN_USER} ALL=(root) NOPASSWD: ${SYSTEMCTL_BIN} restart ${SERVICE_NAME}" > "$SUDOERS_TMP"
