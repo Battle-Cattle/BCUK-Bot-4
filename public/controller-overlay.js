@@ -2,6 +2,7 @@ const $ = id => document.getElementById(id);
 const statusEl = $('status');
 let gamepadIdx = null, polling = false;
 
+/** Highlights (or resets) a simple on/off control such as the A button. */
 function setActive(id, on) {
   const el = $(id); if (!el) return;
   el.style.filter = on ? 'brightness(3)' : '';
@@ -14,6 +15,7 @@ function lsRingFill(clicked, moved) {
   return moved ? '#0a2a3a' : '#222';
 }
 
+/** Reads the active gamepad once and updates the button, trigger and left-stick graphics. */
 function poll() {
   const gps = navigator.getGamepads();
   const gp = gps[gamepadIdx];
@@ -51,18 +53,21 @@ function poll() {
   lsRing.style.filter = lsClicked ? 'brightness(2)' : '';
 }
 
+/** Polls the gamepad once per animation frame while polling is on. */
 function rafLoop() {
   if (!polling) return;
   poll();
   requestAnimationFrame(rafLoop);
 }
 
+/** Starts the per-frame gamepad polling loop, if it isn't already running. */
 function startPolling() {
   if (polling) return;
   polling = true;
   requestAnimationFrame(rafLoop);
 }
 
+/** Stops the per-frame gamepad polling loop. */
 function stopPolling() {
   polling = false;
 }

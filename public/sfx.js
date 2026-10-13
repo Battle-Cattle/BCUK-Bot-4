@@ -23,6 +23,7 @@ function collapseDetailRows(triggerId) {
 }
 
 if (searchInput && sfxTable) {
+  /** Filters the SFX table by command/category, collapsing detail rows of hidden triggers. */
   searchInput.addEventListener('input', () => {
     const q = searchInput.value.toLowerCase().trim();
     const rows = sfxTable.querySelectorAll('tr.sfx-row');

@@ -1,9 +1,15 @@
+/** Confirms user removal before allowing the remove-user form to submit. */
 document.addEventListener('submit', function (event) {
   confirmSubmit(event, 'js-confirm-remove-user', function (t) {
     return 'Remove ' + (t.dataset.userName || 'this user') + '?';
   });
 });
 
+/**
+ * Keeps an add-user form's Twitch name input and "clear Twitch name" checkbox mutually exclusive.
+ * @param {HTMLFormElement} form - The add-user form.
+ * @returns {void}
+ */
 function syncTwitchNameControls(form) {
   if (!(form instanceof HTMLFormElement)) return;
 
@@ -54,6 +60,13 @@ document.querySelectorAll('form[action="/admin/users/add"]').forEach(function (f
   syncTwitchNameControls(form);
 });
 
+/**
+ * Parses a refresh-status poll response, reloading on an auth failure and showing a terminal
+ * message on any other non-JSON/error response.
+ * @param {Element} refreshBanner - The "refresh running" banner element.
+ * @param {Response} response - The fetch response.
+ * @returns {Promise<object>|null} The parsed state, or null when polling should stop.
+ */
 function parseRefreshStatusResponse(refreshBanner, response) {
   var contentType = response.headers.get('content-type') || '';
   if (response.status === 401 || response.status === 403) {
@@ -68,6 +81,11 @@ function parseRefreshStatusResponse(refreshBanner, response) {
   return response.json();
 }
 
+/**
+ * Keeps polling while the refresh is still running, otherwise reloads to show the outcome.
+ * @param {{ outcome?: string } | null} state - Parsed refresh state, or null to stop.
+ * @returns {void}
+ */
 function applyRefreshState(state) {
   if (state && state.outcome === 'running') {
     scheduleRefreshStatusPolling(0);
@@ -76,6 +94,12 @@ function applyRefreshState(state) {
   }
 }
 
+/**
+ * Polls the user-refresh status every 2s while the "refresh running" banner is shown, giving
+ * up after 5 consecutive network failures.
+ * @param {number} retryCount - Consecutive failed attempts so far.
+ * @returns {void}
+ */
 function scheduleRefreshStatusPolling(retryCount) {
   var refreshBanner = document.querySelector('[data-refresh-running="true"]');
   if (!refreshBanner) return;

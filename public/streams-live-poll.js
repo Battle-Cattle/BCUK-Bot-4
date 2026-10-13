@@ -2,6 +2,7 @@
 
 registerToggleEditHandler('btn-toggle-group-edit', 'data-group-id', 'group-edit-');
 
+/** Expands/collapses a live stream's detail row when its ▶/▼ toggle is clicked. */
 document.addEventListener('click', function (event) {
   var target = event.target;
   if (!(target instanceof Element)) return;
@@ -27,6 +28,7 @@ function getDisconnectTwitchConfirmationMessage(t) {
   return 'Disconnect Twitch for ' + (t.dataset.twitchName || 'this streamer') + '?';
 }
 
+/** Confirms group/streamer removal and Twitch disconnects before the forms submit. */
 document.addEventListener('submit', function (event) {
   if (confirmSubmit(event, 'js-confirm-remove-group', function (t) {
     return 'Remove group "' + (t.dataset.groupName || 'this group') + '" and all its streamers?';
@@ -39,6 +41,7 @@ document.addEventListener('submit', function (event) {
 
 var liveNowInflight = false;
 
+/** Fetches the currently-live streams and re-renders the live table (skips if one is in flight). */
 function refreshLiveNow() {
   if (liveNowInflight) return;
   liveNowInflight = true;

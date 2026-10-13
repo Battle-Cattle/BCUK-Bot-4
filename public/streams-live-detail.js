@@ -4,6 +4,7 @@ var expandedLiveRows = Object.create(null);
 
 var liveTableColumnsCache = null;
 
+/** Returns (and caches) the live table's column count, used for full-width colspans. */
 function getLiveTableColumns() {
   if (liveTableColumnsCache !== null) return liveTableColumnsCache;
 
@@ -14,6 +15,7 @@ function getLiveTableColumns() {
   return liveTableColumnsCache;
 }
 
+/** Builds the stable key identifying a live stream row (streamer + group). */
 function getLiveRowKey(item) {
   return String(item.streamerId || '') + ':' + String(item.groupId || '');
 }
@@ -50,6 +52,7 @@ function createDetailSection(titleText, metaItems) {
   return section;
 }
 
+/** Builds the Multi-Twitch section of a live row's details. */
 function createMultiTwitchSection(multiTwitch) {
   var participants = multiTwitch && multiTwitch.participants && multiTwitch.participants.length
     ? multiTwitch.participants.join(', ')
@@ -66,6 +69,12 @@ function createMultiTwitchSection(multiTwitch) {
   return section;
 }
 
+/**
+ * Builds the expandable detail `<tr>` for a live stream; its message previews are filled in
+ * lazily by hydrateLivePreviewGrid when first expanded.
+ * @param {object} item - One stream from GET /admin/streams/live.
+ * @returns {HTMLTableRowElement} The detail row.
+ */
 function createDetailRow(item) {
   var key = getLiveRowKey(item);
   var detailTr = document.createElement('tr');

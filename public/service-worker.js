@@ -39,12 +39,14 @@ const STATIC_ASSETS = [
   '/icons/BCUK-512.png'
 ];
 
+/** Precaches the static assets on install. */
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(STATIC_CACHE).then((cache) => cache.addAll(STATIC_ASSETS))
   );
 });
 
+/** Deletes this app's caches from older versions, then takes control of open pages. */
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches
@@ -63,12 +65,17 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+/** Activates a waiting worker immediately when the page asks it to (see pwa-register.js). */
 self.addEventListener('message', (event) => {
   if (event.data && event.data.type === 'SKIP_WAITING') {
     self.skipWaiting();
   }
 });
 
+/**
+ * Routes same-origin GETs: navigations go network-first with an offline fallback, static
+ * assets are stale-while-revalidate, and everything else is left to the browser.
+ */
 self.addEventListener('fetch', (event) => {
   const request = event.request;
 
@@ -98,6 +105,7 @@ self.addEventListener('fetch', (event) => {
   }
 });
 
+/** Fetches a navigation from the network, falling back to the cached offline page. */
 async function handleNavigationRequest(request) {
   try {
     return await fetch(request);
@@ -107,6 +115,12 @@ async function handleNavigationRequest(request) {
   }
 }
 
+/**
+ * Serves a static asset from cache when present while refreshing the cached copy in the background.
+ * @param {Request} request - The asset request.
+ * @returns {{ responsePromise: Promise<Response>, updatePromise: Promise<void> }} The response to
+ *   serve, and the background refresh to keep the worker alive for.
+ */
 function staleWhileRevalidate(request) {
   const cachePromise = caches.open(STATIC_CACHE);
   const cachedPromise = cachePromise.then((cache) => cache.match(request));
@@ -137,6 +151,7 @@ function staleWhileRevalidate(request) {
   return { responsePromise, updatePromise };
 }
 
+/** True for icons and files with a static-asset extension. */
 function isStaticAsset(pathname) {
   return (
     pathname.startsWith('/icons/') ||
@@ -144,6 +159,7 @@ function isStaticAsset(pathname) {
   );
 }
 
+/** True when a path is, or is under, one of BYPASS_PATH_PREFIXES. */
 function isBypassPath(pathname) {
   return BYPASS_PATH_PREFIXES.some(
     (prefix) => pathname === prefix || pathname.startsWith(prefix + '/')

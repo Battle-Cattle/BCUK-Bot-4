@@ -13,6 +13,7 @@ function setLiveToggleState(button, expanded) {
   button.setAttribute('aria-expanded', expanded ? 'true' : 'false');
 }
 
+/** Renders a live row's Discord message previews the first time its details are shown. */
 function hydrateLivePreviewGrid(liveKey) {
   var detailRow = findLiveDetailRow(liveKey);
   if (!(detailRow instanceof HTMLElement)) return;
@@ -30,6 +31,7 @@ function hydrateLivePreviewGrid(liveKey) {
   grid.dataset.hydrated = 'true';
 }
 
+/** Replaces the live table body with a single full-width message row. */
 function setLiveTableMessage(text) {
   var tbody = document.getElementById('live-tbody');
   if (!tbody) return;
@@ -43,6 +45,11 @@ function setLiveTableMessage(text) {
   tbody.appendChild(tr);
 }
 
+/**
+ * Re-renders the live table from a fresh stream list, keeping rows that were expanded open.
+ * @param {Array<object>} streams - Streams from GET /admin/streams/live.
+ * @returns {void}
+ */
 function renderLiveRows(streams) {
   var tbody = document.getElementById('live-tbody');
   if (!tbody) return;
