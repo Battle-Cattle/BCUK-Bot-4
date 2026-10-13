@@ -95,8 +95,17 @@ describe('config — DB_HOST / DB_PORT', () => {
 
   it('throws for a non-numeric DB_PORT', async () => {
     await expect(loadConfig({ DB_PORT: 'not-a-number' })).rejects.toThrow(
-      'Invalid DB_PORT: must be a number',
+      "Invalid DB_PORT: must be a whole number from 1 to 65535, got 'not-a-number'",
     );
+  });
+
+  it.each(['3306abc', '3306.5', '0', '65536', '-1'])('throws for an invalid DB_PORT %s instead of truncating it', async (value) => {
+    await expect(loadConfig({ DB_PORT: value })).rejects.toThrow('Invalid DB_PORT');
+  });
+
+  it('treats a blank DB_PORT as unset', async () => {
+    const config = await loadConfig({ DB_PORT: '  ' });
+    expect(config.DB_PORT).toBe(3306);
   });
 });
 
@@ -195,8 +204,17 @@ describe('config — GLOBAL_COOLDOWN_MS', () => {
 
   it('throws for a non-numeric value', async () => {
     await expect(loadConfig({ GLOBAL_COOLDOWN_MS: 'soon' })).rejects.toThrow(
-      'Invalid GLOBAL_COOLDOWN_MS: must be a number',
+      `Invalid GLOBAL_COOLDOWN_MS: must be a whole number from 0 to ${Number.MAX_SAFE_INTEGER}, got 'soon'`,
     );
+  });
+
+  it('accepts 0 (no cooldown)', async () => {
+    const config = await loadConfig({ GLOBAL_COOLDOWN_MS: '0' });
+    expect(config.GLOBAL_COOLDOWN_MS).toBe(0);
+  });
+
+  it.each(['-500', '3000ms', '1.5'])('throws for an invalid value %s', async (value) => {
+    await expect(loadConfig({ GLOBAL_COOLDOWN_MS: value })).rejects.toThrow('Invalid GLOBAL_COOLDOWN_MS');
   });
 });
 
@@ -213,8 +231,12 @@ describe('config — WEB_PORT', () => {
 
   it('throws for a non-numeric value', async () => {
     await expect(loadConfig({ WEB_PORT: 'nope' })).rejects.toThrow(
-      'Invalid WEB_PORT: must be a number',
+      "Invalid WEB_PORT: must be a whole number from 1 to 65535, got 'nope'",
     );
+  });
+
+  it.each(['8080x', '0', '70000'])('throws for an invalid value %s', async (value) => {
+    await expect(loadConfig({ WEB_PORT: value })).rejects.toThrow('Invalid WEB_PORT');
   });
 });
 

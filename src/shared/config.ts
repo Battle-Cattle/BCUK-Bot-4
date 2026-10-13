@@ -23,9 +23,32 @@ export const TWITCH_CLIENT_ID     = require_env('TWITCH_CLIENT_ID');
 export const TWITCH_CLIENT_SECRET = require_env('TWITCH_CLIENT_SECRET');
 
 export const DB_HOST = process.env.DB_HOST ?? 'localhost';
-const _DB_PORT = parseInt(process.env.DB_PORT ?? '3306', 10);
-if (Number.isNaN(_DB_PORT)) throw new Error('Invalid DB_PORT: must be a number');
-export const DB_PORT = _DB_PORT;
+/**
+ * Reads an optional whole-number env var that must fall within `[min, max]`. Unlike
+ * {@link parsePositiveIntEnv}, a malformed value is a startup error rather than a silent
+ * fallback: these settings (ports, the command cooldown) have no safe default to fall back to
+ * once someone has tried to set them. Uses Number (not parseInt) so values like `3000abc` or
+ * `30.5` are rejected instead of being truncated to a valid-looking number.
+ * @param name - Environment variable name.
+ * @param fallback - Value to use when the variable is unset or blank.
+ * @param min - Smallest accepted value.
+ * @param max - Largest accepted value.
+ * @returns The parsed value, or `fallback`.
+ * @throws If the variable is set to anything other than a whole number within `[min, max]`.
+ */
+function parseIntEnvInRange(name: string, fallback: number, min: number, max: number): number {
+  const raw = process.env[name]?.trim();
+  if (!raw) return fallback;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < min || parsed > max) {
+    throw new Error(`Invalid ${name}: must be a whole number from ${min} to ${max}, got '${raw}'`);
+  }
+  return parsed;
+}
+
+const MAX_PORT = 65535;
+
+export const DB_PORT = parseIntEnvInRange('DB_PORT', 3306, 1, MAX_PORT);
 export const DB_USER = require_env('DB_USER');
 export const DB_PASSWORD = require_env('DB_PASSWORD');
 export const DB_NAME = require_env('DB_NAME');
@@ -59,14 +82,10 @@ export const DASHBOARD_STATUS_MAX_SSE_PER_GUILD = parsePositiveIntEnv(process.en
 export const OVERLAY_STATUS_MAX_SSE_PER_STREAMER = parsePositiveIntEnv(process.env.OVERLAY_STATUS_MAX_SSE_PER_STREAMER, 3);
 export const ALERT_STATUS_MAX_SSE_PER_STREAMER = parsePositiveIntEnv(process.env.ALERT_STATUS_MAX_SSE_PER_STREAMER, 3);
 export const SSE_MAX_TOTAL_CONNECTIONS = parsePositiveIntEnv(process.env.SSE_MAX_TOTAL_CONNECTIONS, 500);
-const _COOLDOWN = parseInt(process.env.GLOBAL_COOLDOWN_MS ?? '3000', 10);
-if (Number.isNaN(_COOLDOWN)) throw new Error('Invalid GLOBAL_COOLDOWN_MS: must be a number');
-export const GLOBAL_COOLDOWN_MS = _COOLDOWN;
+export const GLOBAL_COOLDOWN_MS = parseIntEnvInRange('GLOBAL_COOLDOWN_MS', 3000, 0, Number.MAX_SAFE_INTEGER);
 
 // Web panel
-const _WEB_PORT = parseInt(process.env.WEB_PORT ?? '3000', 10);
-if (Number.isNaN(_WEB_PORT)) throw new Error('Invalid WEB_PORT: must be a number');
-export const WEB_PORT = _WEB_PORT;
+export const WEB_PORT = parseIntEnvInRange('WEB_PORT', 3000, 1, MAX_PORT);
 export const SESSION_SECRET = require_env('SESSION_SECRET');
 if (SESSION_SECRET === '__REQUIRED_GENERATE_LONG_RANDOM_SECRET__') {
   throw new Error('SESSION_SECRET has not been set — replace the placeholder in .env with a long random string');
