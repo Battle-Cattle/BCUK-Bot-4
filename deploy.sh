@@ -17,14 +17,21 @@ PREVIOUS_SHA=$(git rev-parse HEAD)
 # rollback with the new, untested code in dist/ for the next `npm start`, and tsc never deletes
 # output for removed sources — a fresh folder per deploy drops those stale files too.
 BUILD_DIR="dist.new"
+# Set once this deploy has swapped its build into dist/, so rollback only undoes its own swap —
+# never a dist.old left behind by an earlier, interrupted deploy.
+SWAPPED=0
 
 # On any error after git pull, roll back to the previous commit and the previous build: dist/ is
 # untouched until the swap, and kept as dist.old from then until the deploy succeeds.
 rollback() {
     echo "ERROR: Deployment failed. Rolling back to $PREVIOUS_SHA..."
     rm -rf "$BUILD_DIR"
-    # Past the swap, dist.old holds the previous build until the deploy succeeds — put it back.
-    if [ -d dist.old ]; then rm -rf dist && mv dist.old dist; fi
+    # Past the swap, dist/ holds this deploy's build and dist.old the previous one (if there was
+    # one) until the deploy succeeds — put the previous build back.
+    if [ "$SWAPPED" -eq 1 ]; then
+        rm -rf dist
+        if [ -d dist.old ]; then mv dist.old dist; fi
+    fi
     git reset --hard "$PREVIOUS_SHA"
     exit 1
 }
@@ -128,6 +135,7 @@ fi
 echo "==> Swapping in the new build..."
 rm -rf dist.old  # Left over from an interrupted deploy.
 if [ -d dist ]; then mv dist dist.old; fi
+SWAPPED=1
 mv "$BUILD_DIR" dist
 
 echo "==> Pruning dev dependencies..."
