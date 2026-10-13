@@ -18,7 +18,8 @@ const NON_COLUMN_WORDS = new Set([
 function tablesInSchemaSql(): Map<string, Set<string>> {
   const sql = readFileSync(path.join(REPO_ROOT, 'schema.sql'), 'utf8');
   const tables = new Map<string, Set<string>>();
-  for (const [, name, body] of sql.matchAll(/CREATE TABLE (?:IF NOT EXISTS )?`?(\w+)`?\s*\(([\s\S]*?)\)\s*ENGINE/g)) {
+  // Ends at the statement's `;`, whether or not table options like ENGINE= come before it.
+  for (const [, name, body] of sql.matchAll(/CREATE TABLE (?:IF NOT EXISTS )?`?(\w+)`?\s*\(([\s\S]*?)\)\s*(?:ENGINE\b[^;]*)?;/g)) {
     const columns = new Set<string>();
     for (const rawLine of body!.split('\n')) {
       const firstWord = /^`?(\w+)`?\s+\S/.exec(rawLine.replace(/--.*/, '').trim())?.[1];
@@ -58,8 +59,10 @@ describe('DATABASE-SCHEMA.md', () => {
   const sqlTables = tablesInSchemaSql();
   const docTables = tablesInSchemaDoc();
 
-  it('parses a plausible number of tables from both files', () => {
+  it('parses every CREATE TABLE in schema.sql, and the doc lists the same number of tables', () => {
+    const createStatements = readFileSync(path.join(REPO_ROOT, 'schema.sql'), 'utf8').match(/^\s*CREATE TABLE\b/gim) ?? [];
     expect(sqlTables.size).toBeGreaterThan(20);
+    expect(sqlTables.size).toBe(createStatements.length);
     expect(docTables.size).toBe(sqlTables.size + DOC_ONLY_TABLES.size);
   });
 
