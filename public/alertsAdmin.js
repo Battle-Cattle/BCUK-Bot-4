@@ -1,3 +1,4 @@
+/* global confirmSubmit, registerUploadFormHandler */
 /** Returns the confirmation message for removing an alert asset (image or sound). */
 function getDeleteAssetConfirmationMessage() {
   return 'Remove this file?';

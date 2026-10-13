@@ -33,7 +33,7 @@ window.BCUKPasskey = (function () {
       headers: headers,
       body: JSON.stringify(body),
     });
-    var data = null;
+    var data;
     try {
       data = await res.json();
     } catch (_err) {

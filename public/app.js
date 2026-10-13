@@ -1,3 +1,4 @@
+/* global applyStatus, fetchStatus, loadVoiceChannels */
 /* ── Dashboard initialisation ────────────────────────────── */
 
 // Apply server-provided initial status without inline script execution.

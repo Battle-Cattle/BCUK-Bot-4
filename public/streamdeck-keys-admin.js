@@ -1,3 +1,4 @@
+/* global confirmSubmit */
 /** Returns the confirmation message for denying a pending Streamdeck key request. */
 function getDenyKeyConfirmationMessage() {
   return 'Are you sure you want to deny this request?';

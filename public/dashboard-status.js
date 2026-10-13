@@ -1,3 +1,4 @@
+/* global clearChildren, relativeTime, setClass, setText */
 /* ── Status rendering & polling ──────────────────────────── */
 
 function renderChannels(container, channelMap) {

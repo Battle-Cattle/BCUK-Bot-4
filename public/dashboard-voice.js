@@ -1,3 +1,4 @@
+/* global csrfToken, fetchStatus */
 /* ── Voice channel dropdown & controls ───────────────────── */
 
 let voiceChannelPollTimer = null;

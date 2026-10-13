@@ -1,3 +1,4 @@
+/* global relativeTime, clearChildren */
 /* ── Recent events rendering & live feed ─────────────────── */
 
 const EVENT_ICONS = {

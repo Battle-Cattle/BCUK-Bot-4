@@ -3,12 +3,35 @@ const js = require('@eslint/js');
 const tseslint = require('typescript-eslint');
 const jsdoc = require('eslint-plugin-jsdoc');
 const vitest = require('@vitest/eslint-plugin');
+const globals = require('globals');
 
 module.exports = tseslint.config(
   {
-    ignores: ['dist/**', 'dist.new/**', 'dist.old/**', 'node_modules/**', 'coverage/**', '.vitest-cache/**', 'eslint.config.js', 'public/**'],
+    ignores: ['dist/**', 'dist.new/**', 'dist.old/**', 'node_modules/**', 'coverage/**', '.vitest-cache/**', 'eslint.config.js', 'public/vendor/**'],
   },
   js.configs.recommended,
+  {
+    // The panel's browser scripts: plain classic <script>s, no bundler. Each one shares its
+    // top-level functions with the scripts loaded after it on the same page, so a name a file
+    // uses from another script is declared in a `/* global */` header at its top, and a
+    // top-level declaration that only other scripts call isn't flagged as unused (`vars: 'local'`).
+    files: ['public/**/*.js'],
+    languageOptions: {
+      ecmaVersion: 2024,
+      sourceType: 'script',
+      globals: { ...globals.browser },
+    },
+    rules: {
+      'no-unused-vars': ['error', { vars: 'local', args: 'after-used', argsIgnorePattern: '^_', caughtErrors: 'none' }],
+      eqeqeq: ['error', 'always', { null: 'ignore' }],
+      'no-implied-eval': 'error',
+      'no-eval': 'error',
+    },
+  },
+  {
+    files: ['public/service-worker.js'],
+    languageOptions: { globals: { ...globals.serviceworker } },
+  },
   {
     files: ['src/**/*.ts'],
     extends: [...tseslint.configs.recommended],

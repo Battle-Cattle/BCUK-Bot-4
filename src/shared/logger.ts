@@ -29,23 +29,37 @@ export class HealthStoreErrorTransport extends Transport {
   }
 }
 
+/** The fields of a log entry that {@link formatLogLine} prints. */
+export interface LogLineFields {
+  timestamp?: unknown;
+  label?: unknown;
+  message?: unknown;
+  stack?: unknown;
+}
+
+/**
+ * Formats one log line as `<timestamp> [<level>] [<label>] <message>`, followed by the stack
+ * trace on the next lines when the entry carries one (an `Error` logged via `format.errors`).
+ * @param fields The entry's timestamp, module label, message and optional stack.
+ * @param levelText The level as it should be printed (upper-cased for files, colorized for the console).
+ * @returns The formatted line.
+ */
+export function formatLogLine({ timestamp, label, message, stack }: LogLineFields, levelText: string): string {
+  const base = `${String(timestamp)} [${levelText}] [${String(label)}] ${String(message)}`;
+  return stack ? `${base}\n${String(stack)}` : base;
+}
+
 const fileFormat = format.combine(
   format.errors({ stack: true }),
   format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
-  format.printf(({ timestamp, level, label, message, stack }) => {
-    const base = `${timestamp} [${level.toUpperCase()}] [${label}] ${message}`;
-    return stack ? `${base}\n${stack}` : base;
-  }),
+  format.printf((info) => formatLogLine(info, info.level.toUpperCase())),
 );
 
 const consoleFormat = format.combine(
   format.colorize(),
   format.errors({ stack: true }),
   format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
-  format.printf(({ timestamp, level, label, message, stack }) => {
-    const base = `${timestamp} [${level}] [${label}] ${message}`;
-    return stack ? `${base}\n${stack}` : base;
-  }),
+  format.printf((info) => formatLogLine(info, info.level)),
 );
 
 const rootLogger = winstonCreateLogger({

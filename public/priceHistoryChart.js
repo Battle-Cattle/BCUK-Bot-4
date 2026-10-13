@@ -1,3 +1,4 @@
+/* global connectSse */
 /**
  * Finds the data point nearest to a given time value.
  * @param {Array<[number, number]>} points - `[time, cost]` pairs, sorted ascending by time.

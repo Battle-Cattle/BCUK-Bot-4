@@ -131,3 +131,21 @@ describe('GET /events — initial snapshot push (direct handler invocation)', ()
     }
   });
 });
+
+describe('GET /events — connection cap (direct handler invocation)', () => {
+  it('rejects the 11th concurrent connection with a 429 and pushes it no snapshot', async () => {
+    const handler = getRouteHandler('/events');
+    const accepted = Array.from({ length: 10 }, () => ({ res: makeSseRes(), ...makeSseReq() }));
+    const rejected = { res: makeSseRes(), ...makeSseReq() };
+
+    try {
+      for (const conn of accepted) await handler(conn.req, conn.res, vi.fn());
+      await handler(rejected.req, rejected.res, vi.fn());
+
+      expect(rejected.res.status).toHaveBeenCalledWith(429);
+      expect(rejected.res.write).not.toHaveBeenCalled();
+    } finally {
+      for (const conn of accepted) conn.triggerClose();
+    }
+  });
+});

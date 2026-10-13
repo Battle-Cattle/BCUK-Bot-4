@@ -1,3 +1,4 @@
+/* global confirmSubmit, registerCopyToClipboardHandler */
 /** Returns the confirmation message for revoking the current user's companion app token. */
 function getRevokeTokenConfirmationMessage() {
   return 'Revoke your companion app token? It will stop working immediately.';

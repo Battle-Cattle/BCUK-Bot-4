@@ -1,3 +1,4 @@
+/* global registerUploadFormHandler, confirmSubmit */
 /* ── SFX table search ──────────────────────────────────── */
 
 const searchInput = document.getElementById('sfx-search');

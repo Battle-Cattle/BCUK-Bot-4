@@ -4,7 +4,15 @@ import { mockLogger } from '../test-utils/loggerMock';
 vi.mock('../shared/logger', () => ({ createLogger: mockLogger }));
 vi.mock('mysql2/promise', () => ({ default: {} }));
 
-import { isDeadlockError, getCommandWriteLockName, acquireNamedLock, releaseNamedLock } from './commandLocks';
+import {
+  isDeadlockError,
+  getCommandWriteLockName,
+  getSortedCommandLockNames,
+  acquireNamedLock,
+  releaseNamedLock,
+  runWithDeadlockRetry,
+  MAX_DEADLOCK_RETRIES,
+} from './commandLocks';
 import { makeMockConnection } from '../test-utils/mockMysqlPool';
 
 describe('isDeadlockError', () => {
@@ -132,5 +140,73 @@ describe('releaseNamedLock', () => {
     await expect(releaseNamedLock(conn as any, 'lock_a')).resolves.toBeUndefined();
     expect(conn.destroy).toHaveBeenCalledOnce();
     expect(conn.release).not.toHaveBeenCalled();
+  });
+});
+
+describe('getSortedCommandLockNames', () => {
+  it('orders lock names by command, whatever order the commands arrive in', () => {
+    const expected = ['!a', '!b', '!c'].map(getCommandWriteLockName);
+    expect(getSortedCommandLockNames(['!c', '!a', '!b'])).toEqual(expected);
+    expect(getSortedCommandLockNames(['!b', '!c', '!a'])).toEqual(expected);
+  });
+
+  it('keeps duplicates and does not mutate the input', () => {
+    const commands = ['!b', '!a', '!b'];
+    expect(getSortedCommandLockNames(commands)).toEqual(['!a', '!b', '!b'].map(getCommandWriteLockName));
+    expect(commands).toEqual(['!b', '!a', '!b']);
+  });
+});
+
+describe('runWithDeadlockRetry', () => {
+  const deadlock = () => Object.assign(new Error('Deadlock found'), { code: 'ER_LOCK_DEADLOCK' });
+
+  it('commits and returns the body result on the first attempt', async () => {
+    const conn = makeMockConnection();
+    const body = vi.fn().mockResolvedValue('done');
+
+    await expect(runWithDeadlockRetry(conn as any, 'test', body)).resolves.toBe('done');
+    expect(body).toHaveBeenCalledWith(0);
+    expect(conn.commit).toHaveBeenCalledOnce();
+    expect(conn.rollback).not.toHaveBeenCalled();
+  });
+
+  it('rolls back and retries after a deadlock, passing the attempt index', async () => {
+    const conn = makeMockConnection();
+    const body = vi.fn().mockRejectedValueOnce(deadlock()).mockResolvedValueOnce('second time');
+
+    await expect(runWithDeadlockRetry(conn as any, 'test', body)).resolves.toBe('second time');
+    expect(body.mock.calls).toEqual([[0], [1]]);
+    expect(conn.rollback).toHaveBeenCalledOnce();
+    expect(conn.commit).toHaveBeenCalledOnce();
+  });
+
+  it('rethrows a non-deadlock error straight away, without retrying', async () => {
+    const conn = makeMockConnection();
+    const err = new Error('duplicate entry');
+    const body = vi.fn().mockRejectedValue(err);
+
+    await expect(runWithDeadlockRetry(conn as any, 'test', body, 'gave up')).rejects.toBe(err);
+    expect(body).toHaveBeenCalledOnce();
+    expect(conn.rollback).toHaveBeenCalledOnce();
+  });
+
+  it('rethrows the last deadlock error once retries run out when no exhausted message is given', async () => {
+    const conn = makeMockConnection();
+    const last = deadlock();
+    const body = vi.fn().mockRejectedValueOnce(deadlock()).mockRejectedValueOnce(deadlock()).mockRejectedValue(last);
+
+    await expect(runWithDeadlockRetry(conn as any, 'test', body)).rejects.toBe(last);
+    expect(body).toHaveBeenCalledTimes(MAX_DEADLOCK_RETRIES);
+    expect(conn.commit).not.toHaveBeenCalled();
+  });
+
+  it('throws the exhausted message, with the deadlock as its cause, once retries run out', async () => {
+    const conn = makeMockConnection();
+    const last = deadlock();
+    const body = vi.fn().mockRejectedValueOnce(deadlock()).mockRejectedValueOnce(deadlock()).mockRejectedValue(last);
+
+    const error = await runWithDeadlockRetry(conn as any, 'test', body, 'Command is busy, try again').catch((e: unknown) => e);
+    expect(error).toMatchObject({ message: 'Command is busy, try again', cause: last });
+    expect(body).toHaveBeenCalledTimes(MAX_DEADLOCK_RETRIES);
   });
 });

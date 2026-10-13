@@ -1,3 +1,4 @@
+/* global connectSse */
 (function () {
   const eventsUrl = document.currentScript?.dataset.eventsUrl;
   const dot = document.getElementById('overlay-status-dot');

@@ -1,3 +1,4 @@
+/* global confirmSubmit, registerUploadFormHandler */
 /** Returns the confirmation message for deleting an overlay video. */
 function getDeleteVideoConfirmationMessage() {
   return 'Delete this video? Any reward assignments using it will be removed.';

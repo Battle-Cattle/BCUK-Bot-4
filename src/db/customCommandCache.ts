@@ -1,4 +1,3 @@
-import { createLogger } from '../shared/logger';
 import { normalizeTwitchChannelName } from '../twitch/twitchChannelName';
 import {
   createManagedLookupCache,
@@ -17,8 +16,6 @@ import {
 } from './customCommands';
 import { getAllOverrides, type DbGuildCommandOverride } from './guildCommandOverrides';
 
-const log = createLogger('DB');
-
 // ─── Cache interfaces ─────────────────────────────────────────────────────────
 
 interface CustomCommandLookupCache extends RefreshingLookupCache {
@@ -27,17 +24,6 @@ interface CustomCommandLookupCache extends RefreshingLookupCache {
   // Per-guild Discord overlay on the global catalog: guild_id → (command_id → override).
   // Sparse — only guilds/commands with a deviation appear. Twitch lookups ignore this.
   overridesByGuild: Map<string, Map<number, DbGuildCommandOverride>>;
-}
-
-interface TwitchCommandCandidate {
-  command: DbCustomCommand;
-  source: 'assigned';
-  priority: number;
-  owner: string;
-}
-
-interface TwitchCandidateContext {
-  candidateByCacheKey: Map<string, TwitchCommandCandidate>;
 }
 
 // ─── Cache builder helpers ────────────────────────────────────────────────────
@@ -93,31 +79,6 @@ function getTwitchCommandCacheKey(channelName: string, triggerString: string): s
 }
 
 /**
- * Picks which of two competing Twitch command candidates for the same channel+trigger should
- * win: same command wins trivially, otherwise higher `priority` wins, and ties break toward the
- * lower `command_id`.
- * @param existingCandidate The candidate currently registered for the cache key.
- * @param nextCandidate The new candidate being considered.
- * @returns The candidate that should occupy the cache key.
- */
-function pickPreferredTwitchCandidate(
-  existingCandidate: TwitchCommandCandidate,
-  nextCandidate: TwitchCommandCandidate,
-): TwitchCommandCandidate {
-  if (nextCandidate.command.command_id === existingCandidate.command.command_id) {
-    return existingCandidate;
-  }
-
-  if (nextCandidate.priority !== existingCandidate.priority) {
-    return nextCandidate.priority > existingCandidate.priority ? nextCandidate : existingCandidate;
-  }
-
-  return nextCandidate.command.command_id < existingCandidate.command.command_id
-    ? nextCandidate
-    : existingCandidate;
-}
-
-/**
  * Registers a Discord-enabled command under its trigger string, logging and skipping on collision
  * with an already-registered command. No-ops if the command isn't Discord-enabled.
  * @param discordByTrigger Map being built from trigger string to command.
@@ -144,63 +105,19 @@ function registerDiscordCommand(
 }
 
 /**
- * Registers a Twitch command candidate under a channel+trigger cache key, resolving collisions
- * via {@link pickPreferredTwitchCandidate} and logging the outcome (info on a priority-driven
- * remap, warn on a same-priority remap or an ignored duplicate).
- * @param context Mutable candidate map being built.
- * @param cacheKey Composite channel+trigger cache key.
- * @param triggerString Trigger string, used only for log messages.
- * @param channelName Twitch channel name, used only for log messages.
- * @param candidate Candidate being registered.
- */
-function registerTwitchCandidate(
-  context: TwitchCandidateContext,
-  cacheKey: string,
-  triggerString: string,
-  channelName: string,
-  candidate: TwitchCommandCandidate,
-): void {
-  const existingCandidate = context.candidateByCacheKey.get(cacheKey);
-  if (!existingCandidate) {
-    context.candidateByCacheKey.set(cacheKey, candidate);
-    return;
-  }
-
-  const preferredCandidate = pickPreferredTwitchCandidate(existingCandidate, candidate);
-  if (preferredCandidate === existingCandidate) {
-    if (existingCandidate.command.command_id === candidate.command.command_id) {
-      return;
-    }
-
-    log.warn(
-      `Custom command Twitch trigger collision: '${triggerString}' in channel '${channelName}'. ` +
-      `Already maps to command_id=${existingCandidate.command.command_id} (${existingCandidate.source}:${existingCandidate.owner}); ` +
-      `ignoring command_id=${candidate.command.command_id} (${candidate.source}:${candidate.owner}).`,
-    );
-    return;
-  }
-
-  const remapMsg = `Custom command Twitch trigger collision remapped. trigger='${triggerString}' channel='${channelName}' from_command_id=${existingCandidate.command.command_id} from=${existingCandidate.source}:${existingCandidate.owner} to_command_id=${candidate.command.command_id} to=${candidate.source}:${candidate.owner}`;
-  if (existingCandidate.priority === candidate.priority) {
-    log.warn(remapMsg);
-  } else {
-    log.info(remapMsg);
-  }
-  context.candidateByCacheKey.set(cacheKey, preferredCandidate);
-}
-
-/**
- * Registers a command as a candidate on each assigned user's Twitch channel, skipping users
- * without a Twitch name or with Twitch bot disabled. This is the only way a command reaches a
- * Twitch channel, multi-Twitch ones included: a multi-Twitch command fires (and broadcasts) only
- * on the channels of streamers it's assigned to, so a streamer can opt out by unassigning.
- * @param context Mutable candidate map being built.
+ * Registers a command on each assigned user's Twitch channel, skipping users without a Twitch
+ * name or with Twitch bot disabled. This is the only way a command reaches a Twitch channel,
+ * multi-Twitch ones included: a multi-Twitch command fires (and broadcasts) only on the channels
+ * of streamers it's assigned to, so a streamer can opt out by unassigning. Commands arrive in
+ * ascending `command_id` order, so on a channel+trigger collision the lower id (registered
+ * first) wins and the duplicate is logged and skipped.
+ * @param twitchByChannelAndTrigger Map being built from channel+trigger cache key to command.
  * @param assignedUsers Users the command is individually assigned to.
  * @param triggerString Normalized trigger string.
  * @param command Command to register.
  */
-function registerAssignedTwitchCandidates(
-  context: TwitchCandidateContext,
+function registerAssignedTwitchCommands(
+  twitchByChannelAndTrigger: Map<string, DbCustomCommand>,
   assignedUsers: DbCustomCommandAssignedUser[],
   triggerString: string,
   command: DbCustomCommand,
@@ -210,24 +127,28 @@ function registerAssignedTwitchCandidates(
       continue;
     }
 
-    const cacheKey = getTwitchCommandCacheKey(assignedUser.twitch_name, triggerString);
+    const channelName = assignedUser.twitch_name;
+    const cacheKey = getTwitchCommandCacheKey(channelName, triggerString);
     if (!cacheKey) {
       continue;
     }
 
-    registerTwitchCandidate(context, cacheKey, triggerString, assignedUser.twitch_name, {
+    registerFirstWinsWithWarning(
+      twitchByChannelAndTrigger,
+      cacheKey,
       command,
-      source: 'assigned',
-      priority: 2,
-      owner: assignedUser.discord_id,
-    });
+      (existingCommand) =>
+        `Custom command Twitch trigger collision: '${triggerString}' in channel '${channelName}' is already registered ` +
+        `(command_id=${existingCommand.command_id}); ignoring duplicate from command_id=${command.command_id} ` +
+        `(assigned to ${assignedUser.discord_id}).`,
+    );
   }
 }
 
 /**
  * Builds the full custom command lookup cache: indexes Discord-enabled commands by trigger,
- * resolves the winning Twitch command per channel+trigger among the per-user assigned
- * candidates (multi-Twitch commands included), and indexes per-guild overrides. Commands are
+ * registers each command on its assigned users' Twitch channels (multi-Twitch commands
+ * included), and indexes per-guild overrides. Commands are
  * processed in ascending `command_id` order so collisions resolve deterministically.
  * @param commands All custom commands with their assigned users.
  * @param overrides All per-guild command overrides.
@@ -238,11 +159,8 @@ function buildCustomCommandLookupCache(
   overrides: DbGuildCommandOverride[],
 ): CustomCommandLookupCache {
   const discordByTrigger = new Map<string, DbCustomCommand>();
-  const twitchCandidateByChannelAndTrigger = new Map<string, TwitchCommandCandidate>();
+  const twitchByChannelAndTrigger = new Map<string, DbCustomCommand>();
   const sortedCommands = [...commands].sort((left, right) => left.command_id - right.command_id);
-  const twitchCandidateContext: TwitchCandidateContext = {
-    candidateByCacheKey: twitchCandidateByChannelAndTrigger,
-  };
 
   for (const command of sortedCommands) {
     const normalizedTriggerString = normalizeCommand(command.trigger_string);
@@ -253,7 +171,7 @@ function buildCustomCommandLookupCache(
     // Frozen once here (not copied per-lookup in getCustomCommandFor*) since callers only ever
     // read this object; freezing turns any future accidental mutation into a loud failure
     // instead of silently corrupting the shared cache entry. Shared by reference across
-    // discordByTrigger and every Twitch-candidate cache key that resolves to this command.
+    // discordByTrigger and every Twitch channel+trigger cache key that resolves to this command.
     const baseCommand = Object.freeze({
       command_id: command.command_id,
       trigger_string: command.trigger_string,
@@ -263,17 +181,12 @@ function buildCustomCommandLookupCache(
     });
 
     registerDiscordCommand(discordByTrigger, normalizedTriggerString, baseCommand);
-    registerAssignedTwitchCandidates(
-      twitchCandidateContext,
+    registerAssignedTwitchCommands(
+      twitchByChannelAndTrigger,
       command.assigned_users,
       normalizedTriggerString,
       baseCommand,
     );
-  }
-
-  const twitchByChannelAndTrigger = new Map<string, DbCustomCommand>();
-  for (const [cacheKey, candidate] of twitchCandidateByChannelAndTrigger.entries()) {
-    twitchByChannelAndTrigger.set(cacheKey, candidate.command);
   }
 
   return {
