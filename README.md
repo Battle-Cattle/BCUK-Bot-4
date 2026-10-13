@@ -24,6 +24,36 @@ npm run build    # compile TypeScript
 npm start        # production
 ```
 
+## Running the bot
+
+In production the bot runs as a systemd service, `bcuk-bot`. systemd restarts it within a few seconds after a crash and starts it on boot. It gives up after five failed starts in five minutes, so a broken config can't put it in a crash loop.
+
+One-time setup, run on the server as the user the bot should run as (not root):
+
+```bash
+bash scripts/install-systemd-service.sh
+```
+
+This installs and enables the unit from `deploy/bcuk-bot.service`, filled in with your user, this checkout's path and your `node`. It also adds a sudoers rule allowing that user to run `systemctl restart bcuk-bot` and nothing else. It doesn't start the service: stop any copy still running elsewhere first (for example in an old `screen` session), then run `sudo systemctl start bcuk-bot`.
+
+`bash deploy.sh` (or `npm run deploy`) then:
+
+1. Pulls the latest code.
+2. Builds and tests it.
+3. Swaps the new build in.
+4. Restarts the service.
+5. Waits up to 90 seconds for `GET /healthz` on the web panel to answer.
+
+If the bot doesn't come back up, the deploy fails and prints the service status and its last 50 log lines.
+
+Day to day:
+
+```bash
+systemctl status bcuk-bot        # running?
+journalctl -u bcuk-bot -f        # follow the logs (the bot also writes logs/ as before)
+sudo systemctl restart bcuk-bot  # manual restart
+```
+
 ## Deployment
 
 The web panel serves uploaded files straight from disk: overlay videos from `OVERLAY_FOLDER`, alert images and sounds from `ALERT_ASSETS_FOLDER`, and sounds from `SFX_FOLDER`. The bot checks every served path stays inside its folder, following symlinks, but the check can't be atomic with the file read. So:

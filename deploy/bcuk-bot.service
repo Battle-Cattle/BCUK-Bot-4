@@ -1,0 +1,28 @@
+# systemd unit for the bot. Don't copy this by hand: scripts/install-systemd-service.sh fills in
+# the __PLACEHOLDERS__ and installs it as /etc/systemd/system/bcuk-bot.service.
+[Unit]
+Description=BCUK Bot 4 (Discord/Twitch bot and web panel)
+# Ordering only: a remote MySQL simply has no local unit, which systemd ignores.
+After=network-online.target mysql.service mariadb.service
+Wants=network-online.target
+# Give up after 5 failed starts in 5 minutes rather than hammering Discord/Twitch logins in a
+# crash loop (e.g. a bad .env value, or the port still held by a stray process).
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__REPO_DIR__
+Environment=NODE_ENV=production
+ExecStart=__NODE_BIN__ dist/index.js
+# The bot exits 1 on any fatal error (see the Startup Sequence in CLAUDE.md) and 0 after a
+# SIGTERM shutdown, so this restarts crashes but not deliberate stops.
+Restart=on-failure
+RestartSec=5
+KillSignal=SIGTERM
+# shutdown() announces itself to the owner and closes Discord/Twitch/DB cleanly first.
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

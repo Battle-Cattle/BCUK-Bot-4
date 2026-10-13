@@ -2,13 +2,31 @@
 set -euo pipefail
 
 # ── Config ───────────────────────────────────────────────────────────────────
-# Name of the screen session the bot runs in.
-SCREEN_SESSION="BCUK"
+# systemd unit the bot runs as (installed by scripts/install-systemd-service.sh).
+SERVICE_NAME="bcuk-bot"
+# How long to wait for the restarted bot to answer /healthz before calling the deploy failed.
+# Startup pings the DB, loads the guild registry and logs in to Discord/Twitch before the panel
+# starts listening, so allow for slow logins.
+HEALTH_TIMEOUT_SECONDS=90
 # ─────────────────────────────────────────────────────────────────────────────
 
 cd "$(dirname "$0")"
 
 [ -f package.json ] || { echo "ERROR: Run this script from the repo root."; exit 1; }
+
+# Check the restart path works before changing anything, so a missing unit or sudo rule fails
+# the deploy up front instead of after the new build is already in place.
+if ! systemctl cat "$SERVICE_NAME" > /dev/null 2>&1; then
+    echo "ERROR: systemd service '$SERVICE_NAME' isn't installed."
+    echo "       Run once: bash scripts/install-systemd-service.sh (see README \"Running the bot\")."
+    exit 1
+fi
+if ! sudo -n -l systemctl restart "$SERVICE_NAME" > /dev/null 2>&1; then
+    echo "ERROR: $(id -un) can't run 'sudo systemctl restart $SERVICE_NAME' without a password."
+    echo "       Re-run: bash scripts/install-systemd-service.sh"
+    exit 1
+fi
+command -v curl > /dev/null || { echo "ERROR: curl is required for the post-restart health check."; exit 1; }
 
 PREVIOUS_SHA=$(git rev-parse HEAD)
 
@@ -153,34 +171,38 @@ mv "$BUILD_DIR" dist
 trap - ERR  # Rollback no longer needed — code is good.
 rm -rf dist.old
 
-REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
+# Reads WEB_PORT from .env (the bot's own source of truth for it), defaulting like config.ts does.
+WEB_PORT_SETTING="$(grep -E '^[[:space:]]*WEB_PORT=' .env 2>/dev/null | tail -n 1 | cut -d= -f2- | tr -d "[:space:]\"'")"
+HEALTH_URL="http://127.0.0.1:${WEB_PORT_SETTING:-3000}/healthz"
 
-echo "==> Restarting bot in screen session '$SCREEN_SESSION'..."
+echo "==> Restarting $SERVICE_NAME..."
+# SIGTERM runs the bot's graceful shutdown; systemd waits for it (TimeoutStopSec) before starting
+# the new build.
+sudo -n systemctl restart "$SERVICE_NAME"
 
-# The screen window always runs a plain, persistent `bash` — never `bash -c "... && npm start"`
-# directly. If npm start were the window's own command, Ctrl-C-ing it to stop the bot would
-# make that command (and so the shell, and so the single-window session) exit immediately,
-# leaving nothing for the restart command below to `stuff` into.
-if ! screen -list | grep -Eq "[0-9]+\.${SCREEN_SESSION}[[:space:]]"; then
-    echo "==> Screen session '$SCREEN_SESSION' not found. Creating it..."
-    screen -dmS "$SCREEN_SESSION" bash
-fi
-
-if pgrep -f "node dist/index.js" > /dev/null 2>&1; then
-    screen -S "$SCREEN_SESSION" -X stuff $'\003'
-
-    # Wait up to 15s for the node process to fully exit before restarting.
-    for _ in {1..15}; do
-        pgrep -f "node dist/index.js" > /dev/null 2>&1 || break
-        sleep 1
-    done
-
-    if pgrep -f "node dist/index.js" > /dev/null 2>&1; then
-        echo "WARNING: Node process did not stop within 15s. Attempting restart anyway..."
+echo "==> Waiting up to ${HEALTH_TIMEOUT_SECONDS}s for $HEALTH_URL..."
+HEALTHY=0
+for _ in $(seq 1 "$HEALTH_TIMEOUT_SECONDS"); do
+    if curl -fsS --max-time 2 "$HEALTH_URL" > /dev/null 2>&1; then
+        HEALTHY=1
+        break
     fi
+    # A unit that has hit its restart limit (StartLimitBurst in the unit) won't recover within this
+    # window; stop waiting and show why. A crash loop still under the limit runs out the timeout.
+    if systemctl is-failed --quiet "$SERVICE_NAME"; then
+        break
+    fi
+    sleep 1
+done
+
+if [ "$HEALTHY" -ne 1 ]; then
+    echo "ERROR: $SERVICE_NAME isn't answering $HEALTH_URL after the restart. The new build is in place; the bot may be crash-looping or stopped."
+    echo "--- systemctl status $SERVICE_NAME ---"
+    systemctl status "$SERVICE_NAME" --no-pager --lines=0 || true
+    echo "--- last 50 log lines (journalctl -u $SERVICE_NAME) ---"
+    journalctl -u "$SERVICE_NAME" -n 50 --no-pager || echo "(couldn't read the journal; add this user to the systemd-journal group to see it here)"
+    exit 1
 fi
 
-screen -S "$SCREEN_SESSION" -X stuff "cd '${REPO_DIR}' && npm start\n"
-echo "==> Bot restarted."
-
+echo "==> $SERVICE_NAME is up."
 echo "==> Deploy complete."

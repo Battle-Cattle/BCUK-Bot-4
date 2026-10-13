@@ -64,7 +64,8 @@ Tests run in Vitest's `vmThreads` pool (each file gets a fresh VM context on a r
 
 Boot order in `main()`: verify DB connectivity (ping, exit 1 on failure) → wire Twitch/EventSub runtime callbacks → `reloadGuildRegistry()` (must complete before Discord connects, exit 1 on failure) → start Discord bot → start Twitch bot → start web panel (a listen failure such as `EADDRINUSE` exits 1 — most likely an old process still running) → start schedulers (counter/reward-pricing/timer) → start Twitch monitor + EventSub (fire-and-forget, catch-and-log only, doesn't crash the process).
 
-- **`uncaughtException`/`unhandledRejection`** both log and `process.exit(1)` — deliberate: there's no process supervisor, so the app fails loudly instead of limping on with a corrupted state. Don't add a handler that swallows and continues.
+- **`uncaughtException`/`unhandledRejection`** both log and `process.exit(1)` — deliberate: the app fails loudly instead of limping on with a corrupted state, and production's systemd unit (`deploy/bcuk-bot.service`, `Restart=on-failure`) brings it back up from a clean start. Exit 1 for fatal errors and 0 only after a deliberate `shutdown()`, so systemd can tell them apart. Don't add a handler that swallows and continues.
+- **`GET /healthz`** (`src/web/server.ts`) answers once the web panel is listening, which `main()` reaches only after the DB ping, guild registry and bot startup. `deploy.sh` polls it after restarting the service to confirm the deploy came up. Keep it unauthenticated, ahead of the session and rate-limit middleware, and free of any detail beyond "ok".
 - **`shutdown()`** runs on `SIGINT`/`SIGTERM`: closes the web panel (dropping open SSE connections), stops schedulers/EventSub/monitor/bots, disconnects audio, closes the DB pool, then exits 0.
 - **Single instance only.** Production runs exactly one bot process against the database. Several subsystems rely on that: the redemption reconciliation cursors (`twitchEventSubReconciliationCursors.ts`) and the WebSocket/redemption dedup caches are in-memory per process, the schedulers (counter/reward-pricing/timer) assume they're the only ticker, and the `redemption_handled` ledger is a check-then-act guard, not a cross-process lock. Don't design for horizontal scaling without first revisiting those; a change that assumes more than one instance needs a design decision, not a drive-by fix.
 
@@ -72,7 +73,7 @@ Boot order in `main()`: verify DB connectivity (ping, exit 1 on failure) → wir
 
 ## Web Server (`src/web/server.ts`)
 
-Middleware order: `helmet` (custom CSP) → EJS views → static → body parsers → `trust proxy: 1` → session (`express-mysql-session`, backed by the `sessions` MySQL table) → rate limiters (general/session; `streamdeckLimiter` is applied per-route instead) → `res.locals.user`/csrfToken. The general/session rate limiters run after session middleware deliberately — `sessionLimiter`'s key generator needs `req.session` populated.
+Middleware order: `helmet` (custom CSP) → `GET /healthz` → EJS views → static → body parsers → `trust proxy: 1` → session (`express-mysql-session`, backed by the `sessions` MySQL table) → rate limiters (general/session; `streamdeckLimiter` is applied per-route instead) → `res.locals.user`/csrfToken. The general/session rate limiters run after session middleware deliberately — `sessionLimiter`'s key generator needs `req.session` populated.
 
 Auth middleware (`src/web/middleware.ts`), applied in this order:
 1. **`requireAuth`** — session check.
