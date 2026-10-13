@@ -1,4 +1,4 @@
-/* global expandedLiveRows, liveItemsByKey, findLiveDetailRow, setLiveToggleState, hydrateLivePreviewGrid, setLiveTableMessage, renderLiveRows, registerToggleEditHandler, confirmSubmit */
+/* global expandedLiveRows:writable, liveItemsByKey:writable, findLiveDetailRow, setLiveToggleState, hydrateLivePreviewGrid, setLiveTableMessage, renderLiveRows, registerToggleEditHandler, confirmSubmit */
 
 registerToggleEditHandler('btn-toggle-group-edit', 'data-group-id', 'group-edit-');
 

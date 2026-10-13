@@ -1,3 +1,4 @@
+/* global registerToggleEditHandler, registerUserHueBadges, confirmSubmit */
 registerToggleEditHandler('btn-toggle-timer-edit', 'data-timer-id', 'timer-edit-');
 registerUserHueBadges();
 

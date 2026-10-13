@@ -1,3 +1,4 @@
+/* global confirmSubmit */
 /** Confirms user removal before allowing the remove-user form to submit. */
 document.addEventListener('submit', function (event) {
   confirmSubmit(event, 'js-confirm-remove-user', function (t) {

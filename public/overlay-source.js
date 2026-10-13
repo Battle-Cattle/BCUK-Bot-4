@@ -1,3 +1,4 @@
+/* global connectSse */
 (function () {
   const script = document.currentScript;
   const login = script ? script.dataset.login : '';

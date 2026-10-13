@@ -1,3 +1,4 @@
+/* global confirmSubmit, registerCopyToClipboardHandler */
 /** Returns the confirmation message for revoking the current user's Streamdeck API key. */
 function getRevokeKeyConfirmationMessage() {
   return 'Revoke your API key? It will stop working immediately.';

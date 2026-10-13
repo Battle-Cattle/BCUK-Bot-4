@@ -1,3 +1,4 @@
+/* global registerToggleEditHandler, confirmSubmit */
 registerToggleEditHandler('btn-toggle-counter-edit', 'data-counter-id', 'counter-edit-');
 
 document.addEventListener('submit', function (event) {

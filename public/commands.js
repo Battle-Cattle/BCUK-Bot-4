@@ -1,3 +1,4 @@
+/* global registerToggleEditHandler, registerUserHueBadges, confirmSubmit */
 registerToggleEditHandler('btn-toggle-command-edit', 'data-command-id', 'command-edit-');
 registerUserHueBadges();
 

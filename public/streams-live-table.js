@@ -1,4 +1,4 @@
-/* global expandedLiveRows, getLiveRowKey, getLiveTableColumns, createDetailRow, clearChildren, makeCell, createMessagePreview */
+/* global expandedLiveRows:writable, getLiveRowKey, getLiveTableColumns, createDetailRow, clearChildren, makeCell, createMessagePreview */
 
 var liveItemsByKey = Object.create(null);
 
