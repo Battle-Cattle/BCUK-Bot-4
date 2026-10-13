@@ -3,6 +3,8 @@ import express, { Router } from 'express';
 import request from 'supertest';
 import { EventEmitter } from 'events';
 import http from 'http';
+import net from 'net';
+import type { AddressInfo } from 'net';
 import { mockLogger } from '../test-utils/loggerMock';
 
 vi.mock('../shared/config', () => ({
@@ -121,7 +123,7 @@ vi.mock('./routes/serviceWorker', () => ({ default: emptyRouter() }));
 vi.mock('./routes/health', () => ({ default: markerRouter('health') }));
 vi.mock('./routes/healthStatusEvents', () => ({ default: emptyRouter() }));
 
-import { app, generalLimiter, sessionLimiter } from './server';
+import { app, generalLimiter, sessionLimiter, startWebPanel, stopWebPanel } from './server';
 import { requireAuth, requireGuildContext } from './middleware';
 
 describe('server route wiring', () => {
@@ -407,5 +409,43 @@ describe('sessionLimiter wiring (server.ts)', () => {
   it('allows exactly 600 requests then blocks the 601st for an authenticated account', async () => {
     const testApp = buildLimiterTestApp(sessionLimiter, { discordId: 'session-limiter-block-test' });
     await expectExactThreshold(testApp, 600);
+  });
+});
+
+describe('startWebPanel / stopWebPanel', () => {
+  afterEach(async () => {
+    await stopWebPanel();
+  });
+
+  it('rejects with the listen error instead of reporting success when the port is taken', async () => {
+    const blocker = http.createServer();
+    await new Promise<void>((resolve) => blocker.listen(0, resolve));
+    const { port } = blocker.address() as AddressInfo;
+    try {
+      await expect(startWebPanel(port)).rejects.toMatchObject({ code: 'EADDRINUSE' });
+    } finally {
+      await new Promise<void>((resolve) => blocker.close(() => resolve()));
+    }
+  });
+
+  it('closes the server and drops in-flight connections on stop', async () => {
+    const server = await startWebPanel(0);
+    const { port } = server.address() as AddressInfo;
+    const socket = net.connect(port, '127.0.0.1');
+    const socketClosed = new Promise<void>((resolve) => socket.once('close', () => resolve()));
+    socket.on('error', () => {});
+    await new Promise<void>((resolve) => socket.once('connect', () => resolve()));
+    // A half-sent request keeps the connection active, so a plain server.close() would wait on it.
+    socket.write('GET / HTTP/1.1\r\nHost: localhost\r\n');
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+
+    await stopWebPanel();
+
+    await socketClosed;
+    expect(server.listening).toBe(false);
+  });
+
+  it('is a no-op when the panel is not running', async () => {
+    await expect(stopWebPanel()).resolves.toBeUndefined();
   });
 });

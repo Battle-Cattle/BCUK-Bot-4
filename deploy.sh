@@ -12,9 +12,26 @@ cd "$(dirname "$0")"
 
 PREVIOUS_SHA=$(git rev-parse HEAD)
 
-# On any error after git pull, roll back to the previous commit.
+# The build compiles into this staging folder, which only replaces dist/ once the tests have
+# passed (see "Swapping in the new build" below). Building straight into dist/ would leave a
+# rollback with the new, untested code in dist/ for the next `npm start`, and tsc never deletes
+# output for removed sources — a fresh folder per deploy drops those stale files too.
+BUILD_DIR="dist.new"
+# Set once this deploy has swapped its build into dist/, so rollback only undoes its own swap —
+# never a dist.old left behind by an earlier, interrupted deploy.
+SWAPPED=0
+
+# On any error after git pull, roll back to the previous commit and the previous build: dist/ is
+# untouched until the swap, and kept as dist.old from then until the deploy succeeds.
 rollback() {
     echo "ERROR: Deployment failed. Rolling back to $PREVIOUS_SHA..."
+    rm -rf "$BUILD_DIR"
+    # Past the swap, dist/ holds this deploy's build and dist.old the previous one (if there was
+    # one) until the deploy succeeds — put the previous build back.
+    if [ "$SWAPPED" -eq 1 ]; then
+        rm -rf dist
+        if [ -d dist.old ]; then mv dist.old dist; fi
+    fi
     git reset --hard "$PREVIOUS_SHA"
     exit 1
 }
@@ -97,7 +114,8 @@ echo "==> Building and running tests in parallel..."
 BUILD_LOG=$(mktemp)
 trap 'rm -f "$BUILD_LOG"' EXIT
 
-npm run build > "$BUILD_LOG" 2>&1 &
+rm -rf "$BUILD_DIR"
+npm run build -- --outDir "$BUILD_DIR" > "$BUILD_LOG" 2>&1 &
 BUILD_PID=$!
 npm test &
 TEST_PID=$!
@@ -114,6 +132,7 @@ if [ "$BUILD_STATUS" -ne 0 ] || [ "$TEST_STATUS" -ne 0 ]; then
     rollback
 fi
 
+# Prune before the swap: a failure here rolls back with dist/ still untouched.
 echo "==> Pruning dev dependencies..."
 npm prune --omit=dev
 
@@ -125,7 +144,14 @@ npm prune --omit=dev
 # the full dev+prod graph `npm ci` needs next time.
 git checkout -- package-lock.json
 
+echo "==> Swapping in the new build..."
+rm -rf dist.old  # Left over from an interrupted deploy.
+if [ -d dist ]; then mv dist dist.old; fi
+SWAPPED=1
+mv "$BUILD_DIR" dist
+
 trap - ERR  # Rollback no longer needed — code is good.
+rm -rf dist.old
 
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 

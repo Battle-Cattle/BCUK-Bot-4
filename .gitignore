@@ -1,5 +1,7 @@
 node_modules/
 dist/
+dist.new/
+dist.old/
 coverage/
 .vitest-cache/
 TEMP/
@@ -18,4 +20,3 @@ public/downloads/*
 !.claude/skills
 logs/*
 !logs/.gitkeep
-coverage/

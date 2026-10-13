@@ -6,6 +6,7 @@ import MySQLStore from 'express-mysql-session';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import path from 'path';
+import type { Server } from 'http';
 import { WEB_PORT, SESSION_SECRET, DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME } from '../shared/config';
 
 const log = createLogger('Web');
@@ -359,9 +360,41 @@ export { app };
 // entire app to reach the 100/600 thresholds via every other mounted route.
 export { generalLimiter, sessionLimiter };
 
-/** Starts the Express app listening on {@link WEB_PORT}. */
-export function startWebPanel(): void {
-  app.listen(WEB_PORT, () => {
-    log.info(`Panel available at http://localhost:${WEB_PORT}`);
+/** The panel's listening server, kept so {@link stopWebPanel} can close it on shutdown. */
+let webServer: Server | null = null;
+
+/**
+ * Starts the Express app listening on {@link WEB_PORT}.
+ * @param port - Port to listen on; defaults to {@link WEB_PORT} (tests pass 0 for a free port).
+ * @returns Resolves with the listening server. Rejects with the listen error (e.g.
+ *   `EADDRINUSE`) instead — Express 5 hands that error to the listen callback, so ignoring the
+ *   callback's argument would log "Panel available" for a panel that never came up.
+ */
+export function startWebPanel(port: number = WEB_PORT): Promise<Server> {
+  return new Promise((resolve, reject) => {
+    const server = app.listen(port, (err?: Error) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      webServer = server;
+      log.info(`Panel available at http://localhost:${port}`);
+      resolve(server);
+    });
+  });
+}
+
+/**
+ * Stops the web panel: stops accepting connections and drops the open ones — long-lived SSE
+ * streams would otherwise hold `server.close()` open indefinitely. No-op if it isn't running.
+ * @returns Resolves once the server has closed.
+ */
+export function stopWebPanel(): Promise<void> {
+  const server = webServer;
+  if (!server) return Promise.resolve();
+  webServer = null;
+  return new Promise((resolve, reject) => {
+    server.close((err) => (err ? reject(err) : resolve()));
+    server.closeAllConnections();
   });
 }
