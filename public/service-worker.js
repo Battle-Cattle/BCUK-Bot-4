@@ -5,18 +5,12 @@ const APP_CACHE_PREFIX = 'bcuk-panel-';
 // literal placeholder below is still a valid, if non-rotating, cache name.
 const CACHE_VERSION = 'bcuk-panel-__CACHE_VERSION__';
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
-const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
-const RUNTIME_CACHE_MAX_ENTRIES = 50;
 
 const STATIC_EXTENSIONS = ['.css', '.js', '.json', '.png', '.svg', '.woff2'];
-// '/streams' was dead (the actual route has always been '/admin/streams', already covered by
-// '/admin') — dropped. '/dashboard' and '/channel-points' added: both now carry live SSE
-// endpoints (dashboard status/events, channel-points pricing) that must always hit the
-// network directly, never the static-asset or runtime-cache paths below. '/' is included
-// too: it renders the per-user dashboard (CSRF token, recent-activity feed) and must never be
-// persisted into RUNTIME_CACHE, even for a future non-navigate request (navigations already
-// go network-only via handleNavigationRequest, but a same-origin fetch('/') from client script
-// would otherwise fall through to the runtime-cache path below and persist that HTML past logout).
+// Non-navigation requests under these prefixes always go straight to the network, never the
+// static-asset cache: '/api', '/auth' and '/admin' are per-user/state-changing, and '/dashboard'
+// and '/channel-points' carry live SSE endpoints. '/' renders the per-user dashboard (CSRF token,
+// recent-activity feed), so a script fetch('/') must not be cached past logout either.
 const BYPASS_PATH_PREFIXES = ['/api', '/auth', '/admin', '/dashboard', '/channel-points', '/'];
 
 const STATIC_ASSETS = [
@@ -45,12 +39,14 @@ const STATIC_ASSETS = [
   '/icons/BCUK-512.png'
 ];
 
+/** Precaches the static assets on install. */
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(STATIC_CACHE).then((cache) => cache.addAll(STATIC_ASSETS))
   );
 });
 
+/** Deletes this app's caches from older versions, then takes control of open pages. */
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches
@@ -60,9 +56,7 @@ self.addEventListener('activate', (event) => {
           cacheNames
             .filter(
               (cacheName) =>
-                cacheName.startsWith(APP_CACHE_PREFIX) &&
-                cacheName !== STATIC_CACHE &&
-                cacheName !== RUNTIME_CACHE
+                cacheName.startsWith(APP_CACHE_PREFIX) && cacheName !== STATIC_CACHE
             )
             .map((cacheName) => caches.delete(cacheName))
         )
@@ -71,12 +65,17 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+/** Activates a waiting worker immediately when the page asks it to (see pwa-register.js). */
 self.addEventListener('message', (event) => {
   if (event.data && event.data.type === 'SKIP_WAITING') {
     self.skipWaiting();
   }
 });
 
+/**
+ * Routes same-origin GETs: navigations go network-first with an offline fallback, static
+ * assets are stale-while-revalidate, and everything else is left to the browser.
+ */
 self.addEventListener('fetch', (event) => {
   const request = event.request;
 
@@ -89,21 +88,13 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  if (
-    request.mode !== 'navigate' &&
-    isBypassPath(url.pathname)
-  ) {
-    event.respondWith(fetch(request));
-    return;
-  }
-
   if (request.mode === 'navigate') {
     event.respondWith(handleNavigationRequest(request));
     return;
   }
 
-  if (url.pathname === '/service-worker.js') {
-    event.respondWith(fetch(request));
+  // Anything not served from the static cache below is left to the browser's own network fetch.
+  if (isBypassPath(url.pathname) || url.pathname === '/service-worker.js') {
     return;
   }
 
@@ -111,17 +102,10 @@ self.addEventListener('fetch', (event) => {
     const swr = staleWhileRevalidate(request);
     event.respondWith(swr.responsePromise);
     event.waitUntil(swr.updatePromise);
-    return;
   }
-
-  if (shouldUseRuntimeCache(request, url)) {
-    event.respondWith(networkFirst(request));
-    return;
-  }
-
-  event.respondWith(fetch(request));
 });
 
+/** Fetches a navigation from the network, falling back to the cached offline page. */
 async function handleNavigationRequest(request) {
   try {
     return await fetch(request);
@@ -131,6 +115,12 @@ async function handleNavigationRequest(request) {
   }
 }
 
+/**
+ * Serves a static asset from cache when present while refreshing the cached copy in the background.
+ * @param {Request} request - The asset request.
+ * @returns {{ responsePromise: Promise<Response>, updatePromise: Promise<void> }} The response to
+ *   serve, and the background refresh to keep the worker alive for.
+ */
 function staleWhileRevalidate(request) {
   const cachePromise = caches.open(STATIC_CACHE);
   const cachedPromise = cachePromise.then((cache) => cache.match(request));
@@ -161,25 +151,7 @@ function staleWhileRevalidate(request) {
   return { responsePromise, updatePromise };
 }
 
-async function networkFirst(request) {
-  try {
-    const response = await fetch(request);
-    if (response && response.ok) {
-      const cache = await caches.open(RUNTIME_CACHE);
-      await cache.put(request, response.clone());
-      const keys = await cache.keys();
-      const entriesToDelete = Math.max(0, keys.length - RUNTIME_CACHE_MAX_ENTRIES);
-      for (let i = 0; i < entriesToDelete; i++) {
-        await cache.delete(keys[i]);
-      }
-    }
-    return response;
-  } catch (_error) {
-    const cached = await caches.match(request);
-    return cached || Response.error();
-  }
-}
-
+/** True for icons and files with a static-asset extension. */
 function isStaticAsset(pathname) {
   return (
     pathname.startsWith('/icons/') ||
@@ -187,26 +159,9 @@ function isStaticAsset(pathname) {
   );
 }
 
+/** True when a path is, or is under, one of BYPASS_PATH_PREFIXES. */
 function isBypassPath(pathname) {
   return BYPASS_PATH_PREFIXES.some(
     (prefix) => pathname === prefix || pathname.startsWith(prefix + '/')
   );
-}
-
-function shouldUseRuntimeCache(request, url) {
-  if (request.method !== 'GET') {
-    return false;
-  }
-
-  if (url.origin !== self.location.origin) {
-    return false;
-  }
-
-  return isRuntimeCachePath(url.pathname);
-}
-
-function isRuntimeCachePath(pathname) {
-  // '/' is deliberately excluded — it renders per-user content and is already routed to
-  // isBypassPath (see BYPASS_PATH_PREFIXES) instead, never persisted into RUNTIME_CACHE.
-  return false;
 }

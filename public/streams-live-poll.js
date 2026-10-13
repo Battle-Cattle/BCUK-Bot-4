@@ -1,34 +1,26 @@
-/* global expandedLiveRows, liveItemsByKey, hydrateLivePreviewGrid, setLiveTableMessage, renderLiveRows, toggleGroupEdit, confirmSubmit */
+/* global expandedLiveRows, liveItemsByKey, findLiveDetailRow, setLiveToggleState, hydrateLivePreviewGrid, setLiveTableMessage, renderLiveRows, registerToggleEditHandler, confirmSubmit */
 
+registerToggleEditHandler('btn-toggle-group-edit', 'data-group-id', 'group-edit-');
+
+/** Expands/collapses a live stream's detail row when its ▶/▼ toggle is clicked. */
 document.addEventListener('click', function (event) {
   var target = event.target;
   if (!(target instanceof Element)) return;
 
-  var toggleBtn = target.closest('.btn-toggle-group-edit');
-  if (toggleBtn instanceof HTMLElement) {
-    var id = toggleBtn.dataset.groupId;
-    if (id) toggleGroupEdit(id);
-    return;
-  }
-
   var liveToggleBtn = target.closest('.btn-toggle-live-details');
-  if (liveToggleBtn instanceof HTMLElement) {
-    var liveKey = liveToggleBtn.dataset.liveKey;
-    if (!liveKey) return;
-    expandedLiveRows[liveKey] = !expandedLiveRows[liveKey];
+  if (!(liveToggleBtn instanceof HTMLElement)) return;
+  var liveKey = liveToggleBtn.dataset.liveKey;
+  if (!liveKey) return;
 
-    var detailRow = document.querySelector('tr.live-detail-row[data-live-key="' + CSS.escape(liveKey) + '"]');
-    if (detailRow instanceof HTMLElement) {
-      detailRow.style.display = expandedLiveRows[liveKey] ? 'table-row' : 'none';
-    }
+  var expanded = !expandedLiveRows[liveKey];
+  expandedLiveRows[liveKey] = expanded;
 
-    if (expandedLiveRows[liveKey]) {
-      hydrateLivePreviewGrid(liveKey);
-    }
-
-    liveToggleBtn.textContent = expandedLiveRows[liveKey] ? '▼' : '▶';
-    liveToggleBtn.setAttribute('aria-expanded', expandedLiveRows[liveKey] ? 'true' : 'false');
+  var detailRow = findLiveDetailRow(liveKey);
+  if (detailRow instanceof HTMLElement) {
+    detailRow.style.display = expanded ? 'table-row' : 'none';
   }
+  if (expanded) hydrateLivePreviewGrid(liveKey);
+  setLiveToggleState(liveToggleBtn, expanded);
 });
 
 /** Returns the confirmation message for disconnecting a streamer's Twitch connection. */
@@ -36,6 +28,7 @@ function getDisconnectTwitchConfirmationMessage(t) {
   return 'Disconnect Twitch for ' + (t.dataset.twitchName || 'this streamer') + '?';
 }
 
+/** Confirms group/streamer removal and Twitch disconnects before the forms submit. */
 document.addEventListener('submit', function (event) {
   if (confirmSubmit(event, 'js-confirm-remove-group', function (t) {
     return 'Remove group "' + (t.dataset.groupName || 'this group') + '" and all its streamers?';
@@ -48,6 +41,7 @@ document.addEventListener('submit', function (event) {
 
 var liveNowInflight = false;
 
+/** Fetches the currently-live streams and re-renders the live table (skips if one is in flight). */
 function refreshLiveNow() {
   if (liveNowInflight) return;
   liveNowInflight = true;

@@ -2,11 +2,26 @@
 
 let voiceChannelPollTimer = null;
 
+/** Shows "Failed" on the join/leave button for a few seconds, then restores its prior label. */
+function showVoiceButtonFailure(button, leaving) {
+  button.textContent = 'Failed';
+  setTimeout(() => { button.textContent = leaving ? 'Leave Voice' : 'Join Voice'; }, 3000);
+}
+
+/** Replaces the voice channel dropdown with a disabled "failed to load" option. */
 function setSelectError(select) {
   select.innerHTML = '<option value="">Failed to load channels</option>';
   select.disabled = true;
 }
 
+/**
+ * Re-selects the previously chosen channel if it still exists, else the bot's current channel,
+ * else the guild default.
+ * @param {HTMLSelectElement} select - The voice channel dropdown.
+ * @param {string} previousValue - The selection before the options were rebuilt.
+ * @param {{ currentChannelId?: string, defaultChannelId?: string }} data - Channel list response.
+ * @returns {void}
+ */
 function restoreVoiceSelection(select, previousValue, data) {
   if (previousValue) select.value = previousValue;
   const restored = previousValue && select.value === previousValue;
@@ -15,6 +30,12 @@ function restoreVoiceSelection(select, previousValue, data) {
   else if (data.defaultChannelId) select.value = data.defaultChannelId;
 }
 
+/**
+ * Rebuilds the voice channel dropdown from a channel list response.
+ * @param {HTMLSelectElement} select - The voice channel dropdown.
+ * @param {{ ok: boolean, channels?: Array<{id: string, name: string}> }} data - Response body.
+ * @returns {number} Milliseconds until the next poll (sooner after an error or empty list).
+ */
 function applyVoiceChannelData(select, data) {
   if (!data.ok || !Array.isArray(data.channels)) {
     setSelectError(select);
@@ -44,6 +65,7 @@ function applyVoiceChannelData(select, data) {
   return 30000;
 }
 
+/** Fetches the voice channel list into the dropdown and schedules the next refresh. */
 async function loadVoiceChannels() {
   clearTimeout(voiceChannelPollTimer);
   const select = document.getElementById('voice-channel-select');
@@ -66,6 +88,7 @@ async function loadVoiceChannels() {
 
 const rejoinBtn = document.getElementById('btn-rejoin-voice');
 if (rejoinBtn) {
+  /** Joins the selected voice channel or leaves the current one, then refreshes status. */
   rejoinBtn.addEventListener('click', async () => {
     const leaving = rejoinBtn.textContent === 'Leave Voice';
     const channelSelect = document.getElementById('voice-channel-select');
@@ -90,12 +113,10 @@ if (rejoinBtn) {
         await loadVoiceChannels();
         rejoinBtn.textContent = leaving ? 'Join Voice' : 'Leave Voice';
       } else {
-        rejoinBtn.textContent = 'Failed';
-        setTimeout(() => { rejoinBtn.textContent = leaving ? 'Leave Voice' : 'Join Voice'; }, 3000);
+        showVoiceButtonFailure(rejoinBtn, leaving);
       }
     } catch (_) {
-      rejoinBtn.textContent = 'Failed';
-      setTimeout(() => { rejoinBtn.textContent = leaving ? 'Leave Voice' : 'Join Voice'; }, 3000);
+      showVoiceButtonFailure(rejoinBtn, leaving);
     } finally {
       rejoinBtn.disabled = false;
     }

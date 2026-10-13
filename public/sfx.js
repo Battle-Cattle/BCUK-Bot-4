@@ -23,6 +23,7 @@ function collapseDetailRows(triggerId) {
 }
 
 if (searchInput && sfxTable) {
+  /** Filters the SFX table by command/category, collapsing detail rows of hidden triggers. */
   searchInput.addEventListener('input', () => {
     const q = searchInput.value.toLowerCase().trim();
     const rows = sfxTable.querySelectorAll('tr.sfx-row');
@@ -82,53 +83,7 @@ document.addEventListener('click', (event) => {
 
 /* ── Sound upload (CSRF token via header, not URL) ─────────── */
 
-// The upload form carries no _csrf in its action so the session token never
-// lands in the URL/history/Referer. We submit via fetch with the token in an
-// X-CSRF-Token header, which csrfProtection validates before Multer parses the
-// multipart body. fetch follows the server's redirect; we then navigate to the
-// resulting /sfx?success=… or ?error=… page.
-/**
- * Submit a `.js-sfx-upload` form via fetch with the CSRF token in an X-CSRF-Token
- * header (never the URL), then navigate to the server's redirect target.
- * @param {Event} event The delegated submit event.
- * @returns {void}
- */
-document.addEventListener('submit', (event) => {
-  const form = event.target;
-  if (!(form instanceof HTMLFormElement) || !form.classList.contains('js-sfx-upload')) return;
-  event.preventDefault();
-  // Guard against a second submit (Enter key, double-click, scripted resubmit) while
-  // the fetch above is still pending — disabling the button alone doesn't block those.
-  if (form.dataset.submitting === 'true') return;
-  form.dataset.submitting = 'true';
-
-  const token = (document.body && document.body.dataset.csrfToken) || '';
-  const submitBtn = form.querySelector('button[type="submit"]');
-  if (submitBtn) submitBtn.disabled = true;
-
-  fetch(form.action, {
-    method: 'POST',
-    headers: { 'X-CSRF-Token': token },
-    body: new FormData(form),
-  })
-    .then((res) => {
-      // Only follow an actual server redirect (success/error → /sfx?…). A
-      // non-redirect response (e.g. 403 CSRF, 500) keeps res.url at the POST-only
-      // upload route, so treat any non-OK response as a failure instead.
-      if (res.redirected && res.url) {
-        window.location.assign(res.url);
-        return;
-      }
-      if (!res.ok) throw new Error('Upload failed');
-      window.location.assign('/sfx');
-    })
-    .catch(() => {
-      window.location.assign('/sfx?error=upload_failed');
-    })
-    .finally(() => {
-      delete form.dataset.submitting;
-    });
-});
+registerUploadFormHandler('js-sfx-upload', '/sfx');
 
 /* ── Confirm destructive actions ───────────────────────────── */
 

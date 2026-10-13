@@ -2,17 +2,20 @@ const $ = id => document.getElementById(id);
 const statusEl = $('status');
 let gamepadIdx = null, polling = false;
 
+/** Highlights (or resets) a simple on/off control such as the A button. */
 function setActive(id, on) {
   const el = $(id); if (!el) return;
-  if (on) {
-    el.style.filter = 'brightness(3)';
-    el.setAttribute('fill', '#00d4ff');
-  } else {
-    el.style.filter = '';
-    el.setAttribute('fill', id === 'ls-ring' ? '#222' : '#272727');
-  }
+  el.style.filter = on ? 'brightness(3)' : '';
+  el.setAttribute('fill', on ? '#00d4ff' : '#272727');
 }
 
+/** Ring fill for the left stick: bright when clicked, tinted while deflected, dark at rest. */
+function lsRingFill(clicked, moved) {
+  if (clicked) return '#00d4ff';
+  return moved ? '#0a2a3a' : '#222';
+}
+
+/** Reads the active gamepad once and updates the button, trigger and left-stick graphics. */
 function poll() {
   const gps = navigator.getGamepads();
   const gp = gps[gamepadIdx];
@@ -30,49 +33,41 @@ function poll() {
   // Left stick
   const lx = gp.axes[0] ?? 0, ly = gp.axes[1] ?? 0;
   const R = 26;
-  const lDotX = 85 + lx * R, lDotY = 142 + ly * R;
-  $('ls-dot').setAttribute('cx', lDotX);
-  $('ls-dot').setAttribute('cy', lDotY);
-
   const lM = Math.abs(lx) > 0.08 || Math.abs(ly) > 0.08;
+  const lDotX = 85 + lx * R, lDotY = 142 + ly * R;
   const lsLine = $('ls-line'), lsDot = $('ls-dot'), lsRing = $('ls-ring');
-  if (lM) {
-    lsLine.setAttribute('x2', lDotX); lsLine.setAttribute('y2', lDotY);
-    lsLine.setAttribute('opacity', '0.7');
-    lsDot.setAttribute('fill', '#00d4ff');
-    lsDot.style.filter = 'brightness(1.4)';
-    if (!gp.buttons[10]?.pressed) lsRing.setAttribute('fill', '#0a2a3a');
-    lsRing.setAttribute('stroke', '#00d4ff');
-  } else {
-    lsLine.setAttribute('x2', 85); lsLine.setAttribute('y2', 142);
-    lsLine.setAttribute('opacity', '0');
-    lsDot.setAttribute('fill', '#3a3a3a');
-    lsDot.style.filter = '';
-    if (!gp.buttons[10]?.pressed) lsRing.setAttribute('fill', '#222');
-    lsRing.setAttribute('stroke', '#333');
-  }
+  lsDot.setAttribute('cx', lDotX);
+  lsDot.setAttribute('cy', lDotY);
+
+  // The line tracks the dot while deflected, and collapses back to centre at rest.
+  lsLine.setAttribute('x2', lM ? lDotX : 85);
+  lsLine.setAttribute('y2', lM ? lDotY : 142);
+  lsLine.setAttribute('opacity', lM ? '0.7' : '0');
+  lsDot.setAttribute('fill', lM ? '#00d4ff' : '#3a3a3a');
+  lsDot.style.filter = lM ? 'brightness(1.4)' : '';
+  lsRing.setAttribute('stroke', lM ? '#00d4ff' : '#333');
 
   // LS click
-  if (gp.buttons[10]?.pressed) {
-    lsRing.setAttribute('fill', '#00d4ff');
-    lsRing.style.filter = 'brightness(2)';
-  } else {
-    lsRing.style.filter = '';
-  }
+  const lsClicked = !!gp.buttons[10]?.pressed;
+  lsRing.setAttribute('fill', lsRingFill(lsClicked, lM));
+  lsRing.style.filter = lsClicked ? 'brightness(2)' : '';
 }
 
+/** Polls the gamepad once per animation frame while polling is on. */
 function rafLoop() {
   if (!polling) return;
   poll();
   requestAnimationFrame(rafLoop);
 }
 
+/** Starts the per-frame gamepad polling loop, if it isn't already running. */
 function startPolling() {
   if (polling) return;
   polling = true;
   requestAnimationFrame(rafLoop);
 }
 
+/** Stops the per-frame gamepad polling loop. */
 function stopPolling() {
   polling = false;
 }

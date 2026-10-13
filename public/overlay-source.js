@@ -22,17 +22,14 @@
     v.playsInline = true;
     v.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;';
 
-    v.addEventListener('ended', () => {
+    // Finished or failed to load, either way move on to the next queued video.
+    const advance = () => {
       v.remove();
       playing = false;
       playNext();
-    });
-
-    v.addEventListener('error', () => {
-      v.remove();
-      playing = false;
-      playNext();
-    });
+    };
+    v.addEventListener('ended', advance);
+    v.addEventListener('error', advance);
 
     document.body.appendChild(v);
   }

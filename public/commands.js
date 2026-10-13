@@ -1,13 +1,9 @@
 registerToggleEditHandler('btn-toggle-command-edit', 'data-command-id', 'command-edit-');
 registerUserHueBadges();
 
+/** Confirms command removal before allowing the remove-command form to submit. */
 document.addEventListener('submit', function (event) {
-  var target = event.target;
-  if (!(target instanceof HTMLFormElement)) return;
-  if (!target.classList.contains('js-confirm-remove-command')) return;
-
-  var triggerString = target.dataset.commandTrigger || 'this command';
-  if (!window.confirm('Remove command ' + triggerString + '?')) {
-    event.preventDefault();
-  }
+  confirmSubmit(event, 'js-confirm-remove-command', function (t) {
+    return 'Remove command ' + (t.dataset.commandTrigger || 'this command') + '?';
+  });
 });

@@ -2,8 +2,20 @@
 
 var liveItemsByKey = Object.create(null);
 
+/** Returns the expandable detail `<tr>` for a live row key, or null if it isn't rendered. */
+function findLiveDetailRow(liveKey) {
+  return document.querySelector('tr.live-detail-row[data-live-key="' + CSS.escape(liveKey) + '"]');
+}
+
+/** Syncs a live row's ▶/▼ toggle button label and aria-expanded to its expanded state. */
+function setLiveToggleState(button, expanded) {
+  button.textContent = expanded ? '▼' : '▶';
+  button.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+}
+
+/** Renders a live row's Discord message previews the first time its details are shown. */
 function hydrateLivePreviewGrid(liveKey) {
-  var detailRow = document.querySelector('tr.live-detail-row[data-live-key="' + CSS.escape(liveKey) + '"]');
+  var detailRow = findLiveDetailRow(liveKey);
   if (!(detailRow instanceof HTMLElement)) return;
 
   var grid = detailRow.querySelector('.live-preview-grid');
@@ -19,6 +31,7 @@ function hydrateLivePreviewGrid(liveKey) {
   grid.dataset.hydrated = 'true';
 }
 
+/** Replaces the live table body with a single full-width message row. */
 function setLiveTableMessage(text) {
   var tbody = document.getElementById('live-tbody');
   if (!tbody) return;
@@ -32,6 +45,11 @@ function setLiveTableMessage(text) {
   tbody.appendChild(tr);
 }
 
+/**
+ * Re-renders the live table from a fresh stream list, keeping rows that were expanded open.
+ * @param {Array<object>} streams - Streams from GET /admin/streams/live.
+ * @returns {void}
+ */
 function renderLiveRows(streams) {
   var tbody = document.getElementById('live-tbody');
   if (!tbody) return;
@@ -55,10 +73,9 @@ function renderLiveRows(streams) {
     toggleBtn.type = 'button';
     toggleBtn.className = 'btn btn-sm btn-ghost btn-toggle-live-details';
     toggleBtn.dataset.liveKey = key;
-    toggleBtn.setAttribute('aria-expanded', expandedLiveRows[key] ? 'true' : 'false');
+    setLiveToggleState(toggleBtn, !!expandedLiveRows[key]);
     toggleBtn.setAttribute('aria-label', 'Toggle stream details for ' + String(item.login || 'stream'));
     toggleBtn.title = 'Toggle stream details';
-    toggleBtn.textContent = expandedLiveRows[key] ? '▼' : '▶';
     toggleTd.appendChild(toggleBtn);
     tr.appendChild(toggleTd);
 
