@@ -132,12 +132,7 @@ if [ "$BUILD_STATUS" -ne 0 ] || [ "$TEST_STATUS" -ne 0 ]; then
     rollback
 fi
 
-echo "==> Swapping in the new build..."
-rm -rf dist.old  # Left over from an interrupted deploy.
-if [ -d dist ]; then mv dist dist.old; fi
-SWAPPED=1
-mv "$BUILD_DIR" dist
-
+# Prune before the swap: a failure here rolls back with dist/ still untouched.
 echo "==> Pruning dev dependencies..."
 npm prune --omit=dev
 
@@ -148,6 +143,12 @@ npm prune --omit=dev
 # discarding this rewrite — restore the tracked lockfile so it still reflects
 # the full dev+prod graph `npm ci` needs next time.
 git checkout -- package-lock.json
+
+echo "==> Swapping in the new build..."
+rm -rf dist.old  # Left over from an interrupted deploy.
+if [ -d dist ]; then mv dist dist.old; fi
+SWAPPED=1
+mv "$BUILD_DIR" dist
 
 trap - ERR  # Rollback no longer needed — code is good.
 rm -rf dist.old
