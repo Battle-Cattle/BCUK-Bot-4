@@ -217,3 +217,19 @@ describe('guild scoping', () => {
     expect(triggerCalls).toHaveLength(2);
   });
 });
+
+describe('blank commands', () => {
+  it('never registers a blank trigger or check command, so the other one still resolves', async () => {
+    const { registerFirstWinsWithWarning } = await import('./lookupCache.js');
+    vi.mocked(getAllCounters).mockResolvedValue([
+      makeCounter(1, '   ', '!checkhits'),
+      makeCounter(2, '!deaths', '   '),
+    ]);
+
+    expect((await findCounterByCommand('guild-1', '!checkhits'))?.id).toBe(1);
+    expect((await findCounterByCommand('guild-1', '!deaths'))?.id).toBe(2);
+    // The mocked cache rebuilds on every lookup, so dedupe the keys across both builds.
+    const registeredKeys = new Set(vi.mocked(registerFirstWinsWithWarning).mock.calls.map((call) => call[1]));
+    expect([...registeredKeys]).toEqual(['guild-1:!checkhits', 'guild-1:!deaths']);
+  });
+});

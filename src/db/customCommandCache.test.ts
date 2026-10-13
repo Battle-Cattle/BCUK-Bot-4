@@ -1,14 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('../shared/logger', () => ({
-  createLogger: () => ({ warn: vi.fn(), info: vi.fn(), error: vi.fn() }),
-}));
-
 // Captures the options customCommandCache passes to createManagedLookupCache (at import time, so
 // before any beforeEach clears mock call history) and the invalidate spy on the cache it gets back.
 const managedCache = vi.hoisted(() => ({
   options: null as null | { createEmptyCache: () => any },
   invalidate: null as null | ReturnType<typeof vi.fn>,
+  // Every collision message registerFirstWinsWithWarning would have logged.
+  collisions: [] as string[],
 }));
 
 vi.mock('./lookupCache', () => ({
@@ -20,7 +18,7 @@ vi.mock('./lookupCache', () => ({
   registerFirstWinsWithWarning: <K, V>(map: Map<K, V>, key: K, value: V, describeCollision: (existing: V) => string) => {
     const existing = map.get(key);
     if (existing !== undefined) {
-      describeCollision(existing);
+      managedCache.collisions.push(describeCollision(existing));
       return;
     }
     map.set(key, value);
@@ -71,6 +69,7 @@ function makeCommand(overrides: Partial<MockCommand> = {}): MockCommand {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  managedCache.collisions.length = 0;
   vi.mocked(getAllCustomCommandsWithAssignments).mockResolvedValue([]);
   vi.mocked(getAllOverrides).mockResolvedValue([]);
 });
@@ -303,6 +302,58 @@ describe('getCustomCommandForTwitchChannel', () => {
     const result = await getCustomCommandForTwitchChannel('mychan', '!clap');
     expect(Object.isFrozen(result)).toBe(true);
     expect(() => { (result as any).output = 'mutated'; }).toThrow();
+  });
+});
+
+describe('cache build — edge cases', () => {
+  it('skips a command whose trigger is blank on both platforms', async () => {
+    vi.mocked(getAllCustomCommandsWithAssignments).mockResolvedValue([
+      makeCommand({
+        trigger_string: '   ',
+        assigned_users: [{ discord_id: '111', twitch_name: 'mychan', is_twitch_bot_enabled: true }],
+      }),
+      makeCommand({ command_id: 2 }),
+    ] as any);
+    expect((await getCustomCommandForDiscord('!clap', GUILD))?.command_id).toBe(2);
+    expect(await getCustomCommandForTwitchChannel('mychan', '   ')).toBeNull();
+  });
+
+  it('skips an assigned user whose twitch_name is not a valid channel name', async () => {
+    vi.mocked(getAllCustomCommandsWithAssignments).mockResolvedValue([
+      makeCommand({
+        assigned_users: [
+          { discord_id: '111', twitch_name: '#', is_twitch_bot_enabled: true },
+          { discord_id: '222', twitch_name: 'mychan', is_twitch_bot_enabled: true },
+        ],
+      }),
+    ] as any);
+    expect(await getCustomCommandForTwitchChannel('mychan', '!clap')).not.toBeNull();
+    expect(managedCache.collisions).toEqual([]);
+  });
+
+  it('logs the Twitch collision naming both command ids, the channel and the skipped assignee', async () => {
+    vi.mocked(getAllCustomCommandsWithAssignments).mockResolvedValue([
+      makeCommand({ command_id: 1, assigned_users: [{ discord_id: '111', twitch_name: 'mychan', is_twitch_bot_enabled: true }] }),
+      makeCommand({ command_id: 2, is_discord_enabled: false, assigned_users: [{ discord_id: '222', twitch_name: 'mychan', is_twitch_bot_enabled: true }] }),
+    ] as any);
+    expect((await getCustomCommandForTwitchChannel('mychan', '!clap'))?.command_id).toBe(1);
+    expect(managedCache.collisions).toEqual([
+      "Custom command Twitch trigger collision: '!clap' in channel 'mychan' is already registered " +
+      '(command_id=1); ignoring duplicate from command_id=2 (assigned to 222).',
+    ]);
+  });
+
+  it('indexes several overrides for the same guild', async () => {
+    vi.mocked(getAllCustomCommandsWithAssignments).mockResolvedValue([
+      makeCommand({ command_id: 1, trigger_string: '!one' }),
+      makeCommand({ command_id: 2, trigger_string: '!two' }),
+    ] as any);
+    vi.mocked(getAllOverrides).mockResolvedValue([
+      { guild_id: GUILD, command_id: 1, is_disabled: false, output: 'one here' },
+      { guild_id: GUILD, command_id: 2, is_disabled: true, output: null },
+    ] as any);
+    expect((await getCustomCommandForDiscord('!one', GUILD))?.output).toBe('one here');
+    expect(await getCustomCommandForDiscord('!two', GUILD)).toBeNull();
   });
 });
 

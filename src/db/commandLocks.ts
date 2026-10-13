@@ -27,13 +27,8 @@ export function getCommandWriteLockName(command: string): string {
 
 /** Maps `commands` to their lock names, sorted so callers always acquire multiple locks in a consistent order (avoids lock-order deadlocks). */
 export function getSortedCommandLockNames(commands: string[]): string[] {
-  return commands
-    .slice()
-    .sort((left, right) => {
-      if (left === right) return 0;
-      return left < right ? -1 : 1;
-    })
-    .map((command) => getCommandWriteLockName(command));
+  // The default sort compares by UTF-16 code units, the same order as `<` on strings.
+  return [...commands].sort().map((command) => getCommandWriteLockName(command));
 }
 
 /**
