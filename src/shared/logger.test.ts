@@ -58,20 +58,27 @@ describe('root logger configuration (set at import)', () => {
     vi.resetModules();
     for (const [key, value] of Object.entries(env)) vi.stubEnv(key, value);
     const rotateFileOptions: Array<{ filename: string; level?: string }> = [];
+    // The finished line each stubbed log file would have written, keyed by file name.
+    const writtenLines: Record<string, string[]> = {};
     vi.doMock('winston-daily-rotate-file', async () => {
       const { default: Transport } = await import('winston-transport');
       return {
         default: class extends Transport {
+          private readonly filename: string;
           constructor(options: { filename: string; level?: string }) {
             super(options);
+            this.filename = options.filename;
             rotateFileOptions.push(options);
           }
-          log(_info: unknown, callback: () => void) { callback(); }
+          log(info: Record<symbol, string>, callback: () => void) {
+            (writtenLines[this.filename] ??= []).push(info[Symbol.for('message')]!);
+            callback();
+          }
         },
       };
     });
     const logger = await import('./logger.js');
-    return { logger, rotateFileOptions };
+    return { logger, rotateFileOptions, writtenLines };
   }
 
   afterEach(() => {
@@ -95,6 +102,18 @@ describe('root logger configuration (set at import)', () => {
     ]);
     const transports = logger.createLogger('x').transports;
     expect(transports.some((t: unknown) => t instanceof logger.HealthStoreErrorTransport)).toBe(true);
+  });
+
+  it('writes upper-cased level lines to the log files', async () => {
+    const { logger, writtenLines } = await importLoggerWith({ VITEST: '', LOG_LEVEL: 'info' });
+
+    logger.createLogger('Web').warn('disk nearly full');
+
+    expect(writtenLines['combined-%DATE%.log']).toEqual([
+      expect.stringMatching(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \[WARN\] \[Web\] disk nearly full$/),
+    ]);
+    // Below the error file's level, so it never reaches it.
+    expect(writtenLines['error-%DATE%.log']).toBeUndefined();
   });
 
   it('logs to the console only under tests', async () => {
