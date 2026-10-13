@@ -5,10 +5,10 @@ Description=BCUK Bot 4 (Discord/Twitch bot and web panel)
 # Ordering only: a remote MySQL simply has no local unit, which systemd ignores.
 After=network-online.target mysql.service mariadb.service
 Wants=network-online.target
-# Give up after 5 failed starts in 5 minutes rather than hammering Discord/Twitch logins in a
-# crash loop (e.g. a bad .env value, or the port still held by a stray process).
-StartLimitIntervalSec=300
-StartLimitBurst=5
+# Never stop retrying: a database or network outage makes every start fail (main() exits 1 on a
+# failed DB ping), and nothing would start the bot again once systemd gave up. The backoff below
+# keeps a long crash loop from hammering Discord/Twitch logins instead.
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -19,7 +19,12 @@ ExecStart=__NODE_BIN__ dist/index.js
 # The bot exits 1 on any fatal error (see the Startup Sequence in CLAUDE.md) and 0 after a
 # SIGTERM shutdown, so this restarts crashes but not deliberate stops.
 Restart=on-failure
-RestartSec=5
+# First retry after 10s, then backing off over 5 retries to one attempt every 5 minutes (about
+# 300 a day at most). RestartSteps/RestartMaxDelaySec need systemd 254+; older systemd warns
+# about them and simply retries every 10s.
+RestartSec=10
+RestartSteps=5
+RestartMaxDelaySec=300
 KillSignal=SIGTERM
 # shutdown() announces itself to the owner and closes Discord/Twitch/DB cleanly first.
 TimeoutStopSec=30

@@ -171,8 +171,11 @@ mv "$BUILD_DIR" dist
 trap - ERR  # Rollback no longer needed — code is good.
 rm -rf dist.old
 
-# Reads WEB_PORT from .env (the bot's own source of truth for it), defaulting like config.ts does.
-WEB_PORT_SETTING="$(grep -E '^[[:space:]]*WEB_PORT=' .env 2>/dev/null | tail -n 1 | cut -d= -f2- | tr -d "[:space:]\"'")"
+# Reads WEB_PORT from .env (the bot's own source of truth for it) the way dotenv does: last entry
+# wins, an inline ` # comment` is dropped, surrounding quotes and spaces are stripped. No entry
+# (grep finding nothing must not trip pipefail) or a blank one falls back to 3000, like config.ts.
+WEB_PORT_SETTING="$( { grep -E '^[[:space:]]*WEB_PORT=' .env 2>/dev/null || true; } \
+    | tail -n 1 | cut -d= -f2- | sed -E 's/[[:space:]]+#.*$//' | tr -d "[:space:]\"'")"
 HEALTH_URL="http://127.0.0.1:${WEB_PORT_SETTING:-3000}/healthz"
 
 echo "==> Restarting $SERVICE_NAME..."
@@ -182,13 +185,17 @@ sudo -n systemctl restart "$SERVICE_NAME"
 
 echo "==> Waiting up to ${HEALTH_TIMEOUT_SECONDS}s for $HEALTH_URL..."
 HEALTHY=0
-for _ in $(seq 1 "$HEALTH_TIMEOUT_SECONDS"); do
+# A deadline on elapsed time (bash's SECONDS), not a count of attempts: each curl can take up
+# to its own 2s timeout on top of the 1s sleep.
+HEALTH_DEADLINE=$((SECONDS + HEALTH_TIMEOUT_SECONDS))
+while [ "$SECONDS" -lt "$HEALTH_DEADLINE" ]; do
     if curl -fsS --max-time 2 "$HEALTH_URL" > /dev/null 2>&1; then
         HEALTHY=1
         break
     fi
-    # A unit that has hit its restart limit (StartLimitBurst in the unit) won't recover within this
-    # window; stop waiting and show why. A crash loop still under the limit runs out the timeout.
+    # The unit never gives up on its own (see StartLimitIntervalSec in the unit), so "failed" here
+    # means something stopped it for good, e.g. a bad ExecStart; stop waiting and show why. A
+    # start that keeps crashing and retrying runs out the deadline instead.
     if systemctl is-failed --quiet "$SERVICE_NAME"; then
         break
     fi

@@ -26,7 +26,7 @@ npm start        # production
 
 ## Running the bot
 
-In production the bot runs as a systemd service, `bcuk-bot`. systemd restarts it within a few seconds after a crash and starts it on boot. It gives up after five failed starts in five minutes, so a broken config can't put it in a crash loop.
+In production the bot runs as a systemd service, `bcuk-bot`. systemd restarts it 10 seconds after a crash and starts it on boot. It never stops retrying, so the bot comes back by itself after a database or network outage. Repeated failures back off to one attempt every 5 minutes (on systemd 254+), so a long outage doesn't hammer the Discord and Twitch logins.
 
 One-time setup, run on the server as the user the bot should run as (not root):
 

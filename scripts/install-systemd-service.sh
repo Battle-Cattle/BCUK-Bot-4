@@ -38,9 +38,12 @@ echo "    directory: $REPO_DIR"
 echo "    node:      $NODE_BIN (v$("$NODE_BIN" -v | tr -d v))"
 UNIT_TMP="$(mktemp)"
 trap 'rm -f "$UNIT_TMP" "${SUDOERS_TMP:-}"' EXIT
-sed -e "s|__USER__|${RUN_USER}|" \
-    -e "s|__REPO_DIR__|${REPO_DIR}|" \
-    -e "s|__NODE_BIN__|${NODE_BIN}|" \
+# Escapes a value for the replacement side of `s|...|...|`: backslash, the `|` delimiter and `&`
+# (which sed reads as "the whole match") would otherwise mangle a path that contains them.
+sed_escape() { printf '%s' "$1" | sed -e 's/[\\|&]/\\&/g'; }
+sed -e "s|__USER__|$(sed_escape "$RUN_USER")|" \
+    -e "s|__REPO_DIR__|$(sed_escape "$REPO_DIR")|" \
+    -e "s|__NODE_BIN__|$(sed_escape "$NODE_BIN")|" \
     "$REPO_DIR/deploy/bcuk-bot.service" > "$UNIT_TMP"
 sudo install -m 644 "$UNIT_TMP" "/etc/systemd/system/${SERVICE_NAME}.service"
 sudo "$SYSTEMCTL_BIN" daemon-reload
