@@ -48,6 +48,7 @@ import timersRouter from './routes/timers';
 import privacyRouter from './routes/privacy';
 import tosRouter from './routes/tos';
 import serviceWorkerRouter from './routes/serviceWorker';
+import streamdeckPluginDownloadRouter from './routes/streamdeckPluginDownload';
 import healthRouter from './routes/health';
 import healthStatusEventsRouter from './routes/healthStatusEvents';
 import { requireAuth, requireGuildContext } from './middleware';
@@ -99,6 +100,9 @@ app.set('views', path.join(__dirname, '../../views'));
 // Served ahead of the static middleware below so its cache-version substitution (see
 // serviceWorker.ts) takes effect instead of the raw, unsubstituted file on disk.
 app.use(serviceWorkerRouter);
+// Ahead of static for the same reason: a stale plugin file left in public/downloads/ must not
+// shadow the redirect to the latest release (see streamdeckPluginDownload.ts).
+app.use(streamdeckPluginDownloadRouter);
 
 // Browser half of the passkey (WebAuthn) flow, served straight from the installed package so
 // it always matches the server library's version. Must be same-origin: CSP is script-src 'self'.

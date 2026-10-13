@@ -17,5 +17,6 @@ document.addEventListener('submit', function (event) {
 
 registerCopyToClipboardHandler('copy-key-btn', 'new-key', 'Copy');
 
-const hostCell = document.getElementById('sd-host-cell');
-if (hostCell) hostCell.textContent = window.location.hostname;
+// The plugin talks to the same address the panel is served from.
+const serverUrlCell = document.getElementById('sd-server-url-cell');
+if (serverUrlCell) serverUrlCell.textContent = window.location.origin;

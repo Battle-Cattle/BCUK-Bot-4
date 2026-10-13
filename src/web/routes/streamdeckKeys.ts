@@ -16,7 +16,6 @@ import {
 import { csrfProtection } from '../csrf';
 import { requireAdmin } from '../middleware';
 import { getSessionUser, getCurrentGuildId } from '../session';
-import { WEB_PORT } from '../../shared/config';
 import { normalizeDiscordId, filterQueryParam } from './validation';
 import { renderError, renderView } from './viewHelpers';
 import { logAndRedirectError } from './errorHandling';
@@ -48,7 +47,6 @@ function renderKeyStatus(
     keyRow,
     newKey,
     error,
-    webPort: WEB_PORT,
   });
 }
 
