@@ -31,17 +31,18 @@ jobs:
           node-version: '24.x'
           cache: 'npm'
 
-      # Restores node_modules itself, keyed on the exact OS + Node version + lockfile, so a hit
-      # skips `npm ci` entirely (~25s on Windows, ~8s on Ubuntu — including ffmpeg-static's
-      # postinstall download). Only an exact match is restored, never a fallback: a stale tree
-      # could hide an install problem. A miss falls through to the `npm ci` below, and the
-      # resulting tree is saved for the next run on the same lockfile.
+      # Restores node_modules itself, keyed on the exact OS + Node version + package.json +
+      # lockfile, so a hit skips `npm ci` entirely (~25s on Windows, ~8s on Ubuntu — including
+      # ffmpeg-static's postinstall download). package.json is in the key so a manifest edit the
+      # lockfile doesn't match still reaches `npm ci` and fails there, as it would on deploy. Only
+      # an exact match is restored, never a fallback: a stale tree could hide an install problem.
+      # A miss falls through to the `npm ci` below, and the resulting tree is saved for next time.
       - name: Restore node_modules
         id: node-modules-cache
         uses: actions/cache@v4
         with:
           path: node_modules
-          key: node-modules-${{ runner.os }}-node${{ steps.setup-node.outputs.node-version }}-${{ hashFiles('package-lock.json') }}
+          key: node-modules-${{ runner.os }}-node${{ steps.setup-node.outputs.node-version }}-${{ hashFiles('package.json', 'package-lock.json') }}
 
       - name: Install dependencies
         if: steps.node-modules-cache.outputs.cache-hit != 'true'

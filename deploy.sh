@@ -60,6 +60,9 @@ if ! git diff --quiet "$PREVIOUS_SHA" HEAD -- package.json package-lock.json; th
     DEPS_CHANGED=1
 fi
 
+# Restores the dev dependencies pruned by the previous deploy without reinstalling the rest, then
+# restores the tracked lockfile. Returns non-zero if the install fails, so the caller can fall
+# back to a clean `npm ci`.
 install_dependencies_incrementally() {
     npm install --include=dev --prefer-offline --no-audit --no-fund || return 1
     # npm may rewrite the lockfile's formatting even with no dependency change (see the prune
