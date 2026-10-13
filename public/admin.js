@@ -68,7 +68,7 @@ function parseRefreshStatusResponse(refreshBanner, response) {
   return response.json();
 }
 
-function applyRefreshState(refreshBanner, state) {
+function applyRefreshState(state) {
   if (state && state.outcome === 'running') {
     scheduleRefreshStatusPolling(0);
   } else if (state) {
@@ -87,7 +87,7 @@ function scheduleRefreshStatusPolling(retryCount) {
     }).then(function (response) {
       return parseRefreshStatusResponse(refreshBanner, response);
     }).then(function (state) {
-      applyRefreshState(refreshBanner, state);
+      applyRefreshState(state);
     }).catch(function () {
       if (attempt >= 4) {
         refreshBanner.textContent = 'Refresh status unavailable. Reload the page to check progress.';

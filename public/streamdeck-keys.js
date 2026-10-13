@@ -8,13 +8,9 @@ function getRotateKeyConfirmationMessage() {
   return 'Generate a new API key? Your current key will stop working immediately, everywhere it was set up.';
 }
 
-/** Confirms revocation before allowing the Streamdeck key revoke form to submit. */
+/** Confirms revocation/rotation before allowing the Streamdeck key forms to submit. */
 document.addEventListener('submit', function (event) {
-  confirmSubmit(event, 'js-confirm-revoke-key', getRevokeKeyConfirmationMessage);
-});
-
-/** Confirms rotation before allowing the Streamdeck key rotate form to submit. */
-document.addEventListener('submit', function (event) {
+  if (confirmSubmit(event, 'js-confirm-revoke-key', getRevokeKeyConfirmationMessage)) return;
   confirmSubmit(event, 'js-confirm-rotate-key', getRotateKeyConfirmationMessage);
 });
 

@@ -2,6 +2,12 @@
 
 let voiceChannelPollTimer = null;
 
+/** Shows "Failed" on the join/leave button for a few seconds, then restores its prior label. */
+function showVoiceButtonFailure(button, leaving) {
+  button.textContent = 'Failed';
+  setTimeout(() => { button.textContent = leaving ? 'Leave Voice' : 'Join Voice'; }, 3000);
+}
+
 function setSelectError(select) {
   select.innerHTML = '<option value="">Failed to load channels</option>';
   select.disabled = true;
@@ -90,12 +96,10 @@ if (rejoinBtn) {
         await loadVoiceChannels();
         rejoinBtn.textContent = leaving ? 'Join Voice' : 'Leave Voice';
       } else {
-        rejoinBtn.textContent = 'Failed';
-        setTimeout(() => { rejoinBtn.textContent = leaving ? 'Leave Voice' : 'Join Voice'; }, 3000);
+        showVoiceButtonFailure(rejoinBtn, leaving);
       }
     } catch (_) {
-      rejoinBtn.textContent = 'Failed';
-      setTimeout(() => { rejoinBtn.textContent = leaving ? 'Leave Voice' : 'Join Voice'; }, 3000);
+      showVoiceButtonFailure(rejoinBtn, leaving);
     } finally {
       rejoinBtn.disabled = false;
     }

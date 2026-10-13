@@ -2,8 +2,19 @@
 
 var liveItemsByKey = Object.create(null);
 
+/** Returns the expandable detail `<tr>` for a live row key, or null if it isn't rendered. */
+function findLiveDetailRow(liveKey) {
+  return document.querySelector('tr.live-detail-row[data-live-key="' + CSS.escape(liveKey) + '"]');
+}
+
+/** Syncs a live row's ▶/▼ toggle button label and aria-expanded to its expanded state. */
+function setLiveToggleState(button, expanded) {
+  button.textContent = expanded ? '▼' : '▶';
+  button.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+}
+
 function hydrateLivePreviewGrid(liveKey) {
-  var detailRow = document.querySelector('tr.live-detail-row[data-live-key="' + CSS.escape(liveKey) + '"]');
+  var detailRow = findLiveDetailRow(liveKey);
   if (!(detailRow instanceof HTMLElement)) return;
 
   var grid = detailRow.querySelector('.live-preview-grid');
@@ -55,10 +66,9 @@ function renderLiveRows(streams) {
     toggleBtn.type = 'button';
     toggleBtn.className = 'btn btn-sm btn-ghost btn-toggle-live-details';
     toggleBtn.dataset.liveKey = key;
-    toggleBtn.setAttribute('aria-expanded', expandedLiveRows[key] ? 'true' : 'false');
+    setLiveToggleState(toggleBtn, !!expandedLiveRows[key]);
     toggleBtn.setAttribute('aria-label', 'Toggle stream details for ' + String(item.login || 'stream'));
     toggleBtn.title = 'Toggle stream details';
-    toggleBtn.textContent = expandedLiveRows[key] ? '▼' : '▶';
     toggleTd.appendChild(toggleBtn);
     tr.appendChild(toggleTd);
 

@@ -26,23 +26,20 @@
     });
   }
 
-  function scheduleUpdateChecks(registration) {
-    if (!registration) {
-      return;
-    }
+  /** Asks the browser to re-check for a newer service worker, logging (not throwing) on failure. */
+  function checkForUpdate(registration) {
+    registration.update().catch(function (error) {
+      console.warn('[PWA] Service worker update check failed:', error);
+    });
+  }
 
+  function scheduleUpdateChecks(registration) {
     window.setInterval(function () {
-      registration.update().catch(function (error) {
-        console.warn('[PWA] Service worker update check failed:', error);
-      });
+      checkForUpdate(registration);
     }, UPDATE_INTERVAL_MS);
 
     document.addEventListener('visibilitychange', function () {
-      if (!document.hidden) {
-        registration.update().catch(function (error) {
-          console.warn('[PWA] Service worker update check failed:', error);
-        });
-      }
+      if (!document.hidden) checkForUpdate(registration);
     });
   }
 
@@ -64,11 +61,7 @@
         });
 
         forceActivateWaitingWorker(registration);
-
-        registration.update().catch(function (error) {
-          console.warn('[PWA] Initial service worker update check failed:', error);
-        });
-
+        checkForUpdate(registration);
         scheduleUpdateChecks(registration);
       })
       .catch(function (error) {

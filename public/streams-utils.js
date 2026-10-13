@@ -1,9 +1,3 @@
-function toggleGroupEdit(id) {
-  var row = document.getElementById('group-edit-' + id);
-  if (!row) return;
-  row.classList.toggle('is-hidden');
-}
-
 function clearChildren(el) {
   while (el.firstChild) el.removeChild(el.firstChild);
 }
@@ -15,15 +9,6 @@ function makeCell(text, className) {
   return td;
 }
 
-function escapeHtml(value) {
-  return String(value)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
 function formatValue(value, fallback) {
   if (value === null || value === undefined || value === '') {
     return fallback === undefined || fallback === null
@@ -31,10 +16,6 @@ function formatValue(value, fallback) {
       : String(fallback);
   }
   return String(value);
-}
-
-function renderBadge(label, className) {
-  return '<span class="badge ' + className + '">' + escapeHtml(label) + '</span>';
 }
 
 function createMetadataItem(label, value, extraClass) {
