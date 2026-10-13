@@ -49,14 +49,39 @@ git pull origin main
 
 trap rollback ERR
 
+# The previous deploy left node_modules holding exactly the lockfile's production dependencies
+# (`npm prune --omit=dev` below). When neither package.json nor the lockfile changed since then,
+# `npm install --include=dev` only has to add the dev dependencies back — same resulting tree as a
+# clean `npm ci`, without deleting and re-extracting every package (or re-running postinstall
+# downloads such as ffmpeg-static's). Anything else (dependency change, missing node_modules, or
+# the incremental install failing) falls back to a clean `npm ci`.
+DEPS_CHANGED=0
+if ! git diff --quiet "$PREVIOUS_SHA" HEAD -- package.json package-lock.json; then
+    DEPS_CHANGED=1
+fi
+
+# Restores the dev dependencies pruned by the previous deploy without reinstalling the rest, then
+# restores the tracked lockfile. Returns non-zero if the install fails, so the caller can fall
+# back to a clean `npm ci`.
+install_dependencies_incrementally() {
+    npm install --include=dev --prefer-offline --no-audit --no-fund || return 1
+    # npm may rewrite the lockfile's formatting even with no dependency change (see the prune
+    # note below); restore the tracked copy so the tree still matches what `npm ci` would install.
+    git checkout -- package-lock.json
+}
+
 echo "==> Installing dependencies..."
-retry npm ci
+if [ "$DEPS_CHANGED" -eq 0 ] && [ -d node_modules ] && install_dependencies_incrementally; then
+    echo "==> Dependencies unchanged — restored dev dependencies in place."
+else
+    retry npm ci
+fi
 
 # Vitest's on-disk transform cache (.vitest-cache, see vitest.config.mts) lives outside
-# node_modules so it survives the `npm ci` above and keeps test runs warm across deploys.
-# Drop it whenever the lockfile changed, so a dependency/Vitest upgrade always starts cold.
-if ! git diff --quiet "$PREVIOUS_SHA" HEAD -- package-lock.json; then
-    echo "==> package-lock.json changed — clearing the Vitest transform cache..."
+# node_modules so it survives `npm ci` and keeps test runs warm across deploys. Drop it whenever
+# the dependencies changed, so a dependency/Vitest upgrade always starts cold.
+if [ "$DEPS_CHANGED" -eq 1 ]; then
+    echo "==> package.json/package-lock.json changed — clearing the Vitest transform cache..."
     rm -rf .vitest-cache
 fi
 

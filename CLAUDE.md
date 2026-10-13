@@ -32,6 +32,7 @@ npm run test:toolchain  # ts-node smoke test only — slow (type-checks the proj
 ```
 
 Vitest keeps an on-disk transform cache in `.vitest-cache/` (gitignored, outside `node_modules` so it survives `npm ci`); `deploy.sh` and CI drop/re-key it when `package-lock.json` changes. If a run ever looks stale, `rm -rf .vitest-cache`. In tests, prefer `waitFor` from `src/test-utils/waitFor.ts` over `vi.waitFor` (1ms poll instead of 50ms).
+Tests run in Vitest's `vmThreads` pool (each file gets a fresh VM context on a reused worker thread; ~2x faster than `forks`). Module isolation between files is unchanged, but objects created by Node built-ins come from a different realm, so assert on `.name`/`.code` rather than `instanceof` against a Node built-in class.
 
 ---
 
