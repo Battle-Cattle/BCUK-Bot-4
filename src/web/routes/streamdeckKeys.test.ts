@@ -25,7 +25,6 @@ vi.mock('../csrf', () => ({
 vi.mock('../middleware', () => ({
   requireAdmin: (_req: any, _res: any, next: any) => next(),
 }));
-vi.mock('../../shared/config', () => ({ WEB_PORT: 3000 }));
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
 import express from 'express';
@@ -70,7 +69,7 @@ beforeEach(() => {
 // ─── GET /streamdeck-key ──────────────────────────────────────────────────────
 
 describe('GET /streamdeck-key', () => {
-  it('renders streamdeck-keys with keyRow and webPort', async () => {
+  it('renders streamdeck-keys with keyRow', async () => {
     const keyRow = { discord_id: '1', guild_id: GUILD_ID, status: 'pending', requested_at: new Date(), approved_at: null, approved_by: null };
     vi.mocked(getGuildStatusForKey).mockResolvedValue(keyRow as any);
     const res = await supertest(buildApp()).get('/streamdeck-key');
@@ -78,7 +77,6 @@ describe('GET /streamdeck-key', () => {
     const body = res.body as any;
     expect(body.view).toBe('streamdeck-keys');
     expect(body.locals.keyRow).toMatchObject({ discord_id: '1', status: 'pending' });
-    expect(body.locals.webPort).toBe(3000);
     expect(body.locals.newKey).toBeNull();
     expect(getGuildStatusForKey).toHaveBeenCalledWith(SESSION_USER.discordId, GUILD_ID);
   });
