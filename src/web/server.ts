@@ -93,6 +93,19 @@ app.use(
   }),
 );
 
+// Liveness probe for deploy.sh's post-restart check: answers once the panel is listening, which
+// main() only reaches after the DB ping, guild registry load and bot startup. Registered ahead
+// of static files, sessions and the rate limiters so polling it never touches the session store
+// or uses up a client's request budget, and it reveals nothing beyond "up".
+/**
+ * GET /healthz — replies 200 `{"status":"ok"}`, uncached.
+ * @param _req - Express request (unused).
+ * @param res - Express response.
+ */
+app.get('/healthz', (_req, res) => {
+  res.set('Cache-Control', 'no-store').json({ status: 'ok' });
+});
+
 // View engine
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, '../../views'));

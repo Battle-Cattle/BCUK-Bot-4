@@ -2,13 +2,38 @@
 set -euo pipefail
 
 # ── Config ───────────────────────────────────────────────────────────────────
-# Name of the screen session the bot runs in.
-SCREEN_SESSION="BCUK"
+# systemd unit the bot runs as (installed by scripts/install-systemd-service.sh).
+SERVICE_NAME="bcuk-bot"
+# How long to wait for the restarted bot to answer /healthz before calling the deploy failed.
+# Startup pings the DB, loads the guild registry and logs in to Discord/Twitch before the panel
+# starts listening, so allow for slow logins.
+HEALTH_TIMEOUT_SECONDS=90
 # ─────────────────────────────────────────────────────────────────────────────
 
 cd "$(dirname "$0")"
 
 [ -f package.json ] || { echo "ERROR: Run this script from the repo root."; exit 1; }
+
+# Resolved the same way scripts/install-systemd-service.sh resolves it for the sudoers rule. sudo
+# matches that rule against the absolute path, and a bare `sudo systemctl` would be looked up on
+# sudo's own secure_path instead, which can land on a different path.
+SYSTEMCTL_BIN="$(command -v systemctl || true)"
+[ -n "$SYSTEMCTL_BIN" ] || { echo "ERROR: systemctl is required (the bot runs as a systemd service)."; exit 1; }
+
+# Check the restart path works before changing anything, so a missing unit or sudo rule fails
+# the deploy up front instead of after the new build is already in place.
+if ! "$SYSTEMCTL_BIN" cat "$SERVICE_NAME" > /dev/null 2>&1; then
+    echo "ERROR: systemd service '$SERVICE_NAME' isn't installed."
+    echo "       Run once: bash scripts/install-systemd-service.sh (see README \"Running the bot\")."
+    exit 1
+fi
+if ! sudo -n -l "$SYSTEMCTL_BIN" restart "$SERVICE_NAME" > /dev/null 2>&1; then
+    echo "ERROR: $(id -un) can't run 'sudo systemctl restart $SERVICE_NAME' without a password."
+    echo "       Re-run: bash scripts/install-systemd-service.sh"
+    exit 1
+fi
+command -v curl > /dev/null || { echo "ERROR: curl is required for the post-restart health check."; exit 1; }
+command -v ss > /dev/null || { echo "ERROR: ss (iproute2) is required for the post-restart health check."; exit 1; }
 
 PREVIOUS_SHA=$(git rev-parse HEAD)
 
@@ -153,34 +178,65 @@ mv "$BUILD_DIR" dist
 trap - ERR  # Rollback no longer needed — code is good.
 rm -rf dist.old
 
-REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
+# Reads WEB_PORT from .env (the bot's own source of truth for it) the way dotenv does: last entry
+# wins, an inline ` # comment` is dropped, surrounding quotes and spaces are stripped. No entry
+# (grep finding nothing must not trip pipefail) or a blank one falls back to 3000, like config.ts.
+WEB_PORT_SETTING="$( { grep -E '^[[:space:]]*WEB_PORT=' .env 2>/dev/null || true; } \
+    | tail -n 1 | cut -d= -f2- | sed -E 's/[[:space:]]+#.*$//' | tr -d "[:space:]\"'")"
+WEB_PORT="${WEB_PORT_SETTING:-3000}"
+HEALTH_URL="http://127.0.0.1:${WEB_PORT}/healthz"
 
-echo "==> Restarting bot in screen session '$SCREEN_SESSION'..."
+# Prints the PIDs listening on WEB_PORT, one per line (nothing if none, or if ss can't see them).
+# deploy.sh runs as the service's own user, so ss can see the bot's PID.
+port_listener_pids() {
+    { ss -Hltnp "sport = :${WEB_PORT}" 2>/dev/null || true; } | { grep -o 'pid=[0-9]*' || true; } | cut -d= -f2 | sort -u
+}
 
-# The screen window always runs a plain, persistent `bash` — never `bash -c "... && npm start"`
-# directly. If npm start were the window's own command, Ctrl-C-ing it to stop the bot would
-# make that command (and so the shell, and so the single-window session) exit immediately,
-# leaving nothing for the restart command below to `stuff` into.
-if ! screen -list | grep -Eq "[0-9]+\.${SCREEN_SESSION}[[:space:]]"; then
-    echo "==> Screen session '$SCREEN_SESSION' not found. Creating it..."
-    screen -dmS "$SCREEN_SESSION" bash
-fi
+echo "==> Restarting $SERVICE_NAME..."
+# SIGTERM runs the bot's graceful shutdown; systemd waits for it (TimeoutStopSec) before starting
+# the new build.
+sudo -n "$SYSTEMCTL_BIN" restart "$SERVICE_NAME"
 
-if pgrep -f "node dist/index.js" > /dev/null 2>&1; then
-    screen -S "$SCREEN_SESSION" -X stuff $'\003'
-
-    # Wait up to 15s for the node process to fully exit before restarting.
-    for _ in {1..15}; do
-        pgrep -f "node dist/index.js" > /dev/null 2>&1 || break
-        sleep 1
-    done
-
-    if pgrep -f "node dist/index.js" > /dev/null 2>&1; then
-        echo "WARNING: Node process did not stop within 15s. Attempting restart anyway..."
+echo "==> Waiting up to ${HEALTH_TIMEOUT_SECONDS}s for $HEALTH_URL..."
+HEALTHY=0
+# A deadline on elapsed time (bash's SECONDS), not a count of attempts: each curl can take up
+# to its own 2s timeout on top of the 1s sleep.
+HEALTH_DEADLINE=$((SECONDS + HEALTH_TIMEOUT_SECONDS))
+while [ "$SECONDS" -lt "$HEALTH_DEADLINE" ]; do
+    if curl -fsS --max-time 2 "$HEALTH_URL" > /dev/null 2>&1; then
+        # A 200 only counts if it came from the unit's own process. Something else on the port, such
+        # as the old screen-session bot left running, would answer while the new one crash-loops on
+        # EADDRINUSE. `restart` waits for the old process to exit, so a different listener is never
+        # the previous build.
+        MAIN_PID="$("$SYSTEMCTL_BIN" show -p MainPID --value "$SERVICE_NAME")"
+        LISTENER_PIDS="$(port_listener_pids)"
+        if [ "${MAIN_PID:-0}" != "0" ] && printf '%s\n' "$LISTENER_PIDS" | grep -qx "$MAIN_PID"; then
+            HEALTHY=1
+            break
+        fi
+        if [ -n "$LISTENER_PIDS" ]; then
+            FOREIGN_PIDS="$(printf '%s' "$LISTENER_PIDS" | tr '\n' ' ')"
+            echo "ERROR: Port $WEB_PORT is held by PID ${FOREIGN_PIDS% }, not $SERVICE_NAME (MainPID $MAIN_PID). Is an old instance (e.g. in screen) still running?"
+            break
+        fi
     fi
+    # The unit never gives up on its own (see StartLimitIntervalSec in the unit), so "failed" here
+    # means something stopped it for good, e.g. a bad ExecStart; stop waiting and show why. A
+    # start that keeps crashing and retrying runs out the deadline instead.
+    if "$SYSTEMCTL_BIN" is-failed --quiet "$SERVICE_NAME"; then
+        break
+    fi
+    sleep 1
+done
+
+if [ "$HEALTHY" -ne 1 ]; then
+    echo "ERROR: $SERVICE_NAME didn't come up healthy on $HEALTH_URL after the restart. The new build is in place; the bot may be crash-looping or stopped."
+    echo "--- systemctl status $SERVICE_NAME ---"
+    "$SYSTEMCTL_BIN" status "$SERVICE_NAME" --no-pager --lines=0 || true
+    echo "--- last 50 log lines (journalctl -u $SERVICE_NAME) ---"
+    journalctl -u "$SERVICE_NAME" -n 50 --no-pager || echo "(couldn't read the journal; add this user to the systemd-journal group to see it here)"
+    exit 1
 fi
 
-screen -S "$SCREEN_SESSION" -X stuff "cd '${REPO_DIR}' && npm start\n"
-echo "==> Bot restarted."
-
+echo "==> $SERVICE_NAME is up."
 echo "==> Deploy complete."

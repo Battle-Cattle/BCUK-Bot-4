@@ -1,0 +1,33 @@
+# systemd unit for the bot. Don't copy this by hand: scripts/install-systemd-service.sh fills in
+# the __PLACEHOLDERS__ and installs it as /etc/systemd/system/bcuk-bot.service.
+[Unit]
+Description=BCUK Bot 4 (Discord/Twitch bot and web panel)
+# Ordering only: a remote MySQL simply has no local unit, which systemd ignores.
+After=network-online.target mysql.service mariadb.service
+Wants=network-online.target
+# Never stop retrying: a database or network outage makes every start fail (main() exits 1 on a
+# failed DB ping), and nothing would start the bot again once systemd gave up. The backoff below
+# keeps a long crash loop from hammering Discord/Twitch logins instead.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__REPO_DIR__
+Environment=NODE_ENV=production
+ExecStart=__NODE_BIN__ dist/index.js
+# The bot exits 1 on any fatal error (see the Startup Sequence in CLAUDE.md) and 0 after a
+# SIGTERM shutdown, so this restarts crashes but not deliberate stops.
+Restart=on-failure
+# First retry after 10s, then backing off over 5 retries to one attempt every 5 minutes (about
+# 300 a day at most). RestartSteps/RestartMaxDelaySec need systemd 254+; older systemd warns
+# about them and simply retries every 10s.
+RestartSec=10
+RestartSteps=5
+RestartMaxDelaySec=300
+KillSignal=SIGTERM
+# shutdown() announces itself to the owner and closes Discord/Twitch/DB cleanly first.
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

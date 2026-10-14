@@ -215,6 +215,16 @@ describe('server route wiring', () => {
   });
 });
 
+describe('GET /healthz', () => {
+  it('replies 200 ok, uncached, without needing a session', async () => {
+    const res = await request(app).get('/healthz');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ status: 'ok' });
+    expect(res.headers['cache-control']).toBe('no-store');
+    expect(res.headers['set-cookie']).toBeUndefined();
+  });
+});
+
 describe('static assets', () => {
   it('sends Cache-Control: no-cache so browsers always revalidate against the server', async () => {
     const res = await request(app).get('/style.css');
