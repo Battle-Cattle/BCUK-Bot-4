@@ -224,13 +224,22 @@ describe('POST /sfx', () => {
 });
 
 describe('GET /sfx', () => {
-  it('returns the list of SFX triggers', async () => {
-    const triggers = [{ triggerId: '1', triggerCommand: '!ding', description: null, hidden: false, categoryName: null, files: [] }];
+  it('returns every SFX trigger, hidden ones included, with only the fields the plugin uses', async () => {
+    const triggers = [
+      { triggerId: '1', triggerCommand: '!ding', description: null, hidden: false, categoryId: null, categoryName: null, files: [{ id: 1, file: 'ding.mp3', weight: 1, hidden: false }] },
+      { triggerId: '2', triggerCommand: '!secret', description: 'Shh', hidden: true, categoryId: 3, categoryName: 'Memes', files: [] },
+    ];
     vi.mocked(getAllSfxTriggers).mockResolvedValue(triggers as any);
 
     const res = await supertest(buildApp()).get('/sfx').expect(200);
 
-    expect(res.body).toEqual({ ok: true, triggers });
+    expect(res.body).toEqual({
+      ok: true,
+      triggers: [
+        { triggerCommand: '!ding', categoryName: null, description: null },
+        { triggerCommand: '!secret', categoryName: 'Memes', description: 'Shh' },
+      ],
+    });
   });
 
   it('returns 500 on DB error', async () => {

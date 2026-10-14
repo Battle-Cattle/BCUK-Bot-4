@@ -8,6 +8,8 @@ vi.mock('../../db', () => ({
   createApiKeyAndRequestGuildAccess: vi.fn().mockResolvedValue({ plain: 'a'.repeat(64), status: 'pending' }),
   requestGuildAccessForExistingKey: vi.fn().mockResolvedValue({ status: 'pending' }),
   rotateApiKey: vi.fn().mockResolvedValue({ plain: 'b'.repeat(64) }),
+  getApiKeyVersion: vi.fn().mockResolvedValue('current-version'),
+  keyVersionFromPlaintext: vi.fn((plain: string) => `version-of-${plain.slice(0, 4)}`),
   getGuildStatusForKey: vi.fn().mockResolvedValue(null),
   revokeApiKey: vi.fn().mockResolvedValue(undefined),
   approveApiKey: vi.fn().mockResolvedValue(undefined),
@@ -32,7 +34,7 @@ import supertest from 'supertest';
 import router, { __resetRecentRotationsForTests } from './streamdeckKeys';
 import {
   hasApiKey, createApiKeyAndRequestGuildAccess, requestGuildAccessForExistingKey, rotateApiKey,
-  getGuildStatusForKey, revokeApiKey,
+  getApiKeyVersion, getGuildStatusForKey, revokeApiKey,
   approveApiKey, denyApiKey, getAllApiKeys, getPendingRequests,
 } from '../../db';
 import { AccessLevel } from '../../db';
@@ -60,6 +62,7 @@ beforeEach(() => {
   vi.mocked(createApiKeyAndRequestGuildAccess).mockResolvedValue({ plain: 'a'.repeat(64), status: 'pending' } as any);
   vi.mocked(requestGuildAccessForExistingKey).mockResolvedValue({ status: 'pending' } as any);
   vi.mocked(rotateApiKey).mockResolvedValue({ plain: 'b'.repeat(64) } as any);
+  vi.mocked(getApiKeyVersion).mockResolvedValue('current-version');
   vi.mocked(getGuildStatusForKey).mockResolvedValue(null);
   vi.mocked(getAllApiKeys).mockResolvedValue([]);
   vi.mocked(getPendingRequests).mockResolvedValue([]);
@@ -78,6 +81,7 @@ describe('GET /streamdeck-key', () => {
     expect(body.view).toBe('streamdeck-keys');
     expect(body.locals.keyRow).toMatchObject({ discord_id: '1', status: 'pending' });
     expect(body.locals.newKey).toBeNull();
+    expect(body.locals.keyVersion).toBe('current-version');
     expect(getGuildStatusForKey).toHaveBeenCalledWith(SESSION_USER.discordId, GUILD_ID);
   });
 
@@ -128,7 +132,7 @@ describe('POST /streamdeck-key/request', () => {
     expect(createApiKeyAndRequestGuildAccess).not.toHaveBeenCalled();
   });
 
-  it('is idempotent — a duplicate request while approved neither creates nor rotates a key, and does not re-query the guild status', async () => {
+  it('is idempotent — a duplicate request while approved neither creates nor rotates a key', async () => {
     vi.mocked(getGuildStatusForKey).mockResolvedValue({ discord_id: '1', guild_id: GUILD_ID, status: 'approved' } as any);
 
     const res = await supertest(buildApp()).post('/streamdeck-key/request');
@@ -139,8 +143,6 @@ describe('POST /streamdeck-key/request', () => {
     expect(rotateApiKey).not.toHaveBeenCalled();
     expect(createApiKeyAndRequestGuildAccess).not.toHaveBeenCalled();
     expect(requestGuildAccessForExistingKey).not.toHaveBeenCalled();
-    // The no-op branch reuses the status already fetched instead of a redundant re-query.
-    expect(getGuildStatusForKey).toHaveBeenCalledOnce();
   });
 
   it('is idempotent — a duplicate request while pending neither creates nor rotates a key', async () => {
@@ -156,7 +158,7 @@ describe('POST /streamdeck-key/request', () => {
     expect(requestGuildAccessForExistingKey).not.toHaveBeenCalled();
   });
 
-  it('re-requests guild access instead of just rotating when this guild was previously revoked', async () => {
+  it('re-requests guild access after a revoke and rotates the key, so a revoked (e.g. leaked) key never comes back', async () => {
     vi.mocked(getGuildStatusForKey)
       .mockResolvedValueOnce({ discord_id: '1', guild_id: GUILD_ID, status: 'revoked' } as any)
       .mockResolvedValueOnce({ discord_id: '1', guild_id: GUILD_ID, status: 'pending' } as any);
@@ -164,19 +166,46 @@ describe('POST /streamdeck-key/request', () => {
     const res = await supertest(buildApp()).post('/streamdeck-key/request');
 
     expect(res.status).toBe(200);
-    expect((res.body as any).locals.newKey).toBeNull();
+    expect((res.body as any).locals.newKey).toBe('b'.repeat(64));
+    expect((res.body as any).locals.keyVersion).toBe('version-of-bbbb');
+    expect((res.body as any).locals.keyRow).toMatchObject({ status: 'pending' });
     expect(requestGuildAccessForExistingKey).toHaveBeenCalledWith(SESSION_USER.discordId, SESSION_USER.accessLevel, GUILD_ID);
-    expect(rotateApiKey).not.toHaveBeenCalled();
+    expect(rotateApiKey).toHaveBeenCalledWith(SESSION_USER.discordId);
     expect(createApiKeyAndRequestGuildAccess).not.toHaveBeenCalled();
+    // Rotated before access is re-requested, so a failed re-request never revives the old key.
+    expect(vi.mocked(rotateApiKey).mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(requestGuildAccessForExistingKey).mock.invocationCallOrder[0]!);
   });
 
-  it('redirects to ?error=request_failed when this guild was previously denied', async () => {
+  it('re-shows the rotated key when a re-request after a revoke is submitted twice in quick succession', async () => {
+    vi.mocked(getGuildStatusForKey)
+      .mockResolvedValueOnce({ discord_id: '1', guild_id: GUILD_ID, status: 'revoked' } as any)
+      .mockResolvedValue({ discord_id: '1', guild_id: GUILD_ID, status: 'pending' } as any);
+    const app = buildApp();
+
+    const first = await supertest(app).post('/streamdeck-key/request');
+    const second = await supertest(app).post('/streamdeck-key/request');
+
+    expect((first.body as any).locals.newKey).toBe('b'.repeat(64));
+    expect((second.body as any).locals.newKey).toBe('b'.repeat(64));
+    expect(rotateApiKey).toHaveBeenCalledOnce();
+  });
+
+  it('redirects to ?error=request_denied when this guild was previously denied', async () => {
     vi.mocked(getGuildStatusForKey).mockResolvedValue({ discord_id: '1', guild_id: GUILD_ID, status: 'denied' } as any);
 
     const res = await supertest(buildApp()).post('/streamdeck-key/request');
 
-    expect(res.headers.location).toBe('/streamdeck-key?error=request_failed');
+    expect(res.headers.location).toBe('/streamdeck-key?error=request_denied');
     expect(rotateApiKey).not.toHaveBeenCalled();
+    expect(requestGuildAccessForExistingKey).not.toHaveBeenCalled();
+  });
+
+  it('sends the key status page with Cache-Control: no-store, since it can carry a plaintext key', async () => {
+    const res = await supertest(buildApp()).post('/streamdeck-key/request');
+
+    expect((res.body as any).locals.newKey).toBe('a'.repeat(64));
+    expect(res.headers['cache-control']).toBe('no-store');
   });
 
   it('redirects to ?error=request_failed on error', async () => {
@@ -251,6 +280,34 @@ describe('POST /streamdeck-key/rotate', () => {
     expect((res.body as any).locals.newKey).toBeTruthy();
     expect((res.body as any).locals.keyRow).toMatchObject({ status: 'approved' });
     expect(rotateApiKey).toHaveBeenCalledWith(SESSION_USER.discordId);
+  });
+
+  it('embeds the new key\'s marker so the next rotate form is tied to the key just shown', async () => {
+    vi.mocked(hasApiKey).mockResolvedValue(true);
+
+    const res = await supertest(buildApp()).post('/streamdeck-key/rotate').type('form').send({ key_version: 'current-version' });
+
+    expect((res.body as any).locals.keyVersion).toBe('version-of-bbbb');
+    expect(res.headers['cache-control']).toBe('no-store');
+  });
+
+  it('does not rotate again when a form for an already-replaced key is resubmitted after the dedupe window', async () => {
+    vi.mocked(hasApiKey).mockResolvedValue(true);
+    vi.mocked(getApiKeyVersion).mockResolvedValue('newer-version');
+
+    const res = await supertest(buildApp()).post('/streamdeck-key/rotate').type('form').send({ key_version: 'stale-version' });
+
+    expect(res.headers.location).toBe('/streamdeck-key?error=already_rotated');
+    expect(rotateApiKey).not.toHaveBeenCalled();
+  });
+
+  it('rotates when the form carries the current key\'s marker', async () => {
+    vi.mocked(hasApiKey).mockResolvedValue(true);
+
+    const res = await supertest(buildApp()).post('/streamdeck-key/rotate').type('form').send({ key_version: 'current-version' });
+
+    expect(res.status).toBe(200);
+    expect(rotateApiKey).toHaveBeenCalledOnce();
   });
 
   it('redirects to ?error=rotate_failed when the user has no existing key', async () => {

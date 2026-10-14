@@ -43,9 +43,10 @@ import { getDiscordClient } from '../../discord/discordClientStore';
 import { getActiveGuildForUser } from '../../discord/voicePresence';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
-/** Fake Discord client whose channels.fetch resolves any channel to the given guildId. */
+/** Fake Discord client whose channels.fetch resolves any channel to the given guildId, with one cached guild name. */
 function makeClient(channelGuildId: string | null = 'guild-123') {
   return {
+    guilds: { cache: new Map([['guild-123', { id: 'guild-123', name: 'Battle Cattle' }]]) },
     channels: {
       fetch: vi.fn(async (channelId: string) =>
         channelGuildId ? { id: channelId, guildId: channelGuildId } : null,
@@ -83,8 +84,9 @@ describe('GET /voice/channels', () => {
     expect(res.body).toEqual({
       ok: true,
       guilds: [
-        { guildId: 'guild-123', channels: channelsA },
-        { guildId: '900000000000000002', channels: channelsB },
+        { guildId: 'guild-123', guildName: 'Battle Cattle', channels: channelsA },
+        // Not in the client's guild cache, so no name: the plugin falls back to "Server <id>".
+        { guildId: '900000000000000002', guildName: null, channels: channelsB },
       ],
     });
   });
@@ -110,8 +112,8 @@ describe('GET /voice/channels', () => {
     expect(res.body).toEqual({
       ok: true,
       guilds: [
-        { guildId: 'guild-123', channels: [] },
-        { guildId: '900000000000000002', channels: channelsB },
+        { guildId: 'guild-123', guildName: 'Battle Cattle', channels: [] },
+        { guildId: '900000000000000002', guildName: null, channels: channelsB },
       ],
     });
   });

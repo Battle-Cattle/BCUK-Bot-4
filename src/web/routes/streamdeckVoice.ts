@@ -4,6 +4,7 @@ import { getApprovedGuildIdsForKey } from '../../db';
 import { requireApiKey } from '../middleware';
 import { getAvailableVoiceChannels } from '../../discord/discordUtils';
 import { connect, disconnect } from '../../audio/audioPlayer';
+import { getDiscordClient } from '../../discord/discordClientStore';
 import { normalizeDiscordId } from './validation';
 import {
   resolveChannelGuildOrRespond,
@@ -16,10 +17,19 @@ const log = createLogger('Streamdeck');
 const router = Router();
 
 /**
- * Lists voice channels across every guild the key is currently approved for.
- * One guild failing to resolve (e.g. the bot was removed from it but its
- * approval row wasn't cleaned up) doesn't block the channel list for every
- * other approved guild — that guild is just reported with an empty list.
+ * The guild's display name from the Discord client's cache, or null if it isn't cached
+ * (the Stream Deck plugin then labels the group "Server <id>").
+ * @param guildId - Guild to name.
+ */
+function cachedGuildName(guildId: string): string | null {
+  return getDiscordClient()?.guilds.cache.get(guildId)?.name ?? null;
+}
+
+/**
+ * Lists voice channels across every guild the key is currently approved for, each with the
+ * guild's name so the plugin can label its groups. One guild failing to resolve (e.g. the bot
+ * was removed from it but its approval row wasn't cleaned up) doesn't block the channel list
+ * for every other approved guild — that guild is just reported with an empty list.
  */
 router.get('/voice/channels', requireApiKey, async (req, res) => {
   try {
@@ -28,9 +38,10 @@ router.get('/voice/channels', requireApiKey, async (req, res) => {
       guildIds.map(async (guildId) => ({ guildId, channels: await getAvailableVoiceChannels(guildId) })),
     );
     const guilds = results.map((result, i) => {
-      if (result.status === 'fulfilled') return result.value;
-      log.error(`Failed to list voice channels for guild ${guildIds[i]}:`, result.reason);
-      return { guildId: guildIds[i], channels: [] };
+      const guildId = guildIds[i]!; // results has one entry per guildIds element, in order
+      if (result.status === 'fulfilled') return { ...result.value, guildName: cachedGuildName(guildId) };
+      log.error(`Failed to list voice channels for guild ${guildId}:`, result.reason);
+      return { guildId, guildName: cachedGuildName(guildId), channels: [] };
     });
     res.json({ ok: true, guilds });
   } catch (err) {

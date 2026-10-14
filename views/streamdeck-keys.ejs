@@ -17,7 +17,9 @@
       <% if (error) { %>
       <% const errorMessages = {
         request_failed: 'Failed to generate API key. Please try again.',
+        request_denied: 'Your request for this server was denied. Ask a server Admin if you think that is a mistake.',
         rotate_failed:  'Failed to generate a new key. Please try again.',
+        already_rotated: 'That key had already been replaced, so no new key was generated. If you did not copy the newest key, use Lost your key? again.',
         revoke_failed:  'Failed to revoke API key. Please try again.',
       }; %>
       <div class="card card-alert-danger" role="alert" aria-live="assertive" aria-atomic="true">
@@ -65,6 +67,7 @@
         <p class="muted mt-05">Lost the key you copied? Generating a new one won't affect your approval status, but the old key will immediately stop working<%= user.guilds && user.guilds.length > 1 ? ' — in every server it was approved for, not just this one' : '' %>.</p>
         <form method="POST" action="/streamdeck-key/rotate" class="js-confirm-rotate-key mt-1">
           <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+          <input type="hidden" name="key_version" value="<%= keyVersion || '' %>">
           <button type="submit" class="btn btn-sm btn-ghost">Lost your key?</button>
         </form>
 
@@ -78,6 +81,7 @@
         <div class="d-flex gap-05 flex-wrap mt-1">
           <form method="POST" action="/streamdeck-key/rotate" class="js-confirm-rotate-key">
             <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+            <input type="hidden" name="key_version" value="<%= keyVersion || '' %>">
             <button type="submit" class="btn btn-sm btn-ghost">Lost your key?</button>
           </form>
           <form method="POST" action="/streamdeck-key/revoke" class="js-confirm-revoke-key">
@@ -93,7 +97,7 @@
         <div class="d-flex items-center gap-075 flex-wrap mb-1">
           <span class="badge badge-offline">Revoked</span>
         </div>
-        <p>Your API key has been revoked and is no longer active. You can request a new one.</p>
+        <p>Your API key has been revoked for this server<%= user.guilds && user.guilds.length > 1 ? ' (it still works in any other server it is approved for)' : '' %>. Requesting access again generates a new key and the old one stops working everywhere, so a key that was revoked because it leaked can't come back.</p>
         <% if (user.accessLevel >= 2) { %>
         <p class="muted">As a Manager or above, your new key will be approved immediately.</p>
         <% } else { %>
@@ -103,6 +107,12 @@
           <input type="hidden" name="_csrf" value="<%= csrfToken %>">
           <button type="submit" class="btn">Request New API Key</button>
         </form>
+
+        <% } else if (keyRow.status === 'denied') { %>
+        <div class="d-flex items-center gap-075 flex-wrap mb-1">
+          <span class="badge badge-offline">Denied</span>
+        </div>
+        <p>Your request for a Streamdeck API key on this server was denied. Ask a server Admin if you think that is a mistake.</p>
         <% } %>
       </div>
 
