@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import mysql from 'mysql2/promise';
 import { getPool, withTransaction } from './pool';
 import { AccessLevel } from './users';
@@ -149,6 +150,41 @@ export async function rotateApiKey(discordId: string): Promise<{ plain: string }
     [hash, new Date(), discordId],
   );
   return { plain };
+}
+
+/**
+ * An opaque marker for one particular key secret, derived from its stored hash. The key page
+ * embeds it in its "generate a new key" form, so a resubmitted form (browser refresh, Back then
+ * Forward) can tell the key it was rendered for has already been replaced and must not rotate
+ * again. Hashed again with a fixed prefix so the stored hash itself never reaches the page.
+ * @param keyHash Hex SHA-256 hash of the key, as stored in `streamdeck_api_keys.key_hash`.
+ * @returns A 32-character hex marker.
+ */
+export function keyVersionFromHash(keyHash: string): string {
+  return createHash('sha256').update(`streamdeck-key-version:${keyHash}`).digest('hex').slice(0, 32);
+}
+
+/**
+ * The {@link keyVersionFromHash} marker for a plaintext key, e.g. one just generated, without
+ * reading it back from the database.
+ * @param plain The plaintext key.
+ */
+export function keyVersionFromPlaintext(plain: string): string {
+  return keyVersionFromHash(createHash('sha256').update(plain).digest('hex'));
+}
+
+/**
+ * The {@link keyVersionFromHash} marker for a user's current key.
+ * @param discordId Key owner's Discord snowflake.
+ * @returns The marker, or null when the user has no key.
+ */
+export async function getApiKeyVersion(discordId: string): Promise<string | null> {
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+    'SELECT key_hash FROM streamdeck_api_keys WHERE discord_id = ? LIMIT 1',
+    [discordId],
+  );
+  const row = rows[0];
+  return row ? keyVersionFromHash(String(row.key_hash)) : null;
 }
 
 /**

@@ -11,10 +11,12 @@ const log = createLogger('Streamdeck');
 const router = Router();
 
 /**
- * Lists all SFX triggers available to play via Streamdeck. The SFX catalog
- * itself is global (not guild-scoped), so this only requires the key be
- * approved for at least one guild — matching the old `requireApiKey`
- * semantics before per-guild approval moved out of the identity lookup.
+ * Lists all SFX triggers available to play via Streamdeck, hidden ones included (hidden only
+ * keeps a trigger off the public list; it still plays). The SFX catalog itself is global (not
+ * guild-scoped), so this only requires the key be approved for at least one guild — matching
+ * the old `requireApiKey` semantics before per-guild approval moved out of the identity lookup.
+ * Each trigger carries only what the plugin's dropdown uses, not its sound files, weights or
+ * IDs, which would otherwise be sent on every refresh for nothing.
  */
 router.get('/sfx', requireApiKey, async (req, res) => {
   try {
@@ -23,7 +25,11 @@ router.get('/sfx', requireApiKey, async (req, res) => {
       res.status(403).json({ ok: false, error: 'Key not approved for any guild' });
       return;
     }
-    const triggers = await getAllSfxTriggers();
+    const triggers = (await getAllSfxTriggers()).map(({ triggerCommand, categoryName, description }) => ({
+      triggerCommand,
+      categoryName,
+      description,
+    }));
     res.json({ ok: true, triggers });
   } catch (err) {
     log.error('Failed to list triggers:', err);

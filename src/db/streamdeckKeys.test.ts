@@ -37,6 +37,9 @@ import {
   createApiKeyAndRequestGuildAccess,
   requestGuildAccessForExistingKey,
   rotateApiKey,
+  keyVersionFromHash,
+  keyVersionFromPlaintext,
+  getApiKeyVersion,
   findKeyByHash,
   isKeyApprovedForGuild,
   getApprovedGuildIdsForKey,
@@ -176,6 +179,43 @@ describe('requestGuildAccessForExistingKey', () => {
     for (const match of updateClause.matchAll(/IF\(([^,]+),/g)) {
       expect(match[1]).toContain('streamdeck_key_guild_status.');
     }
+  });
+});
+
+// ─── key version markers ─────────────────────────────────────────────────────────
+
+describe('keyVersionFromHash / keyVersionFromPlaintext', () => {
+  it('gives a stable 32-char hex marker that differs per key and never equals the stored hash', () => {
+    const hashA = createHash('sha256').update('key-a').digest('hex');
+    const hashB = createHash('sha256').update('key-b').digest('hex');
+
+    expect(keyVersionFromHash(hashA)).toMatch(/^[0-9a-f]{32}$/);
+    expect(keyVersionFromHash(hashA)).toBe(keyVersionFromHash(hashA));
+    expect(keyVersionFromHash(hashA)).not.toBe(keyVersionFromHash(hashB));
+    expect(hashA.startsWith(keyVersionFromHash(hashA))).toBe(false);
+  });
+
+  it('derives the same marker from the plaintext as from its stored hash', () => {
+    const hash = createHash('sha256').update('plain-key').digest('hex');
+    expect(keyVersionFromPlaintext('plain-key')).toBe(keyVersionFromHash(hash));
+  });
+});
+
+describe('getApiKeyVersion', () => {
+  it('returns the marker for the user\'s stored key hash', async () => {
+    const hash = createHash('sha256').update('k').digest('hex');
+    const pool = makePool([{ key_hash: hash }]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+
+    await expect(getApiKeyVersion('1')).resolves.toBe(keyVersionFromHash(hash));
+    const [sql, params] = pool.execute.mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain('FROM streamdeck_api_keys');
+    expect(params).toEqual(['1']);
+  });
+
+  it('returns null when the user has no key', async () => {
+    vi.mocked(getPool).mockReturnValue(makePool([]) as any);
+    await expect(getApiKeyVersion('1')).resolves.toBeNull();
   });
 });
 
