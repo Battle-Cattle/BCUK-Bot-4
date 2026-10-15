@@ -11,7 +11,7 @@ export const DEFAULT_POINTS_COOLDOWN_SECONDS = 60;
 export const DEFAULT_POINTS_PER_SUB = 100;
 export const DEFAULT_POINTS_PER_GIFT_SUB = 100;
 
-// `loyalty_points.balance` is a plain INT column (see migrations/loyalty_points.sql) — every
+// `loyalty_points.balance` is a plain INT column (see DATABASE-SCHEMA.md) — every
 // write that can increase it clamps to this rather than allowed to overflow it.
 const MAX_BALANCE = 2_147_483_647;
 

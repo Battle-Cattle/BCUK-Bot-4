@@ -8,6 +8,7 @@ export {
   DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS,
 } from './db/lookupCache';
 export { getPool, closePool } from './db/pool';
+export { runMigrations } from './db/migrations';
 export { pingDb } from './db/health';
 
 // ─── Guilds ──────────────────────────────────────────────────────────────────
@@ -109,7 +110,7 @@ export { initAlertConfigs, saveAlertConfig, setAlertImage, setAlertSound } from 
 export type { StreamerEventType, StreamerEvent } from './db/eventLog';
 export { recordStreamerEvent, getRecentStreamerEvents } from './db/eventLog';
 export type { RedemptionProgress, RedemptionEffect } from './db/redemptionLedger';
-export { getRedemptionProgress, markRedemptionEffect, pruneRedemptionLedger, isRedemptionLedgerReady } from './db/redemptionLedger';
+export { getRedemptionProgress, markRedemptionEffect, pruneRedemptionLedger } from './db/redemptionLedger';
 
 // ─── SFX ────────────────────────────────────────────────────────────────────
 

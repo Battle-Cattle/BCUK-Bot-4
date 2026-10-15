@@ -84,20 +84,3 @@ export async function pruneRedemptionLedger(retentionMs: number): Promise<number
   );
   return result.affectedRows;
 }
-
-/**
- * Checks that the `redemption_handled` table exists (its migration has been applied), for the
- * startup readiness check: every redemption reads and writes it, so running without it would make
- * every redemption fail and be retried until the table appears.
- * @returns True if the table exists; false if MySQL reports it missing (`ER_NO_SUCH_TABLE`).
- * @throws Any other query error (e.g. a connection failure).
- */
-export async function isRedemptionLedgerReady(): Promise<boolean> {
-  try {
-    await getPool().execute('SELECT 1 FROM redemption_handled LIMIT 1');
-    return true;
-  } catch (err) {
-    if ((err as { code?: string }).code === 'ER_NO_SUCH_TABLE') return false;
-    throw err;
-  }
-}

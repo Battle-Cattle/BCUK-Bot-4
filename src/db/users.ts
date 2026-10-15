@@ -220,7 +220,7 @@ export async function upsertUserRecord(
  * `user` delete (or null out) their rows along with the user, so {@link deleteUnlinkedUserRecord}
  * refuses to delete a user while any of these still point at them. `streamdeck_api_keys` has no
  * foreign key but is still owned by a user. Keep in sync with DATABASE-SCHEMA.md; a test checks
- * every foreign key to `user` declared in schema.sql or migrations/ is listed here.
+ * every foreign key to `user` declared in migrations/ is listed here.
  */
 export const USER_REFERENCING_COLUMNS: ReadonlyArray<readonly [table: string, column: string]> = [
   ['guild_member', 'discord_id'],

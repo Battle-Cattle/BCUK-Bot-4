@@ -10,7 +10,7 @@ A multi-platform community bot connecting Twitch and Discord. Features custom co
 ## Requirements
 
 - **Node.js 24 or later**, matching `engines` in `package.json` and CI. Use the npm 11 that Node 24 ships with: npm 10 has failed `npm ci` on this lockfile with a spurious `Missing: <pkg> from lock file` error (it handles the `overrides` entries differently), so check `npm -v` if you installed npm separately.
-- **MySQL 8.0.19 or later.** Upserts use the `INSERT … VALUES (…) AS new_row` row-alias form, which older versions reject. For a fresh install, create the tables from `schema.sql` (`migrations/` upgrades an existing one); `DATABASE-SCHEMA.md` documents each table.
+- **MySQL 8.0.19 or later.** Upserts use the `INSERT … VALUES (…) AS new_row` row-alias form, which older versions reject. For a fresh install, create an empty `utf8mb4` database: the bot creates the tables on first start (see [Database migrations](#database-migrations)). `DATABASE-SCHEMA.md` documents each table.
 - A `.env` file with credentials for each platform. Copy `.env.example` and fill it in; it lists every setting the bot reads.
 
 > **Dev environment note:** The `.env` file is the single source of truth for local configuration. dotenv only fills variables that are not already set in the environment — it does **not** override them. If you have any of the bot's variables exported in your shell profile (e.g. `~/.bashrc`, `~/.zshrc`), un-export or remove those entries so the `.env` values are used instead.
@@ -53,6 +53,30 @@ systemctl status bcuk-bot        # running?
 journalctl -u bcuk-bot -f        # follow the logs (the bot also writes logs/ as before)
 sudo systemctl restart bcuk-bot  # manual restart
 ```
+
+## Database migrations
+
+The bot keeps the schema up to date itself. On every start, after checking it can reach the database and before anything else, it applies each file in `migrations/` that the `schema_migrations` table doesn't record yet, in order, and records it. A named lock stops two processes migrating at once. If a migration fails, the bot logs which one and exits, so a deploy fails its health check instead of running against a half-upgraded schema.
+
+`migrations/0001_baseline.sql` is the full schema from when this was introduced. An empty database runs it. A database that already had the tables but no `schema_migrations` table records it as applied without running it, after checking every baseline table is there.
+
+### Upgrading a database from before the baseline
+
+The per-feature upgrade scripts that came before the baseline were removed from `migrations/`; they live in git history at commit `b80b81d`. A database older than the baseline fails that check at startup with "missing baseline tables (…)", and the bot doesn't start until it's brought up to date by hand:
+
+1. List the old scripts with `git ls-tree --name-only b80b81d migrations/`, and print one with `git show b80b81d:migrations/<name>.sql`.
+2. Apply each script your database hasn't had yet, reading its header first: some need settings filled in (`multi_guild.sql` needs `@legacy_guild_id` set to your `DISCORD_GUILD_ID`).
+3. Compare against `migrations/0001_baseline.sql` (and `DATABASE-SCHEMA.md`) until every table and column it creates is present, then start the bot. It records the baseline as applied and carries on from there.
+
+Don't run `0001_baseline.sql` against a partial schema: its `CREATE TABLE IF NOT EXISTS` statements skip tables that already exist in an older shape, which hides the gap instead of fixing it.
+
+To change the schema:
+
+1. Add `migrations/NNNN_short_description.sql`, numbered one past the highest existing file (four digits, lowercase and underscores).
+2. Update `DATABASE-SCHEMA.md` to match. A test replays the migrations and checks the doc lists the same tables and columns; spell column changes as `ADD COLUMN`/`DROP COLUMN`/`RENAME COLUMN`/`CHANGE COLUMN` so it can follow them.
+3. Never edit or rename a migration once it has been applied anywhere: startup fails if an applied file's checksum changes. Fix mistakes with a new migration.
+
+MySQL commits each DDL statement on its own, so a migration that fails part-way can't be rolled back, and systemd will keep retrying it on restart. Prefer one change per file, and make statements safe to re-run where you can: `CREATE TABLE IF NOT EXISTS` works, but MySQL has no `ADD COLUMN IF NOT EXISTS`, so check `information_schema` in a prepared statement when it matters. To recover, stop the service, finish or undo the failed file's changes by hand, fix the file (it isn't recorded until it succeeds), and start again.
 
 ## Deployment
 

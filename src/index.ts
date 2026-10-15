@@ -1,5 +1,5 @@
 import 'mediaplex'; // Must be imported first to register as Opus provider
-import { getPool, closePool, pingDb, isRedemptionLedgerReady } from './db';
+import { getPool, closePool, pingDb, runMigrations } from './db';
 import { recordDbPing } from './shared/healthStore';
 import { registerOwnerAlertRuntime, primeOwnerAlertBaseline, startOwnerAlertWatcher, stopOwnerAlertWatcher, announceShutdown, announceStartup } from './discord/ownerAlerts';
 import { startTwitchBot, stopTwitchBot, sayInChannel } from './twitch/twitchBot';
@@ -239,7 +239,7 @@ function registerTwitchRuntimes(): void {
  * {@link DISCORD_READY_FOR_OWNER_DM_TIMEOUT_MS}) for Discord to actually be ready, since
  * `startDiscordBot()` itself doesn't block on it.
  * @returns Resolves once every component has started; rejects (and exits the process,
- *   via the `.catch` below) if DB connectivity, the `redemption_handled` migration check, or the
+ *   via the `.catch` below) if DB connectivity, the schema migrations, or the
  *   guild registry load fails. A `startTwitchBot()` failure is logged and startup continues.
  */
 async function main(): Promise<void> {
@@ -258,17 +258,12 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // Every channel-point redemption reads and writes redemption_handled; without it each one would
-  // fail and be retried until the table appears. Fail loudly instead of running degraded.
-  let ledgerReady = false;
+  // Bring the schema up to date before anything reads it. A failed migration stops startup rather
+  // than running against a half-migrated database.
   try {
-    ledgerReady = await isRedemptionLedgerReady();
+    await runMigrations();
   } catch (err) {
-    log.error('Cannot check the redemption_handled table:', err);
-    process.exit(1);
-  }
-  if (!ledgerReady) {
-    log.error('Database table redemption_handled is missing — apply migrations/redemption_handled.sql, then restart.');
+    log.error('Database migration failed:', err);
     process.exit(1);
   }
 
