@@ -163,6 +163,9 @@ export {
 } from './db/loyaltyPoints';
 export { getCachedConfig as getLoyaltyPointsConfig } from './db/loyaltyPointsCache';
 export { setLoyaltyPointsConfig } from './db/loyaltyPointsWrites';
+export { getExclusions as getLoyaltyPointsExclusions } from './db/loyaltyPointsExclusions';
+export { isExcludedFromLoyaltyPoints } from './db/loyaltyPointsExclusionCache';
+export { addLoyaltyPointsExclusion, removeLoyaltyPointsExclusion } from './db/loyaltyPointsExclusionWrites';
 
 // ─── Timer commands ─────────────────────────────────────────────────────────
 

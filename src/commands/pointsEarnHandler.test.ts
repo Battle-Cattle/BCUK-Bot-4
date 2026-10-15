@@ -3,9 +3,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 vi.mock('../db', () => ({
   getLoyaltyPointsConfig: vi.fn(),
   adjustLoyaltyPointsBalance: vi.fn(),
+  isExcludedFromLoyaltyPoints: vi.fn(),
 }));
 
-import { getLoyaltyPointsConfig, adjustLoyaltyPointsBalance } from '../db';
+import { getLoyaltyPointsConfig, adjustLoyaltyPointsBalance, isExcludedFromLoyaltyPoints } from '../db';
 import {
   awardPointsForChatMessage, tryClaimPointsCooldown, clearPointsCooldowns,
   awardPointsForSub, awardPointsForGiftSub, getRemainingCooldownSeconds,
@@ -19,6 +20,7 @@ beforeEach(() => {
   clearPointsCooldowns();
   vi.mocked(getLoyaltyPointsConfig).mockResolvedValue(ENABLED_CONFIG);
   vi.mocked(adjustLoyaltyPointsBalance).mockResolvedValue(0);
+  vi.mocked(isExcludedFromLoyaltyPoints).mockResolvedValue(false);
 });
 
 afterEach(() => {
@@ -128,6 +130,14 @@ describe('awardPointsForChatMessage', () => {
     expect(adjustLoyaltyPointsBalance).toHaveBeenCalledTimes(2);
   });
 
+  it('does not award an excluded bot, and leaves its cooldown unclaimed', async () => {
+    vi.mocked(isExcludedFromLoyaltyPoints).mockResolvedValue(true);
+    await awardPointsForChatMessage(1, 'somebot');
+    expect(isExcludedFromLoyaltyPoints).toHaveBeenCalledWith(1, 'somebot');
+    expect(adjustLoyaltyPointsBalance).not.toHaveBeenCalled();
+    expect(tryClaimPointsCooldown(1, 'somebot', 60)).toBe(true);
+  });
+
   it('tracks cooldowns independently per streamer', async () => {
     await awardPointsForChatMessage(1, 'viewer');
     await awardPointsForChatMessage(2, 'viewer');
@@ -156,6 +166,13 @@ describe('awardPointsForSub', () => {
     expect(adjustLoyaltyPointsBalance).toHaveBeenCalledWith(1, 'subscriber', 250);
   });
 
+  it('does not award an excluded bot', async () => {
+    vi.mocked(isExcludedFromLoyaltyPoints).mockResolvedValue(true);
+    await awardPointsForSub(1, 'somebot');
+    expect(isExcludedFromLoyaltyPoints).toHaveBeenCalledWith(1, 'somebot');
+    expect(adjustLoyaltyPointsBalance).not.toHaveBeenCalled();
+  });
+
   it('is not subject to the chat-earn cooldown', async () => {
     await awardPointsForSub(1, 'subscriber');
     await awardPointsForSub(1, 'subscriber');
@@ -182,6 +199,13 @@ describe('awardPointsForGiftSub', () => {
     vi.mocked(getLoyaltyPointsConfig).mockResolvedValue({ enabled: true, pointsPerMessage: 1, cooldownSeconds: 60, pointsPerSub: 100, pointsPerGiftSub: 10 });
     await awardPointsForGiftSub(1, 'gifter', 5);
     expect(adjustLoyaltyPointsBalance).toHaveBeenCalledWith(1, 'gifter', 50);
+  });
+
+  it('does not award an excluded bot', async () => {
+    vi.mocked(isExcludedFromLoyaltyPoints).mockResolvedValue(true);
+    await awardPointsForGiftSub(1, 'somebot', 5);
+    expect(isExcludedFromLoyaltyPoints).toHaveBeenCalledWith(1, 'somebot');
+    expect(adjustLoyaltyPointsBalance).not.toHaveBeenCalled();
   });
 
   it('scales correctly for a single gifted sub', async () => {

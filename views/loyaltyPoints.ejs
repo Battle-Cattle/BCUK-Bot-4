@@ -26,6 +26,8 @@
         invalid_config:        'Points per message, cooldown, points per sub, and points per gift sub must all be whole numbers of 0 or more.',
         save_failed:           'Failed to save — please try again.',
         missing_prerequisites: 'You can\'t enable Loyalty Points yet — see the checklist below for what\'s still missing.',
+        invalid_username:      'That isn\'t a valid Twitch username.',
+        exclusion_failed:      'Failed to update the excluded bots — please try again.',
       }; %>
       <div class="card card-alert-danger" role="alert" aria-live="assertive" aria-atomic="true">
         <span class="text-danger">&#9888; <%= errorMessages[error] || `Operation failed: ${error.replace(/_/g, ' ')}` %></span>
@@ -102,7 +104,7 @@
           <% } else { %>
           <table class="table full-width">
             <thead>
-              <tr><th>#</th><th>Viewer</th><th>Points</th></tr>
+              <tr><th>#</th><th>Viewer</th><th>Points</th><th></th></tr>
             </thead>
             <tbody>
               <% leaderboard.forEach(function (entry, index) { %>
@@ -110,6 +112,44 @@
                 <td><%= index + 1 %></td>
                 <td><%= entry.twitchUsername %></td>
                 <td><%= entry.balance %></td>
+                <td>
+                  <form method="POST" action="/loyalty-points/exclusions">
+                    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                    <input type="hidden" name="twitch_username" value="<%= entry.twitchUsername %>">
+                    <button type="submit" class="btn btn-sm btn-danger" aria-label="Exclude bot <%= entry.twitchUsername %>">Exclude bot</button>
+                  </form>
+                </td>
+              </tr>
+              <% }); %>
+            </tbody>
+          </table>
+          <% } %>
+        </div>
+      </div>
+
+      <div class="card card-spaced">
+        <div class="card-header"><span class="card-icon">🤖</span><span class="card-label">Excluded Bots</span></div>
+        <div class="card-body">
+          <p class="muted">Chat bots excluded with the leaderboard's "Exclude bot" button don't earn points
+            and aren't shown on the leaderboard. Removing an exclusion restores their previous balance.</p>
+          <% if (excludedUsers.length === 0) { %>
+          <p class="muted">No bots are excluded.</p>
+          <% } else { %>
+          <table class="table full-width">
+            <thead>
+              <tr><th>Account</th><th></th></tr>
+            </thead>
+            <tbody>
+              <% excludedUsers.forEach(function (twitchUsername) { %>
+              <tr>
+                <td><%= twitchUsername %></td>
+                <td>
+                  <form method="POST" action="/loyalty-points/exclusions/remove">
+                    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                    <input type="hidden" name="twitch_username" value="<%= twitchUsername %>">
+                    <button type="submit" class="btn btn-sm btn-ghost" aria-label="Remove exclusion for <%= twitchUsername %>">Remove exclusion</button>
+                  </form>
+                </td>
               </tr>
               <% }); %>
             </tbody>

@@ -628,4 +628,18 @@ CREATE TABLE IF NOT EXISTS loyalty_points_config (
   CONSTRAINT chk_loyalty_points_config_points_per_gift_sub CHECK (points_per_gift_sub >= 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- ---------------------------------------------------------------------------
+-- loyalty_points_exclusion
+-- Per-streamer accounts (in practice, chat bots) excluded from loyalty points:
+-- they never earn points on that channel and are hidden from the leaderboard.
+-- Their loyalty_points row is kept, so un-excluding restores the old balance.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS loyalty_points_exclusion (
+  streamer_id     INT         NOT NULL,
+  twitch_username VARCHAR(64) NOT NULL,
+  created_at      TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (streamer_id, twitch_username),
+  FOREIGN KEY (streamer_id) REFERENCES streamer(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 SET FOREIGN_KEY_CHECKS = 1;
