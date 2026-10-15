@@ -333,6 +333,27 @@ any viewer activity on their channel starts earning points.
 
 Created by `migrations/loyalty_points.sql`.
 
+## `loyalty_points_exclusion`
+
+Per-streamer list of accounts — in practice, chat bots such as a channel's own bot or a chat game
+bot — excluded from loyalty points. An excluded account earns nothing on that streamer's channel
+(chat messages, subs/resubs and gift subs are all skipped) and is hidden from both the web and
+`!points leaderboard` leaderboards. Its `loyalty_points` row is left untouched, so removing the
+exclusion restores its previous balance. Managed from the leaderboard's "Exclude bot" button on the
+`/loyalty-points` web page.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `streamer_id` | `INT` | FK to `streamer.id` ON DELETE CASCADE |
+| `twitch_username` | `VARCHAR(64)` | Excluded Twitch login, stored lowercased to match `loyalty_points.twitch_username` |
+| `created_at` | `TIMESTAMP` | |
+
+Expected constraints:
+
+- `PRIMARY KEY (streamer_id, twitch_username)` — one row per excluded account per streamer.
+
+Created by `migrations/loyalty_points_exclusion.sql`.
+
 ## `custom_command`
 
 Stores custom text commands managed through the admin panel. This is a **global catalog** shared across all guilds (no `guild_id`); per-guild deviations (disable / output override) live in `guild_command_override`. On Discord, every catalog command is enabled by default in every guild.

@@ -64,14 +64,21 @@ export async function getBalance(streamerId: number, twitchUsername: string): Pr
 }
 
 /**
- * Returns the top `limit` viewers by balance for a streamer, highest first.
+ * Returns the top `limit` viewers by balance for a streamer, highest first, leaving out any
+ * account the streamer has excluded (see `loyalty_points_exclusion`).
  * @param streamerId - The streamer's `streamer.id`.
  * @param limit - Maximum number of entries to return.
  * @returns The leaderboard entries, highest balance first.
  */
 export async function getLeaderboard(streamerId: number, limit: number): Promise<LoyaltyPointsLeaderboardEntry[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    'SELECT twitch_username, balance FROM loyalty_points WHERE streamer_id = ? ORDER BY balance DESC LIMIT ?',
+    `SELECT lp.twitch_username, lp.balance FROM loyalty_points lp
+     WHERE lp.streamer_id = ?
+       AND NOT EXISTS (
+         SELECT 1 FROM loyalty_points_exclusion e
+         WHERE e.streamer_id = lp.streamer_id AND e.twitch_username = lp.twitch_username
+       )
+     ORDER BY lp.balance DESC LIMIT ?`,
     [streamerId, limit],
   );
   return rows.map((row) => ({ twitchUsername: row.twitch_username, balance: row.balance }));

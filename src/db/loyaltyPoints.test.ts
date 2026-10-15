@@ -75,6 +75,13 @@ describe('getLeaderboard', () => {
     await getLeaderboard(1, 10);
     expect(pool.execute).toHaveBeenCalledWith(expect.stringContaining('LIMIT'), [1, 10]);
   });
+
+  it('leaves out the streamer\'s excluded bots', async () => {
+    const pool = makePool([]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await getLeaderboard(1, 10);
+    expect(pool.execute).toHaveBeenCalledWith(expect.stringMatching(/NOT EXISTS[\s\S]*loyalty_points_exclusion/), [1, 10]);
+  });
 });
 
 // ─── getConfig ────────────────────────────────────────────────────────────────

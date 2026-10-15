@@ -6,6 +6,9 @@ vi.mock('../../db', () => ({
   getLoyaltyPointsLeaderboard: vi.fn(),
   getLoyaltyPointsConfig: vi.fn(),
   setLoyaltyPointsConfig: vi.fn(),
+  getLoyaltyPointsExclusions: vi.fn(),
+  addLoyaltyPointsExclusion: vi.fn(),
+  removeLoyaltyPointsExclusion: vi.fn(),
   DEFAULT_POINTS_PER_MESSAGE: 1,
   DEFAULT_POINTS_COOLDOWN_SECONDS: 60,
   DEFAULT_POINTS_PER_SUB: 100,
@@ -29,7 +32,10 @@ vi.mock('../../shared/logger', () => ({
 
 import supertest from 'supertest';
 import router from './loyaltyPoints';
-import { findUser, getStreamerByDiscordId, getLoyaltyPointsLeaderboard, getLoyaltyPointsConfig, setLoyaltyPointsConfig } from '../../db';
+import {
+  findUser, getStreamerByDiscordId, getLoyaltyPointsLeaderboard, getLoyaltyPointsConfig, setLoyaltyPointsConfig,
+  getLoyaltyPointsExclusions, addLoyaltyPointsExclusion, removeLoyaltyPointsExclusion,
+} from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
 const STREAMER = { id: 7, discord_id: '1', twitch_name: 'streamerchannel' };
@@ -53,6 +59,9 @@ beforeEach(() => {
   vi.mocked(getLoyaltyPointsLeaderboard).mockResolvedValue([]);
   vi.mocked(getLoyaltyPointsConfig).mockResolvedValue(null);
   vi.mocked(setLoyaltyPointsConfig).mockResolvedValue(undefined);
+  vi.mocked(getLoyaltyPointsExclusions).mockResolvedValue([]);
+  vi.mocked(addLoyaltyPointsExclusion).mockResolvedValue(undefined);
+  vi.mocked(removeLoyaltyPointsExclusion).mockResolvedValue(undefined);
 });
 
 // ─── GET /loyalty-points ──────────────────────────────────────────────────────
@@ -64,6 +73,8 @@ describe('GET /loyalty-points', () => {
     expect(res.status).toBe(200);
     expect(res.body.isStreamer).toBe(false);
     expect(res.body.leaderboard).toEqual([]);
+    expect(res.body.excludedUsers).toEqual([]);
+    expect(getLoyaltyPointsExclusions).not.toHaveBeenCalled();
     expect(res.body.prerequisites).toEqual({ twitchLinked: false, chatBotEnabled: false, isMonitoredStreamer: false });
     expect(res.body.allPrerequisitesMet).toBe(false);
   });
@@ -83,6 +94,16 @@ describe('GET /loyalty-points', () => {
     expect(res.body.config).toEqual({ enabled: true, pointsPerMessage: 2, cooldownSeconds: 30, pointsPerSub: 150, pointsPerGiftSub: 150 });
     expect(res.body.prerequisites).toEqual({ twitchLinked: true, chatBotEnabled: true, isMonitoredStreamer: true });
     expect(res.body.allPrerequisitesMet).toBe(true);
+  });
+
+  it('passes the streamer\'s excluded bots to the view', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(STREAMER as any);
+    vi.mocked(getLoyaltyPointsExclusions).mockResolvedValue(['bcuk_bot', 'pokemoncommunitygame']);
+
+    const res = await supertest(buildApp()).get('/loyalty-points');
+
+    expect(getLoyaltyPointsExclusions).toHaveBeenCalledWith(7);
+    expect(res.body.excludedUsers).toEqual(['bcuk_bot', 'pokemoncommunitygame']);
   });
 
   it('falls back to the app defaults (disabled) when the streamer has no saved config', async () => {
@@ -247,5 +268,52 @@ describe('POST /loyalty-points/config', () => {
     const res = await supertest(buildApp()).post('/loyalty-points/config').type('form').send(VALID_CONFIG_BODY);
 
     expect(res.headers.location).toBe('/loyalty-points?error=save_failed');
+  });
+});
+
+// ─── POST /loyalty-points/exclusions(/remove) ─────────────────────────────────
+
+describe.each([
+  ['/loyalty-points/exclusions', addLoyaltyPointsExclusion],
+  ['/loyalty-points/exclusions/remove', removeLoyaltyPointsExclusion],
+])('POST %s', (path, write) => {
+  it('redirects with not_a_streamer when the requester has no streamer record', async () => {
+    const res = await supertest(buildApp()).post(path).type('form').send({ twitch_username: 'somebot' });
+    expect(res.headers.location).toBe('/loyalty-points?error=not_a_streamer');
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it('applies the change to the signed-in streamer\'s channel and redirects back', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(STREAMER as any);
+
+    const res = await supertest(buildApp()).post(path).type('form').send({ twitch_username: ' PokemonCommunityGame ' });
+
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('/loyalty-points');
+    expect(write).toHaveBeenCalledWith(7, 'PokemonCommunityGame');
+  });
+
+  it.each([
+    ['missing', {}],
+    ['blank', { twitch_username: '  ' }],
+    ['invalid characters', { twitch_username: 'bad name!' }],
+    ['repeated', { twitch_username: ['a', 'b'] }],
+    ['too long', { twitch_username: 'a'.repeat(65) }],
+  ])('rejects a %s username without writing', async (_label, body) => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(STREAMER as any);
+
+    const res = await supertest(buildApp()).post(path).type('form').send(body);
+
+    expect(res.headers.location).toBe('/loyalty-points?error=invalid_username');
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it('redirects with exclusion_failed when the write throws', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(STREAMER as any);
+    vi.mocked(write).mockRejectedValue(new Error('db exploded'));
+
+    const res = await supertest(buildApp()).post(path).type('form').send({ twitch_username: 'somebot' });
+
+    expect(res.headers.location).toBe('/loyalty-points?error=exclusion_failed');
   });
 });
