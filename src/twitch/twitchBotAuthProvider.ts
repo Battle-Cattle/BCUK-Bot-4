@@ -127,7 +127,7 @@ async function rebuildAfterTransientRefreshFailure(userId: string, connectionId:
         log.error(`Failed to re-read the stored chat token while recovering from a transient refresh failure for ${userId} (attempt ${attempt}/${MAX_TRANSIENT_REBUILD_ATTEMPTS}):`, lookupErr);
         continue;
       }
-      if (!current || current.connectionId !== connectionId) return; // superseded by a reconnect since this failure fired
+      if (current?.connectionId !== connectionId) return; // superseded by a reconnect since this failure fired
 
       log.warn(
         `Refresh failure for ${userId} does not look like a revoked/invalid token — rebuilding the chat connection from the still-stored token (attempt ${attempt}/${MAX_TRANSIENT_REBUILD_ATTEMPTS}).`,

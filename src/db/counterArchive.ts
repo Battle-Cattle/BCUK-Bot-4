@@ -104,9 +104,8 @@ export async function getCounterHistory(
   id: number,
 ): Promise<{ counter: DbCounter; history: CounterHistoryEntry[] } | null> {
   const existingColumns = await getExistingArchiveColumns();
-  const selectColumns = existingColumns.length > 0
-    ? `, ${existingColumns.map((col) => `\`${col}\``).join(', ')}`
-    : '';
+  const quotedColumns = existingColumns.map((col) => `\`${col}\``).join(', ');
+  const selectColumns = existingColumns.length > 0 ? `, ${quotedColumns}` : '';
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
     `SELECT ${COUNTER_COLUMNS}${selectColumns}
      FROM counter

@@ -118,7 +118,7 @@ function parseAssignTarget<TId>(
  */
 async function checkAssignee(req: Request, discordId: string): Promise<string | null> {
   const user = await findUser(discordId);
-  if (!user || !user.twitch_name) return 'invalid_assignment_user';
+  if (!user?.twitch_name) return 'invalid_assignment_user';
   if (await getMemberAccessLevel(getCurrentGuildId(req), discordId) === null) return 'assignee_not_in_guild';
   return null;
 }

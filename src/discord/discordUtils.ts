@@ -96,7 +96,7 @@ export async function tryDeleteDiscordMessage(channelId: string, messageId: stri
   for (let attempt = 0; ; attempt++) {
     try {
       const ch = await discordClient.channels.fetch(channelId);
-      if (!ch || !ch.isTextBased()) return;
+      if (!ch?.isTextBased()) return;
       const msg = await ch.messages.fetch(messageId);
       await msg.delete();
       return;
@@ -126,7 +126,7 @@ export async function tryDeleteDiscordMessage(channelId: string, messageId: stri
  */
 export async function getTextChannel(client: Client, channelId: string): Promise<TextBasedChannel | null> {
   const channel = await client.channels.fetch(channelId);
-  if (!channel || !channel.isTextBased()) return null;
+  if (!channel?.isTextBased()) return null;
   return channel;
 }
 

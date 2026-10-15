@@ -32,7 +32,7 @@ export const MAX_SSE_CONNECTIONS_PER_GUILD = DASHBOARD_STATUS_MAX_SSE_PER_GUILD;
 // never resolve after — and clobber the client with stale data behind — a newer one for the same
 // guild. Unrelated guilds stay independent, same as the DB-mutation queues this pattern is shared
 // with (see src/twitch/twitchChannelMembership.ts).
-const statusPushQueue = createMutationQueue<string>();
+const statusPushQueue = createMutationQueue();
 
 /**
  * Pushes a fresh status snapshot to every dashboard connected for `guildId`, or — when

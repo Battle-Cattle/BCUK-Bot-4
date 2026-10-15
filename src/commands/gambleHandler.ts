@@ -74,7 +74,7 @@ async function resolveGamble(streamerId: number, twitchUsername: string, bet: nu
  */
 async function getConfigIfAllowedToGamble(streamerId: number, twitchUsername: string): Promise<LoyaltyPointsConfig | null> {
   const config = await getLoyaltyPointsConfig(streamerId);
-  if (!config || !config.enabled) return null;
+  if (!config?.enabled) return null;
   if (await isExcludedFromLoyaltyPoints(streamerId, twitchUsername)) return null;
   return config;
 }

@@ -77,13 +77,13 @@ export function pruneStaleCooldowns(now: number): void {
 function releaseCommandSessionReservation(sessionKey: string | null, now: number): void {
   if (!sessionKey) return;
   const entry = commandSessionLastFiredAt.get(sessionKey);
-  if (entry && entry.firedAt === now) commandSessionLastFiredAt.delete(sessionKey);
+  if (entry?.firedAt === now) commandSessionLastFiredAt.delete(sessionKey);
 }
 
 /** Releases a channel-floor reservation if it's still the one made at `now` for `timerId` (not a newer/different one made since). */
 function releaseChannelReservation(channel: string, timerId: number, now: number): void {
   const entry = channelLastFiredAt.get(channel);
-  if (entry && entry.firedAt === now && entry.timerId === timerId) channelLastFiredAt.delete(channel);
+  if (entry?.firedAt === now && entry.timerId === timerId) channelLastFiredAt.delete(channel);
 }
 
 /** Clears all cooldown state in both maps. Call on scheduler stop. */

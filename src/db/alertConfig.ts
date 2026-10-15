@@ -195,7 +195,7 @@ async function setAlertAssetColumn(
   eventType: AlertEventType,
   filename: string | null,
 ): Promise<string | null> {
-  const previous = await withTransaction(async (conn) => {
+  return withTransaction(async (conn) => {
     // No-op on duplicate: only guarantees the row exists (and is X-locked) before the snapshot.
     await conn.execute(
       `INSERT INTO alert_config (streamer_id, event_type, enabled, message_template)
@@ -214,7 +214,6 @@ async function setAlertAssetColumn(
     );
     return previous;
   });
-  return previous;
 }
 
 /**

@@ -89,14 +89,13 @@ function sendSseHandshake(res: Response): void {
  * @returns The interval handle, so the caller can also clear it on a normal close/error event.
  */
 function startKeepalive(res: Response, cleanup: () => void): NodeJS.Timeout {
-  const keepalive = setInterval(() => {
+  return setInterval(() => {
     try {
       res.write(': ping\n\n');
     } catch {
       cleanup();
     }
   }, KEEPALIVE_INTERVAL_MS);
-  return keepalive;
 }
 
 /**

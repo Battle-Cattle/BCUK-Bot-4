@@ -244,7 +244,7 @@ export async function addOrUpdateUserMutation({
  */
 export async function toggleTwitchMutation(discordId: string, nextEnabled: boolean): Promise<void> {
   const user = await findUser(discordId);
-  if (!user || !user.twitch_name) {
+  if (!user?.twitch_name) {
     throw new Error('Toggle target user is missing or has no Twitch channel');
   }
 

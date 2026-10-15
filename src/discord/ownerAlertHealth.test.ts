@@ -93,4 +93,13 @@ describe('deriveComponentOks', () => {
     }));
     expect(result.get('scheduler:counter')).toEqual({ ok: false, error: 'counter scheduler run is stale' });
   });
+
+  it('falls back to a generic "failed" message when a failing monitor/scheduler recorded no error', () => {
+    const result = deriveComponentOks(makeSnapshot({
+      monitor: { lastPollAt: new Date(), lastPollOk: false, lastError: null },
+      schedulers: { timer: { lastRunAt: new Date(), lastRunOk: false, lastError: null } },
+    }));
+    expect(result.get('monitor')).toEqual({ ok: false, error: 'Stream monitor poll failed' });
+    expect(result.get('scheduler:timer')).toEqual({ ok: false, error: 'timer scheduler run failed' });
+  });
 });

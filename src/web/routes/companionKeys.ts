@@ -35,7 +35,7 @@ const recentIssues = new Map<string, RecentIssue>();
 // each call `issueToken` — the second runs only after the first has cached its result, and then
 // reuses it; (2) a revoke racing an in-flight issuance always runs after that issuance settles,
 // so it can't be undone by the issuance's own (now-stale) cache write completing afterward.
-const tokenMutationQueue = createMutationQueue<string>();
+const tokenMutationQueue = createMutationQueue();
 
 /** Test-only: clears the issue dedupe cache so each test starts from a clean slate. */
 export function __resetRecentIssuesForTests(): void {

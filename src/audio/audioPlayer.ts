@@ -276,7 +276,7 @@ async function resolveVoiceChannel(
   const channel = await guild.channels.fetch(channelId);
   if (isStale()) return null;
 
-  if (!channel || channel.type !== ChannelType.GuildVoice) {
+  if (channel?.type !== ChannelType.GuildVoice) {
     throw new Error(`Channel ${channelId} is not a voice channel in guild ${guildId}`);
   }
   return { guild, channel };

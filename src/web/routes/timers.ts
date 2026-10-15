@@ -28,6 +28,22 @@ interface TimerViewModel extends DbTimerCommandWithAssignments {
   canEdit: boolean;
 }
 
+/**
+ * Builds one timer's row for the Timers page.
+ * @param timer - The timer with its current assignments.
+ * @param assignableUsers - Users the viewer may assign (empty for streamers).
+ * @param canEdit - Whether the viewer may edit/toggle/delete this timer.
+ * @returns The timer plus the assignable users not yet assigned to it, and its edit flag.
+ */
+function toTimerViewModel(timer: DbTimerCommandWithAssignments, assignableUsers: DbUser[], canEdit: boolean): TimerViewModel {
+  const assignedDiscordIds = new Set(timer.assigned_users.map((entry) => entry.discord_id));
+  return {
+    ...timer,
+    unassigned_users: assignableUsers.filter((entry) => !assignedDiscordIds.has(entry.discord_id)),
+    canEdit,
+  };
+}
+
 /** The timers a viewer sees, plus the users they may assign to them (empty for streamers). */
 interface TimerPageData {
   timers: DbTimerCommandWithAssignments[];
@@ -70,14 +86,7 @@ router.get('/timers', requireGuildContext, csrfProtection, async (req, res) => {
     const isCatalogManager = canManageCatalog(req);
     const discordId = req.session.user!.discordId;
     const { timers, assignableUsers, twitchLinked } = await loadTimerPageData(req);
-    const timersForView: TimerViewModel[] = timers.map((timer) => {
-      const assignedDiscordIds = new Set(timer.assigned_users.map((entry) => entry.discord_id));
-      return {
-        ...timer,
-        unassigned_users: assignableUsers.filter((entry) => !assignedDiscordIds.has(entry.discord_id)),
-        canEdit: isCatalogManager || isTimerSelfManageable(timer, discordId),
-      };
-    });
+    const timersForView = timers.map((timer) => toTimerViewModel(timer, assignableUsers, isCatalogManager || isTimerSelfManageable(timer, discordId)));
 
     renderView(res, 'timers', {
       user: req.session.user,

@@ -88,7 +88,7 @@ export async function maybePushAlert(
   if (!runtime) return;
   try {
     const alert = await findCachedAlertConfig(streamerId, eventType);
-    if (!alert || !alert.enabled) return;
+    if (!alert?.enabled) return;
     runtime.pushAlertEvent(login, {
       type: eventType,
       message: fillTemplate(alert.message_template, vars, 'keep'),

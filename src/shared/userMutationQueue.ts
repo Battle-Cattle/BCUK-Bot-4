@@ -7,7 +7,7 @@ import { withTimeout } from './withTimeout';
  * otherwise race on the same user row. Shared by admin.ts and adminRefresh.ts so writes for the
  * same discord_id always serialize against each other, not just against writes from the same file.
  */
-export const userMutationQueue = createMutationQueue<string>();
+export const userMutationQueue = createMutationQueue();
 
 const USER_MUTATION_TIMEOUT_MS = 15_000;
 

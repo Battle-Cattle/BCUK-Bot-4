@@ -4,6 +4,7 @@ const tseslint = require('typescript-eslint');
 const jsdoc = require('eslint-plugin-jsdoc');
 const vitest = require('@vitest/eslint-plugin');
 const globals = require('globals');
+const sonarjs = require('eslint-plugin-sonarjs');
 
 module.exports = tseslint.config(
   {
@@ -54,9 +55,8 @@ module.exports = tseslint.config(
       '@typescript-eslint/no-explicit-any': 'warn',
       '@typescript-eslint/no-non-null-assertion': 'off',
       'no-console': 'error',
-      // Cyclomatic complexity cap. Every source function was brought under this; a warning
-      // (not an error) nudges new code to extract helpers without failing CI on an edge case.
-      complexity: ['warn', 12],
+      // Cyclomatic complexity cap. Every source function is under it.
+      complexity: ['error', 12],
       // Structure and async hygiene. Everything below is at zero violations; keep it that way.
       '@typescript-eslint/switch-exhaustiveness-check': 'error',
       '@typescript-eslint/only-throw-error': 'error',
@@ -72,8 +72,9 @@ module.exports = tseslint.config(
       'no-else-return': 'error',
       'no-lonely-if': 'error',
       eqeqeq: ['error', 'always', { null: 'ignore' }],
-      // A warning, not an error: flags signatures that are growing without forcing a refactor.
-      'max-params': ['warn', 5],
+      'max-params': ['error', 5],
+      // Callback pyramids (route handler → wrapper → map → filter …): extract a named helper.
+      'max-nested-callbacks': ['error', 3],
       // Type-aware bug catchers cherry-picked from recommendedTypeChecked/strictTypeChecked —
       // the ones that don't depend on Express's untyped req.body. All at zero violations.
       '@typescript-eslint/await-thenable': 'error',
@@ -129,8 +130,37 @@ module.exports = tseslint.config(
       'no-useless-computed-key': 'error',
       'no-unneeded-ternary': 'error',
       'logical-assignment-operators': 'error',
+      '@typescript-eslint/prefer-optional-chain': 'error',
+      '@typescript-eslint/no-unnecessary-type-arguments': 'error',
       // File-size backstop alongside max-lines-per-function; every source file is under it.
       'max-lines': ['error', { max: 400, skipBlankLines: true, skipComments: true }],
+    },
+  },
+  {
+    // Complexity/simplification rules from SonarJS, source files only. cognitive-complexity is the
+    // metric Qlty's "function complexity" smell uses (it weighs nesting, unlike cyclomatic
+    // `complexity` above), so this catches that review finding locally before a push.
+    files: ['src/**/*.ts'],
+    ignores: ['src/**/*.test.ts', 'src/test-utils/**/*.ts'],
+    plugins: { sonarjs },
+    rules: {
+      'sonarjs/cognitive-complexity': ['error', 15],
+      'sonarjs/no-identical-functions': 'error',
+      'sonarjs/no-collapsible-if': 'error',
+      'sonarjs/no-inverted-boolean-check': 'error',
+      'sonarjs/no-redundant-boolean': 'error',
+      'sonarjs/no-redundant-jump': 'error',
+      'sonarjs/no-small-switch': 'error',
+      'sonarjs/no-nested-switch': 'error',
+      'sonarjs/max-switch-cases': 'error',
+      'sonarjs/no-nested-conditional': 'error',
+      'sonarjs/no-nested-template-literals': 'error',
+      'sonarjs/no-gratuitous-expressions': 'error',
+      'sonarjs/no-all-duplicated-branches': 'error',
+      'sonarjs/no-duplicated-branches': 'error',
+      'sonarjs/no-identical-conditions': 'error',
+      'sonarjs/prefer-single-boolean-return': 'error',
+      'sonarjs/prefer-immediate-return': 'error',
     },
   },
   {
@@ -156,6 +186,7 @@ module.exports = tseslint.config(
       'no-lonely-if': 'off',
       eqeqeq: 'off',
       'max-params': 'off',
+      'max-nested-callbacks': 'off',
       // Tests await sync mocks/handlers defensively (harmless, and robust to a handler later
       // going async), build ad-hoc mock classes/generics, and run long — none of which the
       // source-file rules above are aimed at.
