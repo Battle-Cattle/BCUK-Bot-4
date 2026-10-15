@@ -60,6 +60,16 @@ The bot keeps the schema up to date itself. On every start, after checking it ca
 
 `migrations/0001_baseline.sql` is the full schema from when this was introduced. An empty database runs it. A database that already had the tables but no `schema_migrations` table records it as applied without running it, after checking every baseline table is there.
 
+### Upgrading a database from before the baseline
+
+The per-feature upgrade scripts that came before the baseline were removed from `migrations/`; they live in git history at commit `b80b81d`. A database older than the baseline fails that check at startup with "missing baseline tables (…)", and the bot doesn't start until it's brought up to date by hand:
+
+1. List the old scripts with `git ls-tree --name-only b80b81d migrations/`, and print one with `git show b80b81d:migrations/<name>.sql`.
+2. Apply each script your database hasn't had yet, reading its header first: some need settings filled in (`multi_guild.sql` needs `@legacy_guild_id` set to your `DISCORD_GUILD_ID`).
+3. Compare against `migrations/0001_baseline.sql` (and `DATABASE-SCHEMA.md`) until every table and column it creates is present, then start the bot. It records the baseline as applied and carries on from there.
+
+Don't run `0001_baseline.sql` against a partial schema: its `CREATE TABLE IF NOT EXISTS` statements skip tables that already exist in an older shape, which hides the gap instead of fixing it.
+
 To change the schema:
 
 1. Add `migrations/NNNN_short_description.sql`, numbered one past the highest existing file (four digits, lowercase and underscores).

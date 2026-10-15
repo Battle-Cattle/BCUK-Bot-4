@@ -70,7 +70,10 @@ async function adoptExistingDatabase(conn: mysql.Connection, applied: Map<string
   if (!existing.has(EXISTING_INSTALL_MARKER_TABLE)) return;
   const missing = createdTables(baseline.sql).filter((t) => !existing.has(t));
   if (missing.length > 0) {
-    throw new Error(`Existing database is missing baseline tables (${missing.join(', ')}); bring it up to date by hand before adopting migrations`);
+    throw new Error(
+      `Existing database is missing baseline tables (${missing.join(', ')}). It predates the baseline: apply the legacy `
+      + `scripts first (README, "Upgrading a database from before the baseline"), then restart`,
+    );
   }
   await recordApplied(conn, baseline);
   applied.set(baseline.version, baseline.checksum);

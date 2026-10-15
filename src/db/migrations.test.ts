@@ -130,7 +130,7 @@ describe('runMigrations', () => {
     const conn = makeConn(db);
     createConnection.mockResolvedValue(conn);
 
-    await expect(runMigrations(dir)).rejects.toThrow(/missing baseline tables \(guild\)/);
+    await expect(runMigrations(dir)).rejects.toThrow(/missing baseline tables \(guild\)\. It predates the baseline/);
     expect(db.applied.size).toBe(0);
     expect(conn.executed).toEqual([]);
   });
