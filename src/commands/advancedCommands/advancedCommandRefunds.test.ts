@@ -71,6 +71,15 @@ describe('acknowledgements', () => {
     expect(resolveAdvancedCommandUsage).toHaveBeenCalledWith('e1', expect.objectContaining({ refundReason: 'no_ack' }));
   });
 
+  it('logs (not throws) when the timeout refund fails', async () => {
+    vi.useFakeTimers();
+    vi.mocked(resolveAdvancedCommandUsage).mockRejectedValueOnce(new Error('DB down'));
+    trackAdvancedCommandAck('e1', 'streamer');
+    vi.advanceTimersByTime(ACK_TIMEOUT_MS);
+    await flushMicrotasks();
+    expect(adjustLoyaltyPointsBalance).not.toHaveBeenCalled();
+  });
+
   it('marks a successful acknowledgement and cancels the timeout', async () => {
     vi.useFakeTimers();
     trackAdvancedCommandAck('e1', 'streamer');

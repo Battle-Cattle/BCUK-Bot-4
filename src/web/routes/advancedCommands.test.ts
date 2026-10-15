@@ -139,6 +139,13 @@ describe('command routes', () => {
     expect((await post('/advanced-commands/7/update', { name: 'x' })).headers.location).toBe('/advanced-commands?error=not_found');
   });
 
+  it('maps errors thrown by a command route to their page codes', async () => {
+    vi.mocked(db.updateAdvancedCommand).mockRejectedValueOnce(new db.AdvancedCommandConflictError('trigger'));
+    expect((await post('/advanced-commands/7/update', { name: 'x' })).headers.location).toBe('/advanced-commands?error=duplicate_trigger');
+    vi.mocked(db.setAdvancedCommandEnabled).mockRejectedValueOnce(new Error('boom'));
+    expect((await post('/advanced-commands/7/toggle')).headers.location).toBe('/advanced-commands?error=save_failed');
+  });
+
   it('rejects a non-numeric id', async () => {
     expect((await post('/advanced-commands/abc/toggle')).headers.location).toBe('/advanced-commands?error=not_found');
     expect(db.setAdvancedCommandEnabled).not.toHaveBeenCalled();

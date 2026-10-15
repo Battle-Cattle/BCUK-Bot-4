@@ -35,4 +35,9 @@ describe('getAdvancedCommandForTwitchChannel', () => {
     ]);
     expect(await getAdvancedCommandForTwitchChannel('streamer', '!hydrate')).not.toBeNull();
   });
+
+  it('answers from an empty cache when the first load fails', async () => {
+    vi.mocked(getAllAdvancedCommandChatRoutes).mockRejectedValueOnce(new Error('DB down'));
+    expect(await getAdvancedCommandForTwitchChannel('streamer', '!hydrate')).toBeNull();
+  });
 });
