@@ -337,7 +337,7 @@ Created by `migrations/loyalty_points.sql`.
 
 Per-streamer list of accounts — in practice, chat bots such as a channel's own bot or a chat game
 bot — excluded from loyalty points. An excluded account earns nothing on that streamer's channel
-(chat messages, subs/resubs and gift subs are all skipped) and is hidden from both the web and
+(chat messages, subs/resubs and gift subs are all skipped), can't use `!gamble`, and is hidden from both the web and
 `!points leaderboard` leaderboards. Its `loyalty_points` row is left untouched, so removing the
 exclusion restores its previous balance. Managed from the leaderboard's "Exclude bot" button on the
 `/loyalty-points` web page.

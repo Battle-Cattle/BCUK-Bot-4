@@ -4,6 +4,7 @@ vi.mock('../db', () => ({
   getLoyaltyPointsBalance: vi.fn(),
   resolveLoyaltyPointsGambleOutcome: vi.fn(),
   getLoyaltyPointsConfig: vi.fn(),
+  isExcludedFromLoyaltyPoints: vi.fn(),
 }));
 vi.mock('./pointsEarnHandler', () => ({ tryClaimPointsCooldown: vi.fn(), getRemainingCooldownSeconds: vi.fn() }));
 
@@ -12,7 +13,7 @@ vi.mock('./pointsEarnHandler', () => ({ tryClaimPointsCooldown: vi.fn(), getRema
 const { logErrorSpy } = vi.hoisted(() => ({ logErrorSpy: vi.fn() }));
 vi.mock('../shared/logger', () => ({ createLogger: () => ({ info: vi.fn(), error: logErrorSpy }) }));
 
-import { getLoyaltyPointsBalance, resolveLoyaltyPointsGambleOutcome, getLoyaltyPointsConfig } from '../db';
+import { getLoyaltyPointsBalance, resolveLoyaltyPointsGambleOutcome, getLoyaltyPointsConfig, isExcludedFromLoyaltyPoints } from '../db';
 import { tryClaimPointsCooldown, getRemainingCooldownSeconds } from './pointsEarnHandler';
 import { executeGambleCommandForTwitch, registerGambleTwitchRuntime } from './gambleHandler';
 
@@ -27,6 +28,7 @@ beforeEach(() => {
   vi.mocked(getLoyaltyPointsBalance).mockResolvedValue(1000);
   vi.mocked(resolveLoyaltyPointsGambleOutcome).mockResolvedValue(900);
   vi.mocked(getLoyaltyPointsConfig).mockResolvedValue(ENABLED_CONFIG);
+  vi.mocked(isExcludedFromLoyaltyPoints).mockResolvedValue(false);
   vi.mocked(tryClaimPointsCooldown).mockReturnValue(true);
   vi.mocked(getRemainingCooldownSeconds).mockReturnValue(42);
   randomSpy = vi.spyOn(Math, 'random');
@@ -52,6 +54,15 @@ describe('executeGambleCommandForTwitch', () => {
     vi.mocked(getLoyaltyPointsConfig).mockResolvedValue(null);
     await executeGambleCommandForTwitch('channel', 1, '!gamble 100', 'alice', '!gamble');
     expect(SEND).not.toHaveBeenCalled();
+    expect(resolveLoyaltyPointsGambleOutcome).not.toHaveBeenCalled();
+  });
+
+  it('no-ops for an excluded bot, without claiming the cooldown or touching its balance', async () => {
+    vi.mocked(isExcludedFromLoyaltyPoints).mockResolvedValue(true);
+    await executeGambleCommandForTwitch('channel', 1, '!gamble 100', 'somebot', '!gamble');
+    expect(isExcludedFromLoyaltyPoints).toHaveBeenCalledWith(1, 'somebot');
+    expect(SEND).not.toHaveBeenCalled();
+    expect(tryClaimPointsCooldown).not.toHaveBeenCalled();
     expect(resolveLoyaltyPointsGambleOutcome).not.toHaveBeenCalled();
   });
 
