@@ -24,6 +24,16 @@ export function pushCompanionEvent(discordId: string, event: CompanionEvent): vo
 }
 
 /**
+ * Whether a Discord user has at least one companion app connected to the event stream. Advanced
+ * commands refund straight away when nothing is connected to receive (and acknowledge) them.
+ * @param discordId - Discord snowflake to check.
+ * @returns True if at least one connection is open.
+ */
+export function hasCompanionConnection(discordId: string): boolean {
+  return (connections.get(discordId)?.size ?? 0) > 0;
+}
+
+/**
  * Ends every open companion SSE connection for a Discord user, so a just-revoked token stops
  * receiving events immediately instead of continuing to stream to a connection that was
  * authenticated (via `requireCompanionKey`) before the revoke — auth is only checked once, at

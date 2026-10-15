@@ -232,7 +232,7 @@ async function getCounterCommandsById(
 }
 
 /** Disables `runSerializedCommandWrite`'s built-in collision check, leaving it to lock only. */
-const LOCK_ONLY_CHECKS = { includeCustomCommandTable: false, includeCounterTable: false } as const;
+const LOCK_ONLY_CHECKS = { includeCustomCommandTable: false, includeCounterTable: false, includeAdvancedCommandTable: false } as const;
 
 /**
  * Updates an existing counter's fields, locking both its old and new trigger/check commands

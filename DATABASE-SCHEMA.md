@@ -454,6 +454,108 @@ Expected constraints:
 - `UNIQUE KEY uq_alert_config (streamer_id, event_type)` — one row per streamer per event type.
 - Independent of `streamer_event_config` (Twitch chat messages) and `overlay_reward`/`overlay_video` (channel-point video overlay) — a streamer may enable an alert for an event type without enabling the corresponding chat message, or vice versa.
 
+## `advanced_command`
+
+A streamer's own "advanced command". Unlike `custom_command`, it belongs to one streamer, is never shared or assigned, and is managed by that streamer on the `/advanced-commands` page. A viewer fires it from Twitch chat by its trigger, paying loyalty points; the streamer fires it free from their Stream Deck. When it fires it can post a chat reply, play an overlay video, show an alerts-overlay alert, and send an `advanced_command` event to the streamer's companion app.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | `INT` PK, auto-increment | |
+| `streamer_id` | `INT` | FK to `streamer.id` ON DELETE CASCADE |
+| `name` | `VARCHAR(64)` | Display name; companion-app mappings match on it |
+| `trigger_string` | `VARCHAR(255)` nullable | Full prefixed chat trigger (e.g. `!hydrate`), lowercased; `NULL` makes the command Stream Deck only |
+| `is_enabled` | `TINYINT(1)` | Disabled commands fire from neither chat nor the Stream Deck |
+| `response` | `TEXT` nullable | Optional chat reply; `{user}`, `{args}`, `{arg}`, `{cost}` and `{balance}` placeholders (via `fillTemplate`) |
+| `point_cost` | `INT` | Base loyalty-point cost; `0` is free |
+| `price_step` | `INT` | Added to the cost for each use earlier in the same stream; `0` keeps the price fixed |
+| `max_cost` | `INT` nullable | Upper bound on the escalating cost; `NULL` is unbounded |
+| `global_cooldown_seconds` | `INT` | Channel-wide cooldown between chat uses; `0` disables it |
+| `user_cooldown_seconds` | `INT` | Per-viewer cooldown between chat uses; `0` disables it |
+| `min_role` | `ENUM('everyone','subscriber','vip','moderator')` | Lowest chat role allowed to use it; the broadcaster always can |
+| `live_only` | `TINYINT(1)` | When `1`, chat uses are refused while the channel is offline |
+| `max_uses_per_stream` | `INT` nullable | Cap on chat uses per stream; `NULL` is unlimited |
+| `max_uses_per_user_per_stream` | `INT` nullable | Cap on one viewer's chat uses per stream; `NULL` is unlimited |
+| `companion_enabled` | `TINYINT(1)` | When `1`, each use is pushed to the companion app, which must acknowledge it or the viewer is refunded |
+| `created_at` | `TIMESTAMP` | |
+| `updated_at` | `TIMESTAMP` | `ON UPDATE CURRENT_TIMESTAMP` |
+
+Expected constraints and behavior:
+
+- `UNIQUE KEY uq_advanced_command_name (streamer_id, name)` and `UNIQUE KEY uq_advanced_command_trigger (streamer_id, trigger_string)`.
+- Named `CHECK`s keep the costs, cooldowns and caps non-negative (caps positive when set) and `max_cost >= point_cost`.
+- Triggers share the command namespace: a trigger can't be a built-in command, and custom command, counter and advanced command triggers can't collide (see `commandWriteGuard.ts`).
+- Stream Deck triggers skip the cost, cooldowns, role, live-only and caps.
+
+## `advanced_command_param`
+
+Key/value parameters sent in an advanced command's companion event (`parameters`), so one companion-app action can be driven by different values per command.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `command_id` | `INT` | FK to `advanced_command.id` ON DELETE CASCADE |
+| `param_key` | `VARCHAR(32)` | Parameter name; letters, digits, `_` and `-` |
+| `param_value` | `VARCHAR(255)` | Parameter value |
+
+Expected constraints and behavior:
+
+- `PRIMARY KEY (command_id, param_key)`.
+- The app allows at most 10 parameters per command and replaces them all in one transaction when saving.
+
+## `advanced_command_video`
+
+Overlay videos an advanced command plays in the video-overlay browser source. One is picked at random by `weight` per use, the same as `overlay_reward_video`.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `command_id` | `INT` | FK to `advanced_command.id` ON DELETE CASCADE |
+| `video_id` | `INT` | FK to `overlay_video.id` ON DELETE CASCADE |
+| `weight` | `INT` | Relative pick weight; defaults to 1, and the app clamps it to at least 1 |
+
+Expected constraints and behavior:
+
+- `PRIMARY KEY (command_id, video_id)`.
+- Saving replaces all a command's rows in one transaction, and only accepts video IDs owned by the same streamer.
+
+## `advanced_command_alert`
+
+Optional alerts-overlay alert an advanced command shows. Same fields and asset folder as `alert_config`; no row means no alert.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `command_id` | `INT` PK | FK to `advanced_command.id` ON DELETE CASCADE |
+| `message_template` | `VARCHAR(500)` | On-screen text; same placeholders as the command's chat `response` |
+| `image_filename` | `VARCHAR(255)` nullable | Uploaded image/GIF filename, relative to `ALERT_ASSETS_FOLDER/<streamer_id>/` |
+| `sound_filename` | `VARCHAR(255)` nullable | Uploaded sound filename, relative to `ALERT_ASSETS_FOLDER/<streamer_id>/` |
+| `duration_ms` | `INT` | How long the alert stays on screen; `CHECK (duration_ms > 0)` |
+| `text_animation` | `ENUM('none','wave','pulse','glitch','shake','rainbow','flicker','tilt','bounce-in','typewriter')` | On-screen text animation style |
+
+## `advanced_command_usage`
+
+One row per advanced command use. It's the streamer's usage log, the count behind per-stream caps and escalating prices, and the ledger that makes companion refunds happen exactly once.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | `BIGINT` PK, auto-increment | |
+| `event_id` | `CHAR(36)` | UUID sent as the companion event's `id`; the companion app acknowledges by it |
+| `command_id` | `INT` nullable | FK to `advanced_command.id` ON DELETE SET NULL, so the log outlives the command |
+| `streamer_id` | `INT` | FK to `streamer.id` ON DELETE CASCADE |
+| `command_name` | `VARCHAR(64)` | The command's name when it was used |
+| `source` | `ENUM('chat','streamdeck')` | Where the use came from |
+| `twitch_username` | `VARCHAR(64)` nullable | The viewer's Twitch login; `NULL` for Stream Deck uses |
+| `points_spent` | `INT` | Points debited; `0` for free and Stream Deck uses |
+| `stream_started_at` | `DATETIME` nullable | Start time of the live stream the use happened in; `NULL` when offline |
+| `status` | `ENUM('pending','succeeded','refunded','no_ack_needed')` | `pending` while waiting for the companion app's acknowledgement |
+| `refund_reason` | `VARCHAR(64)` nullable | `no_companion`, `companion_error`, `no_ack` or `restart` |
+| `error_message` | `VARCHAR(255)` nullable | Error text the companion app reported, if any |
+| `triggered_at` | `TIMESTAMP` | |
+| `resolved_at` | `TIMESTAMP` nullable | When the status left `pending` |
+
+Expected constraints and behavior:
+
+- `UNIQUE KEY uq_advanced_command_usage_event (event_id)`.
+- A `pending` row moves to `succeeded` or `refunded` with a conditional `UPDATE … WHERE status = 'pending'`, so a late acknowledgement and a timeout can't both refund.
+- Rows still `pending` at startup are refunded (`restart`); the acknowledgement timers live in memory.
+
 ## `timer_command`
 
 Twitch-only auto-posted chat messages ("timer commands" — one message per row; a rotation is achieved by creating several timers), managed like `custom_command`: a global catalog assigned to Twitch-linked Discord users via `timer_command_streamer`, rather than owned by a single streamer. Config-only: the scheduler's live-status/chat-activity firing state lives in memory, keyed per (timer, assigned channel) pair (`timerCommandScheduler.ts`), not in this table, so a restart just restarts each one's countdown rather than replaying fires missed while the bot was down.

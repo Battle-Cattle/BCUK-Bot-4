@@ -172,6 +172,10 @@ vi.mock('../commands/gambleHandler', () => ({
   GAMBLE_COMMAND: '!gamble',
 }));
 
+vi.mock('../commands/advancedCommands/advancedCommandHandler', () => ({
+  executeAdvancedCommandForTwitch: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock('./twitchChatActivity', () => ({
   recordChatMessage: vi.fn(),
   forgetChannelChatActivity: vi.fn(),
@@ -214,6 +218,7 @@ import { executeFollowageForTwitch } from '../commands/followageHandler';
 import { awardPointsForChatMessage } from '../commands/pointsEarnHandler';
 import { executePointsCommandForTwitch } from '../commands/pointsHandler';
 import { executeGambleCommandForTwitch } from '../commands/gambleHandler';
+import { executeAdvancedCommandForTwitch } from '../commands/advancedCommands/advancedCommandHandler';
 import { recordChatMessage } from './twitchChatActivity';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -270,6 +275,8 @@ function makeChatMessage(overrides: {
   isMod?: boolean;
   isVip?: boolean;
   isBroadcaster?: boolean;
+  isSubscriber?: boolean;
+  isFounder?: boolean;
   displayName?: string;
   userId?: string;
   channelId?: string | null;
@@ -280,6 +287,8 @@ function makeChatMessage(overrides: {
       isMod: overrides.isMod ?? false,
       isVip: overrides.isVip ?? false,
       isBroadcaster: overrides.isBroadcaster ?? false,
+      isSubscriber: overrides.isSubscriber ?? false,
+      isFounder: overrides.isFounder ?? false,
       displayName: overrides.displayName,
       userId: overrides.userId ?? 'user-id',
     },
@@ -431,6 +440,19 @@ describe('handleTwitchMessage', () => {
     expect(executePointsCommandForTwitch).toHaveBeenCalledWith('streamer', 42, '!cmd', 'alice', '!cmd');
     await waitFor(() => expect(executeGambleCommandForTwitch).toHaveBeenCalledOnce());
     expect(executeGambleCommandForTwitch).toHaveBeenCalledWith('streamer', 42, '!cmd', 'alice', '!cmd');
+  });
+
+  it('dispatches advanced commands with the sender\'s login, display name and chat roles', () => {
+    sendMessage('#streamer', 'Alice', '!hydrate now', { displayName: 'AliceD', isVip: true, isFounder: true });
+
+    expect(executeAdvancedCommandForTwitch).toHaveBeenCalledWith({
+      channel: 'streamer',
+      userLogin: 'alice',
+      userName: 'AliceD',
+      message: '!hydrate now',
+      command: '!hydrate',
+      roles: { isBroadcaster: false, isMod: false, isVip: true, isSubscriber: true },
+    });
   });
 
   it('does not award points when the channel has no linked streamer', async () => {

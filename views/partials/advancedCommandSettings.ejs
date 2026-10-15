@@ -1,0 +1,66 @@
+<%# Settings fields shared by the add form and each command's edit form. Locals: c (command or
+    null for a new one), idPrefix (unique per form), roles. %>
+<% const v = c || { name: '', triggerString: '', isEnabled: true, response: '', pointCost: 0, priceStep: 0, maxCost: null,
+  globalCooldownSeconds: 0, userCooldownSeconds: 0, minRole: 'everyone', liveOnly: false, maxUsesPerStream: null,
+  maxUsesPerUserPerStream: null, companionEnabled: true }; %>
+<div class="form-row-wrap form-section-gap">
+  <div class="form-col-grow">
+    <label for="<%= idPrefix %>-name" class="form-label">Name</label>
+    <input id="<%= idPrefix %>-name" class="input full-width" name="name" maxlength="64" required value="<%= v.name %>" placeholder="Hydrate">
+  </div>
+  <div class="form-col-grow">
+    <label for="<%= idPrefix %>-trigger" class="form-label">Chat trigger <span class="muted">(blank = Stream Deck only)</span></label>
+    <input id="<%= idPrefix %>-trigger" class="input full-width" name="trigger" maxlength="255" value="<%= v.triggerString || '' %>" placeholder="!hydrate">
+  </div>
+</div>
+<div class="form-section-gap">
+  <label for="<%= idPrefix %>-response" class="form-label">Chat reply <span class="muted">(optional — {user}, {args}, {arg}, {cost}, {balance})</span></label>
+  <textarea id="<%= idPrefix %>-response" class="input full-width" name="response" maxlength="2000" rows="2"><%= v.response || '' %></textarea>
+</div>
+<div class="form-row-wrap form-section-gap">
+  <div class="form-col-grow">
+    <label for="<%= idPrefix %>-cost" class="form-label">Point cost</label>
+    <input id="<%= idPrefix %>-cost" class="input full-width" type="number" min="0" step="1" name="point_cost" value="<%= v.pointCost %>">
+  </div>
+  <div class="form-col-grow">
+    <label for="<%= idPrefix %>-step" class="form-label">Price increase per use this stream</label>
+    <input id="<%= idPrefix %>-step" class="input full-width" type="number" min="0" step="1" name="price_step" value="<%= v.priceStep %>">
+  </div>
+  <div class="form-col-grow">
+    <label for="<%= idPrefix %>-max-cost" class="form-label">Max cost <span class="muted">(blank = no cap)</span></label>
+    <input id="<%= idPrefix %>-max-cost" class="input full-width" type="number" min="0" step="1" name="max_cost" value="<%= v.maxCost ?? '' %>">
+  </div>
+</div>
+<div class="form-row-wrap form-section-gap">
+  <div class="form-col-grow">
+    <label for="<%= idPrefix %>-gcd" class="form-label">Channel cooldown (seconds)</label>
+    <input id="<%= idPrefix %>-gcd" class="input full-width" type="number" min="0" step="1" name="global_cooldown_seconds" value="<%= v.globalCooldownSeconds %>">
+  </div>
+  <div class="form-col-grow">
+    <label for="<%= idPrefix %>-ucd" class="form-label">Per-viewer cooldown (seconds)</label>
+    <input id="<%= idPrefix %>-ucd" class="input full-width" type="number" min="0" step="1" name="user_cooldown_seconds" value="<%= v.userCooldownSeconds %>">
+  </div>
+  <div class="form-col-grow">
+    <label for="<%= idPrefix %>-role" class="form-label">Who can use it</label>
+    <select id="<%= idPrefix %>-role" class="input full-width" name="min_role">
+      <% roles.forEach(function (role) { %>
+      <option value="<%= role %>" <%= v.minRole === role ? 'selected' : '' %>><%= { everyone: 'Everyone', subscriber: 'Subscribers+', vip: 'VIPs+', moderator: 'Moderators' }[role] %></option>
+      <% }); %>
+    </select>
+  </div>
+</div>
+<div class="form-row-wrap form-section-gap">
+  <div class="form-col-grow">
+    <label for="<%= idPrefix %>-max-uses" class="form-label">Max uses per stream <span class="muted">(blank = unlimited)</span></label>
+    <input id="<%= idPrefix %>-max-uses" class="input full-width" type="number" min="1" step="1" name="max_uses_per_stream" value="<%= v.maxUsesPerStream ?? '' %>">
+  </div>
+  <div class="form-col-grow">
+    <label for="<%= idPrefix %>-max-user-uses" class="form-label">Max uses per viewer per stream <span class="muted">(blank = unlimited)</span></label>
+    <input id="<%= idPrefix %>-max-user-uses" class="input full-width" type="number" min="1" step="1" name="max_uses_per_user_per_stream" value="<%= v.maxUsesPerUserPerStream ?? '' %>">
+  </div>
+</div>
+<div class="form-row-wrap form-section-gap">
+  <label class="form-label"><input type="checkbox" name="is_enabled" <%= v.isEnabled ? 'checked' : '' %>> Enabled</label>
+  <label class="form-label"><input type="checkbox" name="live_only" <%= v.liveOnly ? 'checked' : '' %>> Only while live</label>
+  <label class="form-label"><input type="checkbox" name="companion_enabled" <%= v.companionEnabled ? 'checked' : '' %>> Send to my companion app (refund if it fails)</label>
+</div>

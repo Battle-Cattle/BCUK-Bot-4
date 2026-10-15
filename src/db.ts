@@ -156,6 +156,7 @@ export {
   getBalance as getLoyaltyPointsBalance,
   adjustBalance as adjustLoyaltyPointsBalance,
   resolveGambleOutcome as resolveLoyaltyPointsGambleOutcome,
+  spendBalance as spendLoyaltyPoints,
   getLeaderboard as getLoyaltyPointsLeaderboard,
   DEFAULT_POINTS_PER_MESSAGE,
   DEFAULT_POINTS_COOLDOWN_SECONDS,
@@ -167,6 +168,35 @@ export { setLoyaltyPointsConfig } from './db/loyaltyPointsWrites';
 export { getExclusions as getLoyaltyPointsExclusions } from './db/loyaltyPointsExclusions';
 export { isExcludedFromLoyaltyPoints } from './db/loyaltyPointsExclusionCache';
 export { addLoyaltyPointsExclusion, removeLoyaltyPointsExclusion } from './db/loyaltyPointsExclusionWrites';
+
+// ─── Advanced commands ──────────────────────────────────────────────────────
+// Per-streamer commands with a loyalty-point cost, free Stream Deck triggers, and overlay and
+// companion-app effects.
+
+export type {
+  AdvancedCommandRole, AdvancedCommandSettings, AdvancedCommandAlert, AdvancedCommandAlertInput,
+  AdvancedCommandParam, AdvancedCommandEffectsInput,
+} from './db/advancedCommandValidation';
+export {
+  ADVANCED_COMMAND_ROLES, MAX_ADVANCED_COMMAND_PARAMS, AdvancedCommandValidationError,
+} from './db/advancedCommandValidation';
+export type { DbAdvancedCommand, AdvancedCommandVideo, AdvancedCommandChatRoute } from './db/advancedCommands';
+export {
+  AdvancedCommandConflictError, listAdvancedCommands, getAdvancedCommand,
+  saveAdvancedCommandEffects, setAdvancedCommandAlertAsset,
+} from './db/advancedCommands';
+export { getAdvancedCommandForTwitchChannel } from './db/advancedCommandCache';
+export {
+  addAdvancedCommand, updateAdvancedCommand, setAdvancedCommandEnabled, removeAdvancedCommand,
+} from './db/advancedCommandWrites';
+export type {
+  AdvancedCommandUsageSource, AdvancedCommandUsageStatus, AdvancedCommandRefundReason,
+  AdvancedCommandUsageEntry, AdvancedCommandUsageWindow, NewAdvancedCommandUsage, ResolvedAdvancedCommandUsage,
+} from './db/advancedCommandUsage';
+export {
+  recordAdvancedCommandUsage, countAdvancedCommandUses, resolveAdvancedCommandUsage,
+  getAdvancedCommandUsageStreamerId, listPendingAdvancedCommandUsage, listRecentAdvancedCommandUsage,
+} from './db/advancedCommandUsage';
 
 // ─── Timer commands ─────────────────────────────────────────────────────────
 

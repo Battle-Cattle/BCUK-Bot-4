@@ -215,6 +215,20 @@ export function isChannelLive(login: string): boolean {
   return liveStates.getByLogin(login.toLowerCase()) !== undefined;
 }
 
+/**
+ * Returns when `login`'s current stream went live, as tracked by the monitor. Advanced commands
+ * use it to tell one stream from the next for per-stream caps and escalating prices.
+ * @param login - Twitch login name to check.
+ * @returns The stream's start time, or null if the channel isn't live (or Helix sent no valid
+ *   start time).
+ */
+export function getChannelStreamStart(login: string): Date | null {
+  const startedAt = liveStates.getByLogin(login.toLowerCase())?.currentStream.started_at;
+  if (!startedAt) return null;
+  const date = new Date(startedAt);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
 // ─── Multi-twitch URL query (for !multi command) ─────────────────────────────
 
 /**

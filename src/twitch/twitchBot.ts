@@ -12,6 +12,7 @@ import { executeFollowageForTwitch } from '../commands/followageHandler';
 import { awardPointsForChatMessage } from '../commands/pointsEarnHandler';
 import { executePointsCommandForTwitch, POINTS_COMMAND } from '../commands/pointsHandler';
 import { executeGambleCommandForTwitch, GAMBLE_COMMAND } from '../commands/gambleHandler';
+import { executeAdvancedCommandForTwitch } from '../commands/advancedCommands/advancedCommandHandler';
 import { fireAndForget, extractCommand } from '../commands/commandUtils';
 import { recordChatMessage } from './twitchChatActivity';
 import { setTwitchChannel } from '../shared/statusStore';
@@ -209,6 +210,23 @@ function handleTwitchMessage(channel: string, user: string, message: string, msg
       log,
     );
     fireAndForget(executeCountdownForTwitch(normalizedChannel, message, command), 'Countdown error', log);
+    fireAndForget(
+      executeAdvancedCommandForTwitch({
+        channel: normalizedChannel,
+        userLogin: user.toLowerCase(),
+        userName: displayName,
+        message,
+        command,
+        roles: {
+          isBroadcaster: msg.userInfo.isBroadcaster,
+          isMod: msg.userInfo.isMod,
+          isVip: msg.userInfo.isVip,
+          isSubscriber: msg.userInfo.isSubscriber || msg.userInfo.isFounder,
+        },
+      }),
+      'Advanced command error',
+      log,
+    );
     fireAndForget(
       executeFollowageForTwitch(normalizedChannel, message, msg.channelId, { id: msg.userInfo.userId, name: displayName }, command),
       'Followage error',

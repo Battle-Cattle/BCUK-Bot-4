@@ -104,6 +104,8 @@ Auth middleware (`src/web/middleware.ts`), applied in this order:
 
 **Timers exception:** the same self-service model applies to Timers. A user with a linked Twitch account can add timers to their own channel, edit/toggle/delete timers assigned to them alone, and remove themselves from shared ones. Mod+ manage the whole catalog and its assignments. The rules live in `src/web/routes/timerPermissions.ts` (plus the shared `selfServiceAccess.ts`), and streamer writes go through the owner-checked `*OwnTimerCommand*` DB functions.
 
+**Advanced Commands:** per-streamer and self-service only — no catalog, assignments or Mod+ override. Every route resolves the session user's (or the Stream Deck/companion key owner's) streamer record, and every DB function is scoped by `streamer_id`. The DB layer is `src/db/advancedCommand*.ts`, the runtime (gates, effects, companion acknowledgements and refunds) is `src/commands/advancedCommands/`, and the use ledger `advanced_command_usage` makes a refund happen at most once.
+
 ---
 
 ## Design Decisions

@@ -23,12 +23,14 @@ import { registerMultiTwitchRuntime } from './commands/multiCommandHandler';
 import { registerShoutoutRuntime } from './commands/shoutoutHandler';
 import { registerCountdownTwitchRuntime } from './commands/countdownHandler';
 import { registerFollowageRuntime } from './commands/followageHandler';
+import { registerAdvancedCommandRuntime } from './commands/advancedCommands/advancedCommandRuntime';
+import { sweepPendingAdvancedCommandUsage } from './commands/advancedCommands/advancedCommandRefunds';
 import {
   registerEventSubOverlayRuntime, registerEventSubTwitchRuntime, registerEventSubCompanionRuntime,
   registerEventSubAlertRuntime, registerEventSubDashboardRuntime, registerEventSubReloadRuntime,
 } from './twitch/eventsub/twitchEventSubRuntime';
 import { pushOverlayEvent } from './web/routes/overlaySource';
-import { pushCompanionEvent } from './web/routes/companionEvents';
+import { pushCompanionEvent, hasCompanionConnection } from './web/routes/companionEvents';
 import { pushAlertEvent } from './web/routes/alertsOverlaySource';
 import { pushPricingUpdate } from './web/routes/channelPointsEvents';
 import { pushDashboardEvent } from './web/routes/dashboardEvents';
@@ -219,6 +221,7 @@ function registerTwitchRuntimes(): void {
   registerShoutoutRuntime({ send: sayInChannel });
   registerCountdownTwitchRuntime({ send: sayInChannel });
   registerFollowageRuntime({ send: sayInChannel });
+  registerAdvancedCommandRuntime({ send: sayInChannel, hasCompanionConnection });
   registerEventSubOverlayRuntime({ pushOverlayEvent });
   registerEventSubCompanionRuntime({ pushCompanionEvent });
   registerEventSubAlertRuntime({ pushAlertEvent });
@@ -295,6 +298,14 @@ async function main(): Promise<void> {
   });
   await primeOwnerAlertBaseline();
   startOwnerAlertWatcher();
+  // Refund advanced command uses a restart left waiting for a companion acknowledgement (their
+  // timers lived in the old process). Runs before Twitch chat connects, so it can't catch a new
+  // use; a failure is logged, not fatal — the rows stay pending for the next start.
+  try {
+    await sweepPendingAdvancedCommandUsage();
+  } catch (err) {
+    log.error('Failed to refund pending advanced command uses:', err);
+  }
   // Don't let a Twitch chat failure (e.g. a revoked bot token or an IRC outage) abort startup —
   // the web panel must still come up so the owner can reconnect the bot via /admin/bot-auth.
   try {

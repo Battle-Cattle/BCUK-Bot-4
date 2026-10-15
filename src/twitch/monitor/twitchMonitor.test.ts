@@ -27,6 +27,7 @@ vi.mock('./twitchMonitorStartup', () => ({ performStartupLiveCheck: vi.fn().mock
 import {
   startTwitchMonitor, stopTwitchMonitor, triggerImmediateLiveCheck, getLiveStates,
   shutdownTwitchMonitor, restartTwitchMonitor, getMultiTwitchDataForChannel, isChannelLive,
+  getChannelStreamStart,
 } from './twitchMonitor';
 import { getAllStreamersWithGroups, clearStreamerLive } from '../../db';
 import { getUsers, getStreams } from '../twitchApi';
@@ -444,6 +445,28 @@ describe('shutdown, restart, multitwitch lookup, and live-state ordering', () =>
     await triggerImmediateLiveCheck('teststreamer');
 
     expect(isChannelLive('TestStreamer')).toBe(true);
+  });
+
+  it('getChannelStreamStart returns null offline and the stream start once live', async () => {
+    vi.mocked(getAllStreamersWithGroups).mockResolvedValue([makeStreamer()] as any);
+    vi.mocked(getUsers).mockResolvedValue([{ login: 'teststreamer', id: 'uid-5' }]);
+    await startTwitchMonitor();
+    expect(getChannelStreamStart('teststreamer')).toBeNull();
+
+    vi.mocked(getStreams).mockResolvedValueOnce([{ ...makeStream(), started_at: '2026-10-15T18:00:00Z' }] as any);
+    await triggerImmediateLiveCheck('teststreamer');
+
+    expect(getChannelStreamStart('TestStreamer')).toEqual(new Date('2026-10-15T18:00:00Z'));
+  });
+
+  it('getChannelStreamStart returns null when the live stream has no valid start time', async () => {
+    vi.mocked(getAllStreamersWithGroups).mockResolvedValue([makeStreamer()] as any);
+    vi.mocked(getUsers).mockResolvedValue([{ login: 'teststreamer', id: 'uid-5' }]);
+    await startTwitchMonitor();
+    vi.mocked(getStreams).mockResolvedValueOnce([{ ...makeStream(), started_at: 'not a date' }] as any);
+    await triggerImmediateLiveCheck('teststreamer');
+
+    expect(getChannelStreamStart('teststreamer')).toBeNull();
   });
 
   it('getLiveStates sorts by group name, then by login within a group', async () => {

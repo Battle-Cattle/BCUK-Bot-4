@@ -6,9 +6,11 @@ vi.mock('./users', () => ({
   deleteUnlinkedUserRecord: vi.fn(),
 }));
 vi.mock('./customCommandCache', () => ({ invalidateCustomCommandLookupCache: vi.fn() }));
+vi.mock('./advancedCommandCache', () => ({ invalidateAdvancedCommandLookupCache: vi.fn() }));
 
 import { upsertUserRecord, setTwitchBotEnabledRecord, deleteUnlinkedUserRecord } from './users';
 import { invalidateCustomCommandLookupCache } from './customCommandCache';
+import { invalidateAdvancedCommandLookupCache } from './advancedCommandCache';
 import { upsertUser, updateTwitchBotEnabled, deleteUnlinkedUser } from './userWrites';
 
 beforeEach(() => {
@@ -84,5 +86,25 @@ describe('updateTwitchBotEnabled', () => {
     vi.mocked(setTwitchBotEnabledRecord).mockRejectedValue(new Error('DB error'));
     await expect(updateTwitchBotEnabled('1', true)).rejects.toThrow('DB error');
     expect(invalidateCustomCommandLookupCache).not.toHaveBeenCalled();
+  });
+});
+
+describe('advanced command cache invalidation', () => {
+  it('invalidates the advanced command cache alongside the custom command cache on a Twitch name change', async () => {
+    vi.mocked(upsertUserRecord).mockResolvedValue(true);
+    await upsertUser('1', 'Alice', 0, 'alice_chan');
+    expect(invalidateAdvancedCommandLookupCache).toHaveBeenCalledOnce();
+  });
+
+  it('does not invalidate the advanced command cache when the Twitch name is untouched', async () => {
+    await upsertUser('1', 'Alice', 0);
+    expect(invalidateAdvancedCommandLookupCache).not.toHaveBeenCalled();
+  });
+
+  it('invalidates the advanced command cache when the Twitch bot is toggled or a user deleted', async () => {
+    vi.mocked(deleteUnlinkedUserRecord).mockResolvedValue(true);
+    await updateTwitchBotEnabled('1', true);
+    await deleteUnlinkedUser('1');
+    expect(invalidateAdvancedCommandLookupCache).toHaveBeenCalledTimes(2);
   });
 });

@@ -182,6 +182,32 @@ export async function resolveGambleOutcome(
 }
 
 /**
+ * Atomically spends `cost` points from a viewer's balance, only if they have at least that many —
+ * the same conditional debit {@link resolveGambleOutcome} uses, so two concurrent spends can't
+ * both pass a balance check made beforehand.
+ * @param streamerId - The streamer's `streamer.id`.
+ * @param twitchUsername - The viewer's Twitch login.
+ * @param cost - The positive number of points to spend.
+ * @returns The viewer's balance after spending, or null if it was too low (including a viewer
+ *   with no row at all).
+ */
+export async function spendBalance(streamerId: number, twitchUsername: string, cost: number): Promise<number | null> {
+  return withTransaction(async (conn) => {
+    const [result] = await conn.execute<mysql.ResultSetHeader>(
+      `UPDATE loyalty_points
+       SET balance = LAST_INSERT_ID(balance - ?)
+       WHERE streamer_id = ? AND twitch_username = ? AND balance >= ?`,
+      [cost, streamerId, twitchUsername, cost],
+    );
+    if (result.affectedRows === 0) return null;
+    const [rows] = await conn.execute<mysql.RowDataPacket[]>('SELECT LAST_INSERT_ID() AS balance');
+    // See adjustBalance's identical comment: LAST_INSERT_ID() is a BIGINT expression that can
+    // come back as a string, safely parsed back here since this is a bounded points balance.
+    return Number(rows[0]!.balance); // SELECT LAST_INSERT_ID() always returns one row
+  });
+}
+
+/**
  * Creates or replaces a streamer's loyalty-points earn-rate configuration.
  * @param streamerId - The streamer's `streamer.id`.
  * @param config - The new configuration.

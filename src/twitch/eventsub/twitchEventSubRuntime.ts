@@ -64,8 +64,31 @@ export interface CompanionActivityEvent {
   occurredAt: string;
 }
 
+/**
+ * An advanced command use forwarded to the streamer's companion app. When `ackRequired` is set,
+ * the app must acknowledge it (`POST /api/companion/commands/ack`) or the viewer is refunded.
+ */
+export interface CompanionAdvancedCommandEvent {
+  type: 'advanced_command';
+  /** Unique per use (`advanced_command_usage.event_id`); the acknowledgement quotes it back. */
+  id: string;
+  commandId: number;
+  commandName: string;
+  source: 'chat' | 'streamdeck';
+  /** The viewer's Twitch login and display name; null for a Stream Deck trigger. */
+  userLogin: string | null;
+  userName: string | null;
+  /** Text after the trigger in chat, or null when there was none. */
+  args: string | null;
+  pointsSpent: number;
+  /** The command's key/value parameters. */
+  parameters: Record<string, string>;
+  ackRequired: boolean;
+  triggeredAt: string;
+}
+
 /** An event forwarded to a user's companion app over the `/api/companion/events` SSE stream. */
-export type CompanionEvent = CompanionRedemptionEvent | CompanionActivityEvent;
+export type CompanionEvent = CompanionRedemptionEvent | CompanionActivityEvent | CompanionAdvancedCommandEvent;
 
 interface EventSubCompanionRuntime {
   /**
@@ -93,8 +116,8 @@ export function registerEventSubCompanionRuntime(runtime: EventSubCompanionRunti
 // server to be running yet.
 /** A customisable alert (follow/sub/resub/giftsub/raid) pushed to a streamer's alerts browser source. */
 export interface AlertPayload {
-  /** Which event type this alert is for. */
-  type: AlertEventType;
+  /** Which event type this alert is for: a Twitch event, or an advanced command's own alert. */
+  type: AlertEventType | 'advanced_command';
   /** On-screen text, already filled from the streamer's message template. */
   message: string;
   /** Server-relative URL of the configured image/GIF, or null if none is set. */

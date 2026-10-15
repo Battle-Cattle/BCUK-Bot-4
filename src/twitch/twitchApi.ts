@@ -207,6 +207,8 @@ export interface TwitchStream {
   thumbnail_url: string;
   /** 'live' when streaming, '' when not */
   type: string;
+  /** ISO 8601 time the stream went live (Helix always sends it; optional for older fixtures). */
+  started_at?: string;
 }
 
 /**

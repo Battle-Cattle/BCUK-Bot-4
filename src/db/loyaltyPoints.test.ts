@@ -27,7 +27,7 @@ vi.mock('mysql2/promise', () => ({ default: {} }));
 
 import { makeMockPool } from '../test-utils/mockMysqlPool';
 import { getPool } from './pool';
-import { getBalance, getLeaderboard, getConfig, adjustBalance, resolveGambleOutcome, setConfig, getAllConfigs } from './loyaltyPoints';
+import { getBalance, getLeaderboard, getConfig, adjustBalance, resolveGambleOutcome, setConfig, getAllConfigs, spendBalance } from './loyaltyPoints';
 
 /** Builds a fake pool via the shared helper, matching this file's `(rows, meta)` call shape. */
 function makePool(rows: unknown[] = [], meta: unknown = {}) {
@@ -319,5 +319,32 @@ describe('getAllConfigs', () => {
       { streamerId: 1, config: { enabled: true, pointsPerMessage: 1, cooldownSeconds: 60, pointsPerSub: 100, pointsPerGiftSub: 100 } },
       { streamerId: 2, config: { enabled: false, pointsPerMessage: 3, cooldownSeconds: 15, pointsPerSub: 50, pointsPerGiftSub: 50 } },
     ]);
+  });
+});
+
+// ─── spendBalance ─────────────────────────────────────────────────────────────
+
+describe('spendBalance', () => {
+  it('debits conditionally on the balance covering the cost and returns the new balance', async () => {
+    const pool = makePool();
+    pool._conn.execute
+      .mockResolvedValueOnce([{ affectedRows: 1 }, []])
+      .mockResolvedValueOnce([[{ balance: '40' }], []]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+
+    expect(await spendBalance(1, 'viewer', 60)).toBe(40);
+    const [sql, params] = pool._conn.execute.mock.calls[0]!;
+    expect(sql).toContain('balance >= ?');
+    expect(params).toEqual([60, 1, 'viewer', 60]);
+    expect(pool._conn.commit).toHaveBeenCalled();
+  });
+
+  it('returns null without reading back when the balance is too low', async () => {
+    const pool = makePool();
+    pool._conn.execute.mockResolvedValueOnce([{ affectedRows: 0 }, []]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+
+    expect(await spendBalance(1, 'viewer', 60)).toBeNull();
+    expect(pool._conn.execute).toHaveBeenCalledOnce();
   });
 });
