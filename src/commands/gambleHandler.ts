@@ -1,5 +1,5 @@
 import { createLogger } from '../shared/logger';
-import { getLoyaltyPointsBalance, resolveLoyaltyPointsGambleOutcome, getLoyaltyPointsConfig } from '../db';
+import { getLoyaltyPointsBalance, resolveLoyaltyPointsGambleOutcome, getLoyaltyPointsConfig, isExcludedFromLoyaltyPoints } from '../db';
 import { resolveCommand, extractArgs } from './commandUtils';
 import { createRuntimeRegistry } from '../shared/runtimeRegistry';
 import type { TwitchSendRuntime } from './twitchRuntime';
@@ -83,7 +83,8 @@ async function sendGambleMessage(channel: string, message: string): Promise<void
  * number, `1,000`, `5k`, `40%`, or `all`), enforces the shared points cooldown (the same one
  * passive chat-earn uses, so a viewer can't alternate between the two to dodge either one's
  * cooldown), and sends the result via the registered Twitch runtime. No-ops silently if the
- * streamer hasn't opted into Loyalty Points. An invalid amount gets a usage reply without
+ * streamer hasn't opted into Loyalty Points, or if the sender is on the streamer's "Exclude bot"
+ * list (an excluded bot keeps whatever balance it had, but can't gamble it). An invalid amount gets a usage reply without
  * consuming the cooldown — only an actual gamble does that. A bet still on cooldown gets a
  * "try again in Ns" reply rather than silence, since the cooldown can be claimed by something
  * other than the viewer's own prior `!gamble` (passive chat-earn, including other commands —
@@ -111,6 +112,7 @@ export async function executeGambleCommandForTwitch(
 
   const config = await getLoyaltyPointsConfig(streamerId);
   if (!config || !config.enabled) return;
+  if (await isExcludedFromLoyaltyPoints(streamerId, username)) return;
 
   const bet = await resolveBet(streamerId, username, extractArgs(rawMessage));
   if (bet === null) {

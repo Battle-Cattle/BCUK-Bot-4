@@ -113,7 +113,7 @@
                 <td><%= entry.twitchUsername %></td>
                 <td><%= entry.balance %></td>
                 <td>
-                  <form method="POST" action="/loyalty-points/exclusions">
+                  <form method="POST" action="/loyalty-points/exclusions" class="js-confirm-exclude-bot" data-twitch-username="<%= entry.twitchUsername %>">
                     <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                     <input type="hidden" name="twitch_username" value="<%= entry.twitchUsername %>">
                     <button type="submit" class="btn btn-sm btn-danger" aria-label="Exclude bot <%= entry.twitchUsername %>">Exclude bot</button>
@@ -130,8 +130,8 @@
       <div class="card card-spaced">
         <div class="card-header"><span class="card-icon">🤖</span><span class="card-label">Excluded Bots</span></div>
         <div class="card-body">
-          <p class="muted">Chat bots excluded with the leaderboard's "Exclude bot" button don't earn points
-            and aren't shown on the leaderboard. Removing an exclusion restores their previous balance.</p>
+          <p class="muted">Chat bots excluded with the leaderboard's "Exclude bot" button don't earn points,
+            can't use !gamble, and aren't shown on the leaderboard. Removing an exclusion restores their previous balance.</p>
           <% if (excludedUsers.length === 0) { %>
           <p class="muted">No bots are excluded.</p>
           <% } else { %>
@@ -160,6 +160,8 @@
       <% } %>
     </section>
   </main>
+  <script src="/utils.js"></script>
+  <script src="/loyaltyPoints.js"></script>
   <%- include('partials/pwa-register') %>
   <%- include('partials/footer') %>
 </body>

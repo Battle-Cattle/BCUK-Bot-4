@@ -28,6 +28,13 @@ describe('views/loyaltyPoints.ejs', () => {
     expect(html).toContain('name="twitch_username" value="viewer1"');
   });
 
+  it('asks for confirmation before excluding, naming the account', async () => {
+    const html = await render({ leaderboard: [{ twitchUsername: 'pokemoncommunitygame', balance: 900 }] });
+    expect(html).toContain('class="js-confirm-exclude-bot" data-twitch-username="pokemoncommunitygame"');
+    expect(html).toContain('<script src="/utils.js"></script>');
+    expect(html).toContain('<script src="/loyaltyPoints.js"></script>');
+  });
+
   it('lists excluded bots with a "Remove exclusion" button', async () => {
     const html = await render({ excludedUsers: ['bcuk_bot'] });
     expect(html).toContain('action="/loyalty-points/exclusions/remove"');
