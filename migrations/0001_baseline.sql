@@ -1,10 +1,12 @@
--- BCUK Bot 4 — Full Database Schema
+-- BCUK Bot 4 — Baseline schema
 -- MySQL 8.x | utf8mb4 | utf8mb4_unicode_ci
 --
--- Creates all tables from scratch for a fresh install.
+-- The full schema as of the switch to automated migrations (src/db/migrations.ts). The bot runs
+-- it on first start against an empty database. A database that already had these tables records
+-- it as applied without running it. Never edit this file: schema changes go in a new numbered
+-- migration after it.
 -- Table order respects foreign key dependencies.
 --
--- The migrations/ directory contains scripts for upgrading an existing install.
 -- The sessions table is omitted — express-mysql-session creates it automatically.
 
 SET NAMES utf8mb4;

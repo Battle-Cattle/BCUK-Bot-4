@@ -231,7 +231,7 @@ async function isLiveOwner(req: Request): Promise<boolean> {
 /**
  * Ensures the session user is the bot owner (`user.is_owner`), otherwise renders a
  * 403. Distinct from {@link requireAdmin}: `isOwner` is a global super-admin flag set
- * manually in the DB (see `user.is_owner` in schema.sql), not a per-guild `AccessLevel`
+ * manually in the DB (see `user.is_owner` in DATABASE-SCHEMA.md), not a per-guild `AccessLevel`
  * — an Admin in a given guild is not necessarily the owner. Used to gate features
  * still being trialled to the single most-trusted account before a wider rollout.
  * Owner status is re-read from the DB on every call (see {@link isLiveOwner}).
