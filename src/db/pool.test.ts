@@ -10,13 +10,22 @@ vi.mock('../shared/config', () => ({
   DB_NAME: 'test-db',
 }));
 
-import { getPool, closePool, withTransaction, withTransactionOrNotFound, runInTransaction } from './pool';
+import { getPool, closePool, connectionOptions, withTransaction, withTransactionOrNotFound, runInTransaction } from './pool';
 
 beforeEach(async () => {
   vi.clearAllMocks();
   createPool.mockReturnValue({ end: vi.fn().mockResolvedValue(undefined) });
   // Reset the module-level singleton between tests.
   await closePool();
+});
+
+describe('connectionOptions', () => {
+  it('returns the configured settings with BIGINTs as strings', () => {
+    expect(connectionOptions()).toEqual(expect.objectContaining({
+      host: 'test-host', port: 1234, user: 'test-user', password: 'test-password', database: 'test-db',
+      supportBigNumbers: true, bigNumberStrings: true, connectTimeout: 10_000,
+    }));
+  });
 });
 
 describe('getPool', () => {

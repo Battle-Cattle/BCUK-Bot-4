@@ -62,7 +62,7 @@ Tests run in Vitest's `vmThreads` pool (each file gets a fresh VM context on a r
 
 ## Startup Sequence (`src/index.ts`)
 
-Boot order in `main()`: verify DB connectivity (ping, exit 1 on failure) → wire Twitch/EventSub runtime callbacks → `reloadGuildRegistry()` (must complete before Discord connects, exit 1 on failure) → start Discord bot → start Twitch bot → start web panel (a listen failure such as `EADDRINUSE` exits 1 — most likely an old process still running) → start schedulers (counter/reward-pricing/timer) → start Twitch monitor + EventSub (fire-and-forget, catch-and-log only, doesn't crash the process).
+Boot order in `main()`: verify DB connectivity (ping, exit 1 on failure) → apply pending schema migrations (exit 1 on failure) → wire Twitch/EventSub runtime callbacks → `reloadGuildRegistry()` (must complete before Discord connects, exit 1 on failure) → start Discord bot → start Twitch bot → start web panel (a listen failure such as `EADDRINUSE` exits 1 — most likely an old process still running) → start schedulers (counter/reward-pricing/timer) → start Twitch monitor + EventSub (fire-and-forget, catch-and-log only, doesn't crash the process).
 
 - **`uncaughtException`/`unhandledRejection`** both log and `process.exit(1)` — deliberate: the app fails loudly instead of limping on with a corrupted state, and production's systemd unit (`deploy/bcuk-bot.service`, `Restart=on-failure`) brings it back up from a clean start. Exit 1 for fatal errors and 0 only after a deliberate `shutdown()`, so systemd can tell them apart. Don't add a handler that swallows and continues.
 - **`GET /healthz`** (`src/web/server.ts`) answers once the web panel is listening, which `main()` reaches only after the DB ping, guild registry and bot startup. `deploy.sh` polls it after restarting the service to confirm the deploy came up. Keep it unauthenticated, ahead of the session and rate-limit middleware, and free of any detail beyond "ok".
@@ -116,7 +116,9 @@ Auth middleware (`src/web/middleware.ts`), applied in this order:
 
 **MySQL 8 upsert:** Row-alias form only: `VALUES (...) AS new_row`. Deprecated `VALUES(col)` not used.
 
-**Docs:** `DATABASE-SCHEMA.md` is the schema reference — the DB is managed outside this repo, don't infer schema from migrations. `.devin/wiki.json` is a purpose-only architecture outline (no full prose) — useful as a map before diving into source, not a substitute for reading it.
+**Migrations:** the bot applies pending `migrations/NNNN_*.sql` files on startup (`src/db/migrations.ts`, tracked in `schema_migrations`; see the README's "Database migrations"). `0001_baseline.sql` is the full schema at the switch. Any schema change is a new numbered file plus a matching `DATABASE-SCHEMA.md` update (a test replays the migrations against the doc). Never edit an applied migration — startup fails on a checksum mismatch.
+
+**Docs:** `DATABASE-SCHEMA.md` is the schema reference. `.devin/wiki.json` is a purpose-only architecture outline (no full prose) — useful as a map before diving into source, not a substitute for reading it.
 
 ---
 

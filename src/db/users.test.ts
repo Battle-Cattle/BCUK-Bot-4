@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { readFileSync, readdirSync } from 'fs';
-import path from 'path';
 import { mockLogger } from '../test-utils/loggerMock';
+import { schemaFromMigrations } from '../test-utils/migrationSchema';
 
 vi.mock('../shared/logger', () => ({ createLogger: mockLogger }));
 vi.mock('./pool', () => ({ getPool: vi.fn() }));
@@ -450,22 +449,9 @@ describe('deleteUnlinkedUserRecord', () => {
     expect(pool._conn.release).not.toHaveBeenCalled();
   });
 
-  it('guards every foreign key to `user` declared in schema.sql or in a table only migrations/ creates', () => {
-    const root = path.join(__dirname, '../..');
-    const migrationsDir = path.join(root, 'migrations');
-    const createTable = /CREATE TABLE (?:IF NOT EXISTS )?`?(\w+)`?\s*\(([\s\S]*?)\)\s*ENGINE/g;
+  it('guards every foreign key to `user` the migrations declare', () => {
     const userFk = /FOREIGN KEY \((\w+)\) REFERENCES `?user`?\s*\(discord_id\)/g;
-    // schema.sql is authoritative for the tables it declares; migrations can carry older shapes
-    // of those tables, so only tables missing from schema.sql (e.g. webauthn_*) are read from them.
-    const tables = new Map<string, string>();
-    for (const [, table, body] of readFileSync(path.join(root, 'schema.sql'), 'utf8').matchAll(createTable)) {
-      tables.set(table!, body!);
-    }
-    for (const file of readdirSync(migrationsDir).filter((f) => f.endsWith('.sql'))) {
-      for (const [, table, body] of readFileSync(path.join(migrationsDir, file), 'utf8').matchAll(createTable)) {
-        if (!tables.has(table!)) tables.set(table!, body!);
-      }
-    }
+    const tables = new Map([...schemaFromMigrations()].map(([name, { definition }]) => [name, definition]));
     const referencing: string[] = [];
     for (const [table, body] of tables) {
       for (const [, column] of body.matchAll(userFk)) referencing.push(`${table}.${column}`);

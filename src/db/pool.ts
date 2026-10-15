@@ -3,21 +3,32 @@ import { DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME } from '../shared/confi
 
 let pool: mysql.Pool | undefined;
 
+/**
+ * Connection settings shared by the pool and the migration runner's dedicated connection, so
+ * both talk to the same database the same way (including BIGINT columns as strings).
+ * @returns Host, credentials, database and number-handling options for `mysql2`.
+ */
+export function connectionOptions(): mysql.ConnectionOptions {
+  return {
+    host: DB_HOST,
+    port: DB_PORT,
+    user: DB_USER,
+    password: DB_PASSWORD,
+    database: DB_NAME,
+    supportBigNumbers: true,
+    bigNumberStrings: true,
+    connectTimeout: 10_000,
+  };
+}
+
 /** Returns the shared connection pool, creating it on first use. */
 export function getPool(): mysql.Pool {
   if (!pool) {
     pool = mysql.createPool({
-      host: DB_HOST,
-      port: DB_PORT,
-      user: DB_USER,
-      password: DB_PASSWORD,
-      database: DB_NAME,
-      supportBigNumbers: true,
-      bigNumberStrings: true,
+      ...connectionOptions(),
       waitForConnections: true,
       connectionLimit: 15,
       queueLimit: 100,
-      connectTimeout: 10_000,
       // `connectTimeout` only bounds opening a *new* connection. Without these, a
       // connection whose socket goes silently dead (e.g. a network drop that never
       // sends a TCP RST/FIN) can sit hung indefinitely — mysql2 only frees a pooled

@@ -14,7 +14,7 @@ vi.mock('./db', () => ({
   })),
   closePool: vi.fn().mockResolvedValue(undefined),
   pingDb: vi.fn().mockResolvedValue(true),
-  isRedemptionLedgerReady: vi.fn().mockResolvedValue(true),
+  runMigrations: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('./shared/healthStore', () => ({
   recordDbPing: vi.fn(),
@@ -243,21 +243,24 @@ describe('startup — guild registry preload', () => {
       .toBeLessThan(vi.mocked(startOwnerAlertWatcher).mock.invocationCallOrder[0]!);
   });
 
-  it('calls process.exit(1) and does not start the bot when the redemption_handled migration is missing', async () => {
+  it('runs the schema migrations after the DB ping and before loading the guild registry', async () => {
     const db = await import('./db.js');
-    const { startDiscordBot } = await import('./discord/discordBot.js');
-    vi.mocked(db.isRedemptionLedgerReady).mockResolvedValueOnce(false);
+    const { recordDbPing } = await import('./shared/healthStore.js');
+    const { reloadGuildRegistry } = await import('./discord/guildRegistry.js');
 
     await runMain();
 
-    expect(exitSpy).toHaveBeenCalledWith(1);
-    expect(vi.mocked(startDiscordBot)).not.toHaveBeenCalled();
+    expect(vi.mocked(db.runMigrations)).toHaveBeenCalledOnce();
+    expect(vi.mocked(recordDbPing).mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(db.runMigrations).mock.invocationCallOrder[0]!);
+    expect(vi.mocked(db.runMigrations).mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(reloadGuildRegistry).mock.invocationCallOrder[0]!);
   });
 
-  it('calls process.exit(1) and does not start the bot when the redemption_handled check itself errors', async () => {
+  it('calls process.exit(1) and does not start the bot when a migration fails', async () => {
     const db = await import('./db.js');
     const { startDiscordBot } = await import('./discord/discordBot.js');
-    vi.mocked(db.isRedemptionLedgerReady).mockRejectedValueOnce(new Error('connection lost'));
+    vi.mocked(db.runMigrations).mockRejectedValueOnce(new Error('Migration 0002_x failed: syntax error'));
 
     await runMain();
 

@@ -18,7 +18,7 @@ const router = Router();
 
 /** Audio-capable chat model used for description suggestions — the "mini" variant keeps this cheap for a trial feature. */
 const SUGGESTION_MODEL = 'gpt-audio-mini';
-/** Matches `sfxtrigger.description`'s `VARCHAR(255)` column (schema.sql). */
+/** Matches `sfxtrigger.description`'s `VARCHAR(255)` column (see DATABASE-SCHEMA.md). */
 const MAX_DESCRIPTION_LENGTH = 255;
 /** Caps how many sound files are sent to the model per suggestion, bounding both request size and cost. */
 const MAX_SAMPLE = 5;
