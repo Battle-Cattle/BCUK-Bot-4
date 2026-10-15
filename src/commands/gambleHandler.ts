@@ -1,5 +1,5 @@
 import { createLogger } from '../shared/logger';
-import { getLoyaltyPointsBalance, resolveLoyaltyPointsGambleOutcome, getLoyaltyPointsConfig, isExcludedFromLoyaltyPoints } from '../db';
+import { getLoyaltyPointsBalance, resolveLoyaltyPointsGambleOutcome, getLoyaltyPointsConfig, isExcludedFromLoyaltyPoints, type LoyaltyPointsConfig } from '../db';
 import { resolveCommand, extractArgs } from './commandUtils';
 import { createRuntimeRegistry } from '../shared/runtimeRegistry';
 import type { TwitchSendRuntime } from './twitchRuntime';
@@ -65,6 +65,20 @@ async function resolveGamble(streamerId: number, twitchUsername: string, bet: nu
   return `@${twitchUsername} won ${bet} points! New balance: ${newBalance}`;
 }
 
+/**
+ * Looks up the streamer's config for a `!gamble`, returning it only if the streamer has opted into
+ * Loyalty Points and the sender isn't on their "Exclude bot" list.
+ * @param streamerId - The streamer's `streamer.id`.
+ * @param twitchUsername - The gambling viewer's Twitch login.
+ * @returns The streamer's config, or null if this gamble should be silently ignored.
+ */
+async function getConfigIfAllowedToGamble(streamerId: number, twitchUsername: string): Promise<LoyaltyPointsConfig | null> {
+  const config = await getLoyaltyPointsConfig(streamerId);
+  if (!config || !config.enabled) return null;
+  if (await isExcludedFromLoyaltyPoints(streamerId, twitchUsername)) return null;
+  return config;
+}
+
 /** Sends `message` to `channel` via the registered Twitch runtime, logging (rather than
  *  throwing) on failure. No-ops if no runtime has been registered yet. */
 async function sendGambleMessage(channel: string, message: string): Promise<void> {
@@ -110,9 +124,8 @@ export async function executeGambleCommandForTwitch(
   if (command !== GAMBLE_COMMAND) return;
   if (!streamerId || !username) return;
 
-  const config = await getLoyaltyPointsConfig(streamerId);
-  if (!config || !config.enabled) return;
-  if (await isExcludedFromLoyaltyPoints(streamerId, username)) return;
+  const config = await getConfigIfAllowedToGamble(streamerId, username);
+  if (!config) return;
 
   const bet = await resolveBet(streamerId, username, extractArgs(rawMessage));
   if (bet === null) {
