@@ -235,9 +235,13 @@ export const USER_REFERENCING_COLUMNS: ReadonlyArray<readonly [table: string, co
   ['passkey_enrollment_codes', 'discord_id'],
 ];
 
+const NOT_REFERENCED_CLAUSES = USER_REFERENCING_COLUMNS
+  .map(([table, column]) => `NOT EXISTS (SELECT 1 FROM ${table} WHERE ${table}.${column} = ?)`)
+  .join('\n       AND ');
+
 const DELETE_UNLINKED_USER_SQL = `DELETE FROM \`user\`
      WHERE discord_id = ?
-       AND ${USER_REFERENCING_COLUMNS.map(([table, column]) => `NOT EXISTS (SELECT 1 FROM ${table} WHERE ${table}.${column} = ?)`).join('\n       AND ')}`;
+       AND ${NOT_REFERENCED_CLAUSES}`;
 
 /**
  * Deletes a user row, but only while nothing references it (see {@link USER_REFERENCING_COLUMNS}).

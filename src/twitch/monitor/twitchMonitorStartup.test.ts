@@ -17,12 +17,12 @@ vi.mock('../../discord/discordUtils', () => ({
   // objects the tests already construct, so call-chain assertions keep working.
   getTextChannel: vi.fn(async (client: any, channelId: string) => {
     const channel = await client.channels.fetch(channelId);
-    if (!channel || !channel.isTextBased()) return null;
+    if (!channel?.isTextBased()) return null;
     return channel;
   }),
   tryEditDiscordMessage: vi.fn(async (client: any, channelId: string, messageId: string, payload: any) => {
     const channel = await client.channels.fetch(channelId);
-    if (!channel || !channel.isTextBased()) return false;
+    if (!channel?.isTextBased()) return false;
     try {
       const message = await channel.messages.fetch(messageId);
       await message.edit(payload);

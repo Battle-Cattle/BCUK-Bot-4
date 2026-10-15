@@ -80,7 +80,7 @@ export async function takeChallenge(
 ): Promise<{ value: string; discordId?: string; userHandle?: string } | null> {
   const stored = req.session.webauthnChallenge;
   delete req.session.webauthnChallenge;
-  if (!stored || stored.purpose !== purpose || Date.now() > stored.expiresAt) return null;
+  if (stored?.purpose !== purpose || Date.now() > stored.expiresAt) return null;
   if (!(await consumeWebauthnChallenge(stored.value, purpose))) return null;
   return { value: stored.value, discordId: stored.discordId, userHandle: stored.userHandle };
 }

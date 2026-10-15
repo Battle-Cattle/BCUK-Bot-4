@@ -68,7 +68,7 @@ export async function ensureSubscription(
   sessionId: string, spec: SubSpec, token: string, name: string,
   existing: { id: string; sessionId?: string; status?: string } | undefined,
 ): Promise<{ result: SubscribeAttempt; deleted: boolean }> {
-  if (existing && existing.sessionId === sessionId && existing.status === 'enabled') {
+  if (existing?.sessionId === sessionId && existing.status === 'enabled') {
     return { result: { kind: 'live', id: existing.id }, deleted: false };
   }
   let deleted = false;

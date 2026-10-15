@@ -113,7 +113,7 @@ export async function getConfig(streamerId: number): Promise<LoyaltyPointsConfig
  * @returns The viewer's balance after the adjustment.
  */
 export async function adjustBalance(streamerId: number, twitchUsername: string, delta: number): Promise<number> {
-  const newBalance = await withTransaction(async (conn) => {
+  return withTransaction(async (conn) => {
     await conn.execute<mysql.ResultSetHeader>(
       `INSERT INTO loyalty_points (streamer_id, twitch_username, balance)
        VALUES (?, ?, LAST_INSERT_ID(LEAST(GREATEST(?, 0), ?)))
@@ -130,7 +130,6 @@ export async function adjustBalance(streamerId: number, twitchUsername: string, 
     // elsewhere in this codebase). Mirrors incrementCounter's identical comment in counters.ts.
     return Number(rows[0]!.balance); // SELECT LAST_INSERT_ID() always returns one row
   });
-  return newBalance;
 }
 
 /**

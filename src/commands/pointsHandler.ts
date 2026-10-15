@@ -83,7 +83,7 @@ export async function executePointsCommandForTwitch(
   if (!streamerId || !username) return;
 
   const config = await getLoyaltyPointsConfig(streamerId);
-  if (!config || !config.enabled) return;
+  if (!config?.enabled) return;
 
   const response = await buildPointsResponse(streamerId, username, extractArgs(rawMessage));
 

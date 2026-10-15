@@ -709,7 +709,7 @@ describe('startDiscordBot — gateway stall watchdog', () => {
     mod.startDiscordBot();
 
     // The first stall forces a recovery whose replacement login hangs forever.
-    const firstHungLogin = deferred<void>();
+    const firstHungLogin = deferred();
     mockInstance.login.mockImplementationOnce(() => firstHungLogin.promise);
     await vi.advanceTimersByTimeAsync(120_000);
     expect(mockInstance.login).toHaveBeenCalledTimes(2);
@@ -717,7 +717,7 @@ describe('startDiscordBot — gateway stall watchdog', () => {
     // Something else (an intentional stop, or an interleaved shardDisconnect self-heal) stops the
     // bot while that recovery login is still pending, then starts a fresh attempt that also hangs.
     mod.stopDiscordBot();
-    const secondHungLogin = deferred<void>();
+    const secondHungLogin = deferred();
     mockInstance.login.mockImplementationOnce(() => secondHungLogin.promise);
     mod.startDiscordBot();
     expect(mockInstance.login).toHaveBeenCalledTimes(3);
@@ -733,7 +733,7 @@ describe('startDiscordBot — gateway stall watchdog', () => {
     expect(mockInstance.login).toHaveBeenCalledOnce();
 
     // The first stall forces a recovery whose replacement login hangs (neither resolves nor rejects).
-    const hungLogin = deferred<void>();
+    const hungLogin = deferred();
     mockInstance.login.mockImplementationOnce(() => hungLogin.promise);
     await vi.advanceTimersByTimeAsync(120_000);
     expect(mockInstance.login).toHaveBeenCalledTimes(2);
@@ -746,7 +746,7 @@ describe('startDiscordBot — gateway stall watchdog', () => {
 
   it('allows the watchdog to fire again once a pending recovery login settles', async () => {
     mod.startDiscordBot();
-    const hungLogin = deferred<void>();
+    const hungLogin = deferred();
     mockInstance.login.mockImplementationOnce(() => hungLogin.promise);
     await vi.advanceTimersByTimeAsync(120_000);
     expect(mockInstance.login).toHaveBeenCalledTimes(2);
@@ -922,7 +922,7 @@ describe('startDiscordBot — login failure reconnect backoff', () => {
   });
 
   it('does not schedule a reconnect when a login rejects after stopDiscordBot already stopped that attempt', async () => {
-    const { promise: loginGate, reject: rejectLogin } = deferred<void>();
+    const { promise: loginGate, reject: rejectLogin } = deferred();
     mockInstance.login.mockReturnValueOnce(loginGate);
     mod.startDiscordBot();
     await flushMicrotasks();

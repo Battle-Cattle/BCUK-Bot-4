@@ -128,7 +128,7 @@ export async function executeHealthCommandForDiscord(message: Message, precomput
     log.error('Failed to resolve owner user for !health command:', err);
     return;
   }
-  if (!owner || message.author.id !== owner.discord_id) return;
+  if (message.author.id !== owner?.discord_id) return;
 
   try {
     await message.author.send(formatHealthSummary(getHealthSnapshot()));

@@ -30,7 +30,7 @@ export function registerRewardPricingRuntime(runtime: RewardPricingRuntime): voi
 // Serializes read-modify-write cycles per reward, so a redemption and a concurrent
 // decay-scheduler tick on the same reward never race each other. Different rewards
 // (different keys) run fully concurrently.
-const pricingQueue = createMutationQueue<string>();
+const pricingQueue = createMutationQueue();
 
 /**
  * Builds the {@link pricingQueue} key that serialises work on one streamer's reward.
@@ -166,7 +166,7 @@ async function syncRewardPrice(
   streamerId: number, twitchRewardId: string, applyIncrement: boolean, redemptionId: string | null, settingsHint?: StreamerPricingSettings,
 ): Promise<void> {
   const row = await getPricingForReward(streamerId, twitchRewardId);
-  if (!row || !row.enabled) return;
+  if (!row?.enabled) return;
 
   // Idempotency guard: a retried redemption (see handleRedemption's dedup pending/handled
   // lifecycle) must not double-apply its increment if this reward already processed it.

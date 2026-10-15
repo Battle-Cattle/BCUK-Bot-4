@@ -170,7 +170,7 @@ export async function addCustomCommand(
 
   assertNotReservedCommand(normalizedTriggerString);
 
-  const commandId = await runSerializedCommandWrite(
+  return runSerializedCommandWrite(
     normalizedTriggerString,
     undefined,
     async (connection) => {
@@ -192,8 +192,6 @@ export async function addCustomCommand(
     },
     { includeCustomCommandTable: false, includeCounterTable: true },
   );
-
-  return commandId;
 }
 
 /** A custom command's editable fields, as written by {@link writeCustomCommandUpdate}. */

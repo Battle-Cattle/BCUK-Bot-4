@@ -31,6 +31,16 @@ function addEventSubOks(snapshot: HealthSnapshot, result: Map<string, ComponentO
 }
 
 /**
+ * Builds the fallback error for a periodic job that has no recorded error of its own.
+ * @param stale - Whether the job's last run is older than its staleness threshold.
+ * @param subject - What ran, e.g. `Stream monitor poll`.
+ * @returns `<subject> is stale` or `<subject> failed`.
+ */
+function staleOrFailedMessage(stale: boolean, subject: string): string {
+  return stale ? `${subject} is stale` : `${subject} failed`;
+}
+
+/**
  * Sets the `monitor` entry into `result`, treating a poll older than {@link MONITOR_STALE_MS} as failing too.
  * @param snapshot - The health snapshot to read monitor state from.
  * @param result - The map to add the entry to, mutated in place.
@@ -42,7 +52,7 @@ function addMonitorOk(snapshot: HealthSnapshot, result: Map<string, ComponentOk>
   const ok = snapshot.monitor.lastPollOk && !stale;
   result.set('monitor', {
     ok,
-    error: ok ? null : (snapshot.monitor.lastError ?? (stale ? 'Stream monitor poll is stale' : 'Stream monitor poll failed')),
+    error: ok ? null : (snapshot.monitor.lastError ?? staleOrFailedMessage(stale, 'Stream monitor poll')),
   });
 }
 
@@ -59,7 +69,7 @@ function addSchedulerOks(snapshot: HealthSnapshot, result: Map<string, Component
     const ok = health.lastRunOk && !stale;
     result.set(`scheduler:${name}`, {
       ok,
-      error: ok ? null : (health.lastError ?? (stale ? `${name} scheduler run is stale` : `${name} scheduler run failed`)),
+      error: ok ? null : (health.lastError ?? staleOrFailedMessage(stale, `${name} scheduler run`)),
     });
   }
 }

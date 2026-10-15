@@ -360,7 +360,7 @@ export async function resetCounterCurrentValue(guildId: string, id: number): Pro
  * @throws {CounterNotFoundError} If no counter exists with the given id.
  */
 export async function incrementCounter(id: number): Promise<number> {
-  const newValue = await withTransaction(async (conn) => {
+  return withTransaction(async (conn) => {
     const [result] = await conn.execute<mysql.ResultSetHeader>(
       'UPDATE counter SET current_value = LAST_INSERT_ID(current_value + 1) WHERE id = ?',
       [id],
@@ -375,5 +375,4 @@ export async function incrementCounter(id: number): Promise<number> {
     // parsed back this way elsewhere in this codebase).
     return Number(rows[0]!.current_value); // SELECT LAST_INSERT_ID() always returns one row
   });
-  return newValue;
 }

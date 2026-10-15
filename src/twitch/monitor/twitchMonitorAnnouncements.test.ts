@@ -20,12 +20,12 @@ vi.mock('../../discord/discordUtils', () => ({
   // channel._message.edit, etc.) keep working unchanged.
   getTextChannel: vi.fn(async (client: any, channelId: string) => {
     const channel = await client.channels.fetch(channelId);
-    if (!channel || !channel.isTextBased()) return null;
+    if (!channel?.isTextBased()) return null;
     return channel;
   }),
   tryEditDiscordMessage: vi.fn(async (client: any, channelId: string, messageId: string, payload: any) => {
     const channel = await client.channels.fetch(channelId);
-    if (!channel || !channel.isTextBased()) return false;
+    if (!channel?.isTextBased()) return false;
     try {
       const message = await channel.messages.fetch(messageId);
       await message.edit(payload);
@@ -202,7 +202,7 @@ describe('postAnnouncement', () => {
     const streamer = makeStreamer(); // same streamer (id: 10) for both calls
     const liveStates = new Map<string, LiveState>();
 
-    const staleWrite = deferred<void>();
+    const staleWrite = deferred();
     vi.mocked(setStreamerLive).mockReturnValueOnce(staleWrite.promise);
 
     const stalePromise = postAnnouncement(liveStates, streamer, makeStream({ game_name: 'Stale Game' }));

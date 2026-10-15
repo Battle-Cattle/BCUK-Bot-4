@@ -49,7 +49,7 @@ describe('simulateConstantUsageCycle', () => {
     const jumps = ramp.filter((p, i) => {
       const next = ramp[i + 1];
       const isFinalPeak = p.t === result.peakAtMs;
-      const isJumpFollowedByDecay = next !== undefined && next.t === p.t + cooldownMs && next.cost <= p.cost;
+      const isJumpFollowedByDecay = next?.t === p.t + cooldownMs && next.cost <= p.cost;
       return p.cost > config.baseCost && (isFinalPeak || isJumpFollowedByDecay);
     });
     expect(jumps.length).toBeGreaterThan(1);

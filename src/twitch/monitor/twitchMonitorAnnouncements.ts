@@ -20,7 +20,7 @@ import { withTimeout } from '../twitchSendQueue';
 // any earlier one has fully completed, and re-checking `isCurrent` immediately before writing
 // (inside the queued operation, not just before enqueueing) catches a stale write that reaches its
 // turn only after a newer operation has since taken over.
-const persistQueue = createMutationQueue<string>();
+const persistQueue = createMutationQueue();
 
 /** Bounds each queued {@link persistStreamerLive} write so a stalled DB call can't wedge {@link persistQueue} for that streamer forever. */
 const PERSIST_TIMEOUT_MS = 10_000;
@@ -291,7 +291,7 @@ export async function deleteAnnouncement(
   isCurrent: () => boolean = () => true,
 ): Promise<void> {
   const state = liveStates.get(stateKey);
-  if (!state || !state.messageId || !state.channelId) {
+  if (!state?.messageId || !state.channelId) {
     liveStates.delete(stateKey);
     return;
   }

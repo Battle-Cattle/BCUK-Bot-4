@@ -313,7 +313,7 @@ function handleNewFailure(componentId: string, error: string | null, existing: C
    */
   const dispatchDelayedDownAlert = (): void => {
     const current = componentStates.get(componentId);
-    if (!current || current.generation !== generation) return;
+    if (current?.generation !== generation) return;
     current.pendingDownTimer = null;
     const latestError = deriveComponentOks(getHealthSnapshot()).get(componentId)?.error ?? error;
     dispatchDownAlert(componentId, latestError, current, false);

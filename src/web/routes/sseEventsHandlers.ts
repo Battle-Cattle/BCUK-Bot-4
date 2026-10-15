@@ -181,7 +181,7 @@ export function createOverlayStatusEventsHandler(
       res.status(500).end();
       return;
     }
-    if (!streamer || !streamer.twitch_name) {
+    if (!streamer?.twitch_name) {
       res.status(403).end();
       return;
     }
