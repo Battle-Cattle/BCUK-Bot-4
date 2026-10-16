@@ -50,10 +50,16 @@ export function computeCommandCost(
   return command.maxCost === null ? cost : Math.min(cost, command.maxCost);
 }
 
+/** Seconds left on each of a command's cooldowns for one viewer (0 when that one is ready). */
+export interface RemainingCooldowns {
+  globalSeconds: number;
+  userSeconds: number;
+}
+
 /** In-memory cooldown tracking for advanced commands (single bot instance; see CLAUDE.md). */
 export interface AdvancedCommandCooldowns {
-  /** Seconds left before `login` may use the command again (0 when ready). */
-  remainingSeconds: (command: CooldownCommand, login: string, now?: number) => number;
+  /** Seconds left on the global and `login`'s per-user cooldown. */
+  remaining: (command: CooldownCommand, login: string, now?: number) => RemainingCooldowns;
   /** Starts both cooldowns for a use by `login`. */
   claim: (command: CooldownCommand, login: string, now?: number) => void;
   /** Forgets every cooldown (tests and shutdown). */
@@ -78,16 +84,28 @@ export function createAdvancedCommandCooldowns(): AdvancedCommandCooldowns {
   };
 
   return {
-    remainingSeconds: (command, login, now = Date.now()) => Math.max(
-      left(`${command.id}`, command.globalCooldownSeconds, now),
-      left(`${command.id}:${login}`, command.userCooldownSeconds, now),
-    ),
+    remaining: (command, login, now = Date.now()) => ({
+      globalSeconds: left(`${command.id}`, command.globalCooldownSeconds, now),
+      userSeconds: left(`${command.id}:${login}`, command.userCooldownSeconds, now),
+    }),
     claim: (command, login, now = Date.now()) => {
       if (command.globalCooldownSeconds > 0) lastUse.set(`${command.id}`, now);
       if (command.userCooldownSeconds > 0) lastUse.set(`${command.id}:${login}`, now);
     },
     clear: () => lastUse.clear(),
   };
+}
+
+/**
+ * Describes every active cooldown for a chat notice, e.g. `global cooldown 25s, your cooldown 110s`.
+ * @param remaining - The seconds left on each cooldown.
+ * @returns The description, or null when no cooldown is active.
+ */
+export function describeActiveCooldowns(remaining: RemainingCooldowns): string | null {
+  const parts: string[] = [];
+  if (remaining.globalSeconds > 0) parts.push(`global cooldown ${remaining.globalSeconds}s`);
+  if (remaining.userSeconds > 0) parts.push(`your cooldown ${remaining.userSeconds}s`);
+  return parts.length > 0 ? parts.join(', ') : null;
 }
 
 /**

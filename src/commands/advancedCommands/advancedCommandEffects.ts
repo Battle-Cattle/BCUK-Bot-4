@@ -1,4 +1,4 @@
-// Fires an advanced command's effects: the chat reply, an overlay video, an alerts-overlay alert,
+// Fires an advanced command's effects: the chat reply (chat uses only), an overlay video, an alerts-overlay alert,
 // and the companion-app event. Every effect but the companion push is best-effort (logged, never
 // thrown), so one failing effect can't stop the others or undo the points already spent.
 import type { DbAdvancedCommand } from '../../db';
@@ -55,13 +55,13 @@ export function buildTemplateVars(use: AdvancedCommandUse): Record<string, strin
 }
 
 /**
- * Posts the command's chat reply, if it has one.
+ * Posts the command's chat reply, if it has one. A Stream Deck use posts nothing to chat.
  * @param use - The command use.
  * @param vars - Template variables.
  */
 async function sendReply(use: AdvancedCommandUse, vars: Record<string, string>): Promise<void> {
   const runtime = advancedCommandRuntimeRegistry.get();
-  if (!use.command.response || !runtime) return;
+  if (use.source !== 'chat' || !use.command.response || !runtime) return;
   try {
     await runtime.send(use.channel, fillTemplate(use.command.response, vars));
   } catch (err) {

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  hasRequiredRole, computeCommandCost, createAdvancedCommandCooldowns, createNoticeThrottle, type ChatRoleInfo,
+  hasRequiredRole, computeCommandCost, createAdvancedCommandCooldowns, describeActiveCooldowns, createNoticeThrottle, type ChatRoleInfo,
 } from './advancedCommandGates';
 
 const NONE: ChatRoleInfo = { isBroadcaster: false, isMod: false, isVip: false, isSubscriber: false };
@@ -36,22 +36,31 @@ describe('createAdvancedCommandCooldowns', () => {
 
   it('reports the longer of the global and per-viewer cooldowns', () => {
     const cooldowns = createAdvancedCommandCooldowns();
-    expect(cooldowns.remainingSeconds(command, 'alice', 0)).toBe(0);
+    expect(cooldowns.remaining(command, 'alice', 0)).toEqual({ globalSeconds: 0, userSeconds: 0 });
     cooldowns.claim(command, 'alice', 0);
-    expect(cooldowns.remainingSeconds(command, 'alice', 5_000)).toBe(55);
-    expect(cooldowns.remainingSeconds(command, 'bob', 5_000)).toBe(5);
-    expect(cooldowns.remainingSeconds(command, 'bob', 10_000)).toBe(0);
-    expect(cooldowns.remainingSeconds(command, 'alice', 60_000)).toBe(0);
+    expect(cooldowns.remaining(command, 'alice', 5_000)).toEqual({ globalSeconds: 5, userSeconds: 55 });
+    expect(cooldowns.remaining(command, 'bob', 5_000)).toEqual({ globalSeconds: 5, userSeconds: 0 });
+    expect(cooldowns.remaining(command, 'bob', 10_000)).toEqual({ globalSeconds: 0, userSeconds: 0 });
+    expect(cooldowns.remaining(command, 'alice', 60_000)).toEqual({ globalSeconds: 0, userSeconds: 0 });
   });
 
   it('ignores zero cooldowns and forgets everything on clear', () => {
     const cooldowns = createAdvancedCommandCooldowns();
     const none = { id: 2, globalCooldownSeconds: 0, userCooldownSeconds: 0 };
     cooldowns.claim(none, 'alice', 0);
-    expect(cooldowns.remainingSeconds(none, 'alice', 0)).toBe(0);
+    expect(cooldowns.remaining(none, 'alice', 0)).toEqual({ globalSeconds: 0, userSeconds: 0 });
     cooldowns.claim(command, 'alice', 0);
     cooldowns.clear();
-    expect(cooldowns.remainingSeconds(command, 'alice', 1)).toBe(0);
+    expect(cooldowns.remaining(command, 'alice', 1)).toEqual({ globalSeconds: 0, userSeconds: 0 });
+  });
+});
+
+describe('describeActiveCooldowns', () => {
+  it('lists each active cooldown, or null when none is', () => {
+    expect(describeActiveCooldowns({ globalSeconds: 25, userSeconds: 110 })).toBe('global cooldown 25s, your cooldown 110s');
+    expect(describeActiveCooldowns({ globalSeconds: 25, userSeconds: 0 })).toBe('global cooldown 25s');
+    expect(describeActiveCooldowns({ globalSeconds: 0, userSeconds: 110 })).toBe('your cooldown 110s');
+    expect(describeActiveCooldowns({ globalSeconds: 0, userSeconds: 0 })).toBeNull();
   });
 });
 

@@ -1,5 +1,5 @@
 // Advanced commands: per-streamer commands a viewer buys with loyalty points from chat, or the
-// streamer fires free from their Stream Deck. A chat use runs the gates (role, live-only,
+// streamer fires free (and silently in chat) from their Stream Deck. A chat use runs the gates (role, live-only,
 // cooldowns, per-stream caps), charges the escalating cost, records the use, then fires the
 // effects; a use whose companion push can't be delivered or isn't acknowledged is refunded.
 import { randomUUID } from 'node:crypto';
@@ -23,6 +23,7 @@ import {
   computeCommandCost,
   createAdvancedCommandCooldowns,
   createNoticeThrottle,
+  describeActiveCooldowns,
   hasRequiredRole,
   type ChatRoleInfo,
 } from './advancedCommandGates';
@@ -138,7 +139,7 @@ async function charge(
 
 /**
  * Runs the free checks for a chat use: enabled, role and live-only (silently refused), then
- * cooldowns (refused with a notice).
+ * cooldowns (refused with a notice listing every active cooldown).
  * @param command - The command, or null if it's gone.
  * @param msg - The chat message.
  * @returns Null to proceed, `false` to stay silent, or a notice.
@@ -146,8 +147,8 @@ async function charge(
 function checkChatGates(command: DbAdvancedCommand | null, msg: AdvancedCommandChatMessage): string | false | null {
   if (!command?.isEnabled || !hasRequiredRole(command.minRole, msg.roles)) return false;
   if (command.liveOnly && !isChannelLive(msg.channel)) return false;
-  const remaining = cooldowns.remainingSeconds(command, msg.userLogin);
-  return remaining > 0 ? `@${msg.userLogin} ${command.name} is on cooldown — try again in ${remaining}s.` : null;
+  const active = describeActiveCooldowns(cooldowns.remaining(command, msg.userLogin));
+  return active ? `@${msg.userLogin} ${command.name} is on cooldown — ${active} left.` : null;
 }
 
 /**
@@ -239,7 +240,8 @@ export async function executeAdvancedCommandForTwitch(msg: AdvancedCommandChatMe
 
 /**
  * Fires one of a streamer's commands from their Stream Deck: free, and skipping the cooldowns,
- * role, live-only and caps. The command must still be enabled.
+ * role, live-only and caps. It neither starts a cooldown nor counts towards caps or pricing (only
+ * chat uses do), and posts no chat reply. The command must still be enabled.
  * @param streamer - The streamer the Stream Deck key belongs to.
  * @param commandId - The command to fire.
  * @returns `ok`, or why it didn't fire.
