@@ -6,10 +6,10 @@ import { getPool, withTransaction } from './pool';
 // `DEFAULT_PRICING_COOLDOWN_SECONDS` in rewardPricing.ts — a plain app default, not an
 // env-configurable value, so it lives here rather than in shared/config.ts.
 
-export const DEFAULT_POINTS_PER_MESSAGE = 1;
+export const DEFAULT_POINTS_PER_MESSAGE = 10;
 export const DEFAULT_POINTS_COOLDOWN_SECONDS = 60;
-export const DEFAULT_POINTS_PER_SUB = 100;
-export const DEFAULT_POINTS_PER_GIFT_SUB = 100;
+export const DEFAULT_POINTS_PER_SUB = 1000;
+export const DEFAULT_POINTS_PER_GIFT_SUB = 1000;
 
 // `loyalty_points.balance` is a plain INT column (see DATABASE-SCHEMA.md) — every
 // write that can increase it clamps to this rather than allowed to overflow it.

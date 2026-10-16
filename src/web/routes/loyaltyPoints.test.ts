@@ -9,10 +9,10 @@ vi.mock('../../db', () => ({
   getLoyaltyPointsExclusions: vi.fn(),
   addLoyaltyPointsExclusion: vi.fn(),
   removeLoyaltyPointsExclusion: vi.fn(),
-  DEFAULT_POINTS_PER_MESSAGE: 1,
+  DEFAULT_POINTS_PER_MESSAGE: 10,
   DEFAULT_POINTS_COOLDOWN_SECONDS: 60,
-  DEFAULT_POINTS_PER_SUB: 100,
-  DEFAULT_POINTS_PER_GIFT_SUB: 100,
+  DEFAULT_POINTS_PER_SUB: 1000,
+  DEFAULT_POINTS_PER_GIFT_SUB: 1000,
 }));
 
 vi.mock('../csrf', () => ({
@@ -111,7 +111,7 @@ describe('GET /loyalty-points', () => {
 
     const res = await supertest(buildApp()).get('/loyalty-points');
 
-    expect(res.body.config).toEqual({ enabled: false, pointsPerMessage: 1, cooldownSeconds: 60, pointsPerSub: 100, pointsPerGiftSub: 100 });
+    expect(res.body.config).toEqual({ enabled: false, pointsPerMessage: 10, cooldownSeconds: 60, pointsPerSub: 1000, pointsPerGiftSub: 1000 });
   });
 
   it('reports a missing prerequisite when the Twitch chat bot is linked but not enabled', async () => {
