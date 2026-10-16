@@ -166,19 +166,20 @@ async function cooldownNotice(
 }
 
 /**
- * Charges a viewer for a use. A free use always succeeds; a paid one needs Loyalty Points on for
- * the streamer, the viewer not excluded, and enough balance.
+ * Charges a viewer for a use. A free use (a free command, or the broadcaster) always succeeds and
+ * reports the viewer's current balance for `{balance}`; a paid one needs Loyalty Points on for the
+ * streamer, the viewer not excluded, and enough balance.
  * @param command - The command.
  * @param login - The viewer's login.
  * @param cost - The points to charge.
- * @returns The balance after paying (null for a free use), or a notice (null to stay silent).
+ * @returns The balance after paying (or the current one for a free use), or a notice (null to stay silent).
  */
 async function charge(
   command: DbAdvancedCommand,
   login: string,
   cost: number,
 ): Promise<{ balance: number | null } | { notice: string | null }> {
-  if (cost === 0) return { balance: null };
+  if (cost === 0) return { balance: await getLoyaltyPointsBalance(command.streamerId, login) };
   if (!await paysWithPoints(command, login)) return { notice: null };
   const balance = await spendLoyaltyPoints(command.streamerId, login, cost);
   if (balance !== null) return { balance };

@@ -152,9 +152,13 @@ describe('executeAdvancedCommandForTwitch', () => {
 
   it('lets the broadcaster use a paid command for free', async () => {
     const roles = { isBroadcaster: true, isMod: false, isVip: false, isSubscriber: false };
+    vi.mocked(db.getLoyaltyPointsBalance).mockResolvedValue(70);
     await executeAdvancedCommandForTwitch(message({ userLogin: 'streamer', userName: 'Streamer', roles }));
     expect(db.spendLoyaltyPoints).not.toHaveBeenCalled();
     expect(db.getLoyaltyPointsConfig).not.toHaveBeenCalled();
+    // `{balance}` still shows what they have, not a blank.
+    expect(db.getLoyaltyPointsBalance).toHaveBeenCalledWith(3, 'streamer');
+    expect(vi.mocked(runAdvancedCommandEffects).mock.calls[0]![0]).toMatchObject({ pointsSpent: 0, balance: 70 });
     expect(db.recordAdvancedCommandUsage).toHaveBeenCalledWith(expect.objectContaining({ twitchUsername: 'streamer', pointsSpent: 0 }));
   });
 
