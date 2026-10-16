@@ -13,6 +13,7 @@ import {
   recordAdvancedCommandUsage,
   adjustLoyaltyPointsBalance,
   spendLoyaltyPoints,
+  type AdvancedCommandChatRoute,
   type AdvancedCommandUsageWindow,
   type DbAdvancedCommand,
 } from '../../db';
@@ -242,30 +243,65 @@ async function fireUse(use: AdvancedCommandUse, streamStartedAt: Date | null): P
 }
 
 /**
+ * Looks up the channel's advanced command a chat message names.
+ * @param msg - The chat message.
+ * @returns The route and the command (null if it's gone), or null when the message isn't one.
+ */
+async function resolveChatCommand(
+  msg: AdvancedCommandChatMessage,
+): Promise<{ route: AdvancedCommandChatRoute; command: DbAdvancedCommand | null } | null> {
+  if (!msg.command) return null;
+  const route = await getAdvancedCommandForTwitchChannel(msg.channel, msg.command);
+  return route ? { route, command: await getAdvancedCommand(route.streamerId, route.commandId) } : null;
+}
+
+/**
+ * Checks the caps, prices the use and charges the viewer, sending the notice for any refusal.
+ * @param command - The command.
+ * @param msg - The chat message.
+ * @param window - The stream (or offline window) to count and price in.
+ * @param noticeKey - The notice throttle key.
+ * @returns The cost and balance after paying, or null when the use is refused.
+ */
+async function priceAndCharge(
+  command: DbAdvancedCommand,
+  msg: AdvancedCommandChatMessage,
+  window: AdvancedCommandUsageWindow,
+  noticeKey: string,
+): Promise<{ cost: number; balance: number | null } | null> {
+  const priced = await capsAndCost(command, msg, window);
+  if ('notice' in priced) {
+    await sendNotice(msg.channel, noticeKey, priced.notice);
+    return null;
+  }
+  const paid = await charge(command, msg.userLogin, priced.cost);
+  if ('notice' in paid) {
+    if (paid.notice) await sendNotice(msg.channel, noticeKey, paid.notice);
+    return null;
+  }
+  return { cost: priced.cost, balance: paid.balance };
+}
+
+/**
  * Handles a Twitch chat message that may trigger one of the channel's advanced commands.
  * @param msg - The chat message.
  * @returns Resolves once the use is handled (or ignored).
  */
 export async function executeAdvancedCommandForTwitch(msg: AdvancedCommandChatMessage): Promise<void> {
-  if (!msg.command) return;
-  const route = await getAdvancedCommandForTwitchChannel(msg.channel, msg.command);
-  if (!route) return;
-  const command = await getAdvancedCommand(route.streamerId, route.commandId);
+  const resolved = await resolveChatCommand(msg);
+  if (!resolved?.command) return;
+  const { route, command } = resolved;
   const noticeKey = `${route.commandId}:${msg.userLogin}`;
-
-  const gate = checkChatGates(command, msg);
-  if (gate === false || !command) return;
-
   const now = new Date();
   const { window, streamStartedAt } = usageWindow(msg.channel, now);
-  if (gate) return sendNotice(msg.channel, noticeKey, () => cooldownNotice(command, gate, window, msg));
-  const priced = await capsAndCost(command, msg, window);
-  if ('notice' in priced) return sendNotice(msg.channel, noticeKey, priced.notice);
-  const paid = await charge(command, msg.userLogin, priced.cost);
-  if ('notice' in paid) {
-    if (paid.notice) await sendNotice(msg.channel, noticeKey, paid.notice);
+
+  const gate = checkChatGates(command, msg);
+  if (gate !== null) {
+    if (gate) await sendNotice(msg.channel, noticeKey, () => cooldownNotice(command, gate, window, msg));
     return;
   }
+  const paid = await priceAndCharge(command, msg, window, noticeKey);
+  if (!paid) return;
 
   cooldowns.claim(command, msg.userLogin);
   await fireUse({
@@ -277,7 +313,7 @@ export async function executeAdvancedCommandForTwitch(msg: AdvancedCommandChatMe
     userLogin: msg.userLogin,
     userName: msg.userName,
     args: extractArgs(msg.message),
-    pointsSpent: priced.cost,
+    pointsSpent: paid.cost,
     balance: paid.balance,
     triggeredAt: now,
   }, streamStartedAt);
