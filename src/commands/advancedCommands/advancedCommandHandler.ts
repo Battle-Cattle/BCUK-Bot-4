@@ -188,16 +188,23 @@ async function charge(
 }
 
 /**
- * Runs the free checks for a chat use: enabled, role and live-only (silently refused), then
- * cooldowns (refused with a notice listing every active cooldown).
+ * Runs the free checks for a chat use: enabled and role (silently refused), live-only (refused
+ * with a "stream is offline" notice), then cooldowns (refused with a notice listing every active
+ * cooldown).
  * @param command - The command, or null if it's gone.
  * @param msg - The chat message.
- * @returns Null to proceed, `false` to stay silent, or the active cooldowns to report.
+ * @returns Null to proceed, `false` to stay silent, a ready notice, or the active cooldowns to report.
  */
-function checkChatGates(command: DbAdvancedCommand | null, msg: AdvancedCommandChatMessage): string | false | null {
+function checkChatGates(
+  command: DbAdvancedCommand | null,
+  msg: AdvancedCommandChatMessage,
+): { notice: string } | { cooldowns: string } | false | null {
   if (!command?.isEnabled || !hasRequiredRole(command.minRole, msg.roles)) return false;
-  if (command.liveOnly && !isChannelLive(msg.channel)) return false;
-  return describeActiveCooldowns(cooldowns.remaining(command, msg.userLogin));
+  if (command.liveOnly && !isChannelLive(msg.channel)) {
+    return { notice: `@${msg.userLogin} ${command.name} only works while the stream is live.` };
+  }
+  const active = describeActiveCooldowns(cooldowns.remaining(command, msg.userLogin));
+  return active ? { cooldowns: active } : null;
 }
 
 /**
@@ -298,7 +305,11 @@ export async function executeAdvancedCommandForTwitch(msg: AdvancedCommandChatMe
 
   const gate = checkChatGates(command, msg);
   if (gate !== null) {
-    if (gate) await sendNotice(msg.channel, noticeKey, () => cooldownNotice(command, gate, window, msg));
+    if (gate) {
+      await sendNotice(msg.channel, noticeKey, 'notice' in gate
+        ? gate.notice
+        : () => cooldownNotice(command, gate.cooldowns, window, msg));
+    }
     return;
   }
   const paid = await priceAndCharge(command, msg, window, noticeKey);

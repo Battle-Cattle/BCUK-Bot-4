@@ -94,15 +94,20 @@ describe('executeAdvancedCommandForTwitch', () => {
     ['disabled', () => vi.mocked(db.getAdvancedCommand).mockResolvedValue(command({ isEnabled: false }))],
     ['deleted', () => vi.mocked(db.getAdvancedCommand).mockResolvedValue(null)],
     ['below the role', () => vi.mocked(db.getAdvancedCommand).mockResolvedValue(command({ minRole: 'vip' }))],
-    ['live-only while offline', () => {
-      vi.mocked(db.getAdvancedCommand).mockResolvedValue(command({ liveOnly: true }));
-      vi.mocked(isChannelLive).mockReturnValue(false);
-    }],
   ])('silently ignores a %s command', async (_label, setup) => {
     setup();
     await executeAdvancedCommandForTwitch(message());
     expect(db.spendLoyaltyPoints).not.toHaveBeenCalled();
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it('tells the viewer a live-only command needs the stream to be live, once per window', async () => {
+    vi.mocked(db.getAdvancedCommand).mockResolvedValue(command({ liveOnly: true }));
+    vi.mocked(isChannelLive).mockReturnValue(false);
+    await executeAdvancedCommandForTwitch(message());
+    await executeAdvancedCommandForTwitch(message());
+    expect(db.spendLoyaltyPoints).not.toHaveBeenCalled();
+    expect(send).toHaveBeenCalledExactlyOnceWith('streamer', '@alice Hydrate only works while the stream is live.');
   });
 
   it('enforces cooldowns with one notice, not charging again', async () => {
