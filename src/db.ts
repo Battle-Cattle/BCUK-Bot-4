@@ -158,10 +158,6 @@ export {
   resolveGambleOutcome as resolveLoyaltyPointsGambleOutcome,
   spendBalance as spendLoyaltyPoints,
   getLeaderboard as getLoyaltyPointsLeaderboard,
-  DEFAULT_POINTS_PER_MESSAGE,
-  DEFAULT_POINTS_COOLDOWN_SECONDS,
-  DEFAULT_POINTS_PER_SUB,
-  DEFAULT_POINTS_PER_GIFT_SUB,
 } from './db/loyaltyPoints';
 export { getCachedConfig as getLoyaltyPointsConfig } from './db/loyaltyPointsCache';
 export { setLoyaltyPointsConfig } from './db/loyaltyPointsWrites';

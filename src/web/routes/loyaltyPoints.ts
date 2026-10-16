@@ -9,12 +9,9 @@ import {
   getLoyaltyPointsExclusions,
   addLoyaltyPointsExclusion,
   removeLoyaltyPointsExclusion,
-  DEFAULT_POINTS_PER_MESSAGE,
-  DEFAULT_POINTS_COOLDOWN_SECONDS,
-  DEFAULT_POINTS_PER_SUB,
-  DEFAULT_POINTS_PER_GIFT_SUB,
   type LoyaltyPointsConfig,
 } from '../../db';
+import { DEFAULT_LOYALTY_POINTS_CONFIG } from '../../shared/loyaltyPointsDefaults';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import { getSessionUser } from '../session';
@@ -139,13 +136,7 @@ router.get('/loyalty-points', requireAuth, csrfProtection, async (req, res) => {
       allPrerequisitesMet: allMet,
       leaderboard,
       excludedUsers,
-      config: config ?? {
-        enabled: false,
-        pointsPerMessage: DEFAULT_POINTS_PER_MESSAGE,
-        cooldownSeconds: DEFAULT_POINTS_COOLDOWN_SECONDS,
-        pointsPerSub: DEFAULT_POINTS_PER_SUB,
-        pointsPerGiftSub: DEFAULT_POINTS_PER_GIFT_SUB,
-      },
+      config: config ?? DEFAULT_LOYALTY_POINTS_CONFIG,
       error: filterQueryParam(req.query.error, KNOWN_ERRORS),
     });
   } catch (err) {
