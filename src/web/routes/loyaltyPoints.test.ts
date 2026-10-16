@@ -9,10 +9,6 @@ vi.mock('../../db', () => ({
   getLoyaltyPointsExclusions: vi.fn(),
   addLoyaltyPointsExclusion: vi.fn(),
   removeLoyaltyPointsExclusion: vi.fn(),
-  DEFAULT_POINTS_PER_MESSAGE: 10,
-  DEFAULT_POINTS_COOLDOWN_SECONDS: 60,
-  DEFAULT_POINTS_PER_SUB: 1000,
-  DEFAULT_POINTS_PER_GIFT_SUB: 1000,
 }));
 
 vi.mock('../csrf', () => ({
@@ -37,6 +33,7 @@ import {
   getLoyaltyPointsExclusions, addLoyaltyPointsExclusion, removeLoyaltyPointsExclusion,
 } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
+import { DEFAULT_LOYALTY_POINTS_CONFIG } from '../../shared/loyaltyPointsDefaults';
 
 const STREAMER = { id: 7, discord_id: '1', twitch_name: 'streamerchannel' };
 const ELIGIBLE_USER = { discord_id: '1', discord_name: 'TestUser', is_twitch_bot_enabled: true, twitch_name: 'streamerchannel', access_level: 0, is_owner: false };
@@ -111,7 +108,7 @@ describe('GET /loyalty-points', () => {
 
     const res = await supertest(buildApp()).get('/loyalty-points');
 
-    expect(res.body.config).toEqual({ enabled: false, pointsPerMessage: 10, cooldownSeconds: 60, pointsPerSub: 1000, pointsPerGiftSub: 1000 });
+    expect(res.body.config).toEqual(DEFAULT_LOYALTY_POINTS_CONFIG);
   });
 
   it('reports a missing prerequisite when the Twitch chat bot is linked but not enabled', async () => {

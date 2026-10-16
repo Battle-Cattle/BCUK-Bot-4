@@ -303,6 +303,10 @@ config row with `enabled = 1` (via the web panel, which only allows this once th
 linked Twitch account, the Twitch chat bot enabled, and is already a monitored streamer) before
 any viewer activity on their channel starts earning points.
 
+The four rate columns have no DB-level default: every write sets them, and a streamer without a
+row gets the app defaults from `src/shared/loyaltyPointsDefaults.ts`, the only place they're
+defined.
+
 | Column | Type | Notes |
 | --- | --- | --- |
 | `streamer_id` | `INT` PK | FK to `streamer.id` ON DELETE CASCADE |
