@@ -67,13 +67,38 @@ describe('acknowledgements', () => {
     expect(resolveAdvancedCommandUsage).toHaveBeenCalledWith('e1', expect.objectContaining({ refundReason: 'no_ack' }));
   });
 
-  it('logs (not throws) when the timeout refund fails', async () => {
+  it('logs (not throws) when the timeout refund fails, and retries it on the next timeout', async () => {
     vi.useFakeTimers();
     vi.mocked(resolveAdvancedCommandUsage).mockRejectedValueOnce(new Error('DB down'));
     trackAdvancedCommandAck('e1', 'streamer');
     vi.advanceTimersByTime(ACK_TIMEOUT_MS);
     await flushMicrotasks();
     expect(send).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(ACK_TIMEOUT_MS);
+    await flushMicrotasks();
+    expect(resolveAdvancedCommandUsage).toHaveBeenCalledTimes(2);
+    expect(send).toHaveBeenCalledWith('streamer', expect.stringContaining('@alice refunded 100 points'));
+  });
+
+  it('re-arms the timeout when applying an acknowledgement fails, so the use still resolves', async () => {
+    vi.useFakeTimers();
+    vi.mocked(resolveAdvancedCommandUsage).mockRejectedValueOnce(new Error('DB down'));
+    trackAdvancedCommandAck('e1', 'streamer');
+    await expect(acknowledgeAdvancedCommandUse('e1', { ok: true })).rejects.toThrow('DB down');
+
+    vi.advanceTimersByTime(ACK_TIMEOUT_MS);
+    await flushMicrotasks();
+    expect(resolveAdvancedCommandUsage).toHaveBeenLastCalledWith('e1', expect.objectContaining({ refundReason: 'no_ack' }));
+  });
+
+  it('rethrows a failed acknowledgement for an untracked use without arming a timer', async () => {
+    vi.useFakeTimers();
+    vi.mocked(resolveAdvancedCommandUsage).mockRejectedValueOnce(new Error('DB down'));
+    await expect(acknowledgeAdvancedCommandUse('gone', { ok: false, error: 'x' })).rejects.toThrow('DB down');
+    vi.advanceTimersByTime(ACK_TIMEOUT_MS);
+    await flushMicrotasks();
+    expect(resolveAdvancedCommandUsage).toHaveBeenCalledTimes(1);
   });
 
   it('marks a successful acknowledgement and cancels the timeout', async () => {

@@ -60,14 +60,17 @@ export async function refundAdvancedCommandUse(
 
 /**
  * Starts waiting for the companion app to acknowledge a use; refunds it if none arrives in time.
+ * If that refund fails (the use stays pending), the timer is re-armed so it's retried.
  * @param eventId - The use's event id.
  * @param channel - The streamer's channel, for the refund notice.
  */
 export function trackAdvancedCommandAck(eventId: string, channel: string): void {
   const timer = setTimeout(() => {
     pendingAcks.delete(eventId);
-    refundAdvancedCommandUse(eventId, 'no_ack', { channel })
-      .catch((err: unknown) => log.error(`Failed to refund unacknowledged advanced command ${eventId}:`, err));
+    refundAdvancedCommandUse(eventId, 'no_ack', { channel }).catch((err: unknown) => {
+      log.error(`Failed to refund unacknowledged advanced command ${eventId}; retrying:`, err);
+      trackAdvancedCommandAck(eventId, channel);
+    });
   }, ACK_TIMEOUT_MS);
   timer.unref();
   pendingAcks.set(eventId, { timer, channel });
@@ -75,7 +78,8 @@ export function trackAdvancedCommandAck(eventId: string, channel: string): void 
 
 /**
  * Applies a companion app's acknowledgement: success marks the use succeeded, failure refunds it.
- * The caller has already checked the use belongs to the acknowledging streamer.
+ * The caller has already checked the use belongs to the acknowledging streamer. If applying it
+ * throws (the use stays pending), the timeout is re-armed so the use still gets resolved.
  * @param eventId - The use's event id.
  * @param ack - Whether the companion app's actions succeeded, and its error text if not.
  * @returns True if the acknowledgement resolved the use; false if it was already resolved (a
@@ -88,8 +92,13 @@ export async function acknowledgeAdvancedCommandUse(
   const pending = pendingAcks.get(eventId);
   if (pending) clearTimeout(pending.timer);
   pendingAcks.delete(eventId);
-  if (ack.ok) return (await resolveAdvancedCommandUsage(eventId, { status: 'succeeded' })) !== null;
-  return refundAdvancedCommandUse(eventId, 'companion_error', { channel: pending?.channel, errorMessage: ack.error });
+  try {
+    if (ack.ok) return (await resolveAdvancedCommandUsage(eventId, { status: 'succeeded' })) !== null;
+    return await refundAdvancedCommandUse(eventId, 'companion_error', { channel: pending?.channel, errorMessage: ack.error });
+  } catch (err) {
+    if (pending) trackAdvancedCommandAck(eventId, pending.channel);
+    throw err;
+  }
 }
 
 /**
