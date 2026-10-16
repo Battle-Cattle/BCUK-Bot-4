@@ -7,7 +7,6 @@
 // The timers live in memory (single bot instance, see CLAUDE.md); anything still pending at
 // startup lost its timer in the restart and is refunded by `sweepPendingAdvancedCommandUsage`.
 import {
-  adjustLoyaltyPointsBalance,
   listPendingAdvancedCommandUsage,
   resolveAdvancedCommandUsage,
   type AdvancedCommandRefundReason,
@@ -32,8 +31,9 @@ const REFUND_REASON_TEXT: Record<AdvancedCommandRefundReason, string> = {
 const pendingAcks = new Map<string, { timer: ReturnType<typeof setTimeout>; channel: string }>();
 
 /**
- * Refunds a pending use: marks it refunded (only if still pending), credits the points back, and
- * tells the viewer in chat when a channel is known.
+ * Refunds a pending use: marks it refunded (only if still pending) and credits the points back in
+ * one transaction (see `resolveAdvancedCommandUsage`), then tells the viewer in chat when a
+ * channel is known.
  * @param eventId - The use's event id.
  * @param reason - Why it's being refunded.
  * @param options - The channel for the chat notice, and the companion app's error text.
@@ -46,10 +46,9 @@ export async function refundAdvancedCommandUse(
 ): Promise<boolean> {
   const resolved = await resolveAdvancedCommandUsage(eventId, { status: 'refunded', refundReason: reason, errorMessage: options.errorMessage });
   if (!resolved) return false;
-  const { streamerId, twitchUsername, pointsSpent, commandName } = resolved;
+  const { twitchUsername, pointsSpent, commandName } = resolved;
   if (pointsSpent <= 0 || !twitchUsername) return true;
 
-  await adjustLoyaltyPointsBalance(streamerId, twitchUsername, pointsSpent);
   log.info(`Refunded ${pointsSpent} points to ${twitchUsername} for '${commandName}' (${reason})`);
   const runtime = advancedCommandRuntimeRegistry.get();
   if (options.channel && runtime) {

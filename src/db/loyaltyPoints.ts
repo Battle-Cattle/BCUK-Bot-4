@@ -1,4 +1,4 @@
-import mysql from 'mysql2/promise';
+import mysql, { type PoolConnection } from 'mysql2/promise';
 import { getPool, withTransaction } from './pool';
 
 // ─── Defaults ─────────────────────────────────────────────────────────────────
@@ -113,23 +113,40 @@ export async function getConfig(streamerId: number): Promise<LoyaltyPointsConfig
  * @returns The viewer's balance after the adjustment.
  */
 export async function adjustBalance(streamerId: number, twitchUsername: string, delta: number): Promise<number> {
-  return withTransaction(async (conn) => {
-    await conn.execute<mysql.ResultSetHeader>(
-      `INSERT INTO loyalty_points (streamer_id, twitch_username, balance)
-       VALUES (?, ?, LAST_INSERT_ID(LEAST(GREATEST(?, 0), ?)))
-       AS new_row
-       ON DUPLICATE KEY UPDATE balance = LAST_INSERT_ID(LEAST(GREATEST(loyalty_points.balance + ?, 0), ?))`,
-      [streamerId, twitchUsername, delta, MAX_BALANCE, delta, MAX_BALANCE],
-    );
-    const [rows] = await conn.execute<mysql.RowDataPacket[]>('SELECT LAST_INSERT_ID() AS balance');
-    // LAST_INSERT_ID() is a BIGINT expression, so the pool's bigNumberStrings setting can return
-    // it as a string even though `balance` itself is a plain INT column — parse it back with
-    // Number() rather than trusting the driver's JS type. Safe here: this is a points balance
-    // adjusted by small per-message/per-gamble amounts, nowhere near Number.MAX_SAFE_INTEGER
-    // (unlike a Discord snowflake, which is why that case is never parsed back this way
-    // elsewhere in this codebase). Mirrors incrementCounter's identical comment in counters.ts.
-    return Number(rows[0]!.balance); // SELECT LAST_INSERT_ID() always returns one row
-  });
+  return withTransaction((conn) => adjustBalanceOnConn(conn, streamerId, twitchUsername, delta));
+}
+
+/**
+ * {@link adjustBalance} on a connection the caller already holds, so the adjustment commits or
+ * rolls back together with the caller's other writes (e.g. an advanced command refund, which must
+ * not mark a use refunded unless the points actually come back).
+ * @param conn - The caller's transaction connection.
+ * @param streamerId - The streamer's `streamer.id`.
+ * @param twitchUsername - The viewer's Twitch login.
+ * @param delta - Amount to add (positive) or subtract (negative).
+ * @returns The viewer's balance after the adjustment.
+ */
+export async function adjustBalanceOnConn(
+  conn: PoolConnection,
+  streamerId: number,
+  twitchUsername: string,
+  delta: number,
+): Promise<number> {
+  await conn.execute<mysql.ResultSetHeader>(
+    `INSERT INTO loyalty_points (streamer_id, twitch_username, balance)
+     VALUES (?, ?, LAST_INSERT_ID(LEAST(GREATEST(?, 0), ?)))
+     AS new_row
+     ON DUPLICATE KEY UPDATE balance = LAST_INSERT_ID(LEAST(GREATEST(loyalty_points.balance + ?, 0), ?))`,
+    [streamerId, twitchUsername, delta, MAX_BALANCE, delta, MAX_BALANCE],
+  );
+  const [rows] = await conn.execute<mysql.RowDataPacket[]>('SELECT LAST_INSERT_ID() AS balance');
+  // LAST_INSERT_ID() is a BIGINT expression, so the pool's bigNumberStrings setting can return
+  // it as a string even though `balance` itself is a plain INT column — parse it back with
+  // Number() rather than trusting the driver's JS type. Safe here: this is a points balance
+  // adjusted by small per-message/per-gamble amounts, nowhere near Number.MAX_SAFE_INTEGER
+  // (unlike a Discord snowflake, which is why that case is never parsed back this way
+  // elsewhere in this codebase). Mirrors incrementCounter's identical comment in counters.ts.
+  return Number(rows[0]!.balance); // SELECT LAST_INSERT_ID() always returns one row
 }
 
 /**
@@ -175,7 +192,7 @@ export async function resolveGambleOutcome(
     }
 
     const [rows] = await conn.execute<mysql.RowDataPacket[]>('SELECT LAST_INSERT_ID() AS balance');
-    // See adjustBalance's identical comment: LAST_INSERT_ID() is a BIGINT expression that can
+    // See adjustBalanceOnConn's identical comment: LAST_INSERT_ID() is a BIGINT expression that can
     // come back as a string, safely parsed back here since this is a bounded points balance.
     return Number(rows[0]!.balance); // SELECT LAST_INSERT_ID() always returns one row
   });
@@ -201,7 +218,7 @@ export async function spendBalance(streamerId: number, twitchUsername: string, c
     );
     if (result.affectedRows === 0) return null;
     const [rows] = await conn.execute<mysql.RowDataPacket[]>('SELECT LAST_INSERT_ID() AS balance');
-    // See adjustBalance's identical comment: LAST_INSERT_ID() is a BIGINT expression that can
+    // See adjustBalanceOnConn's identical comment: LAST_INSERT_ID() is a BIGINT expression that can
     // come back as a string, safely parsed back here since this is a bounded points balance.
     return Number(rows[0]!.balance); // SELECT LAST_INSERT_ID() always returns one row
   });

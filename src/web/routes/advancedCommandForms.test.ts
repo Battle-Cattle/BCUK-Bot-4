@@ -77,6 +77,8 @@ describe('parseEffectsForm', () => {
     expect(parseEffectsForm({ alert_enabled: 'on', alert_message: 'x', alert_duration_seconds: '999', alert_text_animation: 'spin' }, []).alert)
       .toEqual({ messageTemplate: 'x', durationMs: 60000, textAnimation: 'none' });
     expect(parseEffectsForm({ alert_enabled: 'on', alert_message: 'x', alert_duration_seconds: 'abc' }, []).alert?.durationMs).toBe(6000);
+    expect(parseEffectsForm({ alert_enabled: 'on', alert_message: 'x', alert_duration_seconds: '' }, []).alert?.durationMs).toBe(6000);
+    expect(parseEffectsForm({ alert_enabled: 'on', alert_message: 'x', alert_duration_seconds: '0' }, []).alert?.durationMs).toBe(1000);
     expect(parseEffectsForm({ alert_message: 'x' }, []).alert).toBeNull();
   });
 });

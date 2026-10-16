@@ -113,7 +113,9 @@ function parseVideos(body: FormBody, allowedVideoIds: number[]): AdvancedCommand
  */
 function parseAlert(body: FormBody): AdvancedCommandEffectsInput['alert'] {
   if (!parseCheckboxField(body.alert_enabled)) return null;
-  const seconds = Number(text(body, 'alert_duration_seconds'));
+  // Number('') is 0, which the clamp below would turn into a 1s alert; blank means the default.
+  const rawSeconds = text(body, 'alert_duration_seconds');
+  const seconds = rawSeconds === '' ? Number.NaN : Number(rawSeconds);
   const animation = text(body, 'alert_text_animation') as TextAnimation;
   return {
     messageTemplate: text(body, 'alert_message'),

@@ -128,15 +128,21 @@ function pushCompanion(use: AdvancedCommandUse): CompanionPushOutcome {
 }
 
 /**
- * Fires every effect of a command use. The companion push goes first, so the acknowledgement
- * timer starts as early as possible; the overlays and chat reply follow.
+ * Fires every effect of a command use. The companion push goes first, and `hooks.onPushed` runs
+ * straight after it — before the chat reply is awaited — so the caller can start the
+ * acknowledgement timer before a fast companion app could possibly answer. The overlays and chat
+ * reply follow.
  * @param use - The command use.
- * @returns The companion push outcome, which decides whether to wait for an acknowledgement
- *   or refund straight away.
+ * @param hooks - `onPushed`, called synchronously once the companion event has been pushed.
+ * @returns The companion push outcome; `no_companion` means the caller should refund.
  */
-export async function runAdvancedCommandEffects(use: AdvancedCommandUse): Promise<CompanionPushOutcome> {
+export async function runAdvancedCommandEffects(
+  use: AdvancedCommandUse,
+  hooks: { onPushed?: () => void } = {},
+): Promise<CompanionPushOutcome> {
   const vars = buildTemplateVars(use);
   const outcome = pushCompanion(use);
+  if (outcome === 'pushed') hooks.onPushed?.();
   try {
     pushVideo(use);
     pushAlert(use, vars);

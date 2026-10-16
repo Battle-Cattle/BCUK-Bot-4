@@ -3,12 +3,11 @@ import { mockLogger } from '../../test-utils/loggerMock';
 
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 vi.mock('../../db', () => ({
-  adjustLoyaltyPointsBalance: vi.fn(),
   listPendingAdvancedCommandUsage: vi.fn(),
   resolveAdvancedCommandUsage: vi.fn(),
 }));
 
-import { adjustLoyaltyPointsBalance, listPendingAdvancedCommandUsage, resolveAdvancedCommandUsage } from '../../db';
+import { listPendingAdvancedCommandUsage, resolveAdvancedCommandUsage } from '../../db';
 import {
   ACK_TIMEOUT_MS, acknowledgeAdvancedCommandUse, clearAdvancedCommandAcks, refundAdvancedCommandUse,
   sweepPendingAdvancedCommandUsage, trackAdvancedCommandAck,
@@ -32,29 +31,26 @@ afterEach(() => {
 });
 
 describe('refundAdvancedCommandUse', () => {
-  it('marks the use refunded, credits the points and tells the viewer', async () => {
+  it('refunds through the ledger (which credits the points atomically) and tells the viewer', async () => {
     expect(await refundAdvancedCommandUse('e1', 'no_companion', { channel: 'streamer' })).toBe(true);
     expect(resolveAdvancedCommandUsage).toHaveBeenCalledWith('e1', { status: 'refunded', refundReason: 'no_companion', errorMessage: undefined });
-    expect(adjustLoyaltyPointsBalance).toHaveBeenCalledWith(3, 'alice', 100);
     expect(send).toHaveBeenCalledWith('streamer', expect.stringContaining('@alice refunded 100 points for Hydrate'));
   });
 
   it('does nothing when the use was already resolved', async () => {
     vi.mocked(resolveAdvancedCommandUsage).mockResolvedValueOnce(null);
-    expect(await refundAdvancedCommandUse('e1', 'no_ack')).toBe(false);
-    expect(adjustLoyaltyPointsBalance).not.toHaveBeenCalled();
-  });
-
-  it('skips the credit for a free or Stream Deck use', async () => {
-    vi.mocked(resolveAdvancedCommandUsage).mockResolvedValueOnce({ ...RESOLVED, twitchUsername: null, pointsSpent: 0 });
-    expect(await refundAdvancedCommandUse('e1', 'no_ack', { channel: 'streamer' })).toBe(true);
-    expect(adjustLoyaltyPointsBalance).not.toHaveBeenCalled();
+    expect(await refundAdvancedCommandUse('e1', 'no_ack', { channel: 'streamer' })).toBe(false);
     expect(send).not.toHaveBeenCalled();
   });
 
-  it('credits without a chat notice when no channel is known, and survives a failed send', async () => {
-    await refundAdvancedCommandUse('e1', 'restart');
-    expect(adjustLoyaltyPointsBalance).toHaveBeenCalled();
+  it('sends no refund notice for a free or Stream Deck use', async () => {
+    vi.mocked(resolveAdvancedCommandUsage).mockResolvedValueOnce({ ...RESOLVED, twitchUsername: null, pointsSpent: 0 });
+    expect(await refundAdvancedCommandUse('e1', 'no_ack', { channel: 'streamer' })).toBe(true);
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('refunds without a chat notice when no channel is known, and survives a failed send', async () => {
+    expect(await refundAdvancedCommandUse('e1', 'restart')).toBe(true);
     expect(send).not.toHaveBeenCalled();
 
     send.mockRejectedValueOnce(new Error('offline'));
@@ -77,7 +73,7 @@ describe('acknowledgements', () => {
     trackAdvancedCommandAck('e1', 'streamer');
     vi.advanceTimersByTime(ACK_TIMEOUT_MS);
     await flushMicrotasks();
-    expect(adjustLoyaltyPointsBalance).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
   });
 
   it('marks a successful acknowledgement and cancels the timeout', async () => {

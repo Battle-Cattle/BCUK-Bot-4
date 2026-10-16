@@ -63,7 +63,10 @@ beforeEach(() => {
   vi.mocked(db.countAdvancedCommandUses).mockResolvedValue(0);
   vi.mocked(getChannelStreamStart).mockReturnValue(START);
   vi.mocked(isChannelLive).mockReturnValue(true);
-  vi.mocked(runAdvancedCommandEffects).mockResolvedValue('pushed');
+  vi.mocked(runAdvancedCommandEffects).mockImplementation(async (_use, hooks) => {
+    hooks?.onPushed?.();
+    return 'pushed';
+  });
 });
 
 describe('executeAdvancedCommandForTwitch', () => {

@@ -22,9 +22,11 @@ vi.mock('./pool', () => {
   };
 });
 vi.mock('mysql2/promise', () => ({ default: {} }));
+vi.mock('./loyaltyPoints', () => ({ adjustBalanceOnConn: vi.fn() }));
 
 import { makeMockPool, type MockPool } from '../test-utils/mockMysqlPool';
 import { getPool } from './pool';
+import { adjustBalanceOnConn } from './loyaltyPoints';
 import {
   recordAdvancedCommandUsage, countAdvancedCommandUses, resolveAdvancedCommandUsage,
   getAdvancedCommandUsageStreamerId, listPendingAdvancedCommandUsage, listRecentAdvancedCommandUsage,
@@ -82,6 +84,30 @@ describe('resolveAdvancedCommandUsage', () => {
     expect(params[0]).toBe('refunded');
     expect(params[1]).toBe('companion_error');
     expect(params[2]).toHaveLength(255);
+    // The credit runs on the same transaction connection, before the commit.
+    expect(adjustBalanceOnConn).toHaveBeenCalledWith(pool._conn, 3, 'viewer', 100);
+    expect(pool._conn.commit).toHaveBeenCalled();
+  });
+
+  it('rolls back the status change when the credit fails, leaving the use pending', async () => {
+    pool._conn.execute
+      .mockResolvedValueOnce([[{ streamer_id: 3, command_name: 'Hydrate', twitch_username: 'viewer', points_spent: 100 }], []])
+      .mockResolvedValueOnce([{ affectedRows: 1 }, []]);
+    vi.mocked(adjustBalanceOnConn).mockRejectedValueOnce(new Error('deadlock'));
+    await expect(resolveAdvancedCommandUsage('e1', { status: 'refunded', refundReason: 'no_ack' })).rejects.toThrow('deadlock');
+    expect(pool._conn.rollback).toHaveBeenCalled();
+    expect(pool._conn.commit).not.toHaveBeenCalled();
+  });
+
+  it('credits nothing for a success, a free use or a Stream Deck use', async () => {
+    const row = { streamer_id: 3, command_name: 'Hydrate', twitch_username: 'viewer', points_spent: 100 };
+    pool._conn.execute.mockResolvedValueOnce([[row], []]).mockResolvedValueOnce([{}, []]);
+    await resolveAdvancedCommandUsage('e1', { status: 'succeeded' });
+    pool._conn.execute.mockResolvedValueOnce([[{ ...row, points_spent: 0 }], []]).mockResolvedValueOnce([{}, []]);
+    await resolveAdvancedCommandUsage('e2', { status: 'refunded', refundReason: 'no_ack' });
+    pool._conn.execute.mockResolvedValueOnce([[{ ...row, twitch_username: null }], []]).mockResolvedValueOnce([{}, []]);
+    await resolveAdvancedCommandUsage('e3', { status: 'refunded', refundReason: 'no_ack' });
+    expect(adjustBalanceOnConn).not.toHaveBeenCalled();
   });
 
   it('returns null when the use is no longer pending', async () => {

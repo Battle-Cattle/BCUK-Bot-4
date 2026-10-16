@@ -3,6 +3,7 @@
 // acknowledgements (a pending row is resolved exactly once, by a conditional update).
 import mysql from 'mysql2/promise';
 import { getPool, withTransactionOrNotFound } from './pool';
+import { adjustBalanceOnConn } from './loyaltyPoints';
 
 export type AdvancedCommandUsageSource = 'chat' | 'streamdeck';
 export type AdvancedCommandUsageStatus = 'pending' | 'succeeded' | 'refunded' | 'no_ack_needed';
@@ -101,6 +102,9 @@ export async function countAdvancedCommandUses(
 /**
  * Moves a pending use to `succeeded` or `refunded`. The update only matches a `pending` row, so a
  * late acknowledgement and a timeout (or two acknowledgements) can't both resolve the same use.
+ * A refund credits the viewer's points in the same transaction, so a use is never marked
+ * refunded without the points coming back: if the credit fails, the row stays `pending` and a
+ * later timeout or the startup sweep retries it.
  * @param eventId - The use's event id.
  * @param outcome - The new status, plus the refund reason and the companion app's error text.
  * @returns The resolved row's details, or null if it wasn't pending (already resolved, or unknown).
@@ -123,6 +127,9 @@ export async function resolveAdvancedCommandUsage(
        WHERE event_id = ?`,
       [outcome.status, outcome.refundReason ?? null, outcome.errorMessage?.slice(0, MAX_ERROR_MESSAGE_LENGTH) ?? null, eventId],
     );
+    if (outcome.status === 'refunded' && row.points_spent > 0 && row.twitch_username) {
+      await adjustBalanceOnConn(conn, row.streamer_id, row.twitch_username, row.points_spent);
+    }
     return {
       streamerId: row.streamer_id,
       commandName: row.command_name,

@@ -176,9 +176,12 @@ async function fireUse(use: AdvancedCommandUse, streamStartedAt: Date | null): P
     throw err;
   }
 
-  const outcome = await runAdvancedCommandEffects(use);
-  if (outcome === 'pushed') trackAdvancedCommandAck(use.eventId, use.channel);
-  else if (outcome === 'no_companion') await refundAdvancedCommandUse(use.eventId, 'no_companion', { channel: use.channel });
+  // Track the acknowledgement the moment the event is pushed, not after the chat reply below it
+  // is sent — otherwise a fast failure acknowledgement could arrive before it's being waited for.
+  const outcome = await runAdvancedCommandEffects(use, {
+    onPushed: () => trackAdvancedCommandAck(use.eventId, use.channel),
+  });
+  if (outcome === 'no_companion') await refundAdvancedCommandUse(use.eventId, 'no_companion', { channel: use.channel });
   log.info(`Advanced command '${use.command.name}' (${use.command.id}) fired from ${use.source} in ${use.channel}`);
 }
 

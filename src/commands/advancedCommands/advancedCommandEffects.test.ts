@@ -116,6 +116,27 @@ describe('runAdvancedCommandEffects', () => {
     expect(pushCompanionEvent.mock.calls[0]![1]).toMatchObject({ source: 'streamdeck', userLogin: null, userName: null, args: null });
   });
 
+  it('calls onPushed right after the push, before the chat reply is sent', async () => {
+    hasCompanionConnection.mockReturnValue(true);
+    let replySent = false;
+    send.mockImplementation(async () => { replySent = true; });
+    let sentBeforePush: boolean | undefined;
+    await runAdvancedCommandEffects(
+      use({ command: command({ companionEnabled: true, response: 'hi' }) }),
+      { onPushed: () => { sentBeforePush = replySent; } },
+    );
+    expect(sentBeforePush).toBe(false);
+    expect(replySent).toBe(true);
+  });
+
+  it('does not call onPushed when nothing was pushed', async () => {
+    const onPushed = vi.fn();
+    hasCompanionConnection.mockReturnValue(false);
+    await runAdvancedCommandEffects(use({ command: command({ companionEnabled: true }) }), { onPushed });
+    await runAdvancedCommandEffects(use(), { onPushed });
+    expect(onPushed).not.toHaveBeenCalled();
+  });
+
   it('reports no_companion when nothing is connected', async () => {
     hasCompanionConnection.mockReturnValue(false);
     expect(await runAdvancedCommandEffects(use({ command: command({ companionEnabled: true }) }))).toBe('no_companion');
