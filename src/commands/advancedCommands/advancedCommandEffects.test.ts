@@ -66,6 +66,13 @@ describe('runAdvancedCommandEffects', () => {
     expect(send).toHaveBeenCalledWith('streamer', 'Alice paid 100, 400 left: big');
   });
 
+  it('posts no chat reply for a Stream Deck use', async () => {
+    await runAdvancedCommandEffects(use({
+      command: command({ response: 'hi' }), source: 'streamdeck', userLogin: null, userName: 'Streamer', args: '', pointsSpent: 0,
+    }));
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it('logs and swallows a failed reply', async () => {
     send.mockRejectedValueOnce(new Error('rate limited'));
     await expect(runAdvancedCommandEffects(use({ command: command({ response: 'hi' }) }))).resolves.toBe('disabled');

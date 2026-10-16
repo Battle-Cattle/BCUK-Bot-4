@@ -112,7 +112,58 @@ describe('executeAdvancedCommandForTwitch', () => {
     await executeAdvancedCommandForTwitch(message());
     expect(db.spendLoyaltyPoints).toHaveBeenCalledOnce();
     expect(send).toHaveBeenCalledOnce();
-    expect(send.mock.calls[0]![1]).toMatch(/^@alice Hydrate is on cooldown — try again in \d+s\.$/);
+    expect(send.mock.calls[0]![1]).toMatch(/^@alice Hydrate is on cooldown — your cooldown \d+s left\.$/);
+  });
+
+  it('lists both the global and the viewer\'s own cooldown when both are active', async () => {
+    vi.mocked(db.getAdvancedCommand).mockResolvedValue(command({ globalCooldownSeconds: 30, userCooldownSeconds: 120 }));
+    await executeAdvancedCommandForTwitch(message());
+    await executeAdvancedCommandForTwitch(message());
+    expect(send.mock.calls[0]![1]).toMatch(/^@alice Hydrate is on cooldown — global cooldown \d+s, your cooldown \d+s left\.$/);
+  });
+
+  it('adds the points shortfall to the cooldown notice when the viewer couldn\'t afford it anyway', async () => {
+    vi.mocked(db.getAdvancedCommand).mockResolvedValue(command({ userCooldownSeconds: 60 }));
+    vi.mocked(db.getLoyaltyPointsBalance).mockResolvedValue(30);
+    await executeAdvancedCommandForTwitch(message());
+    await executeAdvancedCommandForTwitch(message());
+    expect(send.mock.calls[0]![1]).toMatch(
+      /^@alice Hydrate is on cooldown — your cooldown \d+s left, and it costs 100 points — you have 30\.$/,
+    );
+  });
+
+  it('leaves the shortfall out of the cooldown notice when the viewer can afford it or isn\'t charged', async () => {
+    vi.mocked(db.getAdvancedCommand).mockResolvedValue(command({ userCooldownSeconds: 60 }));
+    vi.mocked(db.getLoyaltyPointsBalance).mockResolvedValue(500);
+    await executeAdvancedCommandForTwitch(message());
+    await executeAdvancedCommandForTwitch(message());
+    expect(send.mock.calls[0]![1]).toMatch(/^@alice Hydrate is on cooldown — your cooldown \d+s left\.$/);
+
+    clearAdvancedCommandState();
+    send.mockClear();
+    vi.mocked(db.getLoyaltyPointsBalance).mockResolvedValue(30);
+    vi.mocked(db.isExcludedFromLoyaltyPoints).mockResolvedValue(true);
+    vi.mocked(db.getAdvancedCommand).mockResolvedValue(command({ pointCost: 0, userCooldownSeconds: 60 }));
+    await executeAdvancedCommandForTwitch(message());
+    vi.mocked(db.getAdvancedCommand).mockResolvedValue(command({ userCooldownSeconds: 60 }));
+    await executeAdvancedCommandForTwitch(message());
+    expect(send.mock.calls[0]![1]).toMatch(/^@alice Hydrate is on cooldown — your cooldown \d+s left\.$/);
+  });
+
+  it('lets the broadcaster use a paid command for free', async () => {
+    const roles = { isBroadcaster: true, isMod: false, isVip: false, isSubscriber: false };
+    await executeAdvancedCommandForTwitch(message({ userLogin: 'streamer', userName: 'Streamer', roles }));
+    expect(db.spendLoyaltyPoints).not.toHaveBeenCalled();
+    expect(db.getLoyaltyPointsConfig).not.toHaveBeenCalled();
+    expect(db.recordAdvancedCommandUsage).toHaveBeenCalledWith(expect.objectContaining({ twitchUsername: 'streamer', pointsSpent: 0 }));
+  });
+
+  it('logs and swallows a failed notice', async () => {
+    vi.mocked(db.getAdvancedCommand).mockResolvedValue(command({ userCooldownSeconds: 60 }));
+    vi.mocked(db.getLoyaltyPointsBalance).mockRejectedValueOnce(new Error('DB down'));
+    await executeAdvancedCommandForTwitch(message());
+    await expect(executeAdvancedCommandForTwitch(message())).resolves.toBeUndefined();
+    expect(send).not.toHaveBeenCalled();
   });
 
   it('refuses once the per-stream cap is reached', async () => {
@@ -208,6 +259,16 @@ describe('triggerAdvancedCommandFromStreamDeck', () => {
       source: 'streamdeck', twitchUsername: null, pointsSpent: 0,
     }));
     expect(vi.mocked(runAdvancedCommandEffects).mock.calls[0]![0]).toMatchObject({ channel: 'streamer', userName: 'Streamer' });
+  });
+
+  it('neither starts nor is blocked by a chat cooldown', async () => {
+    vi.mocked(db.getAdvancedCommand).mockResolvedValue(command({ globalCooldownSeconds: 60, userCooldownSeconds: 60 }));
+    expect(await triggerAdvancedCommandFromStreamDeck(streamer, 7)).toBe('ok');
+    await executeAdvancedCommandForTwitch(message());
+    expect(db.spendLoyaltyPoints).toHaveBeenCalledOnce();
+    expect(send).not.toHaveBeenCalled();
+    expect(await triggerAdvancedCommandFromStreamDeck(streamer, 7)).toBe('ok');
+    expect(runAdvancedCommandEffects).toHaveBeenCalledTimes(3);
   });
 
   it('reports a missing or disabled command', async () => {

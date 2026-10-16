@@ -1,5 +1,5 @@
 // Advanced commands: per-streamer commands a viewer buys with loyalty points from chat, or the
-// streamer fires free from their Stream Deck. A chat use runs the gates (role, live-only,
+// streamer fires free (and silently in chat) from their Stream Deck. A chat use runs the gates (role, live-only,
 // cooldowns, per-stream caps), charges the escalating cost, records the use, then fires the
 // effects; a use whose companion push can't be delivered or isn't acknowledged is refunded.
 import { randomUUID } from 'node:crypto';
@@ -13,6 +13,7 @@ import {
   recordAdvancedCommandUsage,
   adjustLoyaltyPointsBalance,
   spendLoyaltyPoints,
+  type AdvancedCommandChatRoute,
   type AdvancedCommandUsageWindow,
   type DbAdvancedCommand,
 } from '../../db';
@@ -23,6 +24,7 @@ import {
   computeCommandCost,
   createAdvancedCommandCooldowns,
   createNoticeThrottle,
+  describeActiveCooldowns,
   hasRequiredRole,
   type ChatRoleInfo,
 } from './advancedCommandGates';
@@ -69,12 +71,16 @@ export type StreamDeckTriggerResult = 'ok' | 'command_not_found' | 'command_disa
  * Sends a chat notice to a viewer, at most once per {@link NOTICE_WINDOW_MS} per command and viewer.
  * @param channel - The channel.
  * @param key - Throttle key (command id and viewer).
- * @param message - The notice.
+ * @param message - The notice, or a function building it (only called when the notice will be sent).
  */
-async function sendNotice(channel: string, key: string, message: string): Promise<void> {
+async function sendNotice(channel: string, key: string, message: string | (() => Promise<string>)): Promise<void> {
   const runtime = advancedCommandRuntimeRegistry.get();
   if (!runtime || !notices.tryClaim(key)) return;
-  await runtime.send(channel, message).catch((err: unknown) => log.error(`Failed to send notice in ${channel}:`, err));
+  try {
+    await runtime.send(channel, typeof message === 'string' ? message : await message());
+  } catch (err) {
+    log.error(`Failed to send notice in ${channel}:`, err);
+  }
 }
 
 /**
@@ -91,17 +97,18 @@ function usageWindow(channel: string, now: Date): { window: AdvancedCommandUsage
 }
 
 /**
- * Checks the per-stream caps and works out this use's cost.
+ * Checks the per-stream caps and works out this use's cost. The broadcaster never pays.
  * @param command - The command.
- * @param login - The viewer's login.
+ * @param msg - The chat message (the viewer's login and badges).
  * @param window - The stream (or offline window) to count in.
  * @returns The cost, or a notice saying why the use is refused.
  */
 async function capsAndCost(
   command: DbAdvancedCommand,
-  login: string,
+  msg: Pick<AdvancedCommandChatMessage, 'userLogin' | 'roles'>,
   window: AdvancedCommandUsageWindow,
 ): Promise<{ cost: number } | { notice: string }> {
+  const login = msg.userLogin;
   const needsCount = command.priceStep > 0 || command.maxUsesPerStream !== null;
   const uses = needsCount ? await countAdvancedCommandUses(command.id, window) : 0;
   if (command.maxUsesPerStream !== null && uses >= command.maxUsesPerStream) {
@@ -111,7 +118,51 @@ async function capsAndCost(
     && await countAdvancedCommandUses(command.id, window, login) >= command.maxUsesPerUserPerStream) {
     return { notice: `@${login} you've used ${command.name} as many times as you can this stream.` };
   }
-  return { cost: computeCommandCost(command, uses) };
+  return { cost: msg.roles.isBroadcaster ? 0 : computeCommandCost(command, uses) };
+}
+
+/**
+ * The "not enough points" part of a notice.
+ * @param cost - The use's cost.
+ * @param balance - The viewer's balance.
+ * @returns E.g. `costs 100 points — you have 30`.
+ */
+function shortfallText(cost: number, balance: number): string {
+  return `costs ${cost} points — you have ${balance}`;
+}
+
+/**
+ * Whether the viewer pays in Loyalty Points here: it's on for the streamer and they aren't excluded.
+ * @param command - The command.
+ * @param login - The viewer's login.
+ * @returns True if a paid use would be charged.
+ */
+async function paysWithPoints(command: DbAdvancedCommand, login: string): Promise<boolean> {
+  const config = await getLoyaltyPointsConfig(command.streamerId);
+  return !!config?.enabled && !await isExcludedFromLoyaltyPoints(command.streamerId, login);
+}
+
+/**
+ * Builds the cooldown notice, adding the points shortfall when the viewer couldn't afford the
+ * command anyway (only when Loyalty Points is on and the viewer isn't excluded).
+ * @param command - The command.
+ * @param active - The active cooldowns, from `describeActiveCooldowns`.
+ * @param window - The stream (or offline window) to price the use in.
+ * @param msg - The chat message (the viewer's login, and badges for the broadcaster's free use).
+ * @returns The notice.
+ */
+async function cooldownNotice(
+  command: DbAdvancedCommand,
+  active: string,
+  window: AdvancedCommandUsageWindow,
+  msg: Pick<AdvancedCommandChatMessage, 'userLogin' | 'roles'>,
+): Promise<string> {
+  const login = msg.userLogin;
+  const notice = `@${login} ${command.name} is on cooldown — ${active} left`;
+  const priced = await capsAndCost(command, msg, window);
+  if (!('cost' in priced) || priced.cost === 0 || !await paysWithPoints(command, login)) return `${notice}.`;
+  const balance = await getLoyaltyPointsBalance(command.streamerId, login);
+  return balance < priced.cost ? `${notice}, and it ${shortfallText(priced.cost, balance)}.` : `${notice}.`;
 }
 
 /**
@@ -128,26 +179,24 @@ async function charge(
   cost: number,
 ): Promise<{ balance: number | null } | { notice: string | null }> {
   if (cost === 0) return { balance: null };
-  const config = await getLoyaltyPointsConfig(command.streamerId);
-  if (!config?.enabled || await isExcludedFromLoyaltyPoints(command.streamerId, login)) return { notice: null };
+  if (!await paysWithPoints(command, login)) return { notice: null };
   const balance = await spendLoyaltyPoints(command.streamerId, login, cost);
   if (balance !== null) return { balance };
   const current = await getLoyaltyPointsBalance(command.streamerId, login);
-  return { notice: `@${login} ${command.name} costs ${cost} points — you have ${current}.` };
+  return { notice: `@${login} ${command.name} ${shortfallText(cost, current)}.` };
 }
 
 /**
  * Runs the free checks for a chat use: enabled, role and live-only (silently refused), then
- * cooldowns (refused with a notice).
+ * cooldowns (refused with a notice listing every active cooldown).
  * @param command - The command, or null if it's gone.
  * @param msg - The chat message.
- * @returns Null to proceed, `false` to stay silent, or a notice.
+ * @returns Null to proceed, `false` to stay silent, or the active cooldowns to report.
  */
 function checkChatGates(command: DbAdvancedCommand | null, msg: AdvancedCommandChatMessage): string | false | null {
   if (!command?.isEnabled || !hasRequiredRole(command.minRole, msg.roles)) return false;
   if (command.liveOnly && !isChannelLive(msg.channel)) return false;
-  const remaining = cooldowns.remainingSeconds(command, msg.userLogin);
-  return remaining > 0 ? `@${msg.userLogin} ${command.name} is on cooldown — try again in ${remaining}s.` : null;
+  return describeActiveCooldowns(cooldowns.remaining(command, msg.userLogin));
 }
 
 /**
@@ -194,32 +243,65 @@ async function fireUse(use: AdvancedCommandUse, streamStartedAt: Date | null): P
 }
 
 /**
+ * Looks up the channel's advanced command a chat message names.
+ * @param msg - The chat message.
+ * @returns The route and the command (null if it's gone), or null when the message isn't one.
+ */
+async function resolveChatCommand(
+  msg: AdvancedCommandChatMessage,
+): Promise<{ route: AdvancedCommandChatRoute; command: DbAdvancedCommand | null } | null> {
+  if (!msg.command) return null;
+  const route = await getAdvancedCommandForTwitchChannel(msg.channel, msg.command);
+  return route ? { route, command: await getAdvancedCommand(route.streamerId, route.commandId) } : null;
+}
+
+/**
+ * Checks the caps, prices the use and charges the viewer, sending the notice for any refusal.
+ * @param command - The command.
+ * @param msg - The chat message.
+ * @param window - The stream (or offline window) to count and price in.
+ * @param noticeKey - The notice throttle key.
+ * @returns The cost and balance after paying, or null when the use is refused.
+ */
+async function priceAndCharge(
+  command: DbAdvancedCommand,
+  msg: AdvancedCommandChatMessage,
+  window: AdvancedCommandUsageWindow,
+  noticeKey: string,
+): Promise<{ cost: number; balance: number | null } | null> {
+  const priced = await capsAndCost(command, msg, window);
+  if ('notice' in priced) {
+    await sendNotice(msg.channel, noticeKey, priced.notice);
+    return null;
+  }
+  const paid = await charge(command, msg.userLogin, priced.cost);
+  if ('notice' in paid) {
+    if (paid.notice) await sendNotice(msg.channel, noticeKey, paid.notice);
+    return null;
+  }
+  return { cost: priced.cost, balance: paid.balance };
+}
+
+/**
  * Handles a Twitch chat message that may trigger one of the channel's advanced commands.
  * @param msg - The chat message.
  * @returns Resolves once the use is handled (or ignored).
  */
 export async function executeAdvancedCommandForTwitch(msg: AdvancedCommandChatMessage): Promise<void> {
-  if (!msg.command) return;
-  const route = await getAdvancedCommandForTwitchChannel(msg.channel, msg.command);
-  if (!route) return;
-  const command = await getAdvancedCommand(route.streamerId, route.commandId);
+  const resolved = await resolveChatCommand(msg);
+  if (!resolved?.command) return;
+  const { route, command } = resolved;
   const noticeKey = `${route.commandId}:${msg.userLogin}`;
-
-  const gate = checkChatGates(command, msg);
-  if (gate !== null || !command) {
-    if (gate) await sendNotice(msg.channel, noticeKey, gate);
-    return;
-  }
-
   const now = new Date();
   const { window, streamStartedAt } = usageWindow(msg.channel, now);
-  const priced = await capsAndCost(command, msg.userLogin, window);
-  if ('notice' in priced) return sendNotice(msg.channel, noticeKey, priced.notice);
-  const paid = await charge(command, msg.userLogin, priced.cost);
-  if ('notice' in paid) {
-    if (paid.notice) await sendNotice(msg.channel, noticeKey, paid.notice);
+
+  const gate = checkChatGates(command, msg);
+  if (gate !== null) {
+    if (gate) await sendNotice(msg.channel, noticeKey, () => cooldownNotice(command, gate, window, msg));
     return;
   }
+  const paid = await priceAndCharge(command, msg, window, noticeKey);
+  if (!paid) return;
 
   cooldowns.claim(command, msg.userLogin);
   await fireUse({
@@ -231,7 +313,7 @@ export async function executeAdvancedCommandForTwitch(msg: AdvancedCommandChatMe
     userLogin: msg.userLogin,
     userName: msg.userName,
     args: extractArgs(msg.message),
-    pointsSpent: priced.cost,
+    pointsSpent: paid.cost,
     balance: paid.balance,
     triggeredAt: now,
   }, streamStartedAt);
@@ -239,7 +321,8 @@ export async function executeAdvancedCommandForTwitch(msg: AdvancedCommandChatMe
 
 /**
  * Fires one of a streamer's commands from their Stream Deck: free, and skipping the cooldowns,
- * role, live-only and caps. The command must still be enabled.
+ * role, live-only and caps. It neither starts a cooldown nor counts towards caps or pricing (only
+ * chat uses do), and posts no chat reply. The command must still be enabled.
  * @param streamer - The streamer the Stream Deck key belongs to.
  * @param commandId - The command to fire.
  * @returns `ok`, or why it didn't fire.
