@@ -27,8 +27,8 @@ const REFUND_REASON_TEXT: Record<AdvancedCommandRefundReason, string> = {
   restart: 'the bot restarted',
 };
 
-/** Pending acknowledgements: event id → its timeout and the channel to post a refund notice in. */
-const pendingAcks = new Map<string, { timer: ReturnType<typeof setTimeout>; channel: string }>();
+/** Pending acknowledgements and refund retries: event id → its timer and the channel (if known) for a refund notice. */
+const pendingAcks = new Map<string, { timer: ReturnType<typeof setTimeout>; channel: string | undefined }>();
 
 /**
  * Refunds a pending use: marks it refunded (only if still pending) and credits the points back in
@@ -59,21 +59,32 @@ export async function refundAdvancedCommandUse(
 }
 
 /**
- * Starts waiting for the companion app to acknowledge a use; refunds it if none arrives in time.
- * If that refund fails (the use stays pending), the timer is re-armed so it's retried.
+ * Schedules a refund of a pending use after ACK_TIMEOUT_MS. If that refund fails (the use stays
+ * pending), it schedules itself again, so a transient DB error never strands the points.
  * @param eventId - The use's event id.
- * @param channel - The streamer's channel, for the refund notice.
+ * @param reason - The refund reason to record.
+ * @param channel - The streamer's channel for the refund notice, if known.
  */
-export function trackAdvancedCommandAck(eventId: string, channel: string): void {
+function scheduleRefund(eventId: string, reason: AdvancedCommandRefundReason, channel: string | undefined): void {
   const timer = setTimeout(() => {
     pendingAcks.delete(eventId);
-    refundAdvancedCommandUse(eventId, 'no_ack', { channel }).catch((err: unknown) => {
-      log.error(`Failed to refund unacknowledged advanced command ${eventId}; retrying:`, err);
-      trackAdvancedCommandAck(eventId, channel);
+    refundAdvancedCommandUse(eventId, reason, { channel }).catch((err: unknown) => {
+      log.error(`Failed to refund advanced command ${eventId} (${reason}); retrying:`, err);
+      scheduleRefund(eventId, reason, channel);
     });
   }, ACK_TIMEOUT_MS);
   timer.unref();
   pendingAcks.set(eventId, { timer, channel });
+}
+
+/**
+ * Starts waiting for the companion app to acknowledge a use; refunds it if none arrives in time.
+ * If that refund fails (the use stays pending), it's retried after another timeout.
+ * @param eventId - The use's event id.
+ * @param channel - The streamer's channel, for the refund notice.
+ */
+export function trackAdvancedCommandAck(eventId: string, channel: string): void {
+  scheduleRefund(eventId, 'no_ack', channel);
 }
 
 /**
@@ -96,14 +107,15 @@ export async function acknowledgeAdvancedCommandUse(
     if (ack.ok) return (await resolveAdvancedCommandUsage(eventId, { status: 'succeeded' })) !== null;
     return await refundAdvancedCommandUse(eventId, 'companion_error', { channel: pending?.channel, errorMessage: ack.error });
   } catch (err) {
-    if (pending) trackAdvancedCommandAck(eventId, pending.channel);
+    if (pending) scheduleRefund(eventId, 'no_ack', pending.channel);
     throw err;
   }
 }
 
 /**
  * Refunds every use still pending from before a restart. Call once at startup, before the Twitch
- * bot connects, so no new pending use can be swept by mistake.
+ * bot connects, so no new pending use can be swept by mistake. A refund that fails is retried
+ * after a timeout.
  * @returns How many uses were refunded.
  */
 export async function sweepPendingAdvancedCommandUsage(): Promise<number> {
@@ -113,8 +125,9 @@ export async function sweepPendingAdvancedCommandUsage(): Promise<number> {
     try {
       if (await refundAdvancedCommandUse(eventId, 'restart')) refunded++;
     } catch (err) {
-      // One failed row mustn't hold back the rest; it stays pending for the next startup.
-      log.error(`Failed to refund pending advanced command ${eventId} at startup:`, err);
+      // One failed row mustn't hold back the rest; retry it after a timeout instead.
+      log.error(`Failed to refund pending advanced command ${eventId} at startup; retrying:`, err);
+      scheduleRefund(eventId, 'restart', undefined);
     }
   }
   if (refunded > 0) log.info(`Refunded ${refunded} advanced command use(s) left pending by a restart`);

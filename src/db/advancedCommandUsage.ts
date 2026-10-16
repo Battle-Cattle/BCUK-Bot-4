@@ -104,7 +104,7 @@ export async function countAdvancedCommandUses(
  * late acknowledgement and a timeout (or two acknowledgements) can't both resolve the same use.
  * A refund credits the viewer's points in the same transaction, so a use is never marked
  * refunded without the points coming back: if the credit fails, the row stays `pending` and a
- * re-armed acknowledgement timeout (or, after a restart, the startup sweep) retries it.
+ * re-armed retry timer (see `advancedCommandRefunds.ts`) or the next startup sweep retries it.
  * @param eventId - The use's event id.
  * @param outcome - The new status, plus the refund reason and the companion app's error text.
  * @returns The resolved row's details, or null if it wasn't pending (already resolved, or unknown).

@@ -136,11 +136,18 @@ describe('sweepPendingAdvancedCommandUsage', () => {
     expect(resolveAdvancedCommandUsage).not.toHaveBeenCalledWith('live', expect.anything());
   });
 
-  it('keeps sweeping after one refund fails', async () => {
+  it('keeps sweeping after one refund fails, and retries the failed one without another restart', async () => {
+    vi.useFakeTimers();
     vi.mocked(listPendingAdvancedCommandUsage).mockResolvedValue(['bad', 'good']);
     vi.mocked(resolveAdvancedCommandUsage).mockRejectedValueOnce(new Error('deadlock')).mockResolvedValueOnce(RESOLVED);
 
     expect(await sweepPendingAdvancedCommandUsage()).toBe(1);
     expect(resolveAdvancedCommandUsage).toHaveBeenCalledWith('good', expect.objectContaining({ refundReason: 'restart' }));
+
+    vi.advanceTimersByTime(ACK_TIMEOUT_MS);
+    await flushMicrotasks();
+    expect(resolveAdvancedCommandUsage).toHaveBeenCalledTimes(3);
+    expect(resolveAdvancedCommandUsage).toHaveBeenLastCalledWith('bad', expect.objectContaining({ refundReason: 'restart' }));
+    expect(send).not.toHaveBeenCalled();
   });
 });
