@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BCUK Bot — Advanced Commands</title>
+  <link rel="stylesheet" href="/style.css">
+  <%- include('partials/pwa-head') %>
+</head>
+<body data-csrf-token="<%= csrfToken %>">
+  <%- include('partials/nav') %>
+
+  <main class="container">
+    <section class="section">
+      <h2 class="section-title">Advanced Commands</h2>
+
+      <% if (error) { %>
+      <% const errorMessages = {
+        not_a_streamer:          'You are not configured as a monitored streamer.',
+        save_failed:             'Failed to save — please try again.',
+        not_found:               'That command no longer exists.',
+        invalid_number:          'Costs, cooldowns and limits must be whole numbers.',
+        invalid_name:            'The name must be 1–64 characters.',
+        invalid_trigger:         'The chat trigger must be a single word.',
+        invalid_response:        'The chat reply is too long (2000 characters max).',
+        invalid_point_cost:      'The point cost must be 0 or more.',
+        invalid_price_step:      'The price increase must be 0 or more.',
+        invalid_max_cost:        'The max cost can\'t be below the point cost.',
+        invalid_global_cooldown: 'The channel cooldown must be 0 or more.',
+        invalid_user_cooldown:   'The per-viewer cooldown must be 0 or more.',
+        invalid_max_uses:        'Max uses per stream must be at least 1, or blank.',
+        invalid_max_user_uses:   'Max uses per viewer must be at least 1, or blank.',
+        invalid_role:            'Unknown role.',
+        duplicate_name:          'You already have a command with that name.',
+        duplicate_trigger:       'You already have a command with that trigger.',
+        trigger_taken:           'That trigger is already used by a custom command, counter or another streamer\'s advanced command.',
+        reserved_trigger:        'That trigger is a built-in bot command.',
+        too_many_params:         'A command can have at most ' + maxParams + ' parameters.',
+        invalid_param:           'Parameters must be key=value lines, with keys of letters, digits, _ or - (32 max) and values of 255 characters max.',
+        invalid_alert_message:   'The alert message must be 1–500 characters.',
+        invalid_alert_duration:  'The alert duration must be positive.',
+        invalid_alert_animation: 'Unknown alert animation.',
+        invalid_file:            'That file isn\'t a supported image or sound.',
+        invalid_path:            'Couldn\'t store that file.',
+        file_too_large:          'That file is too large.',
+        upload_failed:           'Upload failed — please try again.',
+        no_alert:                'Turn on and save the command\'s alert before uploading files for it.',
+        test_failed:             'Failed to send the test.',
+        command_disabled:        'That command is disabled — enable it first.',
+      }; %>
+      <div class="card card-alert-danger" role="alert" aria-live="assertive" aria-atomic="true">
+        <span class="text-danger">&#9888; <%= errorMessages[error] || `Operation failed: ${error.replace(/_/g, ' ')}` %></span>
+      </div>
+      <% } %>
+      <% if (success) { %>
+      <% const successMessages = {
+        added: 'Command added.', saved: 'Command saved.', effects_saved: 'Effects saved.', removed: 'Command deleted.',
+        toggled: 'Command updated.', image_uploaded: 'Image uploaded.', sound_uploaded: 'Sound uploaded.',
+        image_deleted: 'Image removed.', sound_deleted: 'Sound removed.', test_sent: 'Test sent.',
+      }; %>
+      <div class="card card-alert-success" role="status"><%= successMessages[success] ?? 'Done.' %></div>
+      <% } %>
+
+      <% if (!isStreamer) { %>
+      <div class="card card-spaced">
+        <div class="card-body">
+          <p>Advanced commands are your own channel's commands: viewers buy them with loyalty points,
+            and you can fire them for free from your Stream Deck. They can post a chat reply, play an
+            overlay video, show an alert, and trigger actions in your companion app.</p>
+          <p class="muted">You need to be set up as a monitored streamer to use them — ask a bot admin.</p>
+        </div>
+      </div>
+      <% } else { %>
+
+      <div class="card card-spaced">
+        <div class="card-body">
+          <p class="muted">Viewers use a command from chat by its trigger and pay its point cost; your
+            Stream Deck fires it for free and ignores the cooldowns, role, live-only and limits. When
+            "Send to my companion app" is on and the app isn't connected, reports a failure, or doesn't
+            answer within 30 seconds, the viewer is refunded.</p>
+          <ul class="checklist">
+            <li><%= twitchLinked ? '✅' : '❌' %> Twitch account linked</li>
+            <li><%= chatBotEnabled ? '✅' : '❌' %> Twitch chat bot enabled <span class="muted">(needed for chat triggers)</span></li>
+            <li><%= loyaltyPointsEnabled ? '✅' : '⚠️' %> <a href="/loyalty-points">Loyalty Points</a> enabled <span class="muted">(needed for commands with a cost)</span></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="card card-spaced">
+        <div class="card-header"><span class="card-icon">➕</span><span class="card-label">Add a command</span></div>
+        <div class="card-body">
+          <form method="POST" action="/advanced-commands/add">
+            <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+            <%- include('partials/advancedCommandSettings', { c: null, idPrefix: 'new', roles }) %>
+            <button type="submit" class="btn btn-primary form-section-gap">Add command</button>
+          </form>
+        </div>
+      </div>
+
+      <% if (commands.length === 0) { %>
+      <p class="muted">You don't have any advanced commands yet.</p>
+      <% } %>
+
+      <% commands.forEach(function (c) { %>
+      <div class="card card-spaced">
+        <div class="card-header">
+          <span class="card-icon"><%= c.isEnabled ? '⚡' : '⏸️' %></span>
+          <span class="card-label"><%= c.name %> <span class="muted"><%= c.triggerString || '(Stream Deck only)' %> · <%= c.pointCost %> pts</span></span>
+        </div>
+        <div class="card-body">
+          <% if (c.pointCost > 0 && !loyaltyPointsEnabled) { %>
+          <p class="text-danger">&#9888; This command has a cost, but Loyalty Points is off, so viewers can't use it.</p>
+          <% } %>
+          <div class="d-flex gap-05">
+            <form method="POST" action="/advanced-commands/<%= c.id %>/toggle">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+              <button type="submit" class="btn btn-sm btn-ghost"><%= c.isEnabled ? 'Disable' : 'Enable' %></button>
+            </form>
+            <form method="POST" action="/advanced-commands/<%= c.id %>/test">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+              <button type="submit" class="btn btn-sm btn-ghost">Test (as Stream Deck)</button>
+            </form>
+            <form method="POST" action="/advanced-commands/<%= c.id %>/remove" class="js-confirm-delete-command" data-command-name="<%= c.name %>">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+              <button type="submit" class="btn btn-sm btn-danger">Delete</button>
+            </form>
+          </div>
+
+          <details class="mt-05">
+            <summary>Settings</summary>
+            <form method="POST" action="/advanced-commands/<%= c.id %>/update">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+              <%- include('partials/advancedCommandSettings', { c, idPrefix: 'cmd-' + c.id, roles }) %>
+              <button type="submit" class="btn btn-primary form-section-gap">Save settings</button>
+            </form>
+          </details>
+
+          <details class="mt-05">
+            <summary>Effects — companion parameters, overlay video, alert</summary>
+            <form method="POST" action="/advanced-commands/<%= c.id %>/effects">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+              <div class="form-section-gap">
+                <label for="params-<%= c.id %>" class="form-label">Companion parameters <span class="muted">(one key=value per line, up to <%= maxParams %>)</span></label>
+                <textarea id="params-<%= c.id %>" class="input full-width" name="params" rows="3" placeholder="color=red"><%= c.params.map(function (p) { return p.key + '=' + p.value; }).join('\n') %></textarea>
+              </div>
+              <fieldset class="form-section-gap">
+                <legend class="form-label">Overlay videos <span class="muted">(one is picked by weight each use)</span></legend>
+                <% if (videos.length === 0) { %>
+                <p class="muted">Upload videos on the <a href="/overlay/settings">Video overlay</a> page first.</p>
+                <% } %>
+                <% videos.forEach(function (video) { const chosen = c.videos.find(function (cv) { return cv.videoId === video.id; }); %>
+                <div class="d-flex gap-05 items-end">
+                  <label class="form-label"><input type="checkbox" name="video_<%= video.id %>" <%= chosen ? 'checked' : '' %>> <%= video.name %></label>
+                  <label class="form-label">Weight <input class="input" type="number" min="1" step="1" name="weight_<%= video.id %>" value="<%= chosen ? chosen.weight : 1 %>"></label>
+                </div>
+                <% }); %>
+              </fieldset>
+              <fieldset class="form-section-gap">
+                <legend class="form-label">Alert</legend>
+                <label class="form-label"><input type="checkbox" name="alert_enabled" <%= c.alert ? 'checked' : '' %>> Show an alert in the alerts overlay</label>
+                <label for="alert-message-<%= c.id %>" class="form-label">Message <span class="muted">(same placeholders as the chat reply)</span></label>
+                <textarea id="alert-message-<%= c.id %>" class="input full-width" name="alert_message" maxlength="500" rows="2"><%= c.alert ? c.alert.messageTemplate : '{user} used ' + c.name + '!' %></textarea>
+                <div class="form-row-wrap">
+                  <div class="form-col-grow">
+                    <label for="alert-duration-<%= c.id %>" class="form-label">Duration (seconds)</label>
+                    <input id="alert-duration-<%= c.id %>" class="input full-width" type="number" min="1" max="60" step="0.01" name="alert_duration_seconds" value="<%= c.alert ? c.alert.durationMs / 1000 : 6 %>">
+                  </div>
+                  <div class="form-col-grow">
+                    <label for="alert-animation-<%= c.id %>" class="form-label">Text animation</label>
+                    <select id="alert-animation-<%= c.id %>" class="input full-width" name="alert_text_animation">
+                      <% textAnimations.forEach(function (a) { %>
+                      <option value="<%= a %>" <%= c.alert && c.alert.textAnimation === a ? 'selected' : '' %>><%= a %></option>
+                      <% }); %>
+                    </select>
+                  </div>
+                </div>
+              </fieldset>
+              <button type="submit" class="btn btn-primary form-section-gap">Save effects</button>
+            </form>
+
+            <% if (c.alert) { %>
+            <% [['image', c.alert.imageFilename, 'image/png,image/gif,image/jpeg,image/webp', maxImageMb], ['sound', c.alert.soundFilename, 'audio/mpeg,audio/ogg,audio/wav', maxSoundMb]].forEach(function (asset) { %>
+            <div class="d-flex gap-05 items-end mt-05">
+              <form method="POST" action="/advanced-commands/<%= c.id %>/alert/<%= asset[0] %>" enctype="multipart/form-data" class="js-advanced-command-upload d-flex gap-05 items-end">
+                <label class="form-label">Alert <%= asset[0] %> <span class="muted">(<%= asset[1] ? 'replace' : 'none yet' %>, <%= asset[3] %> MB max)</span>
+                  <input type="file" name="<%= asset[0] %>" accept="<%= asset[2] %>" required></label>
+                <button type="submit" class="btn btn-sm btn-primary">Upload</button>
+              </form>
+              <% if (asset[1]) { %>
+              <form method="POST" action="/advanced-commands/<%= c.id %>/alert/<%= asset[0] %>/delete">
+                <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                <button type="submit" class="btn btn-sm btn-ghost">Remove <%= asset[0] %></button>
+              </form>
+              <% } %>
+            </div>
+            <% }); %>
+            <% } %>
+          </details>
+        </div>
+      </div>
+      <% }); %>
+
+      <div class="card card-spaced">
+        <div class="card-header"><span class="card-icon">📜</span><span class="card-label">Recent uses</span></div>
+        <div class="card-body">
+          <% if (usage.length === 0) { %>
+          <p class="muted">No commands have been used yet.</p>
+          <% } else { %>
+          <table class="table full-width">
+            <thead><tr><th>When</th><th>Command</th><th>By</th><th>Points</th><th>Result</th></tr></thead>
+            <tbody>
+              <% usage.forEach(function (u) { %>
+              <tr>
+                <td><%= u.triggeredAt.toISOString().replace('T', ' ').slice(0, 16) %> UTC</td>
+                <td><%= u.commandName %></td>
+                <td><%= u.source === 'streamdeck' ? 'Stream Deck' : u.twitchUsername %></td>
+                <td><%= u.pointsSpent %></td>
+                <td>
+                  <%= { pending: 'Waiting for companion', succeeded: 'Done', refunded: 'Refunded', no_ack_needed: 'Done' }[u.status] %>
+                  <% if (u.refundReason) { %><span class="muted">(<%= u.refundReason.replace(/_/g, ' ') %><%= u.errorMessage ? ': ' + u.errorMessage : '' %>)</span><% } %>
+                </td>
+              </tr>
+              <% }); %>
+            </tbody>
+          </table>
+          <% } %>
+        </div>
+      </div>
+      <% } %>
+    </section>
+  </main>
+  <script src="/utils.js"></script>
+  <script src="/advancedCommands.js"></script>
+  <%- include('partials/pwa-register') %>
+  <%- include('partials/footer') %>
+</body>
+</html>

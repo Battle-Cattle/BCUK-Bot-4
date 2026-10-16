@@ -279,7 +279,7 @@ describe('updateCounter', () => {
       ['!old', '!oldcheck', '!new', '!newcheck'],
       { guildId: 'guild-1' },
       expect.any(Function),
-      { includeCustomCommandTable: false, includeCounterTable: false },
+      { includeCustomCommandTable: false, includeCounterTable: false, includeAdvancedCommandTable: false },
     );
   });
 
@@ -341,7 +341,7 @@ describe('removeCounter', () => {
       { guildId: 'guild-1' },
       expect.any(Function),
       // Lock only: a counter that already collides must still be deletable.
-      { includeCustomCommandTable: false, includeCounterTable: false },
+      { includeCustomCommandTable: false, includeCounterTable: false, includeAdvancedCommandTable: false },
     );
   });
 

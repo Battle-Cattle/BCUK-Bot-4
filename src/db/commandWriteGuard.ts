@@ -1,4 +1,4 @@
-// Cross-table trigger-collision checks (custom commands vs counters) and the serialized,
+// Cross-table trigger-collision checks (custom commands vs counters vs advanced commands) and the serialized,
 // lock-guarded write wrapper built on them (`runSerializedCommandWrite`).
 import { createLogger } from '../shared/logger';
 import mysql from 'mysql2/promise';
@@ -75,6 +75,29 @@ function buildCounterExistsCheckPlan(
 }
 
 /**
+ * Builds the SQL + params for checking whether `normalizedCommands` collide with any streamer's
+ * `advanced_command` trigger. Advanced commands are per-streamer, but a custom command or counter
+ * reaching the same channel would fire alongside one, so the check is global — the same
+ * conservative choice the counter check makes for a global custom command.
+ * @param placeholders - `IN (...)` placeholder string sized for `normalizedCommands.length`.
+ * @param normalizedCommands - Normalized command strings to check for a collision.
+ * @returns The SQL and params to run via {@link executeExistsCheck}.
+ */
+function buildAdvancedCommandExistsCheckPlan(placeholders: string, normalizedCommands: string[]): SqlExistsCheckPlan {
+  return {
+    sql: `SELECT 1 FROM advanced_command WHERE trigger_string IN (${placeholders}) LIMIT 1`,
+    params: [...normalizedCommands],
+  };
+}
+
+/** Which tables a collision check covers; each defaults to enabled when omitted. */
+export interface CommandCollisionChecks {
+  includeCustomCommandTable?: boolean;
+  includeCounterTable?: boolean;
+  includeAdvancedCommandTable?: boolean;
+}
+
+/**
  * Runs an exists-check plan built by {@link buildCustomCommandExistsCheckPlan}/{@link buildCounterExistsCheckPlan} and reports whether any row matched.
  * @param executor - Query executor to run the plan on.
  * @param plan - The SQL and params to execute.
@@ -86,8 +109,8 @@ async function executeExistsCheck(executor: SqlExecutor, plan: SqlExistsCheckPla
 }
 
 /**
- * Checks whether any of `commandOrCommands` is already taken by a `custom_command` or
- * `counter` row (whichever tables `checks` enables), optionally excluding a specific
+ * Checks whether any of `commandOrCommands` is already taken by a `custom_command`, `counter`
+ * or `advanced_command` row (whichever tables `checks` enables), optionally excluding a specific
  * command/counter id from the check (used when updating an existing row in place).
  * @param commandOrCommands - A single command string or array of command strings to check.
  * @param options - Ids to exclude from the collision check, if updating an existing row, and
@@ -95,17 +118,14 @@ async function executeExistsCheck(executor: SqlExecutor, plan: SqlExistsCheckPla
  *   `guildId` has no effect on the custom_command half of the check, which is always global.
  * @param executor - Query executor to run the checks on; defaults to the pool, but a
  *   transaction connection is passed when called from {@link runSerializedCommandWrite}.
- * @param checks - Which tables to check; both default to enabled.
+ * @param checks - Which tables to check; each defaults to enabled.
  * @returns True if any command in `commandOrCommands` is already taken.
  */
 export async function isAnyCommandTakenAcrossTables(
   commandOrCommands: string | string[],
   options?: { excludeCustomCommandId?: number; excludeCounterId?: number; guildId?: string },
   executor: SqlExecutor = getPool(),
-  checks: { includeCustomCommandTable?: boolean; includeCounterTable?: boolean } = {
-    includeCustomCommandTable: true,
-    includeCounterTable: true,
-  },
+  checks: CommandCollisionChecks = {},
 ): Promise<boolean> {
   const normalizedCommands = normalizeCommandInputs(commandOrCommands);
   if (normalizedCommands.length === 0) {
@@ -121,6 +141,10 @@ export async function isAnyCommandTakenAcrossTables(
 
   if (checks.includeCounterTable !== false) {
     existsChecks.push(executeExistsCheck(executor, buildCounterExistsCheckPlan(placeholders, normalizedCommands, options)));
+  }
+
+  if (checks.includeAdvancedCommandTable !== false) {
+    existsChecks.push(executeExistsCheck(executor, buildAdvancedCommandExistsCheckPlan(placeholders, normalizedCommands)));
   }
 
   const results = await Promise.all(existsChecks);
@@ -153,7 +177,7 @@ export async function isAnyCommandTakenAcrossTables(
  *   pool — which could otherwise starve the pool under load; the caller keeps ownership and
  *   releases it, while the trigger locks taken here are still released here.
  * @param writeOperation - The transactional write to perform once locks are held and no collision exists.
- * @param checks - Which tables to include in the collision check; both default to enabled.
+ * @param checks - Which tables to include in the collision check; each defaults to enabled.
  * @returns The value returned by `writeOperation`.
  * @throws {@link CommandConflictError} if a collision is detected.
  */
@@ -166,10 +190,7 @@ export async function runSerializedCommandWrite<T>(
     connection?: mysql.PoolConnection;
   } | undefined,
   writeOperation: (connection: mysql.PoolConnection) => Promise<T>,
-  checks: { includeCustomCommandTable?: boolean; includeCounterTable?: boolean } = {
-    includeCustomCommandTable: true,
-    includeCounterTable: true,
-  },
+  checks: CommandCollisionChecks = {},
 ): Promise<T> {
   const normalizedCommands = normalizeCommandInputs(commandOrCommands);
   const lockNames = getSortedCommandLockNames(normalizedCommands);

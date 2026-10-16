@@ -36,6 +36,7 @@ vi.mock('../../db', () => ({
 import supertest from 'supertest';
 import router, {
   pushCompanionEvent, disconnectCompanionConnections, MAX_SSE_CONNECTIONS_PER_TOKEN, connections,
+  hasCompanionConnection,
 } from './companionEvents';
 import type { CompanionEvent } from '../../twitch/eventsub/twitchEventSubRuntime';
 import { RECENT_EVENTS_LIMIT } from './dashboardEvents';
@@ -320,6 +321,18 @@ describe('pushCompanionEvent', () => {
 
   it('is a no-op when no clients are connected for the discord ID', () => {
     expect(() => pushCompanionEvent('nobody', sampleEvent)).not.toThrow();
+  });
+});
+
+describe('hasCompanionConnection', () => {
+  it('is true only while the user has at least one open connection', () => {
+    connections.delete('hc-user');
+    expect(hasCompanionConnection('hc-user')).toBe(false);
+    connections.set('hc-user', new Set());
+    expect(hasCompanionConnection('hc-user')).toBe(false);
+    connections.set('hc-user', new Set([{} as any]));
+    expect(hasCompanionConnection('hc-user')).toBe(true);
+    connections.delete('hc-user');
   });
 });
 

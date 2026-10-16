@@ -34,7 +34,7 @@ describe('isAnyCommandTakenAcrossTables', () => {
     const pool = {
       execute: vi.fn()
         .mockResolvedValueOnce([[{ '1': 1 }]])  // custom_command hit
-        .mockResolvedValueOnce([[]]),             // counter miss
+        .mockResolvedValue([[]]),                 // counter/advanced_command miss
     };
     vi.mocked(getPool).mockReturnValue(pool as any);
     const result = await isAnyCommandTakenAcrossTables('!test');
@@ -45,7 +45,8 @@ describe('isAnyCommandTakenAcrossTables', () => {
     const pool = {
       execute: vi.fn()
         .mockResolvedValueOnce([[]])               // custom_command miss
-        .mockResolvedValueOnce([[{ '1': 1 }]]),   // counter hit
+        .mockResolvedValueOnce([[{ '1': 1 }]])    // counter hit
+        .mockResolvedValue([[]]),                  // advanced_command miss
     };
     vi.mocked(getPool).mockReturnValue(pool as any);
     const result = await isAnyCommandTakenAcrossTables('!test');
@@ -64,10 +65,34 @@ describe('isAnyCommandTakenAcrossTables', () => {
   it('skips counter table when includeCounterTable is false', async () => {
     const pool = { execute: vi.fn().mockResolvedValue([[]]  ) };
     vi.mocked(getPool).mockReturnValue(pool as any);
-    await isAnyCommandTakenAcrossTables('!test', undefined, pool as any, { includeCustomCommandTable: true, includeCounterTable: false });
+    await isAnyCommandTakenAcrossTables('!test', undefined, pool as any, {
+      includeCustomCommandTable: true, includeCounterTable: false, includeAdvancedCommandTable: false,
+    });
     expect(pool.execute).toHaveBeenCalledOnce();
     const sql: string = pool.execute.mock.calls[0]![0];
     expect(sql).toContain('custom_command');
+  });
+
+  it('returns true when only the advanced_command table returns a row', async () => {
+    const pool = {
+      execute: vi.fn()
+        .mockResolvedValueOnce([[]])             // custom_command miss
+        .mockResolvedValueOnce([[]])             // counter miss
+        .mockResolvedValueOnce([[{ '1': 1 }]]),  // advanced_command hit
+    };
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    const result = await isAnyCommandTakenAcrossTables('!test');
+    expect(result).toBe(true);
+    const advancedCall = pool.execute.mock.calls[2]!;
+    expect(advancedCall[0]).toContain('FROM advanced_command WHERE trigger_string IN');
+    expect(advancedCall[1]).toEqual(['!test']);
+  });
+
+  it('skips the advanced_command table when includeAdvancedCommandTable is false', async () => {
+    const pool = { execute: vi.fn().mockResolvedValue([[]]) };
+    await isAnyCommandTakenAcrossTables('!test', undefined, pool as any, { includeAdvancedCommandTable: false });
+    expect(pool.execute).toHaveBeenCalledTimes(2);
+    expect(pool.execute.mock.calls.some((args) => (args[0] as string).includes('advanced_command'))).toBe(false);
   });
 
   it('passes excludeCustomCommandId to custom_command query', async () => {

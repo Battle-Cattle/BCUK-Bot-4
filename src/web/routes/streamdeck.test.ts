@@ -18,6 +18,10 @@ vi.mock('../../db', () => ({
   findSoundFiles: vi.fn(),
 }));
 
+// The advanced-commands sub-router pulls in the command runtime; its own routes are tested in
+// streamdeckAdvancedCommands.test.ts.
+vi.mock('./streamdeckAdvancedCommands', async () => ({ default: (await import('express')).Router() }));
+
 vi.mock('../../audio/soundSelector', () => ({
   pickWeightedRandom: vi.fn(),
 }));

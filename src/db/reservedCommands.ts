@@ -14,6 +14,8 @@ export const BUILT_IN_COMMANDS: Readonly<Record<string, BuiltInCommandMeta>> = {
   '!so': { description: 'Posts a Twitch shoutout for a named streamer (mod/broadcaster only)' },
   '!321': { description: 'Starts a 3-2-1 countdown in Twitch chat' },
   '!followage': { description: 'Posts how long a viewer (or a named user) has followed the Twitch channel' },
+  '!points': { description: "Posts a viewer's loyalty-points balance, or the leaderboard" },
+  '!gamble': { description: 'Bets loyalty points on a coin flip' },
 };
 
 export const RESERVED_BUILT_IN_COMMANDS: ReadonlySet<string> = new Set(Object.keys(BUILT_IN_COMMANDS));

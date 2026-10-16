@@ -77,6 +77,10 @@ vi.mock('./commands/multiCommandHandler', () => ({ registerMultiTwitchRuntime: v
 vi.mock('./commands/shoutoutHandler', () => ({ registerShoutoutRuntime: vi.fn() }));
 vi.mock('./commands/countdownHandler', () => ({ registerCountdownTwitchRuntime: vi.fn() }));
 vi.mock('./commands/followageHandler', () => ({ registerFollowageRuntime: vi.fn() }));
+vi.mock('./commands/advancedCommands/advancedCommandRuntime', () => ({ registerAdvancedCommandRuntime: vi.fn() }));
+vi.mock('./commands/advancedCommands/advancedCommandRefunds', () => ({
+  sweepPendingAdvancedCommandUsage: vi.fn().mockResolvedValue(0),
+}));
 vi.mock('./twitch/eventsub/twitchEventSubRuntime', () => ({
   registerEventSubOverlayRuntime: vi.fn(),
   registerEventSubTwitchRuntime: vi.fn(),
@@ -86,7 +90,7 @@ vi.mock('./twitch/eventsub/twitchEventSubRuntime', () => ({
   registerEventSubReloadRuntime: vi.fn(),
 }));
 vi.mock('./web/routes/overlaySource', () => ({ pushOverlayEvent: vi.fn() }));
-vi.mock('./web/routes/companionEvents', () => ({ pushCompanionEvent: vi.fn() }));
+vi.mock('./web/routes/companionEvents', () => ({ pushCompanionEvent: vi.fn(), hasCompanionConnection: vi.fn() }));
 vi.mock('./web/routes/alertsOverlaySource', () => ({ pushAlertEvent: vi.fn() }));
 vi.mock('./web/routes/channelPointsEvents', () => ({ pushPricingUpdate: vi.fn() }));
 vi.mock('./web/routes/dashboardEvents', () => ({ pushDashboardEvent: vi.fn() }));
@@ -241,6 +245,31 @@ describe('startup — guild registry preload', () => {
     // ownerAlerts.ts's primeOwnerAlertBaseline JSDoc for why that causes false "down" alerts).
     expect(vi.mocked(primeOwnerAlertBaseline).mock.invocationCallOrder[0])
       .toBeLessThan(vi.mocked(startOwnerAlertWatcher).mock.invocationCallOrder[0]!);
+  });
+
+  it('registers the advanced command runtime and sweeps pending uses before Twitch chat starts', async () => {
+    const { registerAdvancedCommandRuntime } = await import('./commands/advancedCommands/advancedCommandRuntime.js');
+    const { sweepPendingAdvancedCommandUsage } = await import('./commands/advancedCommands/advancedCommandRefunds.js');
+    const { hasCompanionConnection } = await import('./web/routes/companionEvents.js');
+    const { startTwitchBot } = await import('./twitch/twitchBot.js');
+
+    await runMain();
+
+    expect(vi.mocked(registerAdvancedCommandRuntime)).toHaveBeenCalledWith({ send: expect.any(Function), hasCompanionConnection });
+    expect(vi.mocked(sweepPendingAdvancedCommandUsage)).toHaveBeenCalledOnce();
+    expect(vi.mocked(sweepPendingAdvancedCommandUsage).mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(startTwitchBot).mock.invocationCallOrder[0]!);
+  });
+
+  it('logs and carries on when the pending advanced command sweep fails', async () => {
+    const { sweepPendingAdvancedCommandUsage } = await import('./commands/advancedCommands/advancedCommandRefunds.js');
+    const { startTwitchBot } = await import('./twitch/twitchBot.js');
+    vi.mocked(sweepPendingAdvancedCommandUsage).mockRejectedValueOnce(new Error('DB down'));
+
+    await runMain();
+
+    expect(vi.mocked(startTwitchBot)).toHaveBeenCalledOnce();
+    expect(exitSpy).not.toHaveBeenCalled();
   });
 
   it('runs the schema migrations after the DB ping and before loading the guild registry', async () => {
