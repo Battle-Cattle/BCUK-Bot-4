@@ -158,6 +158,14 @@ describe('executeAdvancedCommandForTwitch', () => {
     expect(db.recordAdvancedCommandUsage).toHaveBeenCalledWith(expect.objectContaining({ twitchUsername: 'streamer', pointsSpent: 0 }));
   });
 
+  it('logs and swallows a failed notice', async () => {
+    vi.mocked(db.getAdvancedCommand).mockResolvedValue(command({ userCooldownSeconds: 60 }));
+    vi.mocked(db.getLoyaltyPointsBalance).mockRejectedValueOnce(new Error('DB down'));
+    await executeAdvancedCommandForTwitch(message());
+    await expect(executeAdvancedCommandForTwitch(message())).resolves.toBeUndefined();
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it('refuses once the per-stream cap is reached', async () => {
     vi.mocked(db.getAdvancedCommand).mockResolvedValue(command({ maxUsesPerStream: 3 }));
     vi.mocked(db.countAdvancedCommandUses).mockResolvedValue(3);
