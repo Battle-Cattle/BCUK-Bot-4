@@ -28,7 +28,7 @@ export interface AdvancedCommandUse {
   userName: string;
   args: string;
   pointsSpent: number;
-  /** The viewer's balance after paying, or null when nothing was spent. */
+  /** The viewer's balance after the use, or null for a Stream Deck use (no viewer). */
   balance: number | null;
   triggeredAt: Date;
 }

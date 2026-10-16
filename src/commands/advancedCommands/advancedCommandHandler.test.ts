@@ -94,15 +94,20 @@ describe('executeAdvancedCommandForTwitch', () => {
     ['disabled', () => vi.mocked(db.getAdvancedCommand).mockResolvedValue(command({ isEnabled: false }))],
     ['deleted', () => vi.mocked(db.getAdvancedCommand).mockResolvedValue(null)],
     ['below the role', () => vi.mocked(db.getAdvancedCommand).mockResolvedValue(command({ minRole: 'vip' }))],
-    ['live-only while offline', () => {
-      vi.mocked(db.getAdvancedCommand).mockResolvedValue(command({ liveOnly: true }));
-      vi.mocked(isChannelLive).mockReturnValue(false);
-    }],
   ])('silently ignores a %s command', async (_label, setup) => {
     setup();
     await executeAdvancedCommandForTwitch(message());
     expect(db.spendLoyaltyPoints).not.toHaveBeenCalled();
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it('tells the viewer a live-only command needs the stream to be live, once per window', async () => {
+    vi.mocked(db.getAdvancedCommand).mockResolvedValue(command({ liveOnly: true }));
+    vi.mocked(isChannelLive).mockReturnValue(false);
+    await executeAdvancedCommandForTwitch(message());
+    await executeAdvancedCommandForTwitch(message());
+    expect(db.spendLoyaltyPoints).not.toHaveBeenCalled();
+    expect(send).toHaveBeenCalledExactlyOnceWith('streamer', '@alice Hydrate only works while the stream is live.');
   });
 
   it('enforces cooldowns with one notice, not charging again', async () => {
@@ -152,9 +157,13 @@ describe('executeAdvancedCommandForTwitch', () => {
 
   it('lets the broadcaster use a paid command for free', async () => {
     const roles = { isBroadcaster: true, isMod: false, isVip: false, isSubscriber: false };
+    vi.mocked(db.getLoyaltyPointsBalance).mockResolvedValue(70);
     await executeAdvancedCommandForTwitch(message({ userLogin: 'streamer', userName: 'Streamer', roles }));
     expect(db.spendLoyaltyPoints).not.toHaveBeenCalled();
     expect(db.getLoyaltyPointsConfig).not.toHaveBeenCalled();
+    // `{balance}` still shows what they have, not a blank.
+    expect(db.getLoyaltyPointsBalance).toHaveBeenCalledWith(3, 'streamer');
+    expect(vi.mocked(runAdvancedCommandEffects).mock.calls[0]![0]).toMatchObject({ pointsSpent: 0, balance: 70 });
     expect(db.recordAdvancedCommandUsage).toHaveBeenCalledWith(expect.objectContaining({ twitchUsername: 'streamer', pointsSpent: 0 }));
   });
 
