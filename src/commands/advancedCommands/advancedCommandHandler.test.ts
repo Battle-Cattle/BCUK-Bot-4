@@ -178,6 +178,14 @@ describe('executeAdvancedCommandForTwitch', () => {
     expect(refundAdvancedCommandUse).toHaveBeenCalledWith(eventId, 'no_companion', { channel: 'streamer' });
   });
 
+  it('arms the ack timeout to retry when the immediate no-companion refund fails', async () => {
+    vi.mocked(runAdvancedCommandEffects).mockResolvedValue('no_companion');
+    vi.mocked(refundAdvancedCommandUse).mockRejectedValueOnce(new Error('DB down'));
+    await executeAdvancedCommandForTwitch(message());
+    const { eventId } = vi.mocked(runAdvancedCommandEffects).mock.calls[0]![0];
+    expect(trackAdvancedCommandAck).toHaveBeenCalledWith(eventId, 'streamer');
+  });
+
   it('credits the points back and rethrows when recording the use fails', async () => {
     vi.mocked(db.recordAdvancedCommandUsage).mockRejectedValueOnce(new Error('DB down'));
     await expect(executeAdvancedCommandForTwitch(message())).rejects.toThrow('DB down');

@@ -110,7 +110,12 @@ export async function sweepPendingAdvancedCommandUsage(): Promise<number> {
   let refunded = 0;
   for (const eventId of await listPendingAdvancedCommandUsage()) {
     if (pendingAcks.has(eventId)) continue;
-    if (await refundAdvancedCommandUse(eventId, 'restart')) refunded++;
+    try {
+      if (await refundAdvancedCommandUse(eventId, 'restart')) refunded++;
+    } catch (err) {
+      // One failed row mustn't hold back the rest; it stays pending for the next startup.
+      log.error(`Failed to refund pending advanced command ${eventId} at startup:`, err);
+    }
   }
   if (refunded > 0) log.info(`Refunded ${refunded} advanced command use(s) left pending by a restart`);
   return refunded;

@@ -181,7 +181,15 @@ async function fireUse(use: AdvancedCommandUse, streamStartedAt: Date | null): P
   const outcome = await runAdvancedCommandEffects(use, {
     onPushed: () => trackAdvancedCommandAck(use.eventId, use.channel),
   });
-  if (outcome === 'no_companion') await refundAdvancedCommandUse(use.eventId, 'no_companion', { channel: use.channel });
+  if (outcome === 'no_companion') {
+    try {
+      await refundAdvancedCommandUse(use.eventId, 'no_companion', { channel: use.channel });
+    } catch (err) {
+      // The use is still pending; arm the timeout so the refund is retried (as `no_ack`).
+      log.error(`Failed to refund advanced command ${use.eventId} (no companion); retrying after the ack timeout:`, err);
+      trackAdvancedCommandAck(use.eventId, use.channel);
+    }
+  }
   log.info(`Advanced command '${use.command.name}' (${use.command.id}) fired from ${use.source} in ${use.channel}`);
 }
 

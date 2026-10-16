@@ -135,4 +135,12 @@ describe('sweepPendingAdvancedCommandUsage', () => {
     expect(resolveAdvancedCommandUsage).toHaveBeenCalledTimes(2);
     expect(resolveAdvancedCommandUsage).not.toHaveBeenCalledWith('live', expect.anything());
   });
+
+  it('keeps sweeping after one refund fails', async () => {
+    vi.mocked(listPendingAdvancedCommandUsage).mockResolvedValue(['bad', 'good']);
+    vi.mocked(resolveAdvancedCommandUsage).mockRejectedValueOnce(new Error('deadlock')).mockResolvedValueOnce(RESOLVED);
+
+    expect(await sweepPendingAdvancedCommandUsage()).toBe(1);
+    expect(resolveAdvancedCommandUsage).toHaveBeenCalledWith('good', expect.objectContaining({ refundReason: 'restart' }));
+  });
 });
