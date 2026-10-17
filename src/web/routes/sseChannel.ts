@@ -19,12 +19,47 @@ let totalConnections = 0;
  */
 const connectionCleanups = new WeakMap<Response, () => void>();
 
+/** Listeners registered via {@link onConnectionCountChange}, per connections map. */
+const countChangeListeners = new WeakMap<Map<unknown, Set<Response>>, Set<(key: unknown) => void>>();
+
+/**
+ * Subscribes to client additions/removals on one connections map, so a consumer (e.g. an
+ * overlay's status stream) can react the moment a connection opens or closes instead of polling
+ * the map. Fires after the map has been updated, so `connections.get(key)?.size` is current.
+ * @param connections - The connections map to watch.
+ * @param listener - Called with the key whose client count changed.
+ * @returns An idempotent unsubscribe function.
+ */
+export function onConnectionCountChange<K>(
+  connections: Map<K, Set<Response>>,
+  listener: (key: K) => void,
+): () => void {
+  const map = connections as Map<unknown, Set<Response>>;
+  const listeners = countChangeListeners.get(map) ?? new Set<(key: unknown) => void>();
+  countChangeListeners.set(map, listeners);
+  const wrapped = listener as (key: unknown) => void;
+  listeners.add(wrapped);
+  return () => { listeners.delete(wrapped); };
+}
+
+/** Number of {@link onConnectionCountChange} listeners currently subscribed to `connections`. Exported for tests. */
+export function getConnectionCountListenerCount<K>(connections: Map<K, Set<Response>>): number {
+  return countChangeListeners.get(connections as Map<unknown, Set<Response>>)?.size ?? 0;
+}
+
+/** Notifies every {@link onConnectionCountChange} listener on `connections` that `key`'s count changed. */
+function notifyCountChange<K>(connections: Map<K, Set<Response>>, key: K): void {
+  const listeners = countChangeListeners.get(connections as Map<unknown, Set<Response>>);
+  if (!listeners) return;
+  for (const listener of listeners) listener(key);
+}
+
 /** Removes `res` from the channel's client Set, deleting the map entry once it's empty. */
 function removeClient<K>(connections: Map<K, Set<Response>>, key: K, res: Response): void {
   const clients = connections.get(key);
-  if (!clients) return;
-  clients.delete(res);
+  if (!clients?.delete(res)) return;
   if (clients.size === 0) connections.delete(key);
+  notifyCountChange(connections, key);
 }
 
 /**
@@ -53,6 +88,7 @@ export function broadcastToChannel<K>(
   const clients = connections.get(key);
   if (!clients || clients.size === 0) return null;
   const serialized = JSON.stringify(payload);
+  let evictedUnregistered = false;
   for (const res of clients) {
     if (isEligible && !isEligible(res)) continue;
     try {
@@ -60,10 +96,12 @@ export function broadcastToChannel<K>(
     } catch {
       const cleanup = connectionCleanups.get(res);
       if (cleanup) cleanup();
-      else clients.delete(res);
+      else evictedUnregistered = clients.delete(res) || evictedUnregistered;
     }
   }
   if (clients.size === 0) connections.delete(key);
+  // A registered client's cleanup already notified via removeClient; only the fallback path needs it here.
+  if (evictedUnregistered) notifyCountChange(connections, key);
   return clients.size;
 }
 
@@ -113,6 +151,7 @@ function addClientWithinLimit<K>(
   if (clients.size >= maxPerChannel) return false;
   clients.add(res);
   connections.set(key, clients);
+  notifyCountChange(connections, key);
   return true;
 }
 

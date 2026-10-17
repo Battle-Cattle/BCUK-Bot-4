@@ -55,6 +55,7 @@ import { getCustomRewards } from '../../twitch/twitchApi';
 import { AccessLevel } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 import { makeSessionUser, type SessionUserFixture } from '../../test-utils/fixtures';
+import { attachSseConnection } from './sseChannel';
 import { connections as overlaySourceConnections } from './overlaySource';
 
 type SessionUser = SessionUserFixture;
@@ -90,6 +91,19 @@ function makeSseReq(discordId: string) {
     },
     triggerClose: () => closeCb?.(),
   };
+}
+
+/**
+ * Opens a fake overlay browser-source SSE connection under `login` through the real
+ * `attachSseConnection`, so it fires the same connection-change notifications a real one does.
+ */
+function openOverlayConnection(connections: Map<string, Set<any>>, login: string) {
+  const closeCbs: (() => void)[] = [];
+  const on = (event: string, cb: () => void) => { if (event === 'close') closeCbs.push(cb); };
+  attachSseConnection({ on, destroyed: false } as any, { ...makeSseRes(), on, closed: false } as any, {
+    connections, key: login, maxPerChannel: 10,
+  });
+  return { close: () => { for (const cb of closeCbs) cb(); } };
 }
 
 /** Builds a supertest-ready app: the overlay admin router with a stubbed session and a render mock that flattens locals into the JSON body. */
@@ -243,7 +257,7 @@ describe('GET /settings/events', () => {
     expect(statusConnections.get(7)?.has(res as any)).toBe(true);
     expect(res.write).toHaveBeenCalledWith(`data: ${JSON.stringify({ connected: false })}\n\n`);
 
-    triggerClose(); // clears the status-poll interval so it doesn't leak into other tests
+    triggerClose(); // unsubscribes from overlay connection changes so it doesn't leak into other tests
   });
 
   it('reports connected when the overlay already has an open connection', async () => {
@@ -260,53 +274,43 @@ describe('GET /settings/events', () => {
     triggerClose();
   });
 
-  it('pushes an update only when the overlay connection state actually changes on a poll tick', async () => {
-    vi.useFakeTimers();
-    try {
-      vi.mocked(getStreamerByDiscordId).mockResolvedValue(makeStreamer() as any);
-      const handler = getRouteHandler('/settings/events');
-      const res = makeSseRes();
-      const { req, triggerClose } = makeSseReq('discord1');
+  it('pushes an update as soon as an overlay connection opens or closes, and only on a change', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(makeStreamer() as any);
+    const handler = getRouteHandler('/settings/events');
+    const res = makeSseRes();
+    const { req, triggerClose } = makeSseReq('discord1');
 
-      await handler(req, res, vi.fn());
-      expect(res.write).toHaveBeenCalledTimes(2); // handshake + initial disconnected state
-      res.write.mockClear();
+    await handler(req, res, vi.fn());
+    expect(res.write).toHaveBeenCalledTimes(2); // handshake + initial disconnected state
+    res.write.mockClear();
 
-      vi.advanceTimersByTime(3000); // no change yet — still disconnected
-      expect(res.write).not.toHaveBeenCalled();
+    const first = openOverlayConnection(overlaySourceConnections, 'somestreamer');
+    expect(res.write).toHaveBeenCalledWith(`data: ${JSON.stringify({ connected: true })}\n\n`);
+    res.write.mockClear();
 
-      overlaySourceConnections.set('somestreamer', new Set([{} as any]));
-      vi.advanceTimersByTime(3000);
-      expect(res.write).toHaveBeenCalledWith(`data: ${JSON.stringify({ connected: true })}\n\n`);
-      res.write.mockClear();
+    const second = openOverlayConnection(overlaySourceConnections, 'somestreamer'); // still connected — no repeat push
+    openOverlayConnection(overlaySourceConnections, 'otherstreamer').close(); // another channel — ignored
+    first.close();
+    expect(res.write).not.toHaveBeenCalled();
 
-      vi.advanceTimersByTime(3000); // still connected — no repeat push
-      expect(res.write).not.toHaveBeenCalled();
+    second.close();
+    expect(res.write).toHaveBeenCalledWith(`data: ${JSON.stringify({ connected: false })}\n\n`);
 
-      triggerClose();
-    } finally {
-      vi.useRealTimers();
-    }
+    triggerClose();
   });
 
-  it('stops polling once the request closes', async () => {
-    vi.useFakeTimers();
-    try {
-      vi.mocked(getStreamerByDiscordId).mockResolvedValue(makeStreamer() as any);
-      const handler = getRouteHandler('/settings/events');
-      const res = makeSseRes();
-      const { req, triggerClose } = makeSseReq('discord1');
+  it('stops pushing once the request closes', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(makeStreamer() as any);
+    const handler = getRouteHandler('/settings/events');
+    const res = makeSseRes();
+    const { req, triggerClose } = makeSseReq('discord1');
 
-      await handler(req, res, vi.fn());
-      triggerClose();
-      res.write.mockClear();
+    await handler(req, res, vi.fn());
+    triggerClose();
+    res.write.mockClear();
 
-      overlaySourceConnections.set('somestreamer', new Set([{} as any]));
-      vi.advanceTimersByTime(10_000);
+    openOverlayConnection(overlaySourceConnections, 'somestreamer').close();
 
-      expect(res.write).not.toHaveBeenCalled();
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(res.write).not.toHaveBeenCalled();
   });
 });

@@ -12,7 +12,9 @@ vi.mock('../../db', () => ({
 }));
 vi.mock('../session', () => ({ getSessionUser: vi.fn() }));
 
-import { attachSseConnection, broadcastToChannel, chainConnectionCleanup } from './sseChannel';
+import {
+  attachSseConnection, broadcastToChannel, chainConnectionCleanup, getConnectionCountListenerCount, onConnectionCountChange,
+} from './sseChannel';
 import {
   createSseEventsHandler, createLoginValidator, createStreamerSseEventsHandler, createOverlayStatusEventsHandler,
 } from './sseEventsHandlers';
@@ -575,10 +577,15 @@ describe('createOverlayStatusEventsHandler', () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue({ id: 7, twitch_name: 'somestreamer' } as any);
   });
 
-  function buildOverlayStatusHandler(pollIntervalMs = 3000, maxPerChannel = 10) {
-    return createOverlayStatusEventsHandler({
-      statusConnections, overlayConnections, maxPerChannel, pollIntervalMs, log,
-    });
+  function buildOverlayStatusHandler(maxPerChannel = 10) {
+    return createOverlayStatusEventsHandler({ statusConnections, overlayConnections, maxPerChannel, log });
+  }
+
+  /** Opens a real overlay connection under `somestreamer`; returns a function that closes it. */
+  function openOverlay(): () => void {
+    const { req, triggerClose } = makeReq('somestreamer');
+    attachSseConnection(req as any, makeRes() as any, { connections: overlayConnections, key: 'somestreamer', maxPerChannel: 10 });
+    return triggerClose;
   }
 
   it('returns 403 when the streamer has no linked Twitch channel', async () => {
@@ -590,103 +597,134 @@ describe('createOverlayStatusEventsHandler', () => {
     await handler(req as any, res as any);
 
     expect(res.status).toHaveBeenCalledWith(403);
+    expect(getConnectionCountListenerCount(overlayConnections)).toBe(0);
   });
 
-  it('clears the poll interval when the response closes without the request ever closing', async () => {
-    vi.useFakeTimers();
-    try {
-      const handler = buildOverlayStatusHandler();
-      const res = makeRes();
-      const { req } = makeReq('unused');
+  it('pushes the new state as soon as the overlay connects and disconnects, with no timers', async () => {
+    const handler = buildOverlayStatusHandler();
+    const res = makeRes();
+    const { req, triggerClose } = makeReq('unused');
 
-      await handler(req as any, res as any);
-      res.write.mockClear();
-      res.triggerResClose(); // an abrupt socket failure — req never fires 'close'
+    await handler(req as any, res as any);
+    res.write.mockClear();
 
-      overlayConnections.set('somestreamer', new Set([{} as any]));
-      vi.advanceTimersByTime(10_000);
+    const closeOverlay = openOverlay();
+    expect(res.write).toHaveBeenCalledWith(`data: ${JSON.stringify({ connected: true })}\n\n`);
+    res.write.mockClear();
+    closeOverlay();
+    expect(res.write).toHaveBeenCalledWith(`data: ${JSON.stringify({ connected: false })}\n\n`);
 
-      expect(res.write).not.toHaveBeenCalled();
-    } finally {
-      vi.useRealTimers();
-    }
+    triggerClose();
+    expect(getConnectionCountListenerCount(overlayConnections)).toBe(0);
   });
 
-  it('clears the poll interval when the very first status write fails, before any state change', async () => {
-    vi.useFakeTimers();
-    try {
-      const handler = buildOverlayStatusHandler();
-      const res = makeRes();
-      let writeCount = 0;
-      res.write.mockImplementation(() => {
-        writeCount++;
-        // 1st write is the SSE handshake (': connected\n\n'); 2nd is the initial check()'s
-        // broadcast, fired synchronously inside the handler before the interval/wrapper race
-        // could otherwise leave nothing owning this interval's cleanup.
-        if (writeCount === 2) throw new Error('write failed');
-      });
-      const { req } = makeReq('unused');
+  it('unsubscribes when the response closes without the request ever closing', async () => {
+    const handler = buildOverlayStatusHandler();
+    const res = makeRes();
+    const { req } = makeReq('unused');
 
-      await handler(req as any, res as any);
+    await handler(req as any, res as any);
+    expect(getConnectionCountListenerCount(overlayConnections)).toBe(1);
+    res.triggerResClose(); // an abrupt socket failure — req never fires 'close'
 
-      expect(statusConnections.has(7)).toBe(false);
-
-      res.write.mockClear();
-      overlayConnections.set('somestreamer', new Set([{} as any]));
-      vi.advanceTimersByTime(10_000);
-
-      expect(res.write).not.toHaveBeenCalled();
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(getConnectionCountListenerCount(overlayConnections)).toBe(0);
   });
 
-  it('clears the poll interval when a broadcast write fails, with no close/error event ever emitted', async () => {
-    vi.useFakeTimers();
-    try {
-      const handler = buildOverlayStatusHandler();
-      const res = makeRes();
-      const { req } = makeReq('unused');
+  it('unsubscribes when the very first status write fails, before any state change', async () => {
+    const handler = buildOverlayStatusHandler();
+    const res = makeRes();
+    let writeCount = 0;
+    res.write.mockImplementation(() => {
+      writeCount++;
+      // 1st write is the SSE handshake (': connected\n\n'); 2nd is the initial check()'s
+      // broadcast, fired synchronously inside the handler after the subscription's teardown
+      // has been chained onto the connection's cleanup.
+      if (writeCount === 2) throw new Error('write failed');
+    });
+    const { req } = makeReq('unused');
 
-      await handler(req as any, res as any);
-      expect(statusConnections.get(7)?.has(res as any)).toBe(true);
+    await handler(req as any, res as any);
 
-      // Simulate broadcastToChannel's write failing on the next state-change push — this evicts
-      // the response via attachSseConnection's own cleanup, without ever firing 'close'/'error'.
-      res.write.mockImplementationOnce(() => { throw new Error('write failed'); });
-      overlayConnections.set('somestreamer', new Set([{} as any]));
-      vi.advanceTimersByTime(3000);
-
-      expect(statusConnections.has(7)).toBe(false);
-
-      res.write.mockClear();
-      overlayConnections.delete('somestreamer');
-      vi.advanceTimersByTime(10_000);
-
-      expect(res.write).not.toHaveBeenCalled();
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(statusConnections.has(7)).toBe(false);
+    expect(getConnectionCountListenerCount(overlayConnections)).toBe(0);
   });
 
-  it('clears the poll interval when the response errors without the request ever closing', async () => {
-    vi.useFakeTimers();
-    try {
-      const handler = buildOverlayStatusHandler();
-      const res = makeRes();
-      const { req } = makeReq('unused');
+  it('unsubscribes when a broadcast write fails, with no close/error event ever emitted', async () => {
+    const handler = buildOverlayStatusHandler();
+    const res = makeRes();
+    const { req } = makeReq('unused');
 
-      await handler(req as any, res as any);
-      res.write.mockClear();
-      res.triggerResError();
+    await handler(req as any, res as any);
+    expect(statusConnections.get(7)?.has(res as any)).toBe(true);
 
-      overlayConnections.set('somestreamer', new Set([{} as any]));
-      vi.advanceTimersByTime(10_000);
+    // broadcastToChannel's write failing on the next state-change push evicts the response via
+    // attachSseConnection's own cleanup, without ever firing 'close'/'error'.
+    res.write.mockImplementationOnce(() => { throw new Error('write failed'); });
+    const closeOverlay = openOverlay();
 
-      expect(res.write).not.toHaveBeenCalled();
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(statusConnections.has(7)).toBe(false);
+    expect(getConnectionCountListenerCount(overlayConnections)).toBe(0);
+    closeOverlay(); // release the process-wide slot for later tests
+  });
+
+  it('unsubscribes when the response errors without the request ever closing', async () => {
+    const handler = buildOverlayStatusHandler();
+    const res = makeRes();
+    const { req } = makeReq('unused');
+
+    await handler(req as any, res as any);
+    res.triggerResError();
+
+    expect(getConnectionCountListenerCount(overlayConnections)).toBe(0);
+  });
+});
+
+describe('onConnectionCountChange', () => {
+  it('fires with the key after a client is added and after it is removed, until unsubscribed', () => {
+    const listener = vi.fn((key: string) => connections.get(key)?.size ?? 0);
+    const unsubscribe = onConnectionCountChange(connections, listener);
+    const { req, triggerClose } = makeReq('chan');
+
+    attachSseConnection(req as any, makeRes() as any, { connections, key: 'chan', maxPerChannel: 10 });
+    expect(listener).toHaveBeenLastCalledWith('chan');
+    expect(listener).toHaveLastReturnedWith(1); // fired after the map was updated
+
+    triggerClose();
+    expect(listener).toHaveBeenCalledTimes(2);
+    expect(listener).toHaveLastReturnedWith(0);
+
+    unsubscribe();
+    unsubscribe(); // idempotent
+    const later = makeReq('chan');
+    attachSseConnection(later.req as any, makeRes() as any, { connections, key: 'chan', maxPerChannel: 10 });
+    later.triggerClose();
+    expect(listener).toHaveBeenCalledTimes(2);
+    expect(getConnectionCountListenerCount(connections)).toBe(0);
+  });
+
+  it('does not fire when a client is rejected by the per-key limit', () => {
+    const first = makeReq('chan');
+    attachSseConnection(first.req as any, makeRes() as any, { connections, key: 'chan', maxPerChannel: 1 });
+    const listener = vi.fn();
+    const unsubscribe = onConnectionCountChange(connections, listener);
+
+    attachSseConnection(makeReq('chan').req as any, makeRes() as any, { connections, key: 'chan', maxPerChannel: 1 });
+
+    expect(listener).not.toHaveBeenCalled();
+    unsubscribe();
+    first.triggerClose();
+  });
+
+  it('fires once when broadcastToChannel evicts a client that was never registered via attachSseConnection', () => {
+    const failing = { write: vi.fn(() => { throw new Error('gone'); }) };
+    connections.set('chan', new Set([failing as any]));
+    const listener = vi.fn();
+    onConnectionCountChange(connections, listener);
+
+    broadcastToChannel(connections, 'chan', { hello: 1 });
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(listener).toHaveBeenCalledWith('chan');
   });
 });
 
