@@ -47,6 +47,13 @@ vi.mock('discord.js', () => ({
   Client: vi.fn(),
   GatewayIntentBits: { Guilds: 1, GuildMessages: 2, MessageContent: 4, GuildVoiceStates: 8, DirectMessages: 16 },
   Partials: { Channel: 1 },
+  WebSocketShardEvents: {
+    Closed: 'closed', Error: 'error', Ready: 'ready', Resumed: 'resumed', SocketError: 'socketError',
+  },
+  GatewayCloseCodes: {
+    AuthenticationFailed: 4004, InvalidShard: 4010, ShardingRequired: 4011,
+    InvalidAPIVersion: 4012, InvalidIntents: 4013, DisallowedIntents: 4014,
+  },
 }));
 
 type DiscordBotModule = typeof import('./discordBot');
@@ -66,6 +73,7 @@ function makeMockClient() {
   return {
     on: vi.fn().mockReturnThis(),
     once: vi.fn().mockReturnThis(),
+    ws: { on: vi.fn() },
     login: vi.fn().mockResolvedValue(undefined),
     destroy: vi.fn().mockResolvedValue(undefined),
     user: { tag: 'Bot#1234' },
@@ -473,42 +481,44 @@ describe('startDiscordBot — error event', () => {
 // ─── startDiscordBot — gateway watchdog ────────────────────────────────────────
 
 describe('startDiscordBot — gateway watchdog', () => {
-  /** Finds the handler registered for `event` via `mockInstance.on`. */
+  /** Finds the handler registered for the `@discordjs/ws` manager `event` via `mockInstance.ws.on`. */
   function findHandler(event: string): (...args: any[]) => unknown {
-    return mockInstance.on.mock.calls.find(([e]: string[]) => e === event)?.[1];
+    return mockInstance.ws.on.mock.calls.find(([e]: string[]) => e === event)?.[1];
   }
 
-  it('logs a warning with the shard id when a shard is reconnecting, without throwing', () => {
+  it('logs a warning with the shard id and close code when a shard closes recoverably, without throwing or replacing the client', () => {
     mod.startDiscordBot();
-    const handler = findHandler('shardReconnecting');
-    expect(() => handler(0)).not.toThrow();
-    expect(mockLog.warn).toHaveBeenCalledWith(expect.stringContaining('0'));
+    const handler = findHandler('closed');
+    expect(() => handler(1006, 0)).not.toThrow();
+    expect(mockLog.warn).toHaveBeenCalledWith(expect.stringMatching(/Shard 0 .*code 1006/));
+    expect(mockInstance.destroy).not.toHaveBeenCalled();
+    expect(mockInstance.login).toHaveBeenCalledOnce();
   });
 
   it('records the Discord connection as down when a shard starts reconnecting', async () => {
     const healthStore = await import('../shared/healthStore.js');
     mod.startDiscordBot();
-    const handler = findHandler('shardReconnecting');
-    handler(0);
+    const handler = findHandler('closed');
+    handler(1006, 0);
     expect(vi.mocked(healthStore.recordDiscordConnected)).toHaveBeenCalledWith(false);
   });
 
   it('logs an error with the shard id and error the first time a shard reports a gateway connection error, and DMs the owner, without throwing', async () => {
     const ownerAlerts = await import('./ownerAlerts.js');
     mod.startDiscordBot();
-    const handler = findHandler('shardError');
+    const handler = findHandler('socketError');
     const gatewayError = new Error('gateway socket error');
     expect(() => handler(gatewayError, 0)).not.toThrow();
     expect(mockLog.error).toHaveBeenCalledWith(expect.stringContaining('0'), gatewayError);
     expect(vi.mocked(ownerAlerts.sendOwnerAlert)).toHaveBeenCalledWith(expect.stringContaining('Shard 0'));
   });
 
-  it('throttles repeated shardError logs/owner DMs for the same shard to one per interval, folding in a suppressed count', async () => {
+  it('throttles repeated shard socket error logs/owner DMs for the same shard to one per interval, folding in a suppressed count', async () => {
     const ownerAlerts = await import('./ownerAlerts.js');
     vi.useFakeTimers();
     try {
       mod.startDiscordBot();
-      const handler = findHandler('shardError');
+      const handler = findHandler('socketError');
       const gatewayError = new Error('gateway socket error');
 
       handler(gatewayError, 0);
@@ -528,9 +538,9 @@ describe('startDiscordBot — gateway watchdog', () => {
     }
   });
 
-  it('logs shardError independently per shard, without one shard throttling another', () => {
+  it('logs shard socket errors independently per shard, without one shard throttling another', () => {
     mod.startDiscordBot();
-    const handler = findHandler('shardError');
+    const handler = findHandler('socketError');
     const gatewayError = new Error('gateway socket error');
 
     handler(gatewayError, 0);
@@ -538,10 +548,10 @@ describe('startDiscordBot — gateway watchdog', () => {
     expect(mockLog.error).toHaveBeenCalledTimes(2);
   });
 
-  it('records the Discord connection as down on every shardError, even throttled ones, so the health dashboard reflects an ongoing gateway outage', async () => {
+  it('records the Discord connection as down on every shard socket error, even throttled ones, so the health dashboard reflects an ongoing gateway outage', async () => {
     const healthStore = await import('../shared/healthStore.js');
     mod.startDiscordBot();
-    const handler = findHandler('shardError');
+    const handler = findHandler('socketError');
     const gatewayError = new Error('Unexpected server response: 503');
 
     handler(gatewayError, 0);
@@ -554,19 +564,55 @@ describe('startDiscordBot — gateway watchdog', () => {
     expect(vi.mocked(healthStore.recordDiscordConnected)).toHaveBeenCalledWith(false);
   });
 
+  it('logs a fatal shard error (e.g. disallowed intents) the same way as a socket error', async () => {
+    const healthStore = await import('../shared/healthStore.js');
+    mod.startDiscordBot();
+    const handler = findHandler('error');
+    const fatal = new Error('Used disallowed intents');
+    handler(fatal, 0);
+    expect(mockLog.error).toHaveBeenCalledWith(expect.stringContaining('0'), fatal);
+    expect(vi.mocked(healthStore.recordDiscordConnected)).toHaveBeenCalledWith(false);
+  });
+
+  it('treats a normal (1000) close as recoverable, since @discordjs/ws reconnects after it', () => {
+    mod.startDiscordBot();
+    findHandler('closed')(1000, 0);
+    expect(mockInstance.destroy).not.toHaveBeenCalled();
+    expect(mockInstance.login).toHaveBeenCalledOnce();
+  });
+
+  it('ignores shard events from a client that has already been replaced, so its async close cannot mark the new client down', async () => {
+    const healthStore = await import('../shared/healthStore.js');
+    mod.startDiscordBot();
+    const staleClosed = findHandler('closed');
+    mod.stopDiscordBot();
+    mockInstance = makeMockClient();
+    const djs = await import('discord.js');
+    vi.mocked(djs.Client).mockImplementation(function () { return mockInstance; } as any);
+    mod.startDiscordBot();
+    vi.mocked(healthStore.recordDiscordConnected).mockClear();
+
+    staleClosed(1000, 0);
+    staleClosed(4004, 0);
+
+    expect(vi.mocked(healthStore.recordDiscordConnected)).not.toHaveBeenCalled();
+    expect(mockLog.warn).not.toHaveBeenCalled();
+    expect(mockInstance.login).toHaveBeenCalledOnce();
+  });
+
   it('records the Discord connection as up when a shard becomes ready again', async () => {
     const healthStore = await import('../shared/healthStore.js');
     mod.startDiscordBot();
-    const handler = findHandler('shardReady');
-    handler(0);
+    const handler = findHandler('ready');
+    handler({}, 0);
     expect(vi.mocked(healthStore.recordDiscordConnected)).toHaveBeenCalledWith(true);
   });
 
   it('records the Discord connection as up when a shard resumes', async () => {
     const healthStore = await import('../shared/healthStore.js');
     mod.startDiscordBot();
-    const handler = findHandler('shardResume');
-    handler(0, 5);
+    const handler = findHandler('resumed');
+    handler(0);
     expect(vi.mocked(healthStore.recordDiscordConnected)).toHaveBeenCalledWith(true);
   });
 
@@ -574,8 +620,8 @@ describe('startDiscordBot — gateway watchdog', () => {
     mod.startDiscordBot();
     expect(mockInstance.login).toHaveBeenCalledOnce();
 
-    const handler = findHandler('shardDisconnect');
-    handler({ code: 4004 }, 0);
+    const handler = findHandler('closed');
+    handler(4004, 0);
 
     // stopDiscordBot() destroyed the dead client, and startDiscordBot() logged back in.
     expect(mockInstance.destroy).toHaveBeenCalledOnce();
@@ -586,16 +632,16 @@ describe('startDiscordBot — gateway watchdog', () => {
   it('records the Discord connection as down when a shard disconnects permanently', async () => {
     const healthStore = await import('../shared/healthStore.js');
     mod.startDiscordBot();
-    const handler = findHandler('shardDisconnect');
-    handler({ code: 4004 }, 0);
+    const handler = findHandler('closed');
+    handler(4004, 0);
     expect(vi.mocked(healthStore.recordDiscordConnected)).toHaveBeenCalledWith(false);
   });
 
   it('disconnects every guild\'s voice connection before replacing the client, so none are orphaned against the destroyed one', async () => {
     const audioPlayer = await import('../audio/audioPlayer.js');
     mod.startDiscordBot();
-    const handler = findHandler('shardDisconnect');
-    handler({ code: 4004 }, 0);
+    const handler = findHandler('closed');
+    handler(4004, 0);
 
     // No guildId — every guild loses its client here, not just one.
     expect(vi.mocked(audioPlayer.disconnect)).toHaveBeenCalledWith();
@@ -607,14 +653,14 @@ describe('startDiscordBot — gateway watchdog', () => {
 
 // ─── startDiscordBot — gateway stall watchdog ──────────────────────────────────
 //
-// Covers the fallback for when discord.js's own reconnect loop gets stuck without ever firing
-// 'shardDisconnect' (no close code — the socket handshake itself keeps failing, e.g. a sustained
-// run of `Unexpected server response: 503`), and so never reaches the existing self-heal.
+// Covers the fallback for when @discordjs/ws's own reconnect loop gets stuck without ever closing
+// with an unrecoverable code (the socket handshake itself keeps failing, e.g. a sustained run of
+// `Unexpected server response: 503`), and so never reaches the existing self-heal.
 
 describe('startDiscordBot — gateway stall watchdog', () => {
-  /** Finds the handler registered for `event` via `mockInstance.on`. */
+  /** Finds the handler registered for the `@discordjs/ws` manager `event` via `mockInstance.ws.on`. */
   function findHandler(event: string): (...args: any[]) => unknown {
-    return mockInstance.on.mock.calls.find(([e]: string[]) => e === event)?.[1];
+    return mockInstance.ws.on.mock.calls.find(([e]: string[]) => e === event)?.[1];
   }
 
   beforeEach(() => {
@@ -629,7 +675,7 @@ describe('startDiscordBot — gateway stall watchdog', () => {
     mod.startDiscordBot();
     expect(mockInstance.login).toHaveBeenCalledOnce();
 
-    // No shardReconnecting/shardError/shardReady/shardDisconnect at all — total silence.
+    // No shard closed/error/ready/resumed events at all — total silence.
     await vi.advanceTimersByTimeAsync(120_000);
 
     expect(mockLog.error).toHaveBeenCalledWith(expect.stringContaining('reconnect loop appears stuck'));
@@ -646,13 +692,13 @@ describe('startDiscordBot — gateway stall watchdog', () => {
 
   it('does not force a reconnect while shard activity keeps arriving within the stall threshold', async () => {
     mod.startDiscordBot();
-    const handler = findHandler('shardReconnecting');
+    const handler = findHandler('closed');
 
     // A reconnect attempt every 90s (under the 120s threshold) resets the clock each time.
     await vi.advanceTimersByTimeAsync(90_000);
-    handler(0);
+    handler(1006, 0);
     await vi.advanceTimersByTimeAsync(90_000);
-    handler(0);
+    handler(1006, 0);
     await vi.advanceTimersByTimeAsync(90_000);
 
     expect(mockInstance.login).toHaveBeenCalledOnce();
@@ -674,10 +720,10 @@ describe('startDiscordBot — gateway stall watchdog', () => {
     await readyCb(mockInstance);
     expect(clientStore.getDiscordClient()).toBe(mockInstance);
 
-    // getDiscordClient() stays non-null here (only shardDisconnect/stopDiscordBot clear it) — the
+    // getDiscordClient() stays non-null here (only an unrecoverable close/stopDiscordBot clear it) — the
     // watchdog must key off actual gateway connectivity, not client existence, or it would never
     // fire for exactly this incident.
-    const errorHandler = findHandler('shardError');
+    const errorHandler = findHandler('socketError');
     errorHandler(new Error('Unexpected server response: 503'), 0);
 
     await vi.advanceTimersByTimeAsync(120_000);
@@ -693,10 +739,10 @@ describe('startDiscordBot — gateway stall watchdog', () => {
     await readyCb(mockInstance);
     expect(clientStore.getDiscordClient()).toBe(mockInstance);
 
-    // This bot is single-shard, so 'shardReconnecting' alone means the gateway is down — no
-    // 'shardError'/'shardDisconnect' ever needs to fire for the watchdog to need to catch this.
-    const reconnectingHandler = findHandler('shardReconnecting');
-    reconnectingHandler(0);
+    // This bot is single-shard, so a recoverable close alone means the gateway is down — no
+    // error or unrecoverable close ever needs to fire for the watchdog to need to catch this.
+    const closedHandler = findHandler('closed');
+    closedHandler(1006, 0);
 
     await vi.advanceTimersByTimeAsync(120_000);
 
@@ -714,7 +760,7 @@ describe('startDiscordBot — gateway stall watchdog', () => {
     await vi.advanceTimersByTimeAsync(120_000);
     expect(mockInstance.login).toHaveBeenCalledTimes(2);
 
-    // Something else (an intentional stop, or an interleaved shardDisconnect self-heal) stops the
+    // Something else (an intentional stop, or an interleaved unrecoverable-close self-heal) stops the
     // bot while that recovery login is still pending, then starts a fresh attempt that also hangs.
     mod.stopDiscordBot();
     const secondHungLogin = deferred();
@@ -797,7 +843,7 @@ describe('startDiscordBot — gateway stall watchdog', () => {
 
 // ─── startDiscordBot — login failure reconnect backoff ─────────────────────────
 //
-// A failed shardDisconnect self-heal (or the very first boot) must not leave the process
+// A failed unrecoverable-close self-heal (or the very first boot) must not leave the process
 // permanently disconnected from Discord — startDiscordBot() schedules its own retry rather
 // than requiring some other caller to notice and retry manually.
 
@@ -865,7 +911,7 @@ describe('startDiscordBot — login failure reconnect backoff', () => {
   });
 
   it('does not stack a second pending retry when two login failures happen in quick succession', async () => {
-    // Two failures back-to-back (e.g. two shardDisconnect events) must not schedule two
+    // Two failures back-to-back (e.g. two unrecoverable shard closes) must not schedule two
     // independent timers — that would double the reconnect attempts once both fire.
     mockInstance.login.mockRejectedValueOnce(new Error('first failure'));
     mod.startDiscordBot();
@@ -898,9 +944,9 @@ describe('startDiscordBot — login failure reconnect backoff', () => {
     // A later shard disconnect forces a fresh login, which fails again — the backoff for this
     // new failure must start from RECONNECT_BASE_DELAY_MS again, not continue from where the
     // previous (already-recovered) failure episode left off.
-    const disconnectHandler = mockInstance.on.mock.calls.find(([e]: string[]) => e === 'shardDisconnect')?.[1];
+    const closedHandler = mockInstance.ws.on.mock.calls.find(([e]: string[]) => e === 'closed')?.[1];
     mockInstance.login.mockRejectedValueOnce(new Error('second failure'));
-    disconnectHandler({ code: 4004 }, 0);
+    closedHandler(4004, 0);
     await flushMicrotasks();
     expect(mockInstance.login).toHaveBeenCalledTimes(3);
 

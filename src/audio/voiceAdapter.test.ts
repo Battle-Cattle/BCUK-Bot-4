@@ -1,40 +1,50 @@
 import { describe, it, expect, vi } from 'vitest';
+import { mockLogger } from '../test-utils/loggerMock';
+import { waitFor } from '../test-utils/waitFor';
+
+const log = vi.hoisted(() => ({ current: undefined as ReturnType<typeof mockLogger> | undefined }));
+vi.mock('../shared/logger', () => ({
+  createLogger: () => (log.current ??= mockLogger()),
+}));
+
+import { WebSocketShardEvents } from 'discord.js';
 import { createVoiceAdapterFactory } from './voiceAdapter';
 
+type FakeClient = { ws: { on: ReturnType<typeof vi.fn>; send: ReturnType<typeof vi.fn> } };
+
 /** Minimal fake voice channel exposing only what the adapter touches. */
-function makeChannel(client: { on: ReturnType<typeof vi.fn> }, guildId: string) {
-  const shardSend = vi.fn();
-  const channel = { client, guild: { id: guildId, shard: { send: shardSend } } };
-  return { channel, shardSend };
+function makeChannel(client: FakeClient, guildId: string, shardId = 0) {
+  const channel = { client, guild: { id: guildId, shardId } };
+  return { channel, wsSend: client.ws.send };
 }
 
-/** A fake discord.js Client that captures its single registered 'raw' handler. */
-function makeClient() {
-  return { on: vi.fn() };
+/** A fake discord.js Client whose `ws` manager captures its single registered dispatch handler. */
+function makeClient(): FakeClient {
+  return { ws: { on: vi.fn(), send: vi.fn(async () => undefined) } };
 }
 
 function makeMethods() {
   return { onVoiceStateUpdate: vi.fn(), onVoiceServerUpdate: vi.fn() };
 }
 
-/** Retrieves the shared 'raw' handler registered on `client`. */
-function getRawHandler(client: ReturnType<typeof makeClient>): (packet: unknown) => void {
-  return client.on.mock.calls[0]![1] as (packet: unknown) => void;
+/** Retrieves the shared gateway dispatch handler registered on `client.ws`. */
+function getDispatchHandler(client: ReturnType<typeof makeClient>): (packet: unknown) => void {
+  return client.ws.on.mock.calls[0]![1] as (packet: unknown) => void;
 }
 
 describe('createVoiceAdapterFactory', () => {
-  it('registers a single raw listener on first build', () => {
+  it('registers a single gateway dispatch listener on first build', () => {
     const client = makeClient();
     const { channel } = makeChannel(client, 'guild-a');
     const factory = createVoiceAdapterFactory();
 
     factory.build(channel as never)(makeMethods() as never);
 
-    expect(client.on).toHaveBeenCalledTimes(1);
-    expect(client.on).toHaveBeenCalledWith('raw', expect.any(Function));
+    expect(client.ws.on).toHaveBeenCalledTimes(1);
+    expect(client.ws.on).toHaveBeenCalledWith(WebSocketShardEvents.Dispatch, expect.any(Function));
   });
 
-  it('reuses the same raw listener across multiple guilds sharing a client', () => {
+  it('reuses the same dispatch listener across multiple guilds sharing a client', () => {
     const client = makeClient();
     const { channel: channelA } = makeChannel(client, 'guild-a');
     const { channel: channelB } = makeChannel(client, 'guild-b');
@@ -42,8 +52,8 @@ describe('createVoiceAdapterFactory', () => {
     createVoiceAdapterFactory().build(channelA as never)(makeMethods() as never);
     createVoiceAdapterFactory().build(channelB as never)(makeMethods() as never);
 
-    // Only one 'raw' listener total, regardless of how many guilds/factories share the client.
-    expect(client.on).toHaveBeenCalledTimes(1);
+    // Only one dispatch listener total, regardless of how many guilds/factories share the client.
+    expect(client.ws.on).toHaveBeenCalledTimes(1);
   });
 
   it('routes a VOICE_STATE_UPDATE/VOICE_SERVER_UPDATE packet to the matching guild only', () => {
@@ -55,10 +65,10 @@ describe('createVoiceAdapterFactory', () => {
 
     createVoiceAdapterFactory().build(channelA as never)(methodsA as never);
     createVoiceAdapterFactory().build(channelB as never)(methodsB as never);
-    const onRaw = getRawHandler(client);
+    const onDispatch = getDispatchHandler(client);
 
-    onRaw({ t: 'VOICE_STATE_UPDATE', d: { guild_id: 'guild-a', a: 1 } });
-    onRaw({ t: 'VOICE_SERVER_UPDATE', d: { guild_id: 'guild-b', b: 2 } });
+    onDispatch({ t: 'VOICE_STATE_UPDATE', d: { guild_id: 'guild-a', a: 1 } });
+    onDispatch({ t: 'VOICE_SERVER_UPDATE', d: { guild_id: 'guild-b', b: 2 } });
 
     expect(methodsA.onVoiceStateUpdate).toHaveBeenCalledWith({ guild_id: 'guild-a', a: 1 });
     expect(methodsA.onVoiceServerUpdate).not.toHaveBeenCalled();
@@ -72,10 +82,10 @@ describe('createVoiceAdapterFactory', () => {
     const methods = makeMethods();
 
     createVoiceAdapterFactory().build(channel as never)(methods as never);
-    const onRaw = getRawHandler(client);
+    const onDispatch = getDispatchHandler(client);
 
-    onRaw({ t: 'SOMETHING_ELSE', d: { guild_id: 'guild-a' } });
-    onRaw({ t: 'VOICE_STATE_UPDATE', d: {} });
+    onDispatch({ t: 'SOMETHING_ELSE', d: { guild_id: 'guild-a' } });
+    onDispatch({ t: 'VOICE_STATE_UPDATE', d: {} });
 
     expect(methods.onVoiceStateUpdate).not.toHaveBeenCalled();
     expect(methods.onVoiceServerUpdate).not.toHaveBeenCalled();
@@ -90,9 +100,9 @@ describe('createVoiceAdapterFactory', () => {
 
     factory.build(channel as never)(oldMethods as never);
     factory.build(channel as never)(newMethods as never);
-    const onRaw = getRawHandler(client);
+    const onDispatch = getDispatchHandler(client);
 
-    onRaw({ t: 'VOICE_STATE_UPDATE', d: { guild_id: 'guild-a' } });
+    onDispatch({ t: 'VOICE_STATE_UPDATE', d: { guild_id: 'guild-a' } });
 
     expect(oldMethods.onVoiceStateUpdate).not.toHaveBeenCalled();
     expect(newMethods.onVoiceStateUpdate).toHaveBeenCalledOnce();
@@ -106,9 +116,9 @@ describe('createVoiceAdapterFactory', () => {
 
     const adapter = factory.build(channel as never)(methods as never);
     adapter.destroy();
-    const onRaw = getRawHandler(client);
+    const onDispatch = getDispatchHandler(client);
 
-    onRaw({ t: 'VOICE_STATE_UPDATE', d: { guild_id: 'guild-a' } });
+    onDispatch({ t: 'VOICE_STATE_UPDATE', d: { guild_id: 'guild-a' } });
 
     expect(methods.onVoiceStateUpdate).not.toHaveBeenCalled();
   });
@@ -123,9 +133,9 @@ describe('createVoiceAdapterFactory', () => {
     const adapterA = createVoiceAdapterFactory().build(channelA as never)(methodsA as never);
     createVoiceAdapterFactory().build(channelB as never)(methodsB as never);
     adapterA.destroy();
-    const onRaw = getRawHandler(client);
+    const onDispatch = getDispatchHandler(client);
 
-    onRaw({ t: 'VOICE_STATE_UPDATE', d: { guild_id: 'guild-b' } });
+    onDispatch({ t: 'VOICE_STATE_UPDATE', d: { guild_id: 'guild-b' } });
 
     expect(methodsB.onVoiceStateUpdate).toHaveBeenCalledOnce();
   });
@@ -142,23 +152,37 @@ describe('createVoiceAdapterFactory', () => {
     const oldAdapter = createVoiceAdapterFactory().build(channel as never)(oldMethods as never);
     createVoiceAdapterFactory().build(channel as never)(newMethods as never);
     oldAdapter.destroy();
-    const onRaw = getRawHandler(client);
+    const onDispatch = getDispatchHandler(client);
 
-    onRaw({ t: 'VOICE_STATE_UPDATE', d: { guild_id: 'guild-a' } });
+    onDispatch({ t: 'VOICE_STATE_UPDATE', d: { guild_id: 'guild-a' } });
 
     expect(newMethods.onVoiceStateUpdate).toHaveBeenCalledOnce();
   });
 
   it('sendPayload routes through the guild shard and reports success/failure', () => {
     const client = makeClient();
-    const { channel, shardSend } = makeChannel(client, 'guild-a');
+    const { channel, wsSend } = makeChannel(client, 'guild-a', 3);
     const factory = createVoiceAdapterFactory();
     const adapter = factory.build(channel as never)(makeMethods() as never);
 
     expect(adapter.sendPayload({ op: 4 })).toBe(true);
-    expect(shardSend).toHaveBeenCalledWith({ op: 4 });
+    expect(wsSend).toHaveBeenCalledWith(3, { op: 4 });
 
-    shardSend.mockImplementationOnce(() => { throw new Error('shard down'); });
+    wsSend.mockImplementationOnce(() => { throw new Error('shard down'); });
     expect(adapter.sendPayload({ op: 4 })).toBe(false);
+  });
+
+  it('sendPayload logs an async send rejection instead of leaving it unhandled', async () => {
+    const client = makeClient();
+    const { channel, wsSend } = makeChannel(client, 'guild-a');
+    const factory = createVoiceAdapterFactory();
+    const adapter = factory.build(channel as never)(makeMethods() as never);
+    const err = new Error('socket closed');
+    wsSend.mockRejectedValueOnce(err);
+
+    expect(adapter.sendPayload({ op: 4 })).toBe(true);
+    await waitFor(() => expect(log.current?.warn).toHaveBeenCalledWith(
+      'Voice gateway payload send failed for guild guild-a:', err,
+    ));
   });
 });

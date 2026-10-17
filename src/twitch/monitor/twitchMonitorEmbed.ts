@@ -1,4 +1,4 @@
-import { EmbedBuilder } from 'discord.js';
+import { EmbedBuilder } from '@discordjs/builders';
 import { TwitchStream } from '../twitchApi';
 import { LiveState } from './twitchMonitorTypes';
 import { fillTemplate } from '../../shared/textTemplate';

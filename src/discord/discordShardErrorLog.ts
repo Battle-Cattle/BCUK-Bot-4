@@ -1,4 +1,4 @@
-// Throttled logging/alerting for discord.js `shardError` events, so a burst of gateway retries
+// Throttled logging/alerting for gateway shard errors (`@discordjs/ws` `SocketError`/`Error`), so a burst of gateway retries
 // during a Discord-side outage produces one line (and one owner DM) per shard per interval.
 import { createLogger } from '../shared/logger';
 import { sendOwnerAlert } from './ownerAlerts';
@@ -12,14 +12,14 @@ const SHARD_ERROR_LOG_INTERVAL_MS = 60_000;
 const shardErrorLogState = new Map<number, { lastLoggedAt: number; suppressedCount: number }>();
 
 /**
- * Logs a `shardError` at `error` and DMs the owner, throttled to at most one line/DM per
+ * Logs a shard error at `error` and DMs the owner, throttled to at most one line/DM per
  * shard per {@link SHARD_ERROR_LOG_INTERVAL_MS}. During a Discord-side gateway hiccup (e.g.
  * repeated `Unexpected server response: 503`), discord.js's automatic reconnect can retry —
  * and this event can fire — many times a second; logging (and alerting on) every one of those
  * verbatim has filled multiple log files in a single incident without adding any information
  * discord.js's own retry wasn't already handling. Errors swallowed during the throttle window
  * are counted and folded into the next line/DM that does get sent. Still worth surfacing as an
- * error (unlike 'shardReconnecting') because a shard that keeps erroring is a real, ongoing
+ * error (unlike a recoverable shard close) because a shard that keeps erroring is a real, ongoing
  * connectivity problem worth a human looking at, even though discord.js itself will keep
  * retrying without help.
  * @param shardId - The shard that reported the error.
