@@ -3,7 +3,7 @@ import { getStreamerByDiscordId, type DbStreamerEventSub } from '../../db';
 import { getSessionUser } from '../session';
 import { isKnownStreamerLogin, unauthenticatedOverlayPool } from './sseOverlayAccess';
 import type { SseConnectionPool } from './sseConnectionPool';
-import { attachSseConnection, broadcastToChannel, chainConnectionCleanup } from './sseChannel';
+import { attachSseConnection, broadcastToChannel, chainConnectionCleanup, onConnectionCountChange } from './sseChannel';
 import type { createLogger } from '../../shared/logger';
 
 // Express route-handler factories for the app's SSE endpoints, built on attachSseConnection
@@ -135,12 +135,10 @@ export function createStreamerSseEventsHandler<K>(
 export interface OverlayStatusEventsHandlerOptions {
   /** In-memory map of active status-stream SSE connections, keyed by streamer ID. */
   statusConnections: Map<number, Set<Response>>;
-  /** The overlay's own connections map (e.g. from `overlaySource.ts`/`alertsOverlaySource.ts`), keyed by lowercased Twitch login — polled to derive `connected`. */
+  /** The overlay's own connections map (e.g. from `overlaySource.ts`/`alertsOverlaySource.ts`), keyed by lowercased Twitch login — watched via `onConnectionCountChange` to derive `connected`. */
   overlayConnections: Map<string, Set<Response>>;
   /** Maximum concurrent status-stream connections permitted per streamer. */
   maxPerChannel: number;
-  /** How often (ms) to re-check `overlayConnections` for a state change. */
-  pollIntervalMs: number;
   /** Logger used to report an unexpected streamer lookup failure. */
   log: ReturnType<typeof createLogger>;
 }
@@ -152,23 +150,22 @@ export interface OverlayStatusEventsHandlerOptions {
  * something's wrong when an overlay never fires. Shared by the reward-video and alerts overlay
  * settings pages (`overlayAdmin.ts`/`alertsAdmin.ts`) — each keeps its own `statusConnections` and
  * `overlayConnections` maps, since those differ, but the "resolve the session's streamer, then
- * poll for a connection-count change" lifecycle is identical. Polls on an interval rather than
- * reacting to a push event, since opening/closing an overlay's own SSE connection has no existing
- * event to subscribe to.
+ * push on a connection-count change" lifecycle is identical. Reacts to the overlay's own SSE
+ * connections opening/closing via {@link onConnectionCountChange}, so there's no polling interval.
  * @param options - See {@link OverlayStatusEventsHandlerOptions}.
  * @returns An Express route handler: replies 403 if the user isn't a monitored streamer with a
  *   linked Twitch channel, 500 (logged) if the streamer lookup fails, 429 if `maxPerChannel` is
- *   exceeded, otherwise upgrades to `text/event-stream` and tears down the poll interval (along
- *   with the connection itself) on client disconnect.
+ *   exceeded, otherwise upgrades to `text/event-stream` and unsubscribes from overlay connection
+ *   changes (along with tearing down the connection itself) on client disconnect.
  */
 export function createOverlayStatusEventsHandler(
   options: OverlayStatusEventsHandlerOptions,
 ): (req: Request, res: Response) => Promise<void> {
-  const { statusConnections, overlayConnections, maxPerChannel, pollIntervalMs, log } = options;
+  const { statusConnections, overlayConnections, maxPerChannel, log } = options;
 
   /**
    * Route handler for one settings page's status stream: resolves the session's streamer, attaches
-   * the SSE connection, then polls `overlayConnections` for that streamer's login on an interval.
+   * the SSE connection, then pushes whenever `overlayConnections` changes for that streamer's login.
    * @param req - Express request; reads `req.session.user`.
    * @param res - Express response; see {@link createOverlayStatusEventsHandler}'s `@returns`.
    */
@@ -205,27 +202,27 @@ export function createOverlayStatusEventsHandler(
       broadcastToChannel(statusConnections, streamerId, { connected: isConnected });
     };
 
-    const interval = setInterval(check, pollIntervalMs);
+    const unsubscribe = onConnectionCountChange(overlayConnections, (changedLogin) => {
+      if (changedLogin === login) check();
+    });
     // attachSseConnection's own cleanup can be triggered by 'close'/'error' on either req or res
     // (an abrupt socket failure can fire res's events without req ever emitting 'close') — mirror
-    // that here so this interval doesn't outlive the connection under those same paths.
-    /** Idempotent teardown for this handler's poll interval, wired to every path that can end the connection below. */
-    const clearStatusInterval = (): void => clearInterval(interval);
-    req.on('close', clearStatusInterval);
-    res.on('close', clearStatusInterval);
-    res.on('error', clearStatusInterval);
+    // that here so this subscription doesn't outlive the connection under those same paths.
+    req.on('close', unsubscribe);
+    res.on('close', unsubscribe);
+    res.on('error', unsubscribe);
 
     // A failed res.write() inside broadcastToChannel's own `check()` call evicts this response via
     // the same connectionCleanups entry attachSseConnection just registered for it — without
     // emitting 'close'/'error' on either req or res, so the listeners above never fire for that
-    // path. Wrap that cleanup so it also stops this interval; this must happen BEFORE the first
-    // check() below runs, otherwise a failure on that very first write would find no cleanup
-    // entry left to wrap (attachSseConnection's own cleanup already deleted it) and leak the
-    // interval with nothing left to own its teardown.
-    if (!chainConnectionCleanup(res, clearStatusInterval)) {
+    // path. Wrap that cleanup so it also unsubscribes; this must happen BEFORE the first check()
+    // below runs, otherwise a failure on that very first write would find no cleanup entry left
+    // to wrap (attachSseConnection's own cleanup already deleted it) and leak the subscription
+    // with nothing left to own its teardown.
+    if (!chainConnectionCleanup(res, unsubscribe)) {
       // attachSseConnection's connection was already torn down before we got here — nothing left
-      // to poll for.
-      clearInterval(interval);
+      // to watch for.
+      unsubscribe();
       return;
     }
 
