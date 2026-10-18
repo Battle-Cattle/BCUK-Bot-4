@@ -46,6 +46,36 @@ export async function fetchMemberDisplayName(
   }
 }
 
+/** Page size for {@link fetchAllMemberDisplayNames}: the most Discord's List Guild Members endpoint returns per request. */
+const MEMBER_LIST_PAGE_SIZE = 1000;
+
+/**
+ * Fetches every member's display name in a guild via the paginated List Guild Members REST
+ * endpoint, without populating the member cache. Discord only allows this when the Server Members
+ * privileged intent is enabled for the application in the developer portal (the gateway intent
+ * itself need not be requested), so callers must be ready to fall back to per-member lookups.
+ * @param guildId - Guild whose members to list.
+ * @returns Display names keyed by Discord user id, or null if the client isn't ready or any page
+ *   fails (e.g. Missing Access because the intent is off).
+ */
+export async function fetchAllMemberDisplayNames(guildId: string): Promise<Map<string, string> | null> {
+  if (!getDiscordClient()) return null;
+  try {
+    const guild = await getGuild(guildId);
+    const names = new Map<string, string>();
+    let after: string | undefined;
+    for (;;) {
+      const page = await guild.members.list({ limit: MEMBER_LIST_PAGE_SIZE, after, cache: false });
+      for (const [id, member] of page) names.set(id, member.displayName);
+      after = page.lastKey();
+      if (page.size < MEMBER_LIST_PAGE_SIZE || after === undefined) return names;
+    }
+  } catch (err) {
+    log.warn(`Failed to list members of guild ${guildId}:`, err);
+    return null;
+  }
+}
+
 /**
  * Fetches a user's global Discord profile (username and avatar hash) via the bot client.
  * Used by passkey login, which has no Discord OAuth `@me` response to read these from.

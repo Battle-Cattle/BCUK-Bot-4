@@ -10,6 +10,7 @@ vi.mock('../../discord/discordClientStore', () => ({
   getDiscordClient: vi.fn(),
 }));
 vi.mock('../../discord/discordApi', () => ({
+  fetchAllMemberDisplayNames: vi.fn(),
   fetchMemberDisplayName: vi.fn(),
 }));
 vi.mock('../middleware', () => ({
@@ -23,7 +24,7 @@ vi.mock('../csrf', () => ({
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
 import { getGuildMemberUsers, updateDiscordName } from '../../db';
-import { fetchMemberDisplayName } from '../../discord/discordApi';
+import { fetchAllMemberDisplayNames, fetchMemberDisplayName } from '../../discord/discordApi';
 import { getDiscordClient } from '../../discord/discordClientStore';
 import supertest from 'supertest';
 import { buildTestApp } from '../../test-utils/expressTestApp';
@@ -62,6 +63,8 @@ beforeEach(() => {
   middlewareCallOrder.length = 0;
   refreshStates.clear();
   vi.useFakeTimers();
+  // Default to the per-member fallback (bulk listing not permitted); the bulk path has its own tests.
+  vi.mocked(fetchAllMemberDisplayNames).mockResolvedValue(null);
 });
 
 afterEach(() => {
@@ -305,5 +308,62 @@ describe('runDiscordNameRefresh outcomes', () => {
     releaseSecond(null);
     await waitForRefreshComplete();
     expect(getRefreshState(GUILD_ID)).toMatchObject({ outcome: 'partial', updatedCount: 1, failureCount: 1 });
+  });
+});
+
+describe('runDiscordNameRefresh bulk member listing', () => {
+  it('uses the bulk listing when Discord allows it, with no per-member lookups', async () => {
+    vi.mocked(getDiscordClient).mockReturnValue({} as any);
+    vi.mocked(getGuildMemberUsers).mockResolvedValue([
+      { discord_id: '1', discord_name: 'Old1' },
+      { discord_id: '2', discord_name: 'Same' },
+    ] as any);
+    vi.mocked(fetchAllMemberDisplayNames).mockResolvedValue(new Map([['1', 'New1'], ['2', 'Same'], ['3', 'NotRegistered']]));
+    vi.mocked(updateDiscordName).mockResolvedValue(undefined);
+
+    await buildApp().post('/users/refresh-names');
+    await waitForRefreshComplete();
+    expect(fetchAllMemberDisplayNames).toHaveBeenCalledWith(GUILD_ID);
+    expect(fetchMemberDisplayName).not.toHaveBeenCalled();
+    expect(updateDiscordName).toHaveBeenCalledExactlyOnceWith('1', 'New1');
+    expect(getRefreshState(GUILD_ID)).toMatchObject({ outcome: 'success', updatedCount: 1, failureCount: 0 });
+  });
+
+  it('counts a registered user missing from the listing (no longer in the guild) as a failure', async () => {
+    vi.mocked(getDiscordClient).mockReturnValue({} as any);
+    vi.mocked(getGuildMemberUsers).mockResolvedValue([
+      { discord_id: '1', discord_name: 'Old1' },
+      { discord_id: 'gone', discord_name: 'Left' },
+    ] as any);
+    vi.mocked(fetchAllMemberDisplayNames).mockResolvedValue(new Map([['1', 'New1']]));
+    vi.mocked(updateDiscordName).mockResolvedValue(undefined);
+
+    await buildApp().post('/users/refresh-names');
+    await waitForRefreshComplete();
+    expect(fetchMemberDisplayName).not.toHaveBeenCalled();
+    expect(getRefreshState(GUILD_ID)).toMatchObject({ outcome: 'partial', updatedCount: 1, failureCount: 1 });
+  });
+
+  it('falls back to per-member lookups when the bulk listing is not permitted', async () => {
+    vi.mocked(getDiscordClient).mockReturnValue({} as any);
+    vi.mocked(getGuildMemberUsers).mockResolvedValue([{ discord_id: '1', discord_name: 'Old1' }] as any);
+    vi.mocked(fetchAllMemberDisplayNames).mockResolvedValue(null);
+    vi.mocked(fetchMemberDisplayName).mockResolvedValue('New1');
+    vi.mocked(updateDiscordName).mockResolvedValue(undefined);
+
+    await buildApp().post('/users/refresh-names');
+    await waitForRefreshComplete();
+    expect(fetchMemberDisplayName).toHaveBeenCalledWith('1', GUILD_ID, true);
+    expect(getRefreshState(GUILD_ID)).toMatchObject({ outcome: 'success', updatedCount: 1 });
+  });
+
+  it('skips the bulk listing entirely when the guild has no registered users', async () => {
+    vi.mocked(getDiscordClient).mockReturnValue({} as any);
+    vi.mocked(getGuildMemberUsers).mockResolvedValue([]);
+
+    await buildApp().post('/users/refresh-names');
+    await waitForRefreshComplete();
+    expect(fetchAllMemberDisplayNames).not.toHaveBeenCalled();
+    expect(getRefreshState(GUILD_ID).outcome).toBe('noop');
   });
 });

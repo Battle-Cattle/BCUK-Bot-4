@@ -4,10 +4,11 @@ import { mockLogger } from '../test-utils/loggerMock';
 vi.mock('../shared/logger', () => ({ createLogger: mockLogger }));
 vi.mock('./discordClientStore', () => ({ getDiscordClient: vi.fn().mockReturnValue(null) }));
 
+import { Collection } from 'discord.js';
 import { getDiscordClient } from './discordClientStore';
-import { fetchMemberDisplayName, fetchDiscordUserProfile, sendDiscordDirectMessage } from './discordApi';
+import { fetchMemberDisplayName, fetchAllMemberDisplayNames, fetchDiscordUserProfile, sendDiscordDirectMessage } from './discordApi';
 
-let mockGuild: { members: { fetch: ReturnType<typeof vi.fn> } };
+let mockGuild: { members: { fetch: ReturnType<typeof vi.fn>; list: ReturnType<typeof vi.fn> } };
 let client: {
   users: { fetch: ReturnType<typeof vi.fn> };
   guilds: { cache: { get: ReturnType<typeof vi.fn> }; fetch: ReturnType<typeof vi.fn> };
@@ -15,7 +16,7 @@ let client: {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockGuild = { members: { fetch: vi.fn().mockResolvedValue({ displayName: 'Alice' }) } };
+  mockGuild = { members: { fetch: vi.fn().mockResolvedValue({ displayName: 'Alice' }), list: vi.fn() } };
   client = {
     users: { fetch: vi.fn().mockResolvedValue({ username: 'alice', avatar: 'abc123' }) },
     guilds: { cache: { get: vi.fn().mockReturnValue(undefined) }, fetch: vi.fn().mockResolvedValue(mockGuild) },
@@ -56,6 +57,55 @@ describe('fetchMemberDisplayName', () => {
     readyClient();
     mockGuild.members.fetch.mockRejectedValueOnce(new Error('not found'));
     expect(await fetchMemberDisplayName('missing', 'guild-id', false)).toBeNull();
+  });
+});
+
+/** Builds a members.list() page: a Collection of `count` members with ids `${start}`… and names `Name${id}`. */
+function memberPage(start: number, count: number): Collection<string, { displayName: string }> {
+  return new Collection(Array.from({ length: count }, (_, i) => {
+    const id = String(start + i);
+    return [id, { displayName: `Name${id}` }] as const;
+  }));
+}
+
+describe('fetchAllMemberDisplayNames', () => {
+  it('returns null when client is not ready', async () => {
+    expect(await fetchAllMemberDisplayNames('guild-id')).toBeNull();
+  });
+
+  it('pages through the member list until a short page and maps id to display name, without caching', async () => {
+    readyClient();
+    mockGuild.members.list
+      .mockResolvedValueOnce(memberPage(1, 1000))
+      .mockResolvedValueOnce(memberPage(1001, 2));
+
+    const names = await fetchAllMemberDisplayNames('guild-id');
+    expect(names?.size).toBe(1002);
+    expect(names?.get('1')).toBe('Name1');
+    expect(names?.get('1002')).toBe('Name1002');
+    expect(mockGuild.members.list).toHaveBeenNthCalledWith(1, { limit: 1000, after: undefined, cache: false });
+    expect(mockGuild.members.list).toHaveBeenNthCalledWith(2, { limit: 1000, after: '1000', cache: false });
+  });
+
+  it('stops after an empty page', async () => {
+    readyClient();
+    mockGuild.members.list.mockResolvedValueOnce(memberPage(1, 0));
+    expect(await fetchAllMemberDisplayNames('guild-id')).toEqual(new Map());
+    expect(mockGuild.members.list).toHaveBeenCalledOnce();
+  });
+
+  it('returns null when Discord refuses the listing (Server Members intent not enabled)', async () => {
+    readyClient();
+    mockGuild.members.list.mockRejectedValueOnce(Object.assign(new Error('Missing Access'), { code: 50001 }));
+    expect(await fetchAllMemberDisplayNames('guild-id')).toBeNull();
+  });
+
+  it('returns null when a later page fails, rather than a partial result', async () => {
+    readyClient();
+    mockGuild.members.list
+      .mockResolvedValueOnce(memberPage(1, 1000))
+      .mockRejectedValueOnce(new Error('network'));
+    expect(await fetchAllMemberDisplayNames('guild-id')).toBeNull();
   });
 });
 
