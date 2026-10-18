@@ -368,8 +368,8 @@ export async function discardOwnNewTimerCommand(id: number, discordId: string): 
  * trusting `user.twitch_name` as stored: the scheduler uses this same string as the lookup key
  * into `twitchChatActivity`'s per-channel message counts, which are always recorded under the
  * normalized (lowercased) form — an un-normalized channel here would silently and permanently
- * miss that counter, blocking `min_messages` forever with no error. Queried fresh every
- * scheduler tick rather than cached, mirroring `getAllEnabledPricingRows()`.
+ * miss that counter, blocking `min_messages` forever with no error. The scheduler reads this
+ * through `timerCommandCache.ts` rather than on every tick.
  */
 export async function getAllEnabledTimerCommandsWithChannel(): Promise<TimerCommandForScheduler[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(

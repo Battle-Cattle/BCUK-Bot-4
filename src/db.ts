@@ -201,12 +201,14 @@ export type {
   TimerCommandInput, TimerCommandForScheduler,
 } from './db/timerCommands';
 export {
-  TimerCommandNotFoundError, TimerSelfServiceDeniedError,
-  updateOwnTimerCommand, setOwnTimerCommandEnabled, removeOwnTimerCommand, discardOwnNewTimerCommand,
-  getAllTimerCommandsWithAssignments, addTimerCommand, updateTimerCommand,
-  removeTimerCommand, setTimerCommandEnabled, getAllEnabledTimerCommandsWithChannel,
-  assignUserToTimer, assignUsersToTimer, unassignUserFromTimer,
+  TimerCommandNotFoundError, TimerSelfServiceDeniedError, getAllTimerCommandsWithAssignments,
 } from './db/timerCommands';
+export {
+  updateOwnTimerCommand, setOwnTimerCommandEnabled, removeOwnTimerCommand, discardOwnNewTimerCommand,
+  addTimerCommand, updateTimerCommand, removeTimerCommand, setTimerCommandEnabled,
+  assignUserToTimer, assignUsersToTimer, unassignUserFromTimer,
+} from './db/timerCommandWrites';
+export { getEnabledTimerCommandsForScheduler } from './db/timerCommandCache';
 
 // ─── Streamdeck API keys ─────────────────────────────────────────────────────
 
