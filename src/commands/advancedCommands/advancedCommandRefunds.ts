@@ -17,8 +17,14 @@ import { advancedCommandRuntimeRegistry } from './advancedCommandRuntime';
 
 const log = createLogger('AdvancedCommands');
 
-/** How long a companion app has to acknowledge a command before the viewer is refunded. */
-export const ACK_TIMEOUT_MS = 30_000;
+/**
+ * How long a companion app has to acknowledge a command before the viewer is refunded. The app only
+ * acknowledges once every mapped action has finished, and actions can take a while (Delay actions,
+ * slow devices), so this is generous. It only applies while an app is connected but silent: no app
+ * connected, or a failure the app reports, refunds straight away. Matches the channel-point
+ * redemption timeout (`REDEMPTION_ACK_TIMEOUT_MS`).
+ */
+export const ACK_TIMEOUT_MS = 3 * 60_000;
 
 /** Chat wording for each refund reason. */
 const REFUND_REASON_TEXT: Record<AdvancedCommandRefundReason, string> = {
