@@ -12,6 +12,7 @@ import {
   type AdvancedCommandRefundReason,
 } from '../../db';
 import { createLogger } from '../../shared/logger';
+import { sweepPendingAcks } from '../../shared/pendingAckSweep';
 import { advancedCommandRuntimeRegistry } from './advancedCommandRuntime';
 
 const log = createLogger('AdvancedCommands');
@@ -119,17 +120,15 @@ export async function acknowledgeAdvancedCommandUse(
  * @returns How many uses were refunded.
  */
 export async function sweepPendingAdvancedCommandUsage(): Promise<number> {
-  let refunded = 0;
-  for (const eventId of await listPendingAdvancedCommandUsage()) {
-    if (pendingAcks.has(eventId)) continue;
-    try {
-      if (await refundAdvancedCommandUse(eventId, 'restart')) refunded++;
-    } catch (err) {
-      // One failed row mustn't hold back the rest; retry it after a timeout instead.
+  const refunded = await sweepPendingAcks({
+    pendingIds: await listPendingAdvancedCommandUsage(),
+    isTracked: (eventId) => pendingAcks.has(eventId),
+    refund: (eventId) => refundAdvancedCommandUse(eventId, 'restart'),
+    onFailure: (eventId, err) => {
       log.error(`Failed to refund pending advanced command ${eventId} at startup; retrying:`, err);
       scheduleRefund(eventId, 'restart', undefined);
-    }
-  }
+    },
+  });
   if (refunded > 0) log.info(`Refunded ${refunded} advanced command use(s) left pending by a restart`);
   return refunded;
 }

@@ -18,6 +18,7 @@ import {
   type PendingRedemptionAck, type RedemptionRefundReason,
 } from '../../db';
 import { createLogger } from '../../shared/logger';
+import { sweepPendingAcks } from '../../shared/pendingAckSweep';
 import { getValidToken } from '../twitchUserTokens';
 import {
   updateRedemptionStatus, TwitchRedemptionNotFoundError, TwitchRewardUnsupportedError, TwitchRewardAuthError,
@@ -264,17 +265,15 @@ export async function acknowledgeRedemption(redemptionId: string, ack: { ok: boo
  * @returns How many redemptions were resolved.
  */
 export async function sweepPendingRedemptionAcks(): Promise<number> {
-  let resolved = 0;
-  for (const redemptionId of await listPendingRedemptionAcks()) {
-    if (pendingAcks.has(redemptionId)) continue;
-    try {
-      if (await refundRedemption(redemptionId, 'restart')) resolved++;
-    } catch (err) {
-      // One failed row mustn't hold back the rest; retry it after a timeout instead.
-      log.error(`Failed to refund pending redemption ${redemptionId} at startup; retrying:`, err);
-      scheduleRefund(redemptionId, 'restart', undefined);
-    }
-  }
+  const resolved = await sweepPendingAcks({
+    pendingIds: await listPendingRedemptionAcks(),
+    isTracked: (id) => pendingAcks.has(id),
+    refund: (id) => refundRedemption(id, 'restart'),
+    onFailure: (id, err) => {
+      log.error(`Failed to refund pending redemption ${id} at startup; retrying:`, err);
+      scheduleRefund(id, 'restart', undefined);
+    },
+  });
   if (resolved > 0) log.info(`Refunded ${resolved} redemption(s) left waiting for companion confirmation by a restart`);
   return resolved;
 }
