@@ -4,7 +4,9 @@ import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import { getSessionUser } from '../session';
 import { getStreamerByDiscordId } from '../../db';
-import { getPricingConfigsForStreamer, getPricingSettingsForStreamer, getPricingHistoryForRewards } from '../../db';
+import {
+  getPricingConfigsForStreamer, getPricingSettingsForStreamer, getPricingHistoryForRewards, listCompanionConfirmationRewardIds,
+} from '../../db';
 import type { RewardPricingRow, StreamerPricingSettings } from '../../db';
 import type { TwitchCustomReward } from '../../twitch/twitchApi';
 import { fetchStreamerRewards } from './streamerRewards';
@@ -24,9 +26,11 @@ const router = Router();
 const KNOWN_ERRORS = new Set([
   'not_a_streamer', 'invalid_reward_id', 'invalid_config', 'save_failed',
   'delete_failed', 'invalid_settings', 'invalid_reward_fields', 'create_failed', 'update_failed',
+  'confirmation_failed', 'confirmation_unsupported',
 ]);
 const KNOWN_SUCCESSES = new Set([
   'pricing_saved', 'pricing_deleted', 'pricing_settings_saved', 'reward_created', 'reward_updated', 'reward_deleted',
+  'confirmation_saved',
 ]);
 
 /** Selectable "last N hours" ranges for the price history chart; streams here typically run ~3h. */
@@ -38,6 +42,8 @@ interface ChannelPointRewardRow {
   rewardId: string;
   twitchReward: TwitchCustomReward | null;
   config: RewardPricingRow | null;
+  /** Whether redemptions wait for the companion app to confirm (and are refunded otherwise). */
+  companionConfirmation: boolean;
   previewPrice: number | null;
   /**
    * Rendered SVG history chart, already HTML-escaped by `renderPriceHistoryChart` and safe to
@@ -125,9 +131,12 @@ router.get('/', requireAuth, csrfProtection, async (req, res) => {
     const isConnected = !!streamer?.eventsub_access_token;
     const needsReconnect = isConnected && !!streamer.twitch_name && hasAuthFailedSubs(streamer.twitch_name);
 
-    const [pricingConfigs, twitchRewards, pricingSettings] = streamer && isConnected && !needsReconnect
-      ? await Promise.all([getPricingConfigsForStreamer(streamer.id), fetchStreamerRewards(streamer, log), getPricingSettingsForStreamer(streamer.id)])
-      : [[], [], null];
+    const [pricingConfigs, twitchRewards, pricingSettings, confirmationRewardIds] = streamer && isConnected && !needsReconnect
+      ? await Promise.all([
+        getPricingConfigsForStreamer(streamer.id), fetchStreamerRewards(streamer, log), getPricingSettingsForStreamer(streamer.id),
+        listCompanionConfirmationRewardIds(streamer.id),
+      ])
+      : [[], [], null, new Set<string>()];
 
     const historyHours = parseHistoryHours(req.query.hours);
     const rangeEndMs = Date.now();
@@ -168,6 +177,7 @@ router.get('/', requireAuth, csrfProtection, async (req, res) => {
         rewardId: tr.id,
         twitchReward: tr,
         config,
+        companionConfirmation: confirmationRewardIds.has(tr.id),
         previewPrice: config ? previewPriceFor(config) : null,
         historyChartSafeHtml: config ? buildHistoryChart(config) : null,
         ...(config ? buildSimulation(config) : { simulationChartSafeHtml: null, simulationSummary: null }),
@@ -183,6 +193,7 @@ router.get('/', requireAuth, csrfProtection, async (req, res) => {
         rewardId: config.twitch_reward_id,
         twitchReward: null,
         config,
+        companionConfirmation: confirmationRewardIds.has(config.twitch_reward_id),
         previewPrice: previewPriceFor(config),
         historyChartSafeHtml: buildHistoryChart(config),
         ...buildSimulation(config),

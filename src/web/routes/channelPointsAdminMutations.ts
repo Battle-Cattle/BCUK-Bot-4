@@ -2,10 +2,10 @@ import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
-import { updatePricingCooldownForReward } from '../../db';
-import { createCustomReward, updateCustomReward } from '../../twitch/twitchApi';
+import { updatePricingCooldownForReward, isCompanionConfirmationRequired, setCompanionConfirmationRequired } from '../../db';
+import { createCustomReward, updateCustomReward, TwitchRewardUnsupportedError } from '../../twitch/twitchApi';
 import { getValidToken } from '../../twitch/twitchUserTokens';
-import { parseRewardIdParam } from './validation';
+import { parseRewardIdParam, parseCheckboxField } from './validation';
 import { requireStreamer } from './viewHelpers';
 import { logAndRedirectError } from './errorHandling';
 import {
@@ -46,7 +46,8 @@ router.post('/rewards', requireAuth, csrfProtection, async (req, res) => {
 
 /**
  * POST /channel-points/rewards/:twitchRewardId — updates an existing custom reward's fields
- * on Twitch. Only succeeds for rewards created by this app — Twitch returns 403 otherwise.
+ * on Twitch. Only succeeds for rewards created by this app — Twitch returns 403 otherwise. A
+ * reward that requires companion confirmation always keeps its redemptions in the request queue.
  * @param req - Express request; reads the `twitchRewardId` route param and the full reward
  *   field set (see `parseRewardFields`) from `req.body`.
  * @param res - Express response; redirects to `/channel-points?success=reward_updated` on success,
@@ -65,6 +66,9 @@ router.post('/rewards/:twitchRewardId', requireAuth, csrfProtection, async (req,
 
     const input = parseRewardFields(req.body as Record<string, string | string[] | undefined>);
     if (!input) return res.redirect('/channel-points?error=invalid_reward_fields');
+    // Twitch can only refund a redemption still in the request queue, so a reward that requires
+    // companion confirmation must never skip it.
+    if (await isCompanionConfirmationRequired(streamer.id, twitchRewardId)) input.should_redemptions_skip_request_queue = false;
 
     const token = streamer.twitch_user_id ? await getValidToken(streamer) : null;
     if (!streamer.twitch_user_id || !token) return res.redirect('/channel-points?error=update_failed');
@@ -102,6 +106,42 @@ router.post('/rewards/:twitchRewardId/delete', requireAuth, csrfProtection, (req
     (streamer, twitchRewardId) => deleteRewardAndPricing(streamer.id, twitchRewardId),
     { log, successCode: 'reward_deleted', errorLogLabel: 'Reward delete error:', errorCode: 'delete_failed' },
   ));
+
+/**
+ * POST /channel-points/rewards/:twitchRewardId/companion-confirmation — turns companion
+ * confirmation on or off for a reward. When on, each redemption waits for the streamer's
+ * companion app to confirm it ran the reward's actions; an unconfirmed redemption is cancelled
+ * (refunding the viewer) and its dynamic-pricing increment taken back off. Twitch can only cancel
+ * a redemption that's still in the request queue, of a reward this app created, so turning it on
+ * first stops the reward skipping the queue — which fails with a 403 for a reward made elsewhere.
+ * @param req - Express request; reads the `twitchRewardId` route param and the `enabled` checkbox.
+ * @param res - Express response; redirects to `/channel-points?success=confirmation_saved` on
+ *   success, or to `/channel-points?error=<code>` if the requester isn't a streamer
+ *   (`not_a_streamer`), the reward ID isn't a valid UUID (`invalid_reward_id`), the reward wasn't
+ *   created by the bot (`confirmation_unsupported`), or anything else fails (`confirmation_failed`).
+ */
+router.post('/rewards/:twitchRewardId/companion-confirmation', requireAuth, csrfProtection, async (req, res) => {
+  try {
+    const streamer = await requireStreamer(req, res, NOT_A_STREAMER_REDIRECT);
+    if (!streamer) return;
+
+    const twitchRewardId = parseRewardIdParam(req.params.twitchRewardId);
+    if (twitchRewardId === null) return res.redirect('/channel-points?error=invalid_reward_id');
+
+    const required = parseCheckboxField((req.body as Record<string, string | string[] | undefined>).enabled);
+    if (required) {
+      const token = streamer.twitch_user_id ? await getValidToken(streamer) : null;
+      if (!streamer.twitch_user_id || !token) return res.redirect('/channel-points?error=confirmation_failed');
+      await updateCustomReward(streamer.twitch_user_id, twitchRewardId, token, { should_redemptions_skip_request_queue: false });
+    }
+    await setCompanionConfirmationRequired(streamer.id, twitchRewardId, required);
+
+    res.redirect('/channel-points?success=confirmation_saved');
+  } catch (err) {
+    if (err instanceof TwitchRewardUnsupportedError) return res.redirect('/channel-points?error=confirmation_unsupported');
+    logAndRedirectError({ res, log, logLabel: 'Companion confirmation save error:', err, basePath: '/channel-points', errorCode: 'confirmation_failed' });
+  }
+});
 
 // Pricing config and pricing-settings routes live in their own module to keep this file scoped
 // to reward CRUD — see channelPointsAdminPricingMutations.ts.

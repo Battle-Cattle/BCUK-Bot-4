@@ -30,6 +30,12 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+describe('ACK_TIMEOUT_MS', () => {
+  it('gives the companion app minutes, not seconds, so slow actions are not refunded mid-run', () => {
+    expect(ACK_TIMEOUT_MS).toBe(3 * 60_000);
+  });
+});
+
 describe('refundAdvancedCommandUse', () => {
   it('refunds through the ledger (which credits the points atomically) and tells the viewer', async () => {
     expect(await refundAdvancedCommandUse('e1', 'no_companion', { channel: 'streamer' })).toBe(true);

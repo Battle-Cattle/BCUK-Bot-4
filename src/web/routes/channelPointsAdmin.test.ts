@@ -7,6 +7,7 @@ vi.mock('../../db', () => ({
   getPricingConfigsForStreamer: vi.fn(),
   getPricingSettingsForStreamer: vi.fn(),
   getPricingHistoryForRewards: vi.fn(),
+  listCompanionConfirmationRewardIds: vi.fn(),
   AccessLevel: ACCESS_LEVEL_MOCK,
 }));
 
@@ -52,7 +53,10 @@ vi.mock('./channelPointsEvents', async () => {
 
 import supertest from 'supertest';
 import router from './channelPointsAdmin';
-import { getStreamerByDiscordId, getPricingConfigsForStreamer, getPricingSettingsForStreamer, getPricingHistoryForRewards } from '../../db';
+import {
+  getStreamerByDiscordId, getPricingConfigsForStreamer, getPricingSettingsForStreamer, getPricingHistoryForRewards,
+  listCompanionConfirmationRewardIds,
+} from '../../db';
 import { getCustomRewards } from '../../twitch/twitchApi';
 import { getValidToken } from '../../twitch/twitchUserTokens';
 import { hasAuthFailedSubs } from '../../twitch/eventsub/twitchEventSubCreate';
@@ -81,6 +85,7 @@ beforeEach(() => {
   vi.mocked(hasAuthFailedSubs).mockReturnValue(false);
   vi.mocked(getPricingSettingsForStreamer).mockResolvedValue({ half_life_seconds: 1800, time_to_max_multiplier: 2 });
   vi.mocked(getPricingHistoryForRewards).mockResolvedValue(new Map());
+  vi.mocked(listCompanionConfirmationRewardIds).mockResolvedValue(new Set());
 });
 
 describe('GET /', () => {
@@ -110,6 +115,19 @@ describe('GET /', () => {
     expect(res.body.rewards).toHaveLength(1);
     expect(res.body.rewards[0].config.id).toBe(1);
     expect(res.body.rewards[0].previewPrice).toBe(1000);
+  });
+
+  it('marks the rewards that require companion confirmation', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    vi.mocked(getCustomRewards).mockResolvedValue([
+      { id: 'rwd1', title: 'Lights', cost: 200, is_enabled: true } as any,
+      { id: 'rwd2', title: 'Hydrate', cost: 100, is_enabled: true } as any,
+    ]);
+    vi.mocked(listCompanionConfirmationRewardIds).mockResolvedValue(new Set(['rwd1']));
+
+    const res = await supertest(buildApp()).get('/');
+    expect(listCompanionConfirmationRewardIds).toHaveBeenCalledWith(MOCK_STREAMER.id);
+    expect(res.body.rewards.map((r: any) => r.companionConfirmation)).toEqual([true, false]);
   });
 
   it('rounds the preview price to round_to_nearest when configured on the pricing config', async () => {

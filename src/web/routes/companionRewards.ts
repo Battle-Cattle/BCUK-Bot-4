@@ -1,9 +1,11 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import { requireCompanionKey } from '../middleware';
-import { getStreamerByDiscordId } from '../../db';
+import { getStreamerByDiscordId, getRedemptionAckStreamerId, listCompanionConfirmationRewardIds } from '../../db';
 import { getCustomRewards, TwitchCustomReward } from '../../twitch/twitchApi';
 import { getValidToken } from '../../twitch/twitchUserTokens';
+import { acknowledgeRedemption } from '../../twitch/eventsub/twitchEventSubRedemptionAcks';
+import { handleCompanionAck } from './companionAck';
 
 const log = createLogger('CompanionRewards');
 const router = Router();
@@ -17,10 +19,17 @@ export interface CompanionKnownReward {
   backgroundColor: string;
   isEnabled: boolean;
   isUserInputRequired: boolean;
+  /** Redemptions arrive with `ackRequired` and must be acknowledged, or the viewer is refunded. */
+  companionConfirmationRequired: boolean;
 }
 
-/** Maps a Twitch custom reward to the shape exposed to the companion app. */
-function toCompanionReward(reward: TwitchCustomReward): CompanionKnownReward {
+/**
+ * Maps a Twitch custom reward to the shape exposed to the companion app.
+ * @param reward - The Twitch reward.
+ * @param confirmationRewardIds - The streamer's rewards that require companion confirmation.
+ * @returns The companion app's view of the reward.
+ */
+function toCompanionReward(reward: TwitchCustomReward, confirmationRewardIds: Set<string>): CompanionKnownReward {
   return {
     id: reward.id,
     title: reward.title,
@@ -29,6 +38,7 @@ function toCompanionReward(reward: TwitchCustomReward): CompanionKnownReward {
     backgroundColor: reward.background_color,
     isEnabled: reward.is_enabled,
     isUserInputRequired: reward.is_user_input_required,
+    companionConfirmationRequired: confirmationRewardIds.has(reward.id),
   };
 }
 
@@ -52,12 +62,32 @@ router.get('/rewards', requireCompanionKey, async (req, res) => {
       res.json({ ok: true, rewards: [] });
       return;
     }
-    const rewards = await getCustomRewards(streamer.twitch_user_id, token);
-    res.json({ ok: true, rewards: rewards.map(toCompanionReward) });
+    const [rewards, confirmationRewardIds] = await Promise.all([
+      getCustomRewards(streamer.twitch_user_id, token),
+      listCompanionConfirmationRewardIds(streamer.id),
+    ]);
+    res.json({ ok: true, rewards: rewards.map((r) => toCompanionReward(r, confirmationRewardIds)) });
   } catch (err) {
     log.error('Failed to list rewards:', err);
     res.status(500).json({ ok: false, error: 'Failed to fetch rewards' });
   }
 });
+
+/**
+ * POST /api/companion/rewards/ack — the companion app reports whether it ran the actions for a
+ * `channel_points_redemption` event sent with `ackRequired`. Success fulfils the redemption on
+ * Twitch; failure cancels it (refunding the viewer) and takes its increment back off the reward's
+ * dynamic price. The redemption must belong to the authenticated streamer.
+ * @param req - Express request; JSON body `{ eventId, ok, error? }`, where `eventId` is the event's `id`.
+ * @param res - `{ ok: true, resolved }` (`resolved` false when the redemption was already resolved,
+ *   e.g. after the acknowledgement timeout), 400 for a malformed body, 404 for an unknown or
+ *   another streamer's redemption, or 500 on an error.
+ */
+router.post('/rewards/ack', requireCompanionKey, (req, res) => handleCompanionAck(req, res, {
+  getOwnerStreamerId: getRedemptionAckStreamerId,
+  acknowledge: acknowledgeRedemption,
+  log,
+  failureLabel: 'Failed to acknowledge redemption:',
+}));
 
 export default router;

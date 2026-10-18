@@ -231,6 +231,40 @@ Durable per-redemption progress for `handleRedemption`. The in-memory dedup cach
 | `handled_at` | `DATETIME` NULL | Set once every required effect succeeded. The redemption is then skipped entirely |
 | `created_at` | `DATETIME` | Defaults to `CURRENT_TIMESTAMP`. The prune key (`idx_redemption_handled_created`) |
 
+## `reward_companion_confirmation`
+
+Channel-point rewards that wait for the streamer's companion app to confirm it ran the reward's actions (toggled per reward on the Channel Points page). A row means "on"; no row means "off". Twitch can only refund a redemption that is still `UNFULFILLED`, of a reward this app created, so turning it on also stops the reward skipping the request queue.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `streamer_id` | `INT` | FK to `streamer.id` ON DELETE CASCADE. Part of the PK |
+| `twitch_reward_id` | `VARCHAR(255)` | Twitch reward UUID. Part of the PK |
+| `created_at` | `TIMESTAMP` | Defaults to `CURRENT_TIMESTAMP` |
+
+## `redemption_companion_ack`
+
+One row per redemption of a `reward_companion_confirmation` reward, written by `handleRedemption` as a required effect after the dynamic-pricing increment. It's the ledger that makes the fulfil-or-refund decision happen exactly once. The companion app acknowledges over `POST /api/companion/rewards/ack`: success marks the row `fulfilled` and asks Twitch to mark the redemption `FULFILLED` (a failed call is retried, up to 3 attempts 30s apart; if every attempt fails the row stays `fulfilled`, the viewer is never refunded, and the redemption is left in the streamer's request queue for manual recovery). A failure, no companion app connected, or no acknowledgement within 3 minutes (`REDEMPTION_ACK_TIMEOUT_MS`) asks Twitch to mark it `CANCELED`, refunding the viewer, and takes its increment back off the reward's dynamic price; a transient Twitch error puts the row back to `pending` for a retry, and a permanent refusal (see `status`) leaves it `refund_failed`: the viewer isn't refunded, though the price increment is still taken back off.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `redemption_id` | `VARCHAR(64)` PK | Twitch's own redemption id; sent as the companion event's `id` |
+| `streamer_id` | `INT` | FK to `streamer.id` ON DELETE CASCADE |
+| `twitch_reward_id` | `VARCHAR(255)` | Twitch reward UUID |
+| `reward_title` | `VARCHAR(255)` | The reward's title when redeemed, for logs and the refund chat notice |
+| `user_login` | `VARCHAR(64)` | The viewer's Twitch login |
+| `status` | `ENUM('pending','fulfilled','refunded','refund_failed')` | `pending` while waiting for the companion app. `refund_failed` when Twitch refused the refund for good (no usable token, the reward wasn't created by this app, or the redemption is no longer unfulfilled) |
+| `refund_reason` | `VARCHAR(64)` nullable | `no_companion`, `companion_error`, `no_ack` or `restart` |
+| `error_message` | `VARCHAR(255)` nullable | Error text the companion app reported, or why Twitch refused the refund |
+| `redeemed_at_ms` | `BIGINT` | Epoch ms the redemption was handled — a refund removes only the share of its pricing increment that hasn't decayed since |
+| `created_at` | `TIMESTAMP` | Defaults to `CURRENT_TIMESTAMP` |
+| `resolved_at` | `TIMESTAMP` nullable | When the status left `pending`. The prune key (`idx_redemption_companion_ack_resolved`) |
+
+Expected constraints and behavior:
+
+- A `pending` row is resolved with a conditional `UPDATE … WHERE status = 'pending'`, so a late acknowledgement and a timeout can't both act. A transient Twitch failure puts the row back to `pending` for a retry.
+- Rows still `pending` at startup are refunded (`restart`); the acknowledgement timers live in memory.
+- Resolved rows are pruned by age (`REDEMPTION_LEDGER_RETENTION_MS`, 6 hours) from the reconciliation tick; `pending` rows are never pruned.
+
 ## `reward_pricing`
 
 Dynamic Channel Point Pricing: per-reward config and demand state. Independent of `overlay_reward` — a reward can have dynamic pricing without overlay videos and vice versa. Optional/opt-in per reward via `enabled`.
