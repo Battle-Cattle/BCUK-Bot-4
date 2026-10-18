@@ -1,5 +1,5 @@
 import { createLogger } from '../../shared/logger';
-import { getAllEnabledTimerCommandsWithChannel, type TimerCommandForScheduler } from '../../db';
+import { getEnabledTimerCommandsForScheduler, type TimerCommandForScheduler } from '../../db';
 import { getMessageCount } from '../twitchChatActivity';
 import { resolveSharedChatSessionId } from '../../commands/customCommandHandler';
 import { createRuntimeRegistry } from '../../shared/runtimeRegistry';
@@ -127,7 +127,7 @@ async function sendTimerRow(row: TimerCommandForScheduler, now: number, sessionK
 }
 
 /**
- * Runs one scheduler tick: fetches every enabled timer, prunes in-memory state for timers that no
+ * Runs one scheduler tick: reads every enabled timer (from the timer command cache), prunes in-memory state for timers that no
  * longer exist/are disabled, seeds any newly-seen timer without firing it, then for the rest:
  * evaluates each row's own fire condition ({@link shouldFire}), resolves Shared Chat sessions for
  * the ones that are ready, picks which of those actually get to fire this tick (applying the
@@ -141,7 +141,7 @@ export async function runTimerCommandTick(): Promise<void> {
   tickRunning = true;
   currentTickPromise = (async () => {
     try {
-      const rows = await getAllEnabledTimerCommandsWithChannel();
+      const rows = await getEnabledTimerCommandsForScheduler();
       pruneStaleTimerState(new Set(rows.map(rowKey)));
 
       const now = Date.now();

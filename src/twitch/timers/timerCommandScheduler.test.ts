@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vite
 vi.mock('../../shared/logger', () => ({
   createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
 }));
-vi.mock('../../db', () => ({ getAllEnabledTimerCommandsWithChannel: vi.fn() }));
+vi.mock('../../db', () => ({ getEnabledTimerCommandsForScheduler: vi.fn() }));
 vi.mock('../twitchChatActivity', () => ({ getMessageCount: vi.fn() }));
 vi.mock('../monitor/twitchMonitor', () => ({ isChannelLive: vi.fn() }));
 vi.mock('../../commands/customCommandHandler', () => ({ resolveSharedChatSessionId: vi.fn() }));
@@ -12,7 +12,7 @@ vi.mock('../../shared/healthStore', () => ({
   normalizeError: vi.fn((err: unknown) => (err instanceof Error ? err.message : String(err))),
 }));
 
-import { getAllEnabledTimerCommandsWithChannel } from '../../db';
+import { getEnabledTimerCommandsForScheduler } from '../../db';
 import { getMessageCount } from '../twitchChatActivity';
 import { isChannelLive } from '../monitor/twitchMonitor';
 import { resolveSharedChatSessionId } from '../../commands/customCommandHandler';
@@ -64,13 +64,13 @@ afterEach(async () => {
 
 describe('runTimerCommandTick', () => {
   it('seeds state on first sight without firing', async () => {
-    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValue([timerRow()] as any);
+    vi.mocked(getEnabledTimerCommandsForScheduler).mockResolvedValue([timerRow()] as any);
     await runTimerCommandTick();
     expect(send).not.toHaveBeenCalled();
   });
 
   it('fires once the interval has elapsed and the channel is live', async () => {
-    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValue([timerRow({ interval_seconds: 600 })] as any);
+    vi.mocked(getEnabledTimerCommandsForScheduler).mockResolvedValue([timerRow({ interval_seconds: 600 })] as any);
     await runTimerCommandTick(); // seed
     await vi.advanceTimersByTimeAsync(600_000);
     await runTimerCommandTick();
@@ -78,7 +78,7 @@ describe('runTimerCommandTick', () => {
   });
 
   it('does not fire before the interval elapses', async () => {
-    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValue([timerRow({ interval_seconds: 600 })] as any);
+    vi.mocked(getEnabledTimerCommandsForScheduler).mockResolvedValue([timerRow({ interval_seconds: 600 })] as any);
     await runTimerCommandTick(); // seed
     await vi.advanceTimersByTimeAsync(300_000);
     await runTimerCommandTick();
@@ -87,7 +87,7 @@ describe('runTimerCommandTick', () => {
 
   it('does not fire while offline when require_live is set', async () => {
     vi.mocked(isChannelLive).mockReturnValue(false);
-    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValue(
+    vi.mocked(getEnabledTimerCommandsForScheduler).mockResolvedValue(
       [timerRow({ interval_seconds: 600, require_live: true })] as any,
     );
     await runTimerCommandTick(); // seed
@@ -97,7 +97,7 @@ describe('runTimerCommandTick', () => {
   });
 
   it('does not fire below the min_messages threshold', async () => {
-    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValue(
+    vi.mocked(getEnabledTimerCommandsForScheduler).mockResolvedValue(
       [timerRow({ interval_seconds: 600, min_messages: 5 })] as any,
     );
     await runTimerCommandTick(); // seeds messagesAtLastFire at the current count (0)
@@ -108,7 +108,7 @@ describe('runTimerCommandTick', () => {
   });
 
   it('fires once the min_messages threshold is met', async () => {
-    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValue(
+    vi.mocked(getEnabledTimerCommandsForScheduler).mockResolvedValue(
       [timerRow({ interval_seconds: 600, min_messages: 5 })] as any,
     );
     await runTimerCommandTick(); // seeds messagesAtLastFire at the current count (0)
@@ -119,7 +119,7 @@ describe('runTimerCommandTick', () => {
   });
 
   it("rebases the min_messages baseline when the channel's message count resets (e.g. after a part/rejoin)", async () => {
-    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValue(
+    vi.mocked(getEnabledTimerCommandsForScheduler).mockResolvedValue(
       [timerRow({ interval_seconds: 600, min_messages: 5 })] as any,
     );
     vi.mocked(getMessageCount).mockReturnValue(5000);
@@ -136,13 +136,13 @@ describe('runTimerCommandTick', () => {
   });
 
   it('prunes in-memory state once a timer disappears from the enabled-rows query', async () => {
-    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValueOnce([timerRow()] as any);
+    vi.mocked(getEnabledTimerCommandsForScheduler).mockResolvedValueOnce([timerRow()] as any);
     await runTimerCommandTick(); // seeded
 
-    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValueOnce([]);
+    vi.mocked(getEnabledTimerCommandsForScheduler).mockResolvedValueOnce([]);
     await runTimerCommandTick(); // pruned — the timer's old state is gone
 
-    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValueOnce([timerRow()] as any);
+    vi.mocked(getEnabledTimerCommandsForScheduler).mockResolvedValueOnce([timerRow()] as any);
     await vi.advanceTimersByTimeAsync(600_000);
     await runTimerCommandTick(); // re-seen: seeds fresh state again instead of firing on stale state
     expect(send).not.toHaveBeenCalled();
@@ -152,7 +152,7 @@ describe('runTimerCommandTick', () => {
     // A timer can now be assigned to several streamers' channels — each appears as its own row
     // sharing the same timer id, and each must fire on its own live/interval schedule rather
     // than sharing one countdown.
-    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValue([
+    vi.mocked(getEnabledTimerCommandsForScheduler).mockResolvedValue([
       timerRow({ id: 1, channel: 'streamer-a', interval_seconds: 600 }),
       timerRow({ id: 1, channel: 'streamer-b', interval_seconds: 600 }),
     ] as any);
@@ -167,7 +167,7 @@ describe('runTimerCommandTick', () => {
   });
 
   it("keeps firing state independent for the same timer id on different channels (a shared, id-only-keyed state would let one channel's fire reset the other's clock)", async () => {
-    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValue([
+    vi.mocked(getEnabledTimerCommandsForScheduler).mockResolvedValue([
       timerRow({ id: 2, channel: 'streamer-a', interval_seconds: 600 }),
       timerRow({ id: 2, channel: 'streamer-b', interval_seconds: 300 }),
     ] as any);
@@ -185,7 +185,7 @@ describe('runTimerCommandTick', () => {
   });
 
   it("one channel's send failure does not block another's", async () => {
-    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValue([
+    vi.mocked(getEnabledTimerCommandsForScheduler).mockResolvedValue([
       timerRow({ id: 1, channel: 'streamer-a' }),
       timerRow({ id: 2, channel: 'streamer-b' }),
     ] as any);
@@ -202,18 +202,18 @@ describe('runTimerCommandTick', () => {
   });
 
   it('does not throw when loading rows fails', async () => {
-    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockRejectedValue(new Error('db down'));
+    vi.mocked(getEnabledTimerCommandsForScheduler).mockRejectedValue(new Error('db down'));
     await expect(runTimerCommandTick()).resolves.toBeUndefined();
   });
 
   it('records a successful scheduler run on a successful tick', async () => {
-    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValue([timerRow()] as any);
+    vi.mocked(getEnabledTimerCommandsForScheduler).mockResolvedValue([timerRow()] as any);
     await runTimerCommandTick();
     expect(recordSchedulerRun).toHaveBeenCalledWith('timer', true);
   });
 
   it('records a failed scheduler run with the normalized error when the tick fails at the top level', async () => {
-    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockRejectedValue(new Error('db down'));
+    vi.mocked(getEnabledTimerCommandsForScheduler).mockRejectedValue(new Error('db down'));
     await runTimerCommandTick();
     expect(recordSchedulerRun).toHaveBeenCalledWith('timer', false, 'db down');
   });
@@ -221,7 +221,7 @@ describe('runTimerCommandTick', () => {
   it('a reentrancy guard prevents overlapping ticks', async () => {
     let resolveFirst!: () => void;
     const gate = new Promise<void>((resolve) => { resolveFirst = resolve; });
-    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockImplementation(async () => {
+    vi.mocked(getEnabledTimerCommandsForScheduler).mockImplementation(async () => {
       await gate;
       return [];
     });
@@ -232,7 +232,7 @@ describe('runTimerCommandTick', () => {
     resolveFirst();
     await Promise.all([first, second]);
 
-    expect(getAllEnabledTimerCommandsWithChannel).toHaveBeenCalledTimes(1);
+    expect(getEnabledTimerCommandsForScheduler).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -245,7 +245,7 @@ describe('Per-command Shared Chat cooldown', () => {
   it("suppresses a second ready channel for the same command sharing a session, then fires it once the command's own interval elapses as the group cooldown", async () => {
     getLoginUserIds.mockReturnValue(new Map([['streamer-a', 'uid-a'], ['streamer-b', 'uid-b']]));
     stubSessions({ 'uid-a': 'session-1', 'uid-b': 'session-1' });
-    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValue([
+    vi.mocked(getEnabledTimerCommandsForScheduler).mockResolvedValue([
       timerRow({ id: 1, channel: 'streamer-a', message: 'msg', interval_seconds: 60 }),
       timerRow({ id: 1, channel: 'streamer-b', message: 'msg', interval_seconds: 60 }),
     ] as any);
@@ -272,7 +272,7 @@ describe('Per-command Shared Chat cooldown', () => {
       ['streamer-a', 'uid-a'], ['streamer-b', 'uid-b'], ['streamer-c', 'uid-c'],
     ]));
     stubSessions({ 'uid-a': 'session-1', 'uid-b': 'session-1', 'uid-c': 'session-1' });
-    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValue([
+    vi.mocked(getEnabledTimerCommandsForScheduler).mockResolvedValue([
       timerRow({ id: 1, channel: 'streamer-a', message: 'msg', interval_seconds: 60 }),
       timerRow({ id: 1, channel: 'streamer-b', message: 'msg', interval_seconds: 60 }),
       timerRow({ id: 1, channel: 'streamer-c', message: 'msg', interval_seconds: 60 }),
@@ -296,7 +296,7 @@ describe('Per-command Shared Chat cooldown', () => {
   it('does not let two different commands sharing the same session block each other, each governed by its own interval', async () => {
     getLoginUserIds.mockReturnValue(new Map([['streamer-a', 'uid-a'], ['streamer-b', 'uid-b']]));
     stubSessions({ 'uid-a': 'session-1', 'uid-b': 'session-1' });
-    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValue([
+    vi.mocked(getEnabledTimerCommandsForScheduler).mockResolvedValue([
       timerRow({ id: 1, channel: 'streamer-a', message: 'msg-a', interval_seconds: 60 }),
       timerRow({ id: 2, channel: 'streamer-b', message: 'msg-b', interval_seconds: 60 }),
     ] as any);
@@ -313,7 +313,7 @@ describe('Per-command Shared Chat cooldown', () => {
   it('fires independently when timers resolve to different sessions', async () => {
     getLoginUserIds.mockReturnValue(new Map([['streamer-a', 'uid-a'], ['streamer-b', 'uid-b']]));
     stubSessions({ 'uid-a': 'session-1', 'uid-b': 'session-2' });
-    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValue([
+    vi.mocked(getEnabledTimerCommandsForScheduler).mockResolvedValue([
       timerRow({ id: 1, channel: 'streamer-a', message: 'msg-a', interval_seconds: 60 }),
       timerRow({ id: 2, channel: 'streamer-b', message: 'msg-b', interval_seconds: 60 }),
     ] as any);
@@ -329,7 +329,7 @@ describe('Per-command Shared Chat cooldown', () => {
   it('releases the command-session cooldown reservation when the picked row fails to send', async () => {
     getLoginUserIds.mockReturnValue(new Map([['streamer-a', 'uid-a'], ['streamer-b', 'uid-b']]));
     stubSessions({ 'uid-a': 'session-1', 'uid-b': 'session-1' });
-    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValue([
+    vi.mocked(getEnabledTimerCommandsForScheduler).mockResolvedValue([
       timerRow({ id: 1, channel: 'streamer-a', message: 'msg', interval_seconds: 60 }),
       timerRow({ id: 1, channel: 'streamer-b', message: 'msg', interval_seconds: 60 }),
     ] as any);
@@ -353,7 +353,7 @@ describe('Per-command Shared Chat cooldown', () => {
   it('fires normally when the session lookup fails (treated as not in Shared Chat)', async () => {
     getLoginUserIds.mockReturnValue(new Map([['streamer-a', 'uid-a']]));
     vi.mocked(resolveSharedChatSessionId).mockRejectedValue(new Error('helix down'));
-    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValue([
+    vi.mocked(getEnabledTimerCommandsForScheduler).mockResolvedValue([
       timerRow({ id: 1, channel: 'streamer-a', message: 'msg-a', interval_seconds: 60 }),
     ] as any);
 
@@ -372,7 +372,7 @@ describe('Per-command Shared Chat cooldown', () => {
     // elapses despite never having posted, even once the channel floor reopens well before then.
     getLoginUserIds.mockReturnValue(new Map([['streamer-a', 'uid-a']]));
     stubSessions({ 'uid-a': 'session-1' });
-    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValue([
+    vi.mocked(getEnabledTimerCommandsForScheduler).mockResolvedValue([
       timerRow({ id: 1, channel: 'streamer-a', message: 'msg-a', interval_seconds: 60 }),
       timerRow({ id: 2, channel: 'streamer-a', message: 'msg-b', interval_seconds: 300 }),
     ] as any);
@@ -397,7 +397,7 @@ describe('Per-command Shared Chat cooldown', () => {
 
 describe('Cross-command channel floor', () => {
   it("defers a different command from posting to the same channel within 120s of another command's post there", async () => {
-    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValue([
+    vi.mocked(getEnabledTimerCommandsForScheduler).mockResolvedValue([
       timerRow({ id: 1, channel: 'somestreamer', message: 'msg-a', interval_seconds: 60 }),
       timerRow({ id: 2, channel: 'somestreamer', message: 'msg-b', interval_seconds: 90 }),
     ] as any);
@@ -421,7 +421,7 @@ describe('Cross-command channel floor', () => {
   });
 
   it('does not throttle a lone command below its own interval just for having no competition on its channel', async () => {
-    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValue(
+    vi.mocked(getEnabledTimerCommandsForScheduler).mockResolvedValue(
       [timerRow({ id: 1, channel: 'somestreamer', interval_seconds: 90 })] as any,
     );
 
@@ -437,7 +437,7 @@ describe('Cross-command channel floor', () => {
   });
 
   it('picks whichever different command has waited longest when both are eligible for the same channel at once', async () => {
-    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValue([
+    vi.mocked(getEnabledTimerCommandsForScheduler).mockResolvedValue([
       timerRow({ id: 1, channel: 'somestreamer', message: 'msg-a', interval_seconds: 60 }),
       timerRow({ id: 2, channel: 'somestreamer', message: 'msg-b', interval_seconds: 30 }),
     ] as any);
@@ -455,7 +455,7 @@ describe('Cross-command channel floor', () => {
     // next cycle. Picking the globally-longest-waiting row first (ignoring who set the floor) would
     // pick timer 2 here, find it blocked by the floor, and defer the whole channel — silently
     // skipping timer 1's due repeat too. It must fall back to timer 1 specifically.
-    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValue([
+    vi.mocked(getEnabledTimerCommandsForScheduler).mockResolvedValue([
       timerRow({ id: 1, channel: 'somestreamer', message: 'msg-a', interval_seconds: 60 }),
       timerRow({ id: 2, channel: 'somestreamer', message: 'msg-b', interval_seconds: 30 }),
     ] as any);
@@ -475,7 +475,7 @@ describe('Cross-command channel floor', () => {
   });
 
   it('releases the channel-floor reservation when the picked command fails to send', async () => {
-    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValue([
+    vi.mocked(getEnabledTimerCommandsForScheduler).mockResolvedValue([
       timerRow({ id: 1, channel: 'somestreamer', message: 'msg-a', interval_seconds: 60 }),
       timerRow({ id: 2, channel: 'somestreamer', message: 'msg-b', interval_seconds: 60 }),
     ] as any);
@@ -499,38 +499,38 @@ describe('Cross-command channel floor', () => {
 
 describe('startTimerCommandScheduler / stopTimerCommandScheduler', () => {
   it('fires runTimerCommandTick on the configured interval', async () => {
-    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValue([]);
+    vi.mocked(getEnabledTimerCommandsForScheduler).mockResolvedValue([]);
     startTimerCommandScheduler();
 
-    expect(getAllEnabledTimerCommandsWithChannel).not.toHaveBeenCalled();
+    expect(getEnabledTimerCommandsForScheduler).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(15_000);
-    expect(getAllEnabledTimerCommandsWithChannel).toHaveBeenCalledTimes(1);
+    expect(getEnabledTimerCommandsForScheduler).toHaveBeenCalledTimes(1);
 
     await vi.advanceTimersByTimeAsync(15_000);
-    expect(getAllEnabledTimerCommandsWithChannel).toHaveBeenCalledTimes(2);
+    expect(getEnabledTimerCommandsForScheduler).toHaveBeenCalledTimes(2);
   });
 
   it('does not leak the interval when started twice without stopping', async () => {
-    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValue([]);
+    vi.mocked(getEnabledTimerCommandsForScheduler).mockResolvedValue([]);
     startTimerCommandScheduler();
     startTimerCommandScheduler(); // second call should no-op, not replace the tracked handle
 
     await vi.advanceTimersByTimeAsync(15_000);
-    expect(getAllEnabledTimerCommandsWithChannel).toHaveBeenCalledTimes(1);
+    expect(getEnabledTimerCommandsForScheduler).toHaveBeenCalledTimes(1);
 
     await stopTimerCommandScheduler();
     await vi.advanceTimersByTimeAsync(15_000);
-    expect(getAllEnabledTimerCommandsWithChannel).toHaveBeenCalledTimes(1);
+    expect(getEnabledTimerCommandsForScheduler).toHaveBeenCalledTimes(1);
   });
 
   it('stop prevents further ticks', async () => {
-    vi.mocked(getAllEnabledTimerCommandsWithChannel).mockResolvedValue([]);
+    vi.mocked(getEnabledTimerCommandsForScheduler).mockResolvedValue([]);
     startTimerCommandScheduler();
     await vi.advanceTimersByTimeAsync(15_000);
-    expect(getAllEnabledTimerCommandsWithChannel).toHaveBeenCalledTimes(1);
+    expect(getEnabledTimerCommandsForScheduler).toHaveBeenCalledTimes(1);
 
     await stopTimerCommandScheduler();
     await vi.advanceTimersByTimeAsync(15_000);
-    expect(getAllEnabledTimerCommandsWithChannel).toHaveBeenCalledTimes(1);
+    expect(getEnabledTimerCommandsForScheduler).toHaveBeenCalledTimes(1);
   });
 });
