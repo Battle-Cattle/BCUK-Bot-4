@@ -28,8 +28,16 @@ import { companionRuntimeRegistry, twitchRuntimeRegistry, type CompanionRedempti
 
 const log = createLogger('RedemptionAcks');
 
-/** How long a companion app has to confirm a redemption before the viewer is refunded. */
-export const REDEMPTION_ACK_TIMEOUT_MS = 30_000;
+/**
+ * How long a companion app has to confirm a redemption before the viewer is refunded. The app only
+ * acknowledges once every mapped action has finished, and actions can take a while (Delay actions,
+ * slow devices), so this is generous. It only applies while an app is connected but silent: no app
+ * connected, or a failure the app reports, refunds straight away.
+ */
+export const REDEMPTION_ACK_TIMEOUT_MS = 3 * 60_000;
+
+/** Delay between attempts to mark a confirmed redemption FULFILLED on Twitch. */
+const FULFIL_RETRY_DELAY_MS = 30_000;
 
 /** Chat wording for each refund reason. */
 const REFUND_REASON_TEXT: Record<RedemptionRefundReason, string> = {
@@ -171,7 +179,7 @@ const FULFIL_ATTEMPTS = 3;
 
 /**
  * Marks a confirmed redemption FULFILLED on Twitch, retrying a transient failure after
- * REDEMPTION_ACK_TIMEOUT_MS, up to FULFIL_ATTEMPTS in all. A permanent refusal (e.g. the streamer
+ * FULFIL_RETRY_DELAY_MS, up to FULFIL_ATTEMPTS in all. A permanent refusal (e.g. the streamer
  * already fulfilled it by hand) is only logged. The ledger stays `fulfilled` throughout: the
  * actions already ran, so the viewer must never be refunded from here — giving up only leaves the
  * redemption in the streamer's request queue.
@@ -189,7 +197,7 @@ async function markFulfilledOnTwitch(ack: PendingRedemptionAck, attempt = 1): Pr
       return;
     }
     log.warn(`Couldn't mark redemption ${ack.redemptionId} fulfilled on Twitch; retrying:`, err);
-    const timer = setTimeout(() => void markFulfilledOnTwitch(ack, attempt + 1), REDEMPTION_ACK_TIMEOUT_MS);
+    const timer = setTimeout(() => void markFulfilledOnTwitch(ack, attempt + 1), FULFIL_RETRY_DELAY_MS);
     timer.unref();
   }
 }

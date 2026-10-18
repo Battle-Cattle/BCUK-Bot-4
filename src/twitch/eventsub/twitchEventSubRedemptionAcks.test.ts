@@ -161,6 +161,16 @@ describe('refundRedemption', () => {
 });
 
 describe('trackRedemptionAck', () => {
+  it('gives the companion app minutes, not seconds, so slow actions are not refunded mid-run', async () => {
+    vi.useFakeTimers();
+    trackRedemptionAck('red1', 'streamer');
+
+    await vi.advanceTimersByTimeAsync(2 * 60_000);
+    expect(claimRedemptionAck).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(claimRedemptionAck).toHaveBeenCalledWith('red1', expect.objectContaining({ refundReason: 'no_ack' }));
+  });
+
   it('refunds once the timeout passes without an acknowledgement', async () => {
     vi.useFakeTimers();
     trackRedemptionAck('red1', 'streamer');
@@ -228,9 +238,10 @@ describe('acknowledgeRedemption', () => {
 
     expect(await acknowledgeRedemption('red1', { ok: true })).toBe(true);
     expect(updateRedemptionStatus).toHaveBeenCalledTimes(1);
-    await vi.advanceTimersByTimeAsync(REDEMPTION_ACK_TIMEOUT_MS);
+    // Fulfilment retries are 30s apart, independent of the (much longer) acknowledgement timeout.
+    await vi.advanceTimersByTimeAsync(30_000);
     expect(updateRedemptionStatus).toHaveBeenCalledTimes(2);
-    await vi.advanceTimersByTimeAsync(REDEMPTION_ACK_TIMEOUT_MS);
+    await vi.advanceTimersByTimeAsync(30_000);
     expect(updateRedemptionStatus).toHaveBeenCalledTimes(3);
     expect(updateRedemptionStatus).toHaveBeenLastCalledWith('bc1', 'rwd1', 'red1', 'FULFILLED', 'user-token');
 

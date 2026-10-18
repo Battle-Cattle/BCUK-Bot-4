@@ -243,7 +243,7 @@ Channel-point rewards that wait for the streamer's companion app to confirm it r
 
 ## `redemption_companion_ack`
 
-One row per redemption of a `reward_companion_confirmation` reward, written by `handleRedemption` as a required effect after the dynamic-pricing increment. It's the ledger that makes the fulfil-or-refund decision happen exactly once. The companion app acknowledges over `POST /api/companion/rewards/ack`: success marks the redemption `FULFILLED` on Twitch; a failure, no companion app connected, or no acknowledgement within 30 seconds marks it `CANCELED` (refunding the viewer) and takes its increment back off the reward's dynamic price.
+One row per redemption of a `reward_companion_confirmation` reward, written by `handleRedemption` as a required effect after the dynamic-pricing increment. It's the ledger that makes the fulfil-or-refund decision happen exactly once. The companion app acknowledges over `POST /api/companion/rewards/ack`: success marks the redemption `FULFILLED` on Twitch; a failure, no companion app connected, or no acknowledgement within 3 minutes (`REDEMPTION_ACK_TIMEOUT_MS`) marks it `CANCELED` (refunding the viewer) and takes its increment back off the reward's dynamic price.
 
 | Column | Type | Notes |
 | --- | --- | --- |
