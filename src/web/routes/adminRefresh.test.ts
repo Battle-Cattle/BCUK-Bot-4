@@ -29,7 +29,7 @@ import supertest from 'supertest';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
 // Import module last so mocks are in place before module-level code runs
-import router from './adminRefresh';
+import router, { REFRESH_CONCURRENCY } from './adminRefresh';
 import { refreshStates, getRefreshState } from '../../discord/guildRefreshState';
 
 const GUILD_ID = '900000000000000001';
@@ -47,8 +47,7 @@ function buildApp(currentGuildId: string = GUILD_ID) {
 
 /**
  * Wait for a guild's refresh state to leave 'running', advancing fake timers
- * so the background job's real (rate-limiting) setTimeout delays resolve
- * instantly instead of costing real wall-clock time.
+ * so the polling loop doesn't cost real wall-clock time.
  */
 async function waitForRefreshComplete(guildId: string = GUILD_ID, timeoutMs = 2000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
@@ -262,5 +261,49 @@ describe('runDiscordNameRefresh outcomes', () => {
     expect(getRefreshState(GUILD_ID).failureCount).toBe(1);
     expect(getRefreshState(GUILD_ID).outcome).toBe('error');
     expect(vi.mocked(fetchMemberDisplayName)).toHaveBeenCalledWith('1', GUILD_ID, true);
+  });
+
+  it(`runs at most ${REFRESH_CONCURRENCY} lookups at once and processes every member`, async () => {
+    const users = Array.from({ length: REFRESH_CONCURRENCY * 3 + 2 }, (_, i) => ({ discord_id: String(i), discord_name: 'Old' }));
+    vi.mocked(getDiscordClient).mockReturnValue({} as any);
+    vi.mocked(getGuildMemberUsers).mockResolvedValue(users as any);
+    let inFlight = 0;
+    let maxInFlight = 0;
+    vi.mocked(fetchMemberDisplayName).mockImplementation(async () => {
+      inFlight++;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      inFlight--;
+      return 'New';
+    });
+    vi.mocked(updateDiscordName).mockResolvedValue(undefined);
+
+    await buildApp().post('/users/refresh-names');
+    await waitForRefreshComplete();
+    expect(maxInFlight).toBe(REFRESH_CONCURRENCY);
+    expect(fetchMemberDisplayName).toHaveBeenCalledTimes(users.length);
+    expect(getRefreshState(GUILD_ID).updatedCount).toBe(users.length);
+    expect(getRefreshState(GUILD_ID).outcome).toBe('success');
+  });
+
+  it('updates the progress counters while the job is still running', async () => {
+    vi.mocked(getDiscordClient).mockReturnValue({} as any);
+    vi.mocked(getGuildMemberUsers).mockResolvedValue([
+      { discord_id: '1', discord_name: 'Old1' },
+      { discord_id: '2', discord_name: 'Old2' },
+    ] as any);
+    let releaseSecond: (name: string | null) => void = () => {};
+    vi.mocked(fetchMemberDisplayName)
+      .mockResolvedValueOnce('New1')
+      .mockReturnValueOnce(new Promise((resolve) => { releaseSecond = resolve; }));
+    vi.mocked(updateDiscordName).mockResolvedValue(undefined);
+
+    await buildApp().post('/users/refresh-names');
+    await vi.advanceTimersByTimeAsync(10);
+    expect(getRefreshState(GUILD_ID)).toMatchObject({ outcome: 'running', updatedCount: 1, failureCount: 0 });
+
+    releaseSecond(null);
+    await waitForRefreshComplete();
+    expect(getRefreshState(GUILD_ID)).toMatchObject({ outcome: 'partial', updatedCount: 1, failureCount: 1 });
   });
 });

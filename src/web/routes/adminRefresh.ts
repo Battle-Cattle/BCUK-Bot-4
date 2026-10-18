@@ -12,6 +12,12 @@ import { type RefreshOutcome, type RefreshState, refreshStates, getRefreshState 
 const log = createLogger('Web');
 
 /**
+ * How many member lookups a name refresh runs at once. discord.js's REST manager queues and
+ * paces requests against Discord's rate limits itself, so a small pool beats a fixed sleep.
+ */
+export const REFRESH_CONCURRENCY = 5;
+
+/**
  * Re-fetches one guild member's Discord display name and persists it if it changed. Never
  * throws — a failed lookup or write is logged and reported as `'failed'`.
  * @param user - The member's stored Discord id and current display name.
@@ -51,6 +57,7 @@ function refreshOutcome(updatedCount: number, failureCount: number): RefreshOutc
 /**
  * Re-fetches each of `guildId`'s members' current Discord display name and persists any that
  * changed, tracking progress/outcome in `refreshStates` for `/users/refresh-status` to poll.
+ * Runs up to `REFRESH_CONCURRENCY` lookups at a time, leaving rate-limit pacing to discord.js.
  * @param guildId - Guild whose members' Discord names are refreshed.
  * @returns Resolves once every member has been processed (success, no-op, or per-member failure);
  *   never rejects — failures are recorded on the guild's `RefreshState` instead.
@@ -65,19 +72,22 @@ async function runDiscordNameRefresh(guildId: string): Promise<void> {
     }
 
     const users = await getGuildMemberUsers(guildId);
-    let updatedCount = 0;
-    let failureCount = 0;
+    let next = 0;
 
-    for (const user of users) {
-      const result = await refreshMemberName(user, guildId);
-      if (result === 'updated') state.updatedCount = ++updatedCount;
-      if (result === 'failed') state.failureCount = ++failureCount;
-      await new Promise((resolve) => setTimeout(resolve, 200));
-    }
+    /** Pool worker: takes the next unprocessed member until none are left, updating `state`'s counters as each finishes. */
+    const worker = async (): Promise<void> => {
+      while (next < users.length) {
+        // next < users.length was checked just above, and nothing awaits in between.
+        const user = users[next++]!;
+        const result = await refreshMemberName(user, guildId);
+        if (result === 'updated') state.updatedCount++;
+        if (result === 'failed') state.failureCount++;
+      }
+    };
+    const poolSize = Math.min(REFRESH_CONCURRENCY, users.length);
+    await Promise.all(Array.from({ length: poolSize }, worker));
 
-    state.updatedCount = updatedCount;
-    state.failureCount = failureCount;
-    state.outcome = refreshOutcome(updatedCount, failureCount);
+    state.outcome = refreshOutcome(state.updatedCount, state.failureCount);
   } catch (err) {
     state.failureCount = Math.max(state.failureCount, 1);
     state.outcome = 'error';
