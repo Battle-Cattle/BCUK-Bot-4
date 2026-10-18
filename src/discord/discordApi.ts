@@ -1,7 +1,7 @@
 // Discord REST lookups and DMs made through the bot's client: member display names, user
 // profiles and direct messages. Separate from `discordBot.ts` so web routes and other callers
 // can use them without importing the bot's lifecycle, command dispatch and gateway handling.
-import type { Guild } from 'discord.js';
+import { Routes, makeURLSearchParams, type APIGuildMember, type Guild } from 'discord.js';
 import { createLogger } from '../shared/logger';
 import { getDiscordClient } from './discordClientStore';
 
@@ -50,25 +50,42 @@ export async function fetchMemberDisplayName(
 const MEMBER_LIST_PAGE_SIZE = 1000;
 
 /**
+ * A raw member's server display name, by the same precedence as discord.js's
+ * `GuildMember#displayName`: server nickname, then global display name, then username.
+ * @param member - Member object from Discord's REST API.
+ * @returns The display name.
+ */
+function apiMemberDisplayName(member: APIGuildMember): string {
+  return member.nick ?? member.user.global_name ?? member.user.username;
+}
+
+/**
  * Fetches every member's display name in a guild via the paginated List Guild Members REST
- * endpoint, without populating the member cache. Discord only allows this when the Server Members
- * privileged intent is enabled for the application in the developer portal (the gateway intent
- * itself need not be requested), so callers must be ready to fall back to per-member lookups.
+ * endpoint. Calls the endpoint directly rather than `guild.members.list()`, which would add every
+ * member's `User` to the client's unbounded user cache even with `cache: false`. Discord only
+ * allows this when the Server Members privileged intent is enabled for the application in the
+ * developer portal (the gateway intent itself need not be requested), so callers must be ready to
+ * fall back to per-member lookups.
  * @param guildId - Guild whose members to list.
  * @returns Display names keyed by Discord user id, or null if the client isn't ready or any page
- *   fails (e.g. Missing Access because the intent is off).
+ *   fails (e.g. Missing Access because the intent is off, or a page that doesn't advance).
  */
 export async function fetchAllMemberDisplayNames(guildId: string): Promise<Map<string, string> | null> {
-  if (!getDiscordClient()) return null;
+  const client = getDiscordClient();
+  if (!client) return null;
   try {
-    const guild = await getGuild(guildId);
     const names = new Map<string, string>();
-    let after: string | undefined;
+    let after = '0';
     for (;;) {
-      const page = await guild.members.list({ limit: MEMBER_LIST_PAGE_SIZE, after, cache: false });
-      for (const [id, member] of page) names.set(id, member.displayName);
-      after = page.lastKey();
-      if (page.size < MEMBER_LIST_PAGE_SIZE || after === undefined) return names;
+      const page = await client.rest.get(Routes.guildMembers(guildId), {
+        query: makeURLSearchParams({ limit: MEMBER_LIST_PAGE_SIZE, after }),
+      }) as APIGuildMember[];
+      for (const member of page) names.set(member.user.id, apiMemberDisplayName(member));
+      const last = page.at(-1)?.user.id;
+      if (page.length < MEMBER_LIST_PAGE_SIZE || last === undefined) return names;
+      // A full page that doesn't move the cursor would loop forever; treat it as a failed listing.
+      if (last === after) throw new Error(`Member listing cursor did not advance past ${after}`);
+      after = last;
     }
   } catch (err) {
     log.warn(`Failed to list members of guild ${guildId}:`, err);
