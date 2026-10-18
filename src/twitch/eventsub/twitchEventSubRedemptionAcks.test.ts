@@ -56,6 +56,7 @@ beforeEach(() => {
   vi.mocked(getValidToken).mockResolvedValue('user-token');
   vi.mocked(updateRedemptionStatus).mockResolvedValue(undefined);
   vi.mocked(revertRedemptionPricing).mockResolvedValue(undefined);
+  vi.mocked(recordPendingRedemptionAck).mockResolvedValue(true);
 });
 
 afterEach(() => {
@@ -68,7 +69,7 @@ describe('prepareRedemptionConfirmation', () => {
 
   it('records nothing when the reward does not require confirmation', async () => {
     vi.mocked(isCompanionConfirmationRequired).mockResolvedValueOnce(false);
-    expect(await prepareRedemptionConfirmation(redemption, 3, 'streamer')).toBe(false);
+    expect(await prepareRedemptionConfirmation(redemption, 3, 'streamer')).toBe('none');
     expect(recordPendingRedemptionAck).not.toHaveBeenCalled();
   });
 
@@ -92,9 +93,19 @@ describe('prepareRedemptionConfirmation', () => {
     expect(claimRedemptionAck).not.toHaveBeenCalled();
   });
 
+  it('reports an already-resolved retry and arms no timer for it', async () => {
+    vi.useFakeTimers();
+    vi.mocked(isCompanionConfirmationRequired).mockResolvedValueOnce(true);
+    vi.mocked(recordPendingRedemptionAck).mockResolvedValueOnce(false);
+    expect(await prepareRedemptionConfirmation(redemption, 3, 'streamer')).toBe('resolved');
+
+    await vi.advanceTimersByTimeAsync(REDEMPTION_ACK_TIMEOUT_MS);
+    expect(claimRedemptionAck).not.toHaveBeenCalled();
+  });
+
   it('records the redemption as pending when the reward requires confirmation', async () => {
     vi.mocked(isCompanionConfirmationRequired).mockResolvedValueOnce(true);
-    expect(await prepareRedemptionConfirmation(redemption, 3, 'streamer')).toBe(true);
+    expect(await prepareRedemptionConfirmation(redemption, 3, 'streamer')).toBe('pending');
     expect(isCompanionConfirmationRequired).toHaveBeenCalledWith(3, 'rwd1');
     expect(recordPendingRedemptionAck).toHaveBeenCalledWith({
       redemptionId: 'red1', streamerId: 3, twitchRewardId: 'rwd1', rewardTitle: 'Lights', userLogin: 'alice', redeemedAtMs: expect.any(Number),

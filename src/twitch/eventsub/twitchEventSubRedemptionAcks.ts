@@ -51,22 +51,30 @@ export interface ConfirmableRedemption {
 }
 
 /**
+ * Where a redemption stands on companion confirmation: `none` (its reward doesn't require it),
+ * `pending` (waiting for the companion app), or `resolved` (a retry of a redemption whose earlier
+ * attempt was already fulfilled or refunded — it must not be pushed to the companion app again).
+ */
+export type RedemptionConfirmation = 'none' | 'pending' | 'resolved';
+
+/**
  * If the redemption's reward requires companion confirmation, records the redemption as pending and
  * arms its refund timer straight away, so every pending row has a timer even if a later step of
  * `handleRedemption` (such as the `handled` write) keeps failing and the redemption is never pushed.
  * Part of `handleRedemption`'s required chain (a DB failure here retries the redemption), and runs
  * after the pricing increment, so a refund always has an increment to take back off. A retry of a
- * redemption already recorded keeps its existing row and re-arms the timer.
+ * redemption already recorded keeps its existing row: still pending, it re-arms the timer; already
+ * resolved (e.g. refunded by the timer while the `handled` write kept failing), it arms nothing.
  * @param redemption - The redemption.
  * @param streamerId - DB row id of the streamer.
  * @param channel - The streamer's channel, for the refund notice.
- * @returns True if the redemption now waits for confirmation.
+ * @returns Where the redemption stands on confirmation.
  */
 export async function prepareRedemptionConfirmation(
   redemption: ConfirmableRedemption, streamerId: number, channel: string,
-): Promise<boolean> {
-  if (!(await isCompanionConfirmationRequired(streamerId, redemption.rewardId))) return false;
-  await recordPendingRedemptionAck({
+): Promise<RedemptionConfirmation> {
+  if (!(await isCompanionConfirmationRequired(streamerId, redemption.rewardId))) return 'none';
+  const pending = await recordPendingRedemptionAck({
     redemptionId: redemption.id,
     streamerId,
     twitchRewardId: redemption.rewardId,
@@ -74,8 +82,9 @@ export async function prepareRedemptionConfirmation(
     userLogin: redemption.userLogin,
     redeemedAtMs: Date.now(),
   });
+  if (!pending) return 'resolved';
   trackRedemptionAck(redemption.id, channel);
-  return true;
+  return 'pending';
 }
 
 /**

@@ -143,7 +143,7 @@ export async function handleRedemption(
     await applyRecordedRedemptionEffects(event, streamerId, progress);
 
     const videos = await getVideosForReward(event.reward.id, streamerId);
-    const ackRequired = await prepareRedemptionConfirmation({
+    const confirmation = await prepareRedemptionConfirmation({
       id: event.id, rewardId: event.reward.id, rewardTitle: event.reward.title, userLogin: event.user_login,
     }, streamerId, login);
 
@@ -165,7 +165,13 @@ export async function handleRedemption(
     // overlay lookup, confirmation record) has already succeeded: the companion push is
     // best-effort and can't be un-sent, so if it ran earlier and a later required step then
     // failed, a retry would deliver the same companion notification twice for one redemption.
-    await pushRedemptionToCompanion(event, streamerId, ackRequired);
+    // A redemption whose confirmation an earlier attempt already resolved (fulfilled, or refunded by
+    // its timer) isn't pushed again: the companion app could otherwise run the actions after a refund.
+    if (confirmation === 'resolved') {
+      log.warn(`Redemption "${event.reward.title}" (id=${event.id}) confirmation already resolved — not pushing to the companion app`);
+    } else {
+      await pushRedemptionToCompanion(event, streamerId, confirmation === 'pending');
+    }
 
     markRedemptionHandled(event.id);
     return true;

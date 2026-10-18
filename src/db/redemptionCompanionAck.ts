@@ -75,16 +75,24 @@ export async function setCompanionConfirmationRequired(streamerId: number, twitc
  * Records a redemption as waiting for companion confirmation. A retry of the same redemption
  * leaves the existing row (and whatever it was resolved to) alone.
  * @param ack - The redemption.
- * @returns Resolves once written.
+ * @returns True if the redemption is pending (newly recorded, or recorded before and still
+ *   unresolved); false if an earlier attempt's row has already been resolved (fulfilled or refunded).
  */
-export async function recordPendingRedemptionAck(ack: PendingRedemptionAck): Promise<void> {
-  await getPool().execute(
+export async function recordPendingRedemptionAck(ack: PendingRedemptionAck): Promise<boolean> {
+  const [result] = await getPool().execute<mysql.ResultSetHeader>(
     `INSERT INTO redemption_companion_ack
        (redemption_id, streamer_id, twitch_reward_id, reward_title, user_login, redeemed_at_ms)
      VALUES (?, ?, ?, ?, ?, ?) AS new_row
      ON DUPLICATE KEY UPDATE redemption_id = new_row.redemption_id`,
     [ack.redemptionId, ack.streamerId, ack.twitchRewardId, ack.rewardTitle, ack.userLogin, ack.redeemedAtMs],
   );
+  // 1 = inserted. Anything else is a retry hitting the existing row, whose status decides.
+  if (result.affectedRows === 1) return true;
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+    'SELECT status FROM redemption_companion_ack WHERE redemption_id = ?',
+    [ack.redemptionId],
+  );
+  return rows[0]?.status === 'pending';
 }
 
 /**

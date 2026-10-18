@@ -41,7 +41,7 @@ beforeEach(() => {
   vi.mocked(recordStreamerEvent).mockResolvedValue(101);
   vi.mocked(getRedemptionProgress).mockReset().mockResolvedValue(null);
   vi.mocked(markRedemptionEffect).mockReset().mockResolvedValue(undefined);
-  vi.mocked(prepareRedemptionConfirmation).mockReset().mockResolvedValue(false);
+  vi.mocked(prepareRedemptionConfirmation).mockReset().mockResolvedValue('none');
   vi.mocked(pushRedemptionForConfirmation).mockReset().mockResolvedValue(undefined);
 });
 
@@ -105,7 +105,7 @@ describe('handleRedemption', () => {
 
   it('records a confirmation (which arms its timer) and pushes for confirmation when the reward requires it', async () => {
     vi.mocked(getVideosForReward).mockResolvedValue([]);
-    vi.mocked(prepareRedemptionConfirmation).mockResolvedValue(true);
+    vi.mocked(prepareRedemptionConfirmation).mockResolvedValue('pending');
 
     await handleRedemption('streamer', event, CONFIG, streamerId);
 
@@ -121,12 +121,23 @@ describe('handleRedemption', () => {
 
   it('still resolves without pushing when the streamer lookup fails (the armed timer refunds it)', async () => {
     vi.mocked(getVideosForReward).mockResolvedValue([]);
-    vi.mocked(prepareRedemptionConfirmation).mockResolvedValue(true);
+    vi.mocked(prepareRedemptionConfirmation).mockResolvedValue('pending');
     vi.mocked(getStreamerById).mockRejectedValueOnce(new Error('db down'));
 
     await expect(handleRedemption('streamer', event, CONFIG, streamerId)).resolves.toBe(true);
 
     expect(pushRedemptionForConfirmation).not.toHaveBeenCalled();
+  });
+
+  it('does not push a redemption whose confirmation an earlier attempt already resolved', async () => {
+    vi.mocked(getVideosForReward).mockResolvedValue([]);
+    vi.mocked(prepareRedemptionConfirmation).mockResolvedValue('resolved');
+
+    await expect(handleRedemption('streamer', event, CONFIG, streamerId)).resolves.toBe(true);
+
+    expect(pushRedemptionForConfirmation).not.toHaveBeenCalled();
+    expect(mockPushCompanionEvent).not.toHaveBeenCalled();
+    expect(markRedemptionEffect).toHaveBeenCalledWith('redemption-1', streamerId, 'handled');
   });
 
   it('rejects without marking the redemption handled when recording the confirmation fails', async () => {
