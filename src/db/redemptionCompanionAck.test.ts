@@ -52,8 +52,9 @@ describe('redemption_companion_ack', () => {
     redemption_id: 'r1', streamer_id: 3, twitch_reward_id: 'a', reward_title: 'Lights', user_login: 'alice', redeemed_at_ms: '1700000000000',
   };
 
-  it('records a pending redemption, leaving an existing row alone', async () => {
-    const pool = makeMockPool({ executeResult: [{ affectedRows: 1 }, []] });
+  it('records a pending redemption, leaving an existing row alone, and reports it pending', async () => {
+    const pool = makeMockPool();
+    pool.execute.mockResolvedValueOnce([{ affectedRows: 1 }, []]).mockResolvedValueOnce([[{ status: 'pending' }], []]);
     vi.mocked(getPool).mockReturnValue(pool as any);
 
     await expect(recordPendingRedemptionAck({
@@ -63,22 +64,25 @@ describe('redemption_companion_ack', () => {
     const [sql, params] = pool.execute.mock.calls[0]!;
     expect(sql).toContain('ON DUPLICATE KEY UPDATE redemption_id = new_row.redemption_id');
     expect(params).toEqual(['r1', 3, 'a', 'Lights', 'alice', 5]);
-    expect(pool.execute).toHaveBeenCalledTimes(1);
+    expect(pool.execute.mock.calls[1]![1]).toEqual(['r1']);
   });
 
+  // affectedRows is 1 for a no-op duplicate-key update too (mysql2 sets CLIENT_FOUND_ROWS), so it
+  // must never decide: only the stored status does.
   it.each([
-    ['pending', true],
-    ['refunded', false],
-    ['fulfilled', false],
-  ])('on a retry, reports whether the existing %s row is still pending', async (status, expected) => {
+    ['pending', 0, true],
+    ['refunded', 0, false],
+    ['refunded', 1, false],
+    ['refund_failed', 1, false],
+    ['fulfilled', 1, false],
+  ])('on a retry, reports an existing %s row (affectedRows %i) as pending only if it is', async (status, affectedRows, expected) => {
     const pool = makeMockPool();
-    pool.execute.mockResolvedValueOnce([{ affectedRows: 0 }, []]).mockResolvedValueOnce([[{ status }], []]);
+    pool.execute.mockResolvedValueOnce([{ affectedRows }, []]).mockResolvedValueOnce([[{ status }], []]);
     vi.mocked(getPool).mockReturnValue(pool as any);
 
     await expect(recordPendingRedemptionAck({
       redemptionId: 'r1', streamerId: 3, twitchRewardId: 'a', rewardTitle: 'Lights', userLogin: 'alice', redeemedAtMs: 5,
     })).resolves.toBe(expected);
-    expect(pool.execute.mock.calls[1]![1]).toEqual(['r1']);
   });
 
   it('claims a pending row and returns it, with the BIGINT timestamp as a number', async () => {

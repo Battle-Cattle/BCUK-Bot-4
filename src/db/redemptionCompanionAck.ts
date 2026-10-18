@@ -79,15 +79,15 @@ export async function setCompanionConfirmationRequired(streamerId: number, twitc
  *   unresolved); false if an earlier attempt's row has already been resolved (fulfilled or refunded).
  */
 export async function recordPendingRedemptionAck(ack: PendingRedemptionAck): Promise<boolean> {
-  const [result] = await getPool().execute<mysql.ResultSetHeader>(
+  await getPool().execute(
     `INSERT INTO redemption_companion_ack
        (redemption_id, streamer_id, twitch_reward_id, reward_title, user_login, redeemed_at_ms)
      VALUES (?, ?, ?, ?, ?, ?) AS new_row
      ON DUPLICATE KEY UPDATE redemption_id = new_row.redemption_id`,
     [ack.redemptionId, ack.streamerId, ack.twitchRewardId, ack.rewardTitle, ack.userLogin, ack.redeemedAtMs],
   );
-  // 1 = inserted. Anything else is a retry hitting the existing row, whose status decides.
-  if (result.affectedRows === 1) return true;
+  // Read the stored status rather than trusting affectedRows: mysql2 sets CLIENT_FOUND_ROWS by
+  // default, so a no-op duplicate-key update reports affectedRows 1, the same as a fresh insert.
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
     'SELECT status FROM redemption_companion_ack WHERE redemption_id = ?',
     [ack.redemptionId],
