@@ -19,7 +19,7 @@ import {
   isCompanionConfirmationRequired, recordPendingRedemptionAck, getStreamerById,
   type PendingRedemptionAck, type RedemptionRefundReason,
 } from '../../db';
-import { canExtendAckHold } from '../../shared/ackHold';
+import { ackTimerDelayMs, canExtendAckHold } from '../../shared/ackHold';
 import { createLogger } from '../../shared/logger';
 import { sweepPendingAcks } from '../../shared/pendingAckSweep';
 import { getValidToken } from '../twitchUserTokens';
@@ -50,12 +50,17 @@ const REFUND_REASON_TEXT: Record<RedemptionRefundReason, string> = {
   restart: 'the bot restarted',
 };
 
-/** A pending acknowledgement or refund retry: its timer, refund reason, notice channel (if known) and when it was first armed. */
+/**
+ * A pending acknowledgement or refund retry: its timer, refund reason and notice channel (if known).
+ * `armedAt` (when its acknowledgement timer was first armed) is set only while the redemption still
+ * awaits the companion app's acknowledgement; a refund retry has none, so progress pings can't
+ * postpone it.
+ */
 interface PendingAck {
   timer: ReturnType<typeof setTimeout>;
   reason: RedemptionRefundReason;
   channel: string | undefined;
-  armedAt: number;
+  armedAt?: number;
 }
 
 /** Pending acknowledgements and refund retries, by redemption id. */
@@ -232,21 +237,23 @@ async function fulfilRedemption(redemptionId: string): Promise<boolean> {
  * @param redemptionId - Twitch's redemption id.
  * @param reason - The refund reason to record.
  * @param channel - The streamer's channel for the refund notice, if known.
- * @param armedAt - When the redemption's timer was first armed (epoch ms), kept across re-arms so
- *   progress pings can't hold it past ACK_MAX_HOLD_MS.
+ * @param armedAt - Set while the redemption awaits the companion app's acknowledgement: when its
+ *   timer was first armed (epoch ms), so progress pings can extend it but never past
+ *   ACK_MAX_HOLD_MS. Omitted for a refund retry, which pings can't extend.
  */
 function scheduleRefund(
-  redemptionId: string, reason: RedemptionRefundReason, channel: string | undefined, armedAt = Date.now(),
+  redemptionId: string, reason: RedemptionRefundReason, channel: string | undefined, armedAt?: number,
 ): void {
   const existing = pendingAcks.get(redemptionId);
   if (existing) clearTimeout(existing.timer);
+  const delay = armedAt === undefined ? REDEMPTION_ACK_TIMEOUT_MS : ackTimerDelayMs(REDEMPTION_ACK_TIMEOUT_MS, armedAt);
   const timer = setTimeout(() => {
     pendingAcks.delete(redemptionId);
     refundRedemption(redemptionId, reason, { channel }).catch((err: unknown) => {
       log.error(`Failed to refund redemption ${redemptionId} (${reason}); retrying:`, err);
-      scheduleRefund(redemptionId, reason, channel, armedAt);
+      scheduleRefund(redemptionId, reason, channel);
     });
-  }, REDEMPTION_ACK_TIMEOUT_MS);
+  }, delay);
   timer.unref();
   pendingAcks.set(redemptionId, { timer, reason, channel, armedAt });
 }
@@ -270,7 +277,7 @@ async function resolveTracked(
   try {
     return await resolve(pending?.channel);
   } catch (err) {
-    if (pending) scheduleRefund(redemptionId, retryReason, pending.channel, pending.armedAt);
+    if (pending) scheduleRefund(redemptionId, retryReason, pending.channel);
     throw err;
   }
 }
@@ -283,7 +290,7 @@ async function resolveTracked(
  * @param channel - The streamer's channel, for the refund notice.
  */
 export function trackRedemptionAck(redemptionId: string, channel: string): void {
-  scheduleRefund(redemptionId, 'no_ack', channel);
+  scheduleRefund(redemptionId, 'no_ack', channel, Date.now());
 }
 
 /**
@@ -291,12 +298,13 @@ export function trackRedemptionAck(redemptionId: string, channel: string): void 
  * restarts its REDEMPTION_ACK_TIMEOUT_MS countdown, so long actions (Delay actions) aren't
  * refunded mid-run. The caller has already checked the redemption belongs to the pinging streamer.
  * @param redemptionId - Twitch's redemption id.
- * @returns True if the countdown was restarted; false if the redemption isn't waiting (already
- *   resolved, or unknown to this process) or has already been held for ACK_MAX_HOLD_MS.
+ * @returns True if the countdown was restarted; false if the redemption isn't waiting for an
+ *   acknowledgement (already resolved, timed out and awaiting a refund retry, or unknown to this
+ *   process) or has already been held for ACK_MAX_HOLD_MS.
  */
 export function extendRedemptionAck(redemptionId: string): boolean {
   const pending = pendingAcks.get(redemptionId);
-  if (!pending || !canExtendAckHold(pending.armedAt)) return false;
+  if (pending?.armedAt === undefined || !canExtendAckHold(pending.armedAt)) return false;
   scheduleRefund(redemptionId, pending.reason, pending.channel, pending.armedAt);
   return true;
 }

@@ -18,3 +18,15 @@ export const ACK_MAX_HOLD_MS = 2 * 60 * 60_000;
 export function canExtendAckHold(armedAtMs: number, nowMs = Date.now()): boolean {
   return nowMs - armedAtMs < ACK_MAX_HOLD_MS;
 }
+
+/**
+ * How long an event's acknowledgement timer should run: the usual timeout, cut short so the event
+ * is never held past {@link ACK_MAX_HOLD_MS} from when its timer was first armed.
+ * @param timeoutMs - The ledger's acknowledgement timeout.
+ * @param armedAtMs - When the event's acknowledgement timer was first armed (epoch ms).
+ * @param nowMs - The current time (epoch ms).
+ * @returns The timer delay in ms (never negative).
+ */
+export function ackTimerDelayMs(timeoutMs: number, armedAtMs: number, nowMs = Date.now()): number {
+  return Math.max(0, Math.min(timeoutMs, armedAtMs + ACK_MAX_HOLD_MS - nowMs));
+}

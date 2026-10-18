@@ -347,3 +347,44 @@ describe('extendRedemptionAck', () => {
     expect(extendRedemptionAck('red1')).toBe(false);
   });
 });
+
+describe('extendRedemptionAck at the edges', () => {
+  afterEach(() => {
+    clearRedemptionAcks();
+    vi.useRealTimers();
+  });
+
+  it('caps a late ping\'s timer at the time left before the hold boundary', async () => {
+    vi.useFakeTimers();
+    trackRedemptionAck('red1', 'streamer');
+    let held = 0;
+    while (held + REDEMPTION_ACK_TIMEOUT_MS / 2 < ACK_MAX_HOLD_MS - 5_000) {
+      vi.advanceTimersByTime(REDEMPTION_ACK_TIMEOUT_MS / 2);
+      held += REDEMPTION_ACK_TIMEOUT_MS / 2;
+      expect(extendRedemptionAck('red1')).toBe(true);
+    }
+    vi.advanceTimersByTime(ACK_MAX_HOLD_MS - 5_000 - held);
+    expect(extendRedemptionAck('red1')).toBe(true);
+
+    vi.advanceTimersByTime(4_999);
+    await flushMicrotasks();
+    expect(claimRedemptionAck).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    await flushMicrotasks();
+    expect(claimRedemptionAck).toHaveBeenCalledWith('red1', expect.objectContaining({ refundReason: 'no_ack' }));
+  });
+
+  it('never postpones a refund retry once the acknowledgement has timed out', async () => {
+    vi.useFakeTimers();
+    vi.mocked(updateRedemptionStatus).mockRejectedValueOnce(new Error('Twitch 503'));
+    trackRedemptionAck('red1', 'streamer');
+    vi.advanceTimersByTime(REDEMPTION_ACK_TIMEOUT_MS);
+    await flushMicrotasks();
+    expect(releaseRedemptionAck).toHaveBeenCalledWith('red1');
+
+    expect(extendRedemptionAck('red1')).toBe(false);
+    vi.advanceTimersByTime(REDEMPTION_ACK_TIMEOUT_MS);
+    await flushMicrotasks();
+    expect(claimRedemptionAck).toHaveBeenCalledTimes(2);
+  });
+});

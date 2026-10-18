@@ -13,7 +13,7 @@ import {
   resolveAdvancedCommandUsage,
   type AdvancedCommandRefundReason,
 } from '../../db';
-import { canExtendAckHold } from '../../shared/ackHold';
+import { ackTimerDelayMs, canExtendAckHold } from '../../shared/ackHold';
 import { createLogger } from '../../shared/logger';
 import { sweepPendingAcks } from '../../shared/pendingAckSweep';
 import { advancedCommandRuntimeRegistry } from './advancedCommandRuntime';
@@ -37,12 +37,16 @@ const REFUND_REASON_TEXT: Record<AdvancedCommandRefundReason, string> = {
   restart: 'the bot restarted',
 };
 
-/** A pending acknowledgement or refund retry: its timer, refund reason, notice channel (if known) and when it was first armed. */
+/**
+ * A pending acknowledgement or refund retry: its timer, refund reason and notice channel (if known).
+ * `armedAt` (when its acknowledgement timer was first armed) is set only while the use still awaits
+ * the companion app's acknowledgement; a refund retry has none, so progress pings can't postpone it.
+ */
 interface PendingAck {
   timer: ReturnType<typeof setTimeout>;
   reason: AdvancedCommandRefundReason;
   channel: string | undefined;
-  armedAt: number;
+  armedAt?: number;
 }
 
 /** Pending acknowledgements and refund retries, by event id. */
@@ -82,17 +86,19 @@ export async function refundAdvancedCommandUse(
  * @param eventId - The use's event id.
  * @param reason - The refund reason to record.
  * @param channel - The streamer's channel for the refund notice, if known.
- * @param armedAt - When the use's timer was first armed (epoch ms), kept across re-arms so
- *   progress pings can't hold it past ACK_MAX_HOLD_MS.
+ * @param armedAt - Set while the use awaits the companion app's acknowledgement: when its timer was
+ *   first armed (epoch ms), so progress pings can extend it but never past ACK_MAX_HOLD_MS. Omitted
+ *   for a refund retry, which pings can't extend.
  */
-function scheduleRefund(eventId: string, reason: AdvancedCommandRefundReason, channel: string | undefined, armedAt = Date.now()): void {
+function scheduleRefund(eventId: string, reason: AdvancedCommandRefundReason, channel: string | undefined, armedAt?: number): void {
+  const delay = armedAt === undefined ? ACK_TIMEOUT_MS : ackTimerDelayMs(ACK_TIMEOUT_MS, armedAt);
   const timer = setTimeout(() => {
     pendingAcks.delete(eventId);
     refundAdvancedCommandUse(eventId, reason, { channel }).catch((err: unknown) => {
       log.error(`Failed to refund advanced command ${eventId} (${reason}); retrying:`, err);
-      scheduleRefund(eventId, reason, channel, armedAt);
+      scheduleRefund(eventId, reason, channel);
     });
-  }, ACK_TIMEOUT_MS);
+  }, delay);
   timer.unref();
   pendingAcks.set(eventId, { timer, reason, channel, armedAt });
 }
@@ -104,7 +110,7 @@ function scheduleRefund(eventId: string, reason: AdvancedCommandRefundReason, ch
  * @param channel - The streamer's channel, for the refund notice.
  */
 export function trackAdvancedCommandAck(eventId: string, channel: string): void {
-  scheduleRefund(eventId, 'no_ack', channel);
+  scheduleRefund(eventId, 'no_ack', channel, Date.now());
 }
 
 /**
@@ -112,12 +118,13 @@ export function trackAdvancedCommandAck(eventId: string, channel: string): void 
  * ACK_TIMEOUT_MS countdown, so long actions (Delay actions) aren't refunded mid-run. The caller has
  * already checked the use belongs to the pinging streamer.
  * @param eventId - The use's event id.
- * @returns True if the countdown was restarted; false if the use isn't waiting (already resolved,
- *   or unknown to this process) or has already been held for ACK_MAX_HOLD_MS.
+ * @returns True if the countdown was restarted; false if the use isn't waiting for an acknowledgement
+ *   (already resolved, timed out and awaiting a refund retry, or unknown to this process) or has
+ *   already been held for ACK_MAX_HOLD_MS.
  */
 export function extendAdvancedCommandAck(eventId: string): boolean {
   const pending = pendingAcks.get(eventId);
-  if (!pending || !canExtendAckHold(pending.armedAt)) return false;
+  if (pending?.armedAt === undefined || !canExtendAckHold(pending.armedAt)) return false;
   clearTimeout(pending.timer);
   scheduleRefund(eventId, pending.reason, pending.channel, pending.armedAt);
   return true;
@@ -143,7 +150,7 @@ export async function acknowledgeAdvancedCommandUse(
     if (ack.ok) return (await resolveAdvancedCommandUsage(eventId, { status: 'succeeded' })) !== null;
     return await refundAdvancedCommandUse(eventId, 'companion_error', { channel: pending?.channel, errorMessage: ack.error });
   } catch (err) {
-    if (pending) scheduleRefund(eventId, 'no_ack', pending.channel, pending.armedAt);
+    if (pending) scheduleRefund(eventId, 'no_ack', pending.channel);
     throw err;
   }
 }

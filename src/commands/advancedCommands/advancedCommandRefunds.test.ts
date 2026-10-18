@@ -192,3 +192,46 @@ describe('extendAdvancedCommandAck', () => {
     expect(resolveAdvancedCommandUsage).toHaveBeenCalledWith('e1', expect.objectContaining({ refundReason: 'no_ack' }));
   });
 });
+
+describe('extendAdvancedCommandAck at the edges', () => {
+  it('caps a late ping\'s timer at the time left before the hold boundary', async () => {
+    vi.useFakeTimers();
+    trackAdvancedCommandAck('e1', 'streamer');
+    let held = 0;
+    while (held + ACK_TIMEOUT_MS / 2 < ACK_MAX_HOLD_MS - 5_000) {
+      vi.advanceTimersByTime(ACK_TIMEOUT_MS / 2);
+      held += ACK_TIMEOUT_MS / 2;
+      expect(extendAdvancedCommandAck('e1')).toBe(true);
+    }
+    vi.advanceTimersByTime(ACK_MAX_HOLD_MS - 5_000 - held);
+    expect(extendAdvancedCommandAck('e1')).toBe(true);
+
+    vi.advanceTimersByTime(4_999);
+    await flushMicrotasks();
+    expect(resolveAdvancedCommandUsage).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    await flushMicrotasks();
+    expect(resolveAdvancedCommandUsage).toHaveBeenCalledWith('e1', expect.objectContaining({ refundReason: 'no_ack' }));
+  });
+
+  it('never postpones a refund retry once the acknowledgement has timed out', async () => {
+    vi.useFakeTimers();
+    vi.mocked(resolveAdvancedCommandUsage).mockRejectedValueOnce(new Error('DB down'));
+    trackAdvancedCommandAck('e1', 'streamer');
+    vi.advanceTimersByTime(ACK_TIMEOUT_MS);
+    await flushMicrotasks();
+
+    expect(extendAdvancedCommandAck('e1')).toBe(false);
+    vi.advanceTimersByTime(ACK_TIMEOUT_MS);
+    await flushMicrotasks();
+    expect(resolveAdvancedCommandUsage).toHaveBeenCalledTimes(2);
+  });
+
+  it('never extends a use re-armed after its acknowledgement failed to apply', async () => {
+    vi.useFakeTimers();
+    vi.mocked(resolveAdvancedCommandUsage).mockRejectedValueOnce(new Error('DB down'));
+    trackAdvancedCommandAck('e1', 'streamer');
+    await expect(acknowledgeAdvancedCommandUse('e1', { ok: true })).rejects.toThrow('DB down');
+    expect(extendAdvancedCommandAck('e1')).toBe(false);
+  });
+});
