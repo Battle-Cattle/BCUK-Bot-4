@@ -9,7 +9,7 @@ vi.mock('../../audio/soundSelector', () => ({ pickWeightedRandom: vi.fn() }));
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 vi.mock('../pricing/rewardPricingService', () => ({ applyRedemptionPricing: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('./twitchEventSubRedemptionAcks', () => ({
-  prepareRedemptionConfirmation: vi.fn(), trackRedemptionAck: vi.fn(), pushRedemptionForConfirmation: vi.fn(),
+  prepareRedemptionConfirmation: vi.fn(), pushRedemptionForConfirmation: vi.fn(),
 }));
 
 import { handleRedemption } from './twitchEventSubRedemption';
@@ -22,7 +22,7 @@ import {
 } from '../../db';
 import { pickWeightedRandom } from '../../audio/soundSelector';
 import { applyRedemptionPricing } from '../pricing/rewardPricingService';
-import { prepareRedemptionConfirmation, trackRedemptionAck, pushRedemptionForConfirmation } from './twitchEventSubRedemptionAcks';
+import { prepareRedemptionConfirmation, pushRedemptionForConfirmation } from './twitchEventSubRedemptionAcks';
 
 const mockPushOverlayEvent = vi.fn();
 registerEventSubOverlayRuntime({ pushOverlayEvent: mockPushOverlayEvent });
@@ -100,20 +100,18 @@ describe('handleRedemption', () => {
       ackRequired: false,
       redeemedAt: expect.any(String),
     });
-    expect(trackRedemptionAck).not.toHaveBeenCalled();
     expect(pushRedemptionForConfirmation).not.toHaveBeenCalled();
   });
 
-  it('records a confirmation, arms its timer and pushes for confirmation when the reward requires it', async () => {
+  it('records a confirmation (which arms its timer) and pushes for confirmation when the reward requires it', async () => {
     vi.mocked(getVideosForReward).mockResolvedValue([]);
     vi.mocked(prepareRedemptionConfirmation).mockResolvedValue(true);
 
     await handleRedemption('streamer', event, CONFIG, streamerId);
 
     expect(prepareRedemptionConfirmation).toHaveBeenCalledWith(
-      { id: 'redemption-1', rewardId: 'reward-abc', rewardTitle: 'Cool Reward', userLogin: 'redeemer' }, streamerId,
+      { id: 'redemption-1', rewardId: 'reward-abc', rewardTitle: 'Cool Reward', userLogin: 'redeemer' }, streamerId, 'streamer',
     );
-    expect(trackRedemptionAck).toHaveBeenCalledWith('redemption-1', 'streamer');
     expect(pushRedemptionForConfirmation).toHaveBeenCalledWith('999888777', expect.objectContaining({ id: 'redemption-1', ackRequired: true }));
     expect(mockPushCompanionEvent).not.toHaveBeenCalled();
     // The confirmation record is a required effect, so it's written before the redemption is marked handled.
@@ -121,14 +119,13 @@ describe('handleRedemption', () => {
       .toBeLessThan(vi.mocked(markRedemptionEffect).mock.invocationCallOrder.at(-1)!);
   });
 
-  it('still arms the confirmation timer when the streamer lookup fails, so the redemption is refunded', async () => {
+  it('still resolves without pushing when the streamer lookup fails (the armed timer refunds it)', async () => {
     vi.mocked(getVideosForReward).mockResolvedValue([]);
     vi.mocked(prepareRedemptionConfirmation).mockResolvedValue(true);
     vi.mocked(getStreamerById).mockRejectedValueOnce(new Error('db down'));
 
     await expect(handleRedemption('streamer', event, CONFIG, streamerId)).resolves.toBe(true);
 
-    expect(trackRedemptionAck).toHaveBeenCalledWith('redemption-1', 'streamer');
     expect(pushRedemptionForConfirmation).not.toHaveBeenCalled();
   });
 

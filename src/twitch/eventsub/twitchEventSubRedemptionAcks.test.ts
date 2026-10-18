@@ -68,13 +68,33 @@ describe('prepareRedemptionConfirmation', () => {
 
   it('records nothing when the reward does not require confirmation', async () => {
     vi.mocked(isCompanionConfirmationRequired).mockResolvedValueOnce(false);
-    expect(await prepareRedemptionConfirmation(redemption, 3)).toBe(false);
+    expect(await prepareRedemptionConfirmation(redemption, 3, 'streamer')).toBe(false);
     expect(recordPendingRedemptionAck).not.toHaveBeenCalled();
+  });
+
+  it('arms the refund timer as soon as the pending row is recorded', async () => {
+    vi.useFakeTimers();
+    vi.mocked(isCompanionConfirmationRequired).mockResolvedValueOnce(true);
+    await prepareRedemptionConfirmation(redemption, 3, 'streamer');
+
+    await vi.advanceTimersByTimeAsync(REDEMPTION_ACK_TIMEOUT_MS);
+    expect(claimRedemptionAck).toHaveBeenCalledWith('red1', expect.objectContaining({ refundReason: 'no_ack' }));
+    expect(send).toHaveBeenCalledWith('streamer', expect.stringContaining("didn't respond"));
+  });
+
+  it('arms no timer when recording the pending row fails', async () => {
+    vi.useFakeTimers();
+    vi.mocked(isCompanionConfirmationRequired).mockResolvedValueOnce(true);
+    vi.mocked(recordPendingRedemptionAck).mockRejectedValueOnce(new Error('db down'));
+    await expect(prepareRedemptionConfirmation(redemption, 3, 'streamer')).rejects.toThrow('db down');
+
+    await vi.advanceTimersByTimeAsync(REDEMPTION_ACK_TIMEOUT_MS);
+    expect(claimRedemptionAck).not.toHaveBeenCalled();
   });
 
   it('records the redemption as pending when the reward requires confirmation', async () => {
     vi.mocked(isCompanionConfirmationRequired).mockResolvedValueOnce(true);
-    expect(await prepareRedemptionConfirmation(redemption, 3)).toBe(true);
+    expect(await prepareRedemptionConfirmation(redemption, 3, 'streamer')).toBe(true);
     expect(isCompanionConfirmationRequired).toHaveBeenCalledWith(3, 'rwd1');
     expect(recordPendingRedemptionAck).toHaveBeenCalledWith({
       redemptionId: 'red1', streamerId: 3, twitchRewardId: 'rwd1', rewardTitle: 'Lights', userLogin: 'alice', redeemedAtMs: expect.any(Number),
@@ -191,11 +211,33 @@ describe('acknowledgeRedemption', () => {
     expect(claimRedemptionAck).toHaveBeenCalledTimes(1);
   });
 
-  it('still reports success when marking it fulfilled on Twitch fails', async () => {
-    vi.mocked(updateRedemptionStatus).mockRejectedValueOnce(new Error('503'));
+  it('retries a transient failure to mark it fulfilled, never refunding (the actions ran)', async () => {
+    vi.useFakeTimers();
+    vi.mocked(updateRedemptionStatus).mockRejectedValueOnce(new Error('503')).mockRejectedValueOnce(new Error('503'));
+
     expect(await acknowledgeRedemption('red1', { ok: true })).toBe(true);
-    vi.mocked(updateRedemptionStatus).mockRejectedValueOnce(new TwitchRedemptionNotFoundError('gone'));
+    expect(updateRedemptionStatus).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(REDEMPTION_ACK_TIMEOUT_MS);
+    expect(updateRedemptionStatus).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(REDEMPTION_ACK_TIMEOUT_MS);
+    expect(updateRedemptionStatus).toHaveBeenCalledTimes(3);
+    expect(updateRedemptionStatus).toHaveBeenLastCalledWith('bc1', 'rwd1', 'red1', 'FULFILLED', 'user-token');
+
+    expect(releaseRedemptionAck).not.toHaveBeenCalled();
+    expect(claimRedemptionAck).toHaveBeenCalledTimes(1);
+  });
+
+  it('gives up after three failed attempts, and does not retry a permanent refusal', async () => {
+    vi.useFakeTimers();
+    vi.mocked(updateRedemptionStatus).mockRejectedValue(new Error('503'));
+    await acknowledgeRedemption('red1', { ok: true });
+    await vi.advanceTimersByTimeAsync(REDEMPTION_ACK_TIMEOUT_MS * 5);
+    expect(updateRedemptionStatus).toHaveBeenCalledTimes(3);
+
+    vi.mocked(updateRedemptionStatus).mockReset().mockRejectedValueOnce(new TwitchRedemptionNotFoundError('gone'));
     expect(await acknowledgeRedemption('red1', { ok: true })).toBe(true);
+    await vi.advanceTimersByTimeAsync(REDEMPTION_ACK_TIMEOUT_MS * 2);
+    expect(updateRedemptionStatus).toHaveBeenCalledTimes(1);
   });
 
   it('refunds with the companion error on failure, noticing in the tracked channel', async () => {

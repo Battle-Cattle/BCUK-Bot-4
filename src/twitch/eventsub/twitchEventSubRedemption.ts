@@ -10,7 +10,7 @@ import { pickWeightedRandom } from '../../audio/soundSelector';
 import { createLogger } from '../../shared/logger';
 import { applyRedemptionPricing } from '../pricing/rewardPricingService';
 import { isDuplicateRedemption, markRedemptionHandled, clearPendingRedemption } from './twitchEventSubRedemptionDedup';
-import { prepareRedemptionConfirmation, trackRedemptionAck, pushRedemptionForConfirmation } from './twitchEventSubRedemptionAcks';
+import { prepareRedemptionConfirmation, pushRedemptionForConfirmation } from './twitchEventSubRedemptionAcks';
 import {
   overlayRuntimeRegistry,
   companionRuntimeRegistry,
@@ -145,7 +145,7 @@ export async function handleRedemption(
     const videos = await getVideosForReward(event.reward.id, streamerId);
     const ackRequired = await prepareRedemptionConfirmation({
       id: event.id, rewardId: event.reward.id, rewardTitle: event.reward.title, userLogin: event.user_login,
-    }, streamerId);
+    }, streamerId, login);
 
     // Mark handled once every required effect (dashboard, pricing, overlay lookup, confirmation record) has succeeded,
     // but before the two live pushes below: those aren't tracked in the ledger and can't be
@@ -165,7 +165,7 @@ export async function handleRedemption(
     // overlay lookup, confirmation record) has already succeeded: the companion push is
     // best-effort and can't be un-sent, so if it ran earlier and a later required step then
     // failed, a retry would deliver the same companion notification twice for one redemption.
-    await pushRedemptionToCompanion(login, event, streamerId, ackRequired);
+    await pushRedemptionToCompanion(event, streamerId, ackRequired);
 
     markRedemptionHandled(event.id);
     return true;
@@ -201,17 +201,16 @@ async function applyRecordedRedemptionEffects(event: RedemptionEvent, streamerId
 
 /**
  * Forwards a redemption to the streamer's companion app (if any device is connected). Best-effort:
- * every error is logged here, never thrown. When the reward requires companion confirmation, the
- * acknowledgement timer is armed before anything else, so the redemption is refunded even if the
- * push never happens, and a redemption with no companion app connected is refunded straight away.
- * @param login - Broadcaster login, the chat channel for a refund notice.
+ * every error is logged here, never thrown. When the reward requires companion confirmation, its
+ * refund timer is already armed (by `prepareRedemptionConfirmation`), so the redemption is refunded
+ * even if the push never happens, and a redemption with no companion app connected is refunded
+ * straight away.
  * @param event - The redemption.
  * @param streamerId - DB row id of the streamer.
  * @param ackRequired - Whether the reward requires companion confirmation.
  * @returns Resolves once the push (or refund) has been attempted.
  */
-async function pushRedemptionToCompanion(login: string, event: RedemptionEvent, streamerId: number, ackRequired: boolean): Promise<void> {
-  if (ackRequired) trackRedemptionAck(event.id, login);
+async function pushRedemptionToCompanion(event: RedemptionEvent, streamerId: number, ackRequired: boolean): Promise<void> {
   try {
     const streamer = await getStreamerById(streamerId);
     if (!streamer) return;

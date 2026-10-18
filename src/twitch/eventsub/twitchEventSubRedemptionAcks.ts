@@ -51,15 +51,20 @@ export interface ConfirmableRedemption {
 }
 
 /**
- * If the redemption's reward requires companion confirmation, records the redemption as pending.
+ * If the redemption's reward requires companion confirmation, records the redemption as pending and
+ * arms its refund timer straight away, so every pending row has a timer even if a later step of
+ * `handleRedemption` (such as the `handled` write) keeps failing and the redemption is never pushed.
  * Part of `handleRedemption`'s required chain (a DB failure here retries the redemption), and runs
  * after the pricing increment, so a refund always has an increment to take back off. A retry of a
- * redemption already recorded keeps its existing row.
+ * redemption already recorded keeps its existing row and re-arms the timer.
  * @param redemption - The redemption.
  * @param streamerId - DB row id of the streamer.
+ * @param channel - The streamer's channel, for the refund notice.
  * @returns True if the redemption now waits for confirmation.
  */
-export async function prepareRedemptionConfirmation(redemption: ConfirmableRedemption, streamerId: number): Promise<boolean> {
+export async function prepareRedemptionConfirmation(
+  redemption: ConfirmableRedemption, streamerId: number, channel: string,
+): Promise<boolean> {
   if (!(await isCompanionConfirmationRequired(streamerId, redemption.rewardId))) return false;
   await recordPendingRedemptionAck({
     redemptionId: redemption.id,
@@ -69,6 +74,7 @@ export async function prepareRedemptionConfirmation(redemption: ConfirmableRedem
     userLogin: redemption.userLogin,
     redeemedAtMs: Date.now(),
   });
+  trackRedemptionAck(redemption.id, channel);
   return true;
 }
 
@@ -151,21 +157,43 @@ export async function refundRedemption(
   return true;
 }
 
+/** How many times marking a confirmed redemption FULFILLED on Twitch is tried before giving up. */
+const FULFIL_ATTEMPTS = 3;
+
 /**
- * Marks a pending redemption fulfilled, here and on Twitch. The Twitch update is best-effort: the
- * actions already ran, so a failure only leaves the redemption in the streamer's request queue.
+ * Marks a confirmed redemption FULFILLED on Twitch, retrying a transient failure after
+ * REDEMPTION_ACK_TIMEOUT_MS, up to FULFIL_ATTEMPTS in all. A permanent refusal (e.g. the streamer
+ * already fulfilled it by hand) is only logged. The ledger stays `fulfilled` throughout: the
+ * actions already ran, so the viewer must never be refunded from here — giving up only leaves the
+ * redemption in the streamer's request queue.
+ * @param ack - The fulfilled redemption.
+ * @param attempt - This attempt's number, starting at 1.
+ * @returns Resolves once this attempt has run (a retry runs later, on its own timer).
+ */
+async function markFulfilledOnTwitch(ack: PendingRedemptionAck, attempt = 1): Promise<void> {
+  try {
+    const refusal = await setTwitchRedemptionStatus(ack, 'FULFILLED');
+    if (refusal) log.warn(`Couldn't mark redemption ${ack.redemptionId} fulfilled on Twitch: ${refusal}`);
+  } catch (err) {
+    if (attempt >= FULFIL_ATTEMPTS) {
+      log.error(`Gave up marking redemption ${ack.redemptionId} fulfilled on Twitch after ${attempt} attempts:`, err);
+      return;
+    }
+    log.warn(`Couldn't mark redemption ${ack.redemptionId} fulfilled on Twitch; retrying:`, err);
+    const timer = setTimeout(() => void markFulfilledOnTwitch(ack, attempt + 1), REDEMPTION_ACK_TIMEOUT_MS);
+    timer.unref();
+  }
+}
+
+/**
+ * Marks a pending redemption fulfilled, here and on Twitch (see {@link markFulfilledOnTwitch}).
  * @param redemptionId - Twitch's redemption id.
  * @returns True if this call resolved it; false if it was already resolved.
  */
 async function fulfilRedemption(redemptionId: string): Promise<boolean> {
   const ack = await claimRedemptionAck(redemptionId, { status: 'fulfilled' });
   if (!ack) return false;
-  try {
-    const refusal = await setTwitchRedemptionStatus(ack, 'FULFILLED');
-    if (refusal) log.warn(`Couldn't mark redemption ${redemptionId} fulfilled on Twitch: ${refusal}`);
-  } catch (err) {
-    log.warn(`Couldn't mark redemption ${redemptionId} fulfilled on Twitch:`, err);
-  }
+  await markFulfilledOnTwitch(ack);
   return true;
 }
 
@@ -228,8 +256,8 @@ export function trackRedemptionAck(redemptionId: string, channel: string): void 
 
 /**
  * Pushes a redemption that needs confirmation to the streamer's companion app, or refunds it
- * straight away when no companion app is connected to receive it. Call after
- * {@link trackRedemptionAck}.
+ * straight away when no companion app is connected to receive it. Its refund timer is already
+ * armed by {@link prepareRedemptionConfirmation}.
  * @param discordId - The streamer's Discord id (the companion stream key).
  * @param event - The companion event, with `ackRequired` set.
  * @returns Resolves once pushed or refunded.
