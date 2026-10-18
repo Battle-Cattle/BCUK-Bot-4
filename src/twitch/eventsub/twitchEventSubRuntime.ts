@@ -42,14 +42,21 @@ export function registerEventSubOverlayRuntime(runtime: EventSubOverlayRuntime):
 /** Non-redemption streamer activity types forwarded to the companion app. */
 export type CompanionActivityEventType = Exclude<StreamerEventType, 'redemption'>;
 
-/** A channel-point reward redemption forwarded to a user's companion app. */
+/**
+ * A channel-point reward redemption forwarded to a user's companion app. When `ackRequired` is
+ * set (the reward requires companion confirmation), the app must acknowledge it
+ * (`POST /api/companion/rewards/ack`) or the redemption is cancelled and the viewer refunded.
+ */
 export interface CompanionRedemptionEvent {
   type: 'channel_points_redemption';
+  /** Twitch's redemption id; the acknowledgement quotes it back. */
+  id: string;
   rewardId: string;
   rewardTitle: string;
   userLogin: string;
   userName: string;
   userInput: string;
+  ackRequired: boolean;
   redeemedAt: string;
 }
 
@@ -97,6 +104,12 @@ interface EventSubCompanionRuntime {
    * @param event - The companion event payload to deliver.
    */
   pushCompanionEvent: (discordId: string, event: CompanionEvent) => void;
+  /**
+   * True if the Discord user has at least one companion app connected. A redemption that needs
+   * confirmation is refunded straight away when nothing is connected. When omitted, a push is
+   * assumed delivered and an unanswered one is refunded once its acknowledgement times out.
+   */
+  hasCompanionConnection?: (discordId: string) => boolean;
 }
 
 export const companionRuntimeRegistry = createRuntimeRegistry<EventSubCompanionRuntime>();

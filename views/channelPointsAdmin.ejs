@@ -24,6 +24,8 @@
         save_failed:           'Failed to save — please try again.',
         delete_failed:         'Delete failed — please try again.',
         invalid_settings:      'Half-life and time-to-max-demand multiplier must both be positive numbers.',
+        confirmation_failed:   'Failed to save companion confirmation — please try again, or reconnect Twitch if this keeps happening.',
+        confirmation_unsupported: 'Companion confirmation only works for rewards created by the bot — Twitch only lets the app that created a reward refund its redemptions.',
       }; %>
       <%= errorMessages[error] ?? `An error occurred (${error}).` %>
     </div>
@@ -38,6 +40,7 @@
         pricing_saved:          'Pricing config saved.',
         pricing_deleted:        'Dynamic pricing disabled.',
         pricing_settings_saved: 'Pricing settings saved.',
+        confirmation_saved:     'Companion confirmation saved.',
       }; %>
       <%= successMessages[success] ?? 'Done.' %>
     </div>
@@ -199,6 +202,28 @@
               </div>
             </form>
           </details>
+          <% } %>
+
+          <% if (r.twitchReward) { %>
+          <!-- Companion confirmation sub-section -->
+          <div class="subsection-divider">
+            <strong class="hint hint-compact">Companion confirmation</strong>
+            <p class="hint hint-compact">
+              Wait for your companion app to confirm it ran this reward's actions. If it doesn't confirm within 30 seconds
+              (or isn't connected, or reports a failure), the viewer is refunded and the redemption doesn't raise the dynamic price.
+              Redemptions stay in the request queue until confirmed. Only works for rewards created by the bot.
+            </p>
+            <form method="POST" action="/channel-points/rewards/<%= r.rewardId %>/companion-confirmation" class="form-row-wrap items-end mt-05">
+              <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+              <label class="checkbox-input-label">
+                <input type="checkbox" name="enabled" <%= r.companionConfirmation ? 'checked' : '' %>>
+                Require confirmation
+              </label>
+              <div>
+                <button type="submit" class="btn">Save</button>
+              </div>
+            </form>
+          </div>
           <% } %>
 
           <!-- Dynamic pricing sub-section -->

@@ -81,6 +81,9 @@ vi.mock('./commands/advancedCommands/advancedCommandRuntime', () => ({ registerA
 vi.mock('./commands/advancedCommands/advancedCommandRefunds', () => ({
   sweepPendingAdvancedCommandUsage: vi.fn().mockResolvedValue(0),
 }));
+vi.mock('./twitch/eventsub/twitchEventSubRedemptionAcks', () => ({
+  sweepPendingRedemptionAcks: vi.fn().mockResolvedValue(0),
+}));
 vi.mock('./twitch/eventsub/twitchEventSubRuntime', () => ({
   registerEventSubOverlayRuntime: vi.fn(),
   registerEventSubTwitchRuntime: vi.fn(),
@@ -176,11 +179,11 @@ describe('startup — guild registry preload', () => {
 
   it('registers the companion event runtime with pushCompanionEvent on a clean startup', async () => {
     const { registerEventSubCompanionRuntime } = await import('./twitch/eventsub/twitchEventSubRuntime.js');
-    const { pushCompanionEvent } = await import('./web/routes/companionEvents.js');
+    const { pushCompanionEvent, hasCompanionConnection } = await import('./web/routes/companionEvents.js');
 
     await runMain();
 
-    expect(vi.mocked(registerEventSubCompanionRuntime)).toHaveBeenCalledWith({ pushCompanionEvent });
+    expect(vi.mocked(registerEventSubCompanionRuntime)).toHaveBeenCalledWith({ pushCompanionEvent, hasCompanionConnection });
   });
 
   it('registers the alerts overlay runtime with pushAlertEvent on a clean startup', async () => {
@@ -269,6 +272,27 @@ describe('startup — guild registry preload', () => {
     await runMain();
 
     expect(vi.mocked(startTwitchBot)).toHaveBeenCalledOnce();
+    expect(exitSpy).not.toHaveBeenCalled();
+  });
+
+  it('sweeps redemptions pending companion confirmation before EventSub starts', async () => {
+    const { sweepPendingRedemptionAcks } = await import('./twitch/eventsub/twitchEventSubRedemptionAcks.js');
+    const { startEventSub } = await import('./twitch/eventsub/twitchEventSub.js');
+
+    await runMain();
+    expect(vi.mocked(sweepPendingRedemptionAcks)).toHaveBeenCalledOnce();
+    expect(vi.mocked(sweepPendingRedemptionAcks).mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(startEventSub).mock.invocationCallOrder[0]!);
+  });
+
+  it('logs and carries on when the pending redemption confirmation sweep fails', async () => {
+    const { sweepPendingRedemptionAcks } = await import('./twitch/eventsub/twitchEventSubRedemptionAcks.js');
+    const { startEventSub } = await import('./twitch/eventsub/twitchEventSub.js');
+    vi.mocked(sweepPendingRedemptionAcks).mockRejectedValueOnce(new Error('DB down'));
+
+    await runMain();
+
+    expect(vi.mocked(startEventSub)).toHaveBeenCalledOnce();
     expect(exitSpy).not.toHaveBeenCalled();
   });
 

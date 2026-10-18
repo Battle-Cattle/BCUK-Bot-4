@@ -6,6 +6,8 @@ vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 vi.mock('../../db', () => ({
   getStreamerByDiscordId: vi.fn(),
   updatePricingCooldownForReward: vi.fn(),
+  isCompanionConfirmationRequired: vi.fn(),
+  setCompanionConfirmationRequired: vi.fn(),
 }));
 
 vi.mock('../csrf', () => ({
@@ -19,10 +21,10 @@ vi.mock('../middleware', () => ({
   requireAuth: (_req: any, _res: any, next: any) => next(),
 }));
 
-vi.mock('../../twitch/twitchApi', () => ({
-  createCustomReward: vi.fn(),
-  updateCustomReward: vi.fn(),
-}));
+vi.mock('../../twitch/twitchApi', () => {
+  class TwitchRewardUnsupportedError extends Error {}
+  return { createCustomReward: vi.fn(), updateCustomReward: vi.fn(), TwitchRewardUnsupportedError };
+});
 
 vi.mock('../../twitch/twitchUserTokens', () => ({
   getValidToken: vi.fn(),
@@ -34,8 +36,10 @@ vi.mock('../../twitch/pricing/rewardPricingService', () => ({
 
 import supertest from 'supertest';
 import { router } from './channelPointsAdminMutations';
-import { getStreamerByDiscordId, updatePricingCooldownForReward } from '../../db';
-import { createCustomReward, updateCustomReward } from '../../twitch/twitchApi';
+import {
+  getStreamerByDiscordId, updatePricingCooldownForReward, isCompanionConfirmationRequired, setCompanionConfirmationRequired,
+} from '../../db';
+import { createCustomReward, updateCustomReward, TwitchRewardUnsupportedError } from '../../twitch/twitchApi';
 import { getValidToken } from '../../twitch/twitchUserTokens';
 import { deleteRewardAndPricing } from '../../twitch/pricing/rewardPricingService';
 import { buildTestApp } from '../../test-utils/expressTestApp';
@@ -66,6 +70,8 @@ beforeEach(() => {
   vi.mocked(updateCustomReward).mockResolvedValue(VALID_REWARD_TWITCH_DATA as any);
   vi.mocked(updatePricingCooldownForReward).mockResolvedValue(undefined);
   vi.mocked(deleteRewardAndPricing).mockResolvedValue(undefined);
+  vi.mocked(isCompanionConfirmationRequired).mockResolvedValue(false);
+  vi.mocked(setCompanionConfirmationRequired).mockResolvedValue(undefined);
 });
 
 describe('POST /rewards', () => {
@@ -140,6 +146,17 @@ describe('POST /rewards/:twitchRewardId', () => {
     expect(updatePricingCooldownForReward).toHaveBeenCalledWith(MOCK_STREAMER.id, VALID_REWARD_ID, 300);
   });
 
+  it('keeps redemptions in the request queue when the reward requires companion confirmation', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    vi.mocked(isCompanionConfirmationRequired).mockResolvedValue(true);
+    await supertest(buildApp()).post(`/rewards/${VALID_REWARD_ID}`).type('form')
+      .send({ ...VALID_REWARD_FORM, should_redemptions_skip_request_queue: 'on' });
+    expect(isCompanionConfirmationRequired).toHaveBeenCalledWith(MOCK_STREAMER.id, VALID_REWARD_ID);
+    expect(updateCustomReward).toHaveBeenCalledWith('twitch123', VALID_REWARD_ID, 'user-token', expect.objectContaining({
+      should_redemptions_skip_request_queue: false,
+    }));
+  });
+
   it('still redirects to success when the best-effort cooldown sync throws', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
     vi.mocked(updatePricingCooldownForReward).mockRejectedValueOnce(new Error('DB down'));
@@ -186,5 +203,57 @@ describe('POST /rewards/:twitchRewardId/delete', () => {
     vi.mocked(deleteRewardAndPricing).mockRejectedValueOnce(new Error('403'));
     const res = await supertest(buildApp()).post(`/rewards/${VALID_REWARD_ID}/delete`);
     expect(res.headers.location).toBe('/channel-points?error=delete_failed');
+  });
+});
+
+describe('POST /rewards/:twitchRewardId/companion-confirmation', () => {
+  const path = `/rewards/${VALID_REWARD_ID}/companion-confirmation`;
+
+  it('redirects with error when user is not a streamer', async () => {
+    const res = await supertest(buildApp()).post(path).type('form').send({ enabled: 'on' });
+    expect(res.headers.location).toBe('/channel-points?error=not_a_streamer');
+  });
+
+  it('redirects with error for an invalid reward id', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    const res = await supertest(buildApp()).post('/rewards/not-a-uuid/companion-confirmation').type('form').send({ enabled: 'on' });
+    expect(res.headers.location).toBe('/channel-points?error=invalid_reward_id');
+  });
+
+  it('turns confirmation on after making the reward use the request queue', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    const res = await supertest(buildApp()).post(path).type('form').send({ enabled: 'on' });
+    expect(res.headers.location).toBe('/channel-points?success=confirmation_saved');
+    expect(updateCustomReward).toHaveBeenCalledWith('twitch123', VALID_REWARD_ID, 'user-token', { should_redemptions_skip_request_queue: false });
+    expect(setCompanionConfirmationRequired).toHaveBeenCalledWith(MOCK_STREAMER.id, VALID_REWARD_ID, true);
+    expect(vi.mocked(updateCustomReward).mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(setCompanionConfirmationRequired).mock.invocationCallOrder[0]!);
+  });
+
+  it('turns confirmation off without touching the reward on Twitch', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    const res = await supertest(buildApp()).post(path).type('form').send({});
+    expect(res.headers.location).toBe('/channel-points?success=confirmation_saved');
+    expect(updateCustomReward).not.toHaveBeenCalled();
+    expect(setCompanionConfirmationRequired).toHaveBeenCalledWith(MOCK_STREAMER.id, VALID_REWARD_ID, false);
+  });
+
+  it('refuses a reward the bot did not create, saving nothing', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    vi.mocked(updateCustomReward).mockRejectedValueOnce(new TwitchRewardUnsupportedError('403'));
+    const res = await supertest(buildApp()).post(path).type('form').send({ enabled: 'on' });
+    expect(res.headers.location).toBe('/channel-points?error=confirmation_unsupported');
+    expect(setCompanionConfirmationRequired).not.toHaveBeenCalled();
+  });
+
+  it('redirects with confirmation_failed without a token or when saving fails', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    vi.mocked(getValidToken).mockResolvedValueOnce(null);
+    const noToken = await supertest(buildApp()).post(path).type('form').send({ enabled: 'on' });
+    expect(noToken.headers.location).toBe('/channel-points?error=confirmation_failed');
+
+    vi.mocked(setCompanionConfirmationRequired).mockRejectedValueOnce(new Error('DB down'));
+    const dbDown = await supertest(buildApp()).post(path).type('form').send({});
+    expect(dbDown.headers.location).toBe('/channel-points?error=confirmation_failed');
   });
 });

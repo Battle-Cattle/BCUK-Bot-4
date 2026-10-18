@@ -111,6 +111,14 @@ export type { StreamerEventType, StreamerEvent } from './db/eventLog';
 export { recordStreamerEvent, getRecentStreamerEvents } from './db/eventLog';
 export type { RedemptionProgress, RedemptionEffect } from './db/redemptionLedger';
 export { getRedemptionProgress, markRedemptionEffect, pruneRedemptionLedger } from './db/redemptionLedger';
+export type {
+  RedemptionAckStatus, RedemptionRefundReason, PendingRedemptionAck,
+} from './db/redemptionCompanionAck';
+export {
+  listCompanionConfirmationRewardIds, isCompanionConfirmationRequired, setCompanionConfirmationRequired,
+  recordPendingRedemptionAck, claimRedemptionAck, releaseRedemptionAck, updateRedemptionAckStatus,
+  getRedemptionAckStreamerId, listPendingRedemptionAcks, pruneResolvedRedemptionAcks,
+} from './db/redemptionCompanionAck';
 
 // ─── SFX ────────────────────────────────────────────────────────────────────
 

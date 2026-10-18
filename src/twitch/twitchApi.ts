@@ -545,6 +545,46 @@ export async function updateRewardCost(broadcasterId: string, rewardId: string, 
   await updateCustomReward(broadcasterId, rewardId, userToken, { cost });
 }
 
+/**
+ * Thrown when Twitch returns 404 for a redemption status update — the redemption doesn't exist,
+ * or is no longer `UNFULFILLED` (already fulfilled or cancelled, or its reward skips the request
+ * queue so it was auto-fulfilled). Permanent: retrying can't change it.
+ */
+export class TwitchRedemptionNotFoundError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'TwitchRedemptionNotFoundError';
+  }
+}
+
+/**
+ * Marks an `UNFULFILLED` channel-point redemption `FULFILLED` or `CANCELED` via Helix. Cancelling
+ * refunds the viewer's points. Requires a broadcaster user token with the
+ * channel:manage:redemptions scope, and only works for rewards created by this app's client_id.
+ *
+ * @param broadcasterId - Twitch user ID of the reward's broadcaster.
+ * @param rewardId - Twitch reward UUID the redemption belongs to.
+ * @param redemptionId - Twitch redemption id to update.
+ * @param status - `FULFILLED` to complete it, `CANCELED` to refund it.
+ * @param userToken - Broadcaster OAuth user token with the channel:manage:redemptions scope.
+ * @throws {TwitchRedemptionNotFoundError} When Twitch returns 404 (unknown, or no longer unfulfilled).
+ * @throws {TwitchRewardUnsupportedError} When Twitch returns 403 (reward created by a different client_id).
+ * @throws {TwitchRewardAuthError} When Twitch returns 401 (invalid token, or missing scope).
+ */
+export async function updateRedemptionStatus(
+  broadcasterId: string, rewardId: string, redemptionId: string, status: 'FULFILLED' | 'CANCELED', userToken: string,
+): Promise<void> {
+  const url = 'https://api.twitch.tv/helix/channel_points/custom_rewards/redemptions'
+    + `?broadcaster_id=${encodeURIComponent(broadcasterId)}&reward_id=${encodeURIComponent(rewardId)}&id=${encodeURIComponent(redemptionId)}`;
+  const res = await twitchFetch(url, {
+    method: 'PATCH',
+    headers: { ...authHeaders(userToken), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status }),
+  });
+  if (res.status === 404) throw new TwitchRedemptionNotFoundError(`[TwitchAPI] updateRedemptionStatus: redemption ${redemptionId} not found or not unfulfilled (404)`);
+  throwForRewardManagementFailure(res, 'updateRedemptionStatus', rewardId);
+}
+
 export interface SharedChatParticipant {
   broadcaster_id: string;
   broadcaster_login: string;

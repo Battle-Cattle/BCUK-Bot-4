@@ -6,12 +6,10 @@ import { Router } from 'express';
 import { requireCompanionKey } from '../middleware';
 import { getAdvancedCommandUsageStreamerId, getStreamerByDiscordId, listAdvancedCommands } from '../../db';
 import { acknowledgeAdvancedCommandUse } from '../../commands/advancedCommands/advancedCommandRefunds';
+import { handleCompanionAck } from './companionAck';
 
 const log = createLogger('CompanionCommands');
 const router = Router();
-
-const EVENT_ID_PATTERN = /^[0-9a-f-]{36}$/i;
-const MAX_ACK_ERROR_LENGTH = 255;
 
 /**
  * GET /api/companion/commands — bearer-token authenticated via `requireCompanionKey`. Lists the
@@ -45,18 +43,6 @@ router.get('/commands', requireCompanionKey, async (req, res) => {
 });
 
 /**
- * Validates an acknowledgement body.
- * @param body - The parsed JSON body.
- * @returns The event id, outcome and error text, or null if malformed.
- */
-function parseAck(body: unknown): { eventId: string; ok: boolean; error: string | null } | null {
-  const { eventId, ok, error } = (body ?? {}) as { eventId?: unknown; ok?: unknown; error?: unknown };
-  if (typeof eventId !== 'string' || !EVENT_ID_PATTERN.test(eventId) || typeof ok !== 'boolean') return null;
-  if (error != null && typeof error !== 'string') return null;
-  return { eventId, ok, error: typeof error === 'string' ? error.slice(0, MAX_ACK_ERROR_LENGTH) : null };
-}
-
-/**
  * POST /api/companion/commands/ack — the companion app reports whether it ran an
  * `advanced_command` event's actions. Success marks the use succeeded; failure refunds the
  * viewer. The event must belong to the authenticated streamer.
@@ -65,27 +51,11 @@ function parseAck(body: unknown): { eventId: string; ok: boolean; error: string 
  *   after the acknowledgement timeout), 400 for a malformed body, 404 for an unknown or
  *   another streamer's event, or 500 on an error.
  */
-router.post('/commands/ack', requireCompanionKey, async (req, res) => {
-  const ack = parseAck(req.body);
-  if (!ack) {
-    res.status(400).json({ ok: false, error: 'Expected { eventId, ok, error? }' });
-    return;
-  }
-  try {
-    const [streamer, ownerId] = await Promise.all([
-      getStreamerByDiscordId(req.companionDiscordId!),
-      getAdvancedCommandUsageStreamerId(ack.eventId),
-    ]);
-    if (ownerId === null || ownerId !== streamer?.id) {
-      res.status(404).json({ ok: false, error: 'event_not_found' });
-      return;
-    }
-    const resolved = await acknowledgeAdvancedCommandUse(ack.eventId, { ok: ack.ok, error: ack.error });
-    res.json({ ok: true, resolved });
-  } catch (err) {
-    log.error('Failed to acknowledge advanced command:', err);
-    res.status(500).json({ ok: false, error: 'Failed to acknowledge' });
-  }
-});
+router.post('/commands/ack', requireCompanionKey, (req, res) => handleCompanionAck(req, res, {
+  getOwnerStreamerId: getAdvancedCommandUsageStreamerId,
+  acknowledge: acknowledgeAdvancedCommandUse,
+  log,
+  failureLabel: 'Failed to acknowledge advanced command:',
+}));
 
 export default router;

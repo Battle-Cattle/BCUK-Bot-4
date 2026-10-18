@@ -10,8 +10,8 @@ vi.mock('../shared/config', () => ({
 import {
   getUsers, getStreams, getChannelInfo, getSharedChatSession, getAppToken,
   getCustomRewards, updateRewardCost, createCustomReward, updateCustomReward, deleteCustomReward,
-  getRewardRedemptions, getChannelFollower,
-  TwitchRewardUnsupportedError, TwitchRewardAuthError,
+  getRewardRedemptions, getChannelFollower, updateRedemptionStatus,
+  TwitchRewardUnsupportedError, TwitchRewardAuthError, TwitchRedemptionNotFoundError,
 } from './twitchApi';
 
 const TOKEN_RESPONSE = { access_token: 'test-token', expires_in: 3600 };
@@ -418,6 +418,32 @@ describe('updateCustomReward', () => {
   it('throws a generic error for other non-OK statuses', async () => {
     vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(500, {}));
     await expect(updateCustomReward('bc1', 'rwd1', 'user-token', { title: 'x' })).rejects.toThrow('updateCustomReward failed: 500');
+  });
+});
+
+describe('updateRedemptionStatus', () => {
+  it('sends a PATCH scoped to the broadcaster, reward and redemption with the new status', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(200, { data: [] }));
+    await updateRedemptionStatus('bc1', 'rwd1', 'red1', 'CANCELED', 'user-token');
+
+    const [url, init] = vi.mocked(globalThis.fetch).mock.calls[0]!;
+    expect(String(url)).toBe('https://api.twitch.tv/helix/channel_points/custom_rewards/redemptions?broadcaster_id=bc1&reward_id=rwd1&id=red1');
+    expect(init?.method).toBe('PATCH');
+    expect(init?.body).toBe(JSON.stringify({ status: 'CANCELED' }));
+  });
+
+  it.each([
+    [404, TwitchRedemptionNotFoundError],
+    [403, TwitchRewardUnsupportedError],
+    [401, TwitchRewardAuthError],
+  ])('maps a %i to its typed error', async (status, errorClass) => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(status, {}));
+    await expect(updateRedemptionStatus('bc1', 'rwd1', 'red1', 'FULFILLED', 'user-token')).rejects.toBeInstanceOf(errorClass);
+  });
+
+  it('throws a plain error for any other failure', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(mockResponse(500, {}));
+    await expect(updateRedemptionStatus('bc1', 'rwd1', 'red1', 'FULFILLED', 'user-token')).rejects.toThrow('updateRedemptionStatus failed: 500');
   });
 });
 

@@ -10,6 +10,7 @@ vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 vi.mock('../../db', () => ({
   getStreamerById: vi.fn(),
   pruneRedemptionLedger: vi.fn(),
+  pruneResolvedRedemptionAcks: vi.fn(),
   DEFAULT_EVENT_CONFIG: { follow_enabled: false, sub_enabled: false, raid_enabled: false },
 }));
 vi.mock('./twitchEventSubDispatch', () => ({ getAllStreamerInfo: vi.fn() }));
@@ -17,7 +18,7 @@ vi.mock('../twitchUserTokens', () => ({ getValidToken: vi.fn() }));
 vi.mock('../twitchApi', () => ({ getCustomRewards: vi.fn(), getRewardRedemptions: vi.fn() }));
 vi.mock('./twitchEventSubRedemption', () => ({ handleRedemption: vi.fn() }));
 
-import { getStreamerById, pruneRedemptionLedger } from '../../db';
+import { getStreamerById, pruneRedemptionLedger, pruneResolvedRedemptionAcks } from '../../db';
 import { getAllStreamerInfo } from './twitchEventSubDispatch';
 import { getValidToken } from '../twitchUserTokens';
 import { getCustomRewards, getRewardRedemptions } from '../twitchApi';
@@ -64,6 +65,7 @@ beforeEach(() => {
   vi.mocked(getRewardRedemptions).mockResolvedValue({ redemptions: [], cursor: null });
   vi.mocked(handleRedemption).mockResolvedValue(true);
   vi.mocked(pruneRedemptionLedger).mockReset().mockResolvedValue(0);
+  vi.mocked(pruneResolvedRedemptionAcks).mockReset().mockResolvedValue(0);
 });
 
 afterEach(async () => {
@@ -646,6 +648,7 @@ describe('redemption ledger pruning', () => {
     await runReconciliationTick();
     expect(pruneRedemptionLedger).toHaveBeenCalledTimes(1);
     expect(pruneRedemptionLedger).toHaveBeenCalledWith(REDEMPTION_LEDGER_RETENTION_MS);
+    expect(pruneResolvedRedemptionAcks).toHaveBeenCalledWith(REDEMPTION_LEDGER_RETENTION_MS);
 
     vi.advanceTimersByTime(9 * 60_000);
     await runReconciliationTick();
@@ -662,6 +665,15 @@ describe('redemption ledger pruning', () => {
 
     await expect(runReconciliationTick()).resolves.toBeUndefined();
     expect(mockLog.error).toHaveBeenCalledWith('Failed to prune the redemption ledger:', expect.any(Error));
+    expect(pruneResolvedRedemptionAcks).toHaveBeenCalledTimes(1);
+  });
+
+  it('logs a confirmation-prune failure without failing the tick', async () => {
+    vi.mocked(getAllStreamerInfo).mockReturnValue(new Map());
+    vi.mocked(pruneResolvedRedemptionAcks).mockRejectedValueOnce(new Error('db down'));
+
+    await expect(runReconciliationTick()).resolves.toBeUndefined();
+    expect(mockLog.error).toHaveBeenCalledWith('Failed to prune resolved redemption confirmations:', expect.any(Error));
   });
 });
 

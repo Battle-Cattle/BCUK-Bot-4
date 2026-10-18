@@ -1,5 +1,5 @@
 import { createLogger } from '../../shared/logger';
-import { getStreamerById, DEFAULT_EVENT_CONFIG, pruneRedemptionLedger } from '../../db';
+import { getStreamerById, DEFAULT_EVENT_CONFIG, pruneRedemptionLedger, pruneResolvedRedemptionAcks } from '../../db';
 import { getAllStreamerInfo, type StreamerInfo } from './twitchEventSubDispatch';
 import { getValidToken } from '../twitchUserTokens';
 import { getCustomRewards, getRewardRedemptions, TwitchRewardRedemption } from '../twitchApi';
@@ -236,7 +236,8 @@ export async function runReconciliationTick(): Promise<void> {
 }
 
 /**
- * Prunes `redemption_handled` rows older than {@link REDEMPTION_LEDGER_RETENTION_MS}, at most once
+ * Prunes `redemption_handled` rows, and resolved `redemption_companion_ack` rows, older than
+ * {@link REDEMPTION_LEDGER_RETENTION_MS}, at most once
  * per {@link LEDGER_PRUNE_INTERVAL_MS}. Runs from the reconciliation tick so it shares that
  * lifecycle (started after EventSub, stopped before the DB pool closes). A failure is logged and
  * retried on a later tick; it never fails the tick.
@@ -251,6 +252,12 @@ async function maybePruneRedemptionLedger(now: number): Promise<void> {
     if (deleted > 0) log.debug(`Pruned ${deleted} expired redemption ledger row(s)`);
   } catch (err) {
     log.error('Failed to prune the redemption ledger:', err);
+  }
+  try {
+    const deleted = await pruneResolvedRedemptionAcks(REDEMPTION_LEDGER_RETENTION_MS);
+    if (deleted > 0) log.debug(`Pruned ${deleted} resolved redemption confirmation row(s)`);
+  } catch (err) {
+    log.error('Failed to prune resolved redemption confirmations:', err);
   }
 }
 
