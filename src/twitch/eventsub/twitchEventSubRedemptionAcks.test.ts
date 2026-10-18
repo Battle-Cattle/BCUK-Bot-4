@@ -31,7 +31,9 @@ import { registerEventSubCompanionRuntime, registerEventSubTwitchRuntime } from 
 import {
   REDEMPTION_ACK_TIMEOUT_MS, prepareRedemptionConfirmation, refundRedemption, trackRedemptionAck,
   pushRedemptionForConfirmation, acknowledgeRedemption, sweepPendingRedemptionAcks, clearRedemptionAcks,
+  extendRedemptionAck,
 } from './twitchEventSubRedemptionAcks';
+import { ACK_MAX_HOLD_MS } from '../../shared/ackHold';
 import { flushMicrotasks } from '../../test-utils/flushMicrotasks';
 
 const send = vi.fn();
@@ -307,5 +309,41 @@ describe('sweepPendingRedemptionAcks', () => {
     await vi.advanceTimersByTimeAsync(REDEMPTION_ACK_TIMEOUT_MS);
     expect(claimRedemptionAck).toHaveBeenCalledWith('red1', expect.objectContaining({ refundReason: 'no_ack' }));
     expect(claimRedemptionAck).toHaveBeenCalledWith('red2', expect.objectContaining({ refundReason: 'restart' }));
+  });
+});
+
+describe('extendRedemptionAck', () => {
+  afterEach(() => {
+    clearRedemptionAcks();
+    vi.useRealTimers();
+  });
+
+  it('restarts the countdown, so a redemption pinged before the timeout is not refunded', async () => {
+    vi.useFakeTimers();
+    trackRedemptionAck('red1', 'streamer');
+    vi.advanceTimersByTime(REDEMPTION_ACK_TIMEOUT_MS - 1_000);
+    expect(extendRedemptionAck('red1')).toBe(true);
+    vi.advanceTimersByTime(REDEMPTION_ACK_TIMEOUT_MS - 1_000);
+    await flushMicrotasks();
+    expect(claimRedemptionAck).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(1_000);
+    await flushMicrotasks();
+    expect(claimRedemptionAck).toHaveBeenCalledWith('red1', expect.objectContaining({ refundReason: 'no_ack' }));
+  });
+
+  it('does nothing for a redemption that is not waiting', () => {
+    expect(extendRedemptionAck('unknown')).toBe(false);
+  });
+
+  it('stops extending once the redemption has been held for ACK_MAX_HOLD_MS', () => {
+    vi.useFakeTimers();
+    trackRedemptionAck('red1', 'streamer');
+    vi.advanceTimersByTime(REDEMPTION_ACK_TIMEOUT_MS - 1);
+    for (let held = REDEMPTION_ACK_TIMEOUT_MS - 1; held < ACK_MAX_HOLD_MS; held += REDEMPTION_ACK_TIMEOUT_MS - 1) {
+      expect(extendRedemptionAck('red1')).toBe(true);
+      vi.advanceTimersByTime(REDEMPTION_ACK_TIMEOUT_MS - 1);
+    }
+    expect(extendRedemptionAck('red1')).toBe(false);
   });
 });

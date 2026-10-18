@@ -20,6 +20,7 @@ vi.mock('../../db', () => ({
 
 vi.mock('../../twitch/eventsub/twitchEventSubRedemptionAcks', () => ({
   acknowledgeRedemption: vi.fn(),
+  extendRedemptionAck: vi.fn(),
 }));
 
 vi.mock('../../twitch/twitchApi', () => ({
@@ -35,7 +36,7 @@ vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 import supertest from 'supertest';
 import router from './companionRewards';
 import { getStreamerByDiscordId, getRedemptionAckStreamerId, listCompanionConfirmationRewardIds } from '../../db';
-import { acknowledgeRedemption } from '../../twitch/eventsub/twitchEventSubRedemptionAcks';
+import { acknowledgeRedemption, extendRedemptionAck } from '../../twitch/eventsub/twitchEventSubRedemptionAcks';
 import { getCustomRewards } from '../../twitch/twitchApi';
 import { getValidToken } from '../../twitch/twitchUserTokens';
 import { buildTestApp } from '../../test-utils/expressTestApp';
@@ -174,5 +175,29 @@ describe('POST /rewards/ack', () => {
     vi.mocked(acknowledgeRedemption).mockRejectedValueOnce(new Error('boom'));
     const res = await supertest(buildApp()).post('/rewards/ack').send({ eventId: REDEMPTION_ID, ok: true });
     expect(res.status).toBe(500);
+  });
+});
+
+describe('POST /rewards/progress', () => {
+  const REDEMPTION_ID = '17fa2df1-ad76-4804-bfa5-a40ef63efe63';
+
+  it('restarts the timeout for the streamer\'s own redemption', async () => {
+    vi.mocked(extendRedemptionAck).mockReturnValueOnce(true);
+    const res = await supertest(buildApp()).post('/rewards/progress').send({ eventId: REDEMPTION_ID }).expect(200);
+    expect(res.body).toEqual({ ok: true, extended: true });
+    expect(extendRedemptionAck).toHaveBeenCalledWith(REDEMPTION_ID);
+  });
+
+  it('reports a redemption that is no longer waiting', async () => {
+    vi.mocked(extendRedemptionAck).mockReturnValueOnce(false);
+    const res = await supertest(buildApp()).post('/rewards/progress').send({ eventId: REDEMPTION_ID }).expect(200);
+    expect(res.body).toEqual({ ok: true, extended: false });
+  });
+
+  it('refuses another streamer\'s redemption and a malformed body', async () => {
+    vi.mocked(getRedemptionAckStreamerId).mockResolvedValueOnce(99);
+    await supertest(buildApp()).post('/rewards/progress').send({ eventId: REDEMPTION_ID }).expect(404);
+    await supertest(buildApp()).post('/rewards/progress').send({ eventId: 'nope' }).expect(400);
+    expect(extendRedemptionAck).not.toHaveBeenCalled();
   });
 });
