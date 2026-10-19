@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { SfxTrigger, SfxFile, SfxLookupResult } from '../../db';
-import { mockLogger } from '../../test-utils/loggerMock';
 
 const API_KEY_OWNER = 'user-1';
 
@@ -41,7 +40,9 @@ vi.mock('../../discord/voicePresence', () => ({
   getActiveGuildForUser: vi.fn(),
 }));
 
-vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
+// One shared logger instance, so tests can assert on the route's log lines.
+const log = vi.hoisted(() => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }));
+vi.mock('../../shared/logger', () => ({ createLogger: () => log }));
 
 import supertest from 'supertest';
 import router from './streamdeckSfx';
@@ -113,6 +114,30 @@ describe('POST /sfx', () => {
 
     expect(res.body).toEqual({ ok: true, file: 'ding.mp3' });
     expect(vi.mocked(setVoicePlaying)).toHaveBeenCalledWith('guild-123', 'ding.mp3', '!ding', 'streamdeck');
+  });
+
+  it('logs how long the request took to handle at info level when it was quick', async () => {
+    vi.mocked(findCachedSfxTrigger).mockResolvedValue(LOOKUP);
+
+    await supertest(buildApp()).post('/sfx').send({ command: '!ding' }).expect(200);
+
+    expect(log.info).toHaveBeenCalledWith(expect.stringMatching(/'ding\.mp3'.*request handled in \d+ms/));
+    expect(log.warn).not.toHaveBeenCalled();
+  });
+
+  it('logs a warning when the request took longer than 250ms to handle', async () => {
+    vi.mocked(findCachedSfxTrigger).mockResolvedValue(LOOKUP);
+    // First call stamps the arrival, the second measures it after playFile.
+    const now = vi.spyOn(performance, 'now').mockReturnValueOnce(1_000).mockReturnValueOnce(1_400);
+
+    try {
+      await supertest(buildApp()).post('/sfx').send({ command: '!ding' }).expect(200);
+    } finally {
+      now.mockRestore();
+    }
+
+    expect(log.warn).toHaveBeenCalledWith(expect.stringContaining('request handled in 400ms'));
+    expect(log.info).not.toHaveBeenCalled();
   });
 
   it('normalises the command to lowercase before lookup', async () => {

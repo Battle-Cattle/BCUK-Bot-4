@@ -55,6 +55,10 @@ interface GuildVoiceState {
   adapterFactory: VoiceAdapterFactory;
   player: DjsAudioPlayer | null;
   playing: boolean;
+  // When the current connection became Ready (Date.now()), for the playback-start log's connection age.
+  connectedAt: number | null;
+  // When startPlayback last handed the player a resource, until the player reports Playing.
+  playRequestedAt: number | null;
 }
 
 const states = new Map<string, GuildVoiceState>();
@@ -75,6 +79,8 @@ function getState(guildId: string): GuildVoiceState {
     adapterFactory: createVoiceAdapterFactory(),
     player: null,
     playing: false,
+    connectedAt: null,
+    playRequestedAt: null,
   }));
 }
 
@@ -91,6 +97,12 @@ function anyConnected(): boolean {
 const RECONNECT_BASE_DELAY_MS = 5_000;
 const RECONNECT_MAX_DELAY_MS = 60_000;
 const VOICE_CONNECT_TIMEOUT_MS = 30_000;
+
+/**
+ * A sound that takes longer than this from {@link startPlayback} to its first audio frame is
+ * logged as a warning instead of at debug level, so a growing SFX delay shows up in the logs.
+ */
+const SLOW_PLAYBACK_START_MS = 500;
 
 /** Cancels and nulls any pending reconnect timer for the given guild state. */
 function clearReconnectTimer(state: GuildVoiceState): void {
@@ -119,24 +131,47 @@ function scheduleReconnect(state: GuildVoiceState, reason: string): void {
   }, delay);
 }
 
-/** Returns this guild's audio player, lazily creating it with idle and error handlers on first use. */
+/** Returns this guild's audio player, lazily creating it with playing, idle and error handlers on first use. */
 function getPlayer(state: GuildVoiceState): DjsAudioPlayer {
   if (!state.player) {
     const guildPlayer = createAudioPlayer({
       behaviors: { noSubscriber: NoSubscriberBehavior.Pause },
     });
+    guildPlayer.on(AudioPlayerStatus.Playing, () => logPlaybackStart(state));
     guildPlayer.on(AudioPlayerStatus.Idle, () => {
       state.playing = false;
+      state.playRequestedAt = null;
       setVoiceIdle(state.guildId);
     });
     guildPlayer.on('error', (err) => {
       log.error(`Error: ${err.message}`, err);
       state.playing = false;
+      state.playRequestedAt = null;
       setVoiceIdle(state.guildId);
     });
     state.player = guildPlayer;
   }
   return state.player;
+}
+
+/**
+ * Logs how long the sound handed to {@link startPlayback} took to reach its first audio frame
+ * (ffmpeg spawn and decode), with the voice connection's age and gateway/UDP ping, so a growing
+ * SFX delay can be traced to the audio pipeline, the voice connection or neither. A no-op when no
+ * start is pending, e.g. when the player resumes from auto-pause mid-sound.
+ * @param state - The guild's voice state.
+ */
+function logPlaybackStart(state: GuildVoiceState): void {
+  if (state.playRequestedAt === null) return;
+  const now = Date.now();
+  const startupMs = now - state.playRequestedAt;
+  state.playRequestedAt = null;
+  const ping = state.connection?.ping;
+  const ageMin = state.connectedAt === null ? '?' : Math.round((now - state.connectedAt) / 60_000);
+  const message = `Playback started in guild ${state.guildId} after ${startupMs}ms`
+    + ` (voice connected ${ageMin}min, ping ws ${ping?.ws ?? '?'}ms / udp ${ping?.udp ?? '?'}ms)`;
+  if (startupMs > SLOW_PLAYBACK_START_MS) log.warn(message);
+  else log.debug(message);
 }
 
 /** Stops this guild's audio player (if any) and marks it not-playing, ignoring stop errors. */
@@ -234,6 +269,7 @@ export async function connect(client: Client, guildId: string, channelId: string
     releasePreviousConnection(previousConnection, joinedConnection, deps);
     state.pendingConnection = null;
     state.connection = joinedConnection;
+    state.connectedAt = Date.now();
     state.currentChannelId = channel.id;
 
     clearReconnectTimer(state);
@@ -416,5 +452,6 @@ export function forgetGuild(guildId: string): void {
 export function startPlayback(resource: AudioResource, guildId: string): void {
   const state = getState(guildId);
   state.playing = true;
+  state.playRequestedAt = Date.now();
   getPlayer(state).play(resource);
 }
