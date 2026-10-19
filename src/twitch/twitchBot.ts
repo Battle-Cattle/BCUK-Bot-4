@@ -10,7 +10,7 @@ import { executeShoutoutForTwitch } from '../commands/shoutoutHandler';
 import { executeCountdownForTwitch } from '../commands/countdownHandler';
 import { executeFollowageForTwitch } from '../commands/followageHandler';
 import { awardPointsForChatMessage } from '../commands/pointsEarnHandler';
-import { executePointsCommandForTwitch, POINTS_COMMAND } from '../commands/pointsHandler';
+import { executePointsCommandForTwitch } from '../commands/pointsHandler';
 import { executeGambleCommandForTwitch, GAMBLE_COMMAND } from '../commands/gambleHandler';
 import { executeAdvancedCommandForTwitch } from '../commands/advancedCommands/advancedCommandHandler';
 import { fireAndForget, extractCommand } from '../commands/commandUtils';
@@ -236,25 +236,23 @@ function handleTwitchMessage(channel: string, user: string, message: string, msg
     // calling resolveStreamerIdForTwitchChannel (an uncached DB lookup) independently — that
     // would otherwise run the same query three times per chat message.
     const streamerIdPromise = resolveStreamerIdForTwitchChannel(normalizedChannel);
+    const earnPromise = streamerIdPromise.then((streamerId) => {
+      // Skip chat-earn for a !gamble message itself — it would otherwise race
+      // executeGambleCommandForTwitch below for the same shared points cooldown and almost
+      // always win it first, silently dropping the bet (see GAMBLE_COMMAND's doc comment).
+      if (streamerId !== null && command !== GAMBLE_COMMAND) {
+        return awardPointsForChatMessage(streamerId, user);
+      }
+    });
+    fireAndForget(earnPromise, 'Points earn error', log);
+    // !points waits for this message's own chat-earn award to settle (success or failure —
+    // a failed award is already logged above and must not suppress the reply), so the balance
+    // it reports already includes the points that message earned.
     fireAndForget(
-      streamerIdPromise.then((streamerId) => {
-        // Skip chat-earn for a !gamble message itself — it would otherwise race
-        // executeGambleCommandForTwitch below for the same shared points cooldown and almost
-        // always win it first, silently dropping the bet (see GAMBLE_COMMAND's doc comment).
-        // Also skip it for !points — that command has no cooldown of its own, but without this
-        // exemption it would still claim the shared cooldown as an ordinary chat message,
-        // silently blocking an immediately-following !gamble for up to the full cooldown
-        // duration (see POINTS_COMMAND's doc comment).
-        if (streamerId !== null && command !== GAMBLE_COMMAND && command !== POINTS_COMMAND) {
-          return awardPointsForChatMessage(streamerId, user);
-        }
-      }),
-      'Points earn error',
-      log,
-    );
-    fireAndForget(
-      streamerIdPromise.then((streamerId) =>
-        executePointsCommandForTwitch(normalizedChannel, streamerId, message, user, command)),
+      earnPromise
+        .catch(() => undefined)
+        .then(() => streamerIdPromise)
+        .then((streamerId) => executePointsCommandForTwitch(normalizedChannel, streamerId, message, user, command)),
       'Points command error',
       log,
     );
