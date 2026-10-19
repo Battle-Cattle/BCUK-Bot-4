@@ -4,8 +4,8 @@ import { requireCompanionKey } from '../middleware';
 import { getStreamerByDiscordId, getRedemptionAckStreamerId, listCompanionConfirmationRewardIds } from '../../db';
 import { getCustomRewards, TwitchCustomReward } from '../../twitch/twitchApi';
 import { getValidToken } from '../../twitch/twitchUserTokens';
-import { acknowledgeRedemption } from '../../twitch/eventsub/twitchEventSubRedemptionAcks';
-import { handleCompanionAck } from './companionAck';
+import { acknowledgeRedemption, extendRedemptionAck } from '../../twitch/eventsub/twitchEventSubRedemptionAcks';
+import { handleCompanionAck, handleCompanionProgress } from './companionAck';
 
 const log = createLogger('CompanionRewards');
 const router = Router();
@@ -88,6 +88,23 @@ router.post('/rewards/ack', requireCompanionKey, (req, res) => handleCompanionAc
   acknowledge: acknowledgeRedemption,
   log,
   failureLabel: 'Failed to acknowledge redemption:',
+}));
+
+/**
+ * POST /api/companion/rewards/progress — the companion app reports it's still running the actions
+ * for a `channel_points_redemption` event sent with `ackRequired` (sent periodically before the
+ * acknowledgement), restarting the acknowledgement timeout so long actions aren't refunded
+ * mid-run. The redemption must belong to the authenticated streamer.
+ * @param req - Express request; JSON body `{ eventId }`, where `eventId` is the event's `id`.
+ * @param res - `{ ok: true, extended }` (`extended` false once the redemption is resolved or has been
+ *   held as long as allowed), 400 for a malformed body, 404 for an unknown or another streamer's
+ *   redemption, or 500 on an error.
+ */
+router.post('/rewards/progress', requireCompanionKey, (req, res) => handleCompanionProgress(req, res, {
+  getOwnerStreamerId: getRedemptionAckStreamerId,
+  extend: extendRedemptionAck,
+  log,
+  failureLabel: 'Failed to record redemption progress:',
 }));
 
 export default router;

@@ -1,12 +1,13 @@
 // Companion-app API for the streamer's advanced commands: the list (so the app's mappings window
-// can offer command names), and the acknowledgement the app sends after running a command's
-// actions — a failure (or no acknowledgement in time) refunds the viewer.
+// can offer command names), the progress pings it sends while a command's actions are still
+// running, and the acknowledgement it sends after — a failure (or no acknowledgement in time)
+// refunds the viewer.
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import { requireCompanionKey } from '../middleware';
 import { getAdvancedCommandUsageStreamerId, getStreamerByDiscordId, listAdvancedCommands } from '../../db';
-import { acknowledgeAdvancedCommandUse } from '../../commands/advancedCommands/advancedCommandRefunds';
-import { handleCompanionAck } from './companionAck';
+import { acknowledgeAdvancedCommandUse, extendAdvancedCommandAck } from '../../commands/advancedCommands/advancedCommandRefunds';
+import { handleCompanionAck, handleCompanionProgress } from './companionAck';
 
 const log = createLogger('CompanionCommands');
 const router = Router();
@@ -56,6 +57,23 @@ router.post('/commands/ack', requireCompanionKey, (req, res) => handleCompanionA
   acknowledge: acknowledgeAdvancedCommandUse,
   log,
   failureLabel: 'Failed to acknowledge advanced command:',
+}));
+
+/**
+ * POST /api/companion/commands/progress — the companion app reports it's still running an
+ * `advanced_command` event's actions (sent periodically before the acknowledgement), restarting
+ * the acknowledgement timeout so long actions aren't refunded mid-run. The event must belong to
+ * the authenticated streamer.
+ * @param req - Express request; JSON body `{ eventId }`.
+ * @param res - `{ ok: true, extended }` (`extended` false once the use is resolved or has been held
+ *   as long as allowed), 400 for a malformed body, 404 for an unknown or another streamer's event,
+ *   or 500 on an error.
+ */
+router.post('/commands/progress', requireCompanionKey, (req, res) => handleCompanionProgress(req, res, {
+  getOwnerStreamerId: getAdvancedCommandUsageStreamerId,
+  extend: extendAdvancedCommandAck,
+  log,
+  failureLabel: 'Failed to record advanced command progress:',
 }));
 
 export default router;

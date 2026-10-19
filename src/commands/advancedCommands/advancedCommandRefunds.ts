@@ -2,7 +2,9 @@
 // effect is recorded `pending`; the companion app then acknowledges it (success or failure) over
 // `POST /api/companion/commands/ack`. A failure, a missing companion app, or no acknowledgement
 // within ACK_TIMEOUT_MS refunds the viewer. `resolveAdvancedCommandUsage` only matches a pending
-// row, so whichever of those happens first wins and the rest are no-ops.
+// row, so whichever of those happens first wins and the rest are no-ops. While the app is still
+// running a long command's actions it can send progress pings
+// (`POST /api/companion/commands/progress`), each restarting the timeout, up to ACK_MAX_HOLD_MS.
 //
 // The timers live in memory (single bot instance, see CLAUDE.md); anything still pending at
 // startup lost its timer in the restart and is refunded by `sweepPendingAdvancedCommandUsage`.
@@ -11,6 +13,7 @@ import {
   resolveAdvancedCommandUsage,
   type AdvancedCommandRefundReason,
 } from '../../db';
+import { ackTimerDelayMs, canExtendAckHold } from '../../shared/ackHold';
 import { createLogger } from '../../shared/logger';
 import { sweepPendingAcks } from '../../shared/pendingAckSweep';
 import { advancedCommandRuntimeRegistry } from './advancedCommandRuntime';
@@ -34,8 +37,20 @@ const REFUND_REASON_TEXT: Record<AdvancedCommandRefundReason, string> = {
   restart: 'the bot restarted',
 };
 
-/** Pending acknowledgements and refund retries: event id → its timer and the channel (if known) for a refund notice. */
-const pendingAcks = new Map<string, { timer: ReturnType<typeof setTimeout>; channel: string | undefined }>();
+/**
+ * A pending acknowledgement or refund retry: its timer, refund reason and notice channel (if known).
+ * `armedAt` (when its acknowledgement timer was first armed) is set only while the use still awaits
+ * the companion app's acknowledgement; a refund retry has none, so progress pings can't postpone it.
+ */
+interface PendingAck {
+  timer: ReturnType<typeof setTimeout>;
+  reason: AdvancedCommandRefundReason;
+  channel: string | undefined;
+  armedAt?: number;
+}
+
+/** Pending acknowledgements and refund retries, by event id. */
+const pendingAcks = new Map<string, PendingAck>();
 
 /**
  * Refunds a pending use: marks it refunded (only if still pending) and credits the points back in
@@ -71,17 +86,21 @@ export async function refundAdvancedCommandUse(
  * @param eventId - The use's event id.
  * @param reason - The refund reason to record.
  * @param channel - The streamer's channel for the refund notice, if known.
+ * @param armedAt - Set while the use awaits the companion app's acknowledgement: when its timer was
+ *   first armed (epoch ms), so progress pings can extend it but never past ACK_MAX_HOLD_MS. Omitted
+ *   for a refund retry, which pings can't extend.
  */
-function scheduleRefund(eventId: string, reason: AdvancedCommandRefundReason, channel: string | undefined): void {
+function scheduleRefund(eventId: string, reason: AdvancedCommandRefundReason, channel: string | undefined, armedAt?: number): void {
+  const delay = armedAt === undefined ? ACK_TIMEOUT_MS : ackTimerDelayMs(ACK_TIMEOUT_MS, armedAt);
   const timer = setTimeout(() => {
     pendingAcks.delete(eventId);
     refundAdvancedCommandUse(eventId, reason, { channel }).catch((err: unknown) => {
       log.error(`Failed to refund advanced command ${eventId} (${reason}); retrying:`, err);
       scheduleRefund(eventId, reason, channel);
     });
-  }, ACK_TIMEOUT_MS);
+  }, delay);
   timer.unref();
-  pendingAcks.set(eventId, { timer, channel });
+  pendingAcks.set(eventId, { timer, reason, channel, armedAt });
 }
 
 /**
@@ -91,7 +110,24 @@ function scheduleRefund(eventId: string, reason: AdvancedCommandRefundReason, ch
  * @param channel - The streamer's channel, for the refund notice.
  */
 export function trackAdvancedCommandAck(eventId: string, channel: string): void {
-  scheduleRefund(eventId, 'no_ack', channel);
+  scheduleRefund(eventId, 'no_ack', channel, Date.now());
+}
+
+/**
+ * Applies a companion app's progress ping for a use whose actions are still running: restarts its
+ * ACK_TIMEOUT_MS countdown, so long actions (Delay actions) aren't refunded mid-run. The caller has
+ * already checked the use belongs to the pinging streamer.
+ * @param eventId - The use's event id.
+ * @returns True if the countdown was restarted; false if the use isn't waiting for an acknowledgement
+ *   (already resolved, timed out and awaiting a refund retry, or unknown to this process) or has
+ *   already been held for ACK_MAX_HOLD_MS.
+ */
+export function extendAdvancedCommandAck(eventId: string): boolean {
+  const pending = pendingAcks.get(eventId);
+  if (pending?.armedAt === undefined || !canExtendAckHold(pending.armedAt)) return false;
+  clearTimeout(pending.timer);
+  scheduleRefund(eventId, pending.reason, pending.channel, pending.armedAt);
+  return true;
 }
 
 /**

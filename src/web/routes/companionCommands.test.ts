@@ -12,13 +12,16 @@ vi.mock('../../db', () => ({
   listAdvancedCommands: vi.fn(),
   getAdvancedCommandUsageStreamerId: vi.fn(),
 }));
-vi.mock('../../commands/advancedCommands/advancedCommandRefunds', () => ({ acknowledgeAdvancedCommandUse: vi.fn() }));
+vi.mock('../../commands/advancedCommands/advancedCommandRefunds', () => ({
+  acknowledgeAdvancedCommandUse: vi.fn(),
+  extendAdvancedCommandAck: vi.fn(),
+}));
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
 import supertest from 'supertest';
 import router from './companionCommands';
 import { getStreamerByDiscordId, listAdvancedCommands, getAdvancedCommandUsageStreamerId } from '../../db';
-import { acknowledgeAdvancedCommandUse } from '../../commands/advancedCommands/advancedCommandRefunds';
+import { acknowledgeAdvancedCommandUse, extendAdvancedCommandAck } from '../../commands/advancedCommands/advancedCommandRefunds';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
 const EVENT_ID = '3f2b8c1e-4d5a-4b6c-8d7e-9f0a1b2c3d4e';
@@ -113,6 +116,45 @@ describe('POST /commands/ack', () => {
     vi.mocked(acknowledgeAdvancedCommandUse).mockRejectedValue(new Error('boom'));
     {
       const r = await supertest(app()).post('/commands/ack').send({ eventId: EVENT_ID, ok: true });
+      expect(r.status).toBe(500);
+    }
+  });
+});
+
+describe('POST /commands/progress', () => {
+  it('restarts the timeout for the streamer\'s own use', async () => {
+    vi.mocked(extendAdvancedCommandAck).mockReturnValueOnce(true);
+    const res = await supertest(app()).post('/commands/progress').send({ eventId: EVENT_ID }).expect(200);
+    expect(res.body).toEqual({ ok: true, extended: true });
+    expect(extendAdvancedCommandAck).toHaveBeenCalledWith(EVENT_ID);
+  });
+
+  it.each([[{}], [{ eventId: 'not-a-uuid' }], [{ eventId: 42 }]])('rejects a malformed body %o', async (body) => {
+    {
+      const r = await supertest(app()).post('/commands/progress').send(body);
+      expect(r.status).toBe(400);
+    }
+    expect(extendAdvancedCommandAck).not.toHaveBeenCalled();
+  });
+
+  it('refuses another streamer\'s or an unknown event', async () => {
+    vi.mocked(getAdvancedCommandUsageStreamerId).mockResolvedValueOnce(4);
+    {
+      const r = await supertest(app()).post('/commands/progress').send({ eventId: EVENT_ID });
+      expect(r.status).toBe(404);
+    }
+    vi.mocked(getAdvancedCommandUsageStreamerId).mockResolvedValueOnce(null);
+    {
+      const r = await supertest(app()).post('/commands/progress').send({ eventId: EVENT_ID });
+      expect(r.status).toBe(404);
+    }
+    expect(extendAdvancedCommandAck).not.toHaveBeenCalled();
+  });
+
+  it('returns 500 when the ownership lookup fails', async () => {
+    vi.mocked(getAdvancedCommandUsageStreamerId).mockRejectedValueOnce(new Error('boom'));
+    {
+      const r = await supertest(app()).post('/commands/progress').send({ eventId: EVENT_ID });
       expect(r.status).toBe(500);
     }
   });
