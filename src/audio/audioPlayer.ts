@@ -269,7 +269,9 @@ export async function connect(client: Client, guildId: string, channelId: string
     releasePreviousConnection(previousConnection, joinedConnection, deps);
     state.pendingConnection = null;
     state.connection = joinedConnection;
-    state.connectedAt = Date.now();
+    // @discordjs/voice hands back the live connection when this guild is already joined, so keep
+    // its original Ready time for a reused connection; only a new one restarts the age.
+    if (joinedConnection !== previousConnection || state.connectedAt === null) state.connectedAt = Date.now();
     state.currentChannelId = channel.id;
 
     clearReconnectTimer(state);

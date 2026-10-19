@@ -118,10 +118,16 @@ describe('POST /sfx', () => {
 
   it('logs how long the request took to handle at info level when it was quick', async () => {
     vi.mocked(findCachedSfxTrigger).mockResolvedValue(LOOKUP);
+    // First call stamps the arrival, the second measures it after playFile.
+    const now = vi.spyOn(performance, 'now').mockReturnValueOnce(1_000).mockReturnValueOnce(1_012);
 
-    await supertest(buildApp()).post('/sfx').send({ command: '!ding' }).expect(200);
+    try {
+      await supertest(buildApp()).post('/sfx').send({ command: '!ding' }).expect(200);
+    } finally {
+      now.mockRestore();
+    }
 
-    expect(log.info).toHaveBeenCalledWith(expect.stringMatching(/'ding\.mp3'.*request handled in \d+ms/));
+    expect(log.info).toHaveBeenCalledWith(expect.stringMatching(/'ding\.mp3'.*request handled in 12ms/));
     expect(log.warn).not.toHaveBeenCalled();
   });
 

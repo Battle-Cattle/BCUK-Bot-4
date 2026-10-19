@@ -703,6 +703,21 @@ describe('per-guild audio player', () => {
       expect(log.warn).not.toHaveBeenCalled();
     });
 
+    it('keeps the connection age when connect() reuses the live connection', async () => {
+      const voice = await import('@discordjs/voice');
+      const conn = makeConnection();
+      vi.mocked(voice.joinVoiceChannel).mockReturnValue(conn as never);
+      const { playing, now } = await startSound(0, 60 * 60_000);
+      // Rejoin an hour in: @discordjs/voice hands back the same connection.
+      await mod.connect(makeClient().client as never, 'guild-A', 'chan-1');
+      now.mockReturnValue(60 * 60_000 + 100);
+
+      playing();
+      now.mockRestore();
+
+      expect(log.debug).toHaveBeenCalledWith(expect.stringContaining('voice connected 60min'));
+    });
+
     it('logs a warning when the sound took longer than 500ms to start', async () => {
       const { playing, now } = await startSound(0, 1_000);
       now.mockReturnValue(3_500);
