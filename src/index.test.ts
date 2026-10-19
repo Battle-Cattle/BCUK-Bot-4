@@ -105,6 +105,10 @@ vi.mock('./twitch/pricing/rewardPricingScheduler', () => ({
   startRewardPricingScheduler: vi.fn(),
   stopRewardPricingScheduler: vi.fn().mockResolvedValue(undefined),
 }));
+vi.mock('./shared/eventLoopMonitor', () => ({
+  startEventLoopMonitor: vi.fn(),
+  stopEventLoopMonitor: vi.fn(),
+}));
 vi.mock('./twitch/pricing/rewardPricingService', () => ({
   registerRewardPricingRuntime: vi.fn(),
 }));
@@ -343,10 +347,12 @@ describe('startup — reward pricing scheduler', () => {
     const { startEventSub } = await import('./twitch/eventsub/twitchEventSub.js');
     const { startEventSubReconciliation } = await import('./twitch/eventsub/twitchEventSubReconciliation.js');
     const { startChannelReconciliationPoll } = await import('./twitch/twitchChannelReconciliationPoll.js');
+    const { startEventLoopMonitor } = await import('./shared/eventLoopMonitor.js');
 
     await runMain();
 
     expect(vi.mocked(startRewardPricingScheduler)).toHaveBeenCalledOnce();
+    expect(vi.mocked(startEventLoopMonitor)).toHaveBeenCalledOnce();
     expect(vi.mocked(startEventSub)).toHaveBeenCalledOnce();
     expect(vi.mocked(startEventSubReconciliation)).toHaveBeenCalledOnce();
     expect(vi.mocked(startChannelReconciliationPoll)).toHaveBeenCalledOnce();
@@ -534,12 +540,14 @@ describe('shutdown', () => {
     const { stopRewardPricingScheduler } = await import('./twitch/pricing/rewardPricingScheduler.js');
     const { stopEventSubReconciliation } = await import('./twitch/eventsub/twitchEventSubReconciliation.js');
     const { stopChannelReconciliationPoll } = await import('./twitch/twitchChannelReconciliationPoll.js');
+    const { stopEventLoopMonitor } = await import('./shared/eventLoopMonitor.js');
 
     await runMain();
     process.emit('SIGINT');
     await new Promise<void>((resolve) => setImmediate(resolve));
 
     expect(vi.mocked(stopRewardPricingScheduler)).toHaveBeenCalledOnce();
+    expect(vi.mocked(stopEventLoopMonitor)).toHaveBeenCalledOnce();
     expect(vi.mocked(stopEventSubReconciliation)).toHaveBeenCalledOnce();
     expect(vi.mocked(stopChannelReconciliationPoll)).toHaveBeenCalledOnce();
   });

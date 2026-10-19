@@ -1,5 +1,5 @@
 import { createLogger } from '../../shared/logger';
-import { Router } from 'express';
+import { Router, type Request, type Response, type NextFunction } from 'express';
 import { findCachedSfxTrigger, getAllSfxTriggers, getApprovedGuildIdsForKey } from '../../db';
 import { pickWeightedRandom } from '../../audio/soundSelector';
 import { playFile, VoiceNotConnectedError } from '../../audio/sfxPlayer';
@@ -9,6 +9,35 @@ import { resolvePresenceGuildOrRespond, getReadyDiscordClientOrRespond } from '.
 
 const log = createLogger('Streamdeck');
 const router = Router();
+
+/**
+ * A Play SFX request that takes longer than this to handle (auth, guild resolution, trigger
+ * lookup and handing the sound to the player) is logged as a warning, so a slow bot-side
+ * response is told apart from a slow audio start (logged by the audio player itself).
+ */
+const SLOW_SFX_REQUEST_MS = 250;
+
+/**
+ * Stamps the request's arrival time in `res.locals.sfxStartedAt`, ahead of `requireApiKey`, so
+ * the Play SFX log line can include the key lookup's time too.
+ * @param _req - Express request (unused).
+ * @param res - Express response; its locals get the timestamp.
+ * @param next - Continues to the next middleware.
+ */
+function stampRequestStart(_req: Request, res: Response, next: NextFunction): void {
+  res.locals.sfxStartedAt = performance.now();
+  next();
+}
+
+/**
+ * Milliseconds since {@link stampRequestStart} ran for this response, rounded.
+ * @param res - Express response whose locals hold the start time.
+ * @returns Elapsed whole milliseconds, or 0 if the request was never stamped.
+ */
+function elapsedMs(res: Response): number {
+  const startedAt = res.locals.sfxStartedAt as number | undefined;
+  return startedAt === undefined ? 0 : Math.round(performance.now() - startedAt);
+}
 
 /**
  * Lists all SFX triggers available to play via Streamdeck, hidden ones included (hidden only
@@ -41,7 +70,7 @@ router.get('/sfx', requireApiKey, async (req, res) => {
  * Plays a random weighted sound file for the SFX trigger named in the request
  * body, in whichever guild the key owner is currently connected to voice in.
  */
-router.post('/sfx', requireApiKey, async (req, res) => {
+router.post('/sfx', stampRequestStart, requireApiKey, async (req, res) => {
   const { command } = (req.body ?? {}) as { command?: unknown };
   if (typeof command !== 'string' || !command.trim()) {
     res.status(400).json({ ok: false, error: 'Missing or invalid "command" field' });
@@ -78,7 +107,10 @@ router.post('/sfx', requireApiKey, async (req, res) => {
   try {
     await playFile(filename, guildId);
     setVoicePlaying(guildId, filename, normalizedCommand, 'streamdeck');
-    log.info(`Playing '${filename.replace(/[\r\n]/g, '')}' for trigger '${normalizedCommand.replace(/[\r\n]/g, '')}' in guild ${guildId}`);
+    const handledMs = elapsedMs(res);
+    const message = `Playing '${filename.replace(/[\r\n]/g, '')}' for trigger '${normalizedCommand.replace(/[\r\n]/g, '')}' in guild ${guildId} (request handled in ${handledMs}ms)`;
+    if (handledMs > SLOW_SFX_REQUEST_MS) log.warn(message);
+    else log.info(message);
     res.json({ ok: true, file: filename });
   } catch (err: unknown) {
     if (err instanceof VoiceNotConnectedError) {
