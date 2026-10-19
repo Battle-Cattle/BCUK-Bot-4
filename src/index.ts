@@ -25,6 +25,7 @@ import { registerCountdownTwitchRuntime } from './commands/countdownHandler';
 import { registerFollowageRuntime } from './commands/followageHandler';
 import { registerAdvancedCommandRuntime } from './commands/advancedCommands/advancedCommandRuntime';
 import { sweepPendingAdvancedCommandUsage } from './commands/advancedCommands/advancedCommandRefunds';
+import { sweepPendingRedemptionAcks } from './twitch/eventsub/twitchEventSubRedemptionAcks';
 import {
   registerEventSubOverlayRuntime, registerEventSubTwitchRuntime, registerEventSubCompanionRuntime,
   registerEventSubAlertRuntime, registerEventSubDashboardRuntime, registerEventSubReloadRuntime,
@@ -223,7 +224,7 @@ function registerTwitchRuntimes(): void {
   registerFollowageRuntime({ send: sayInChannel });
   registerAdvancedCommandRuntime({ send: sayInChannel, hasCompanionConnection });
   registerEventSubOverlayRuntime({ pushOverlayEvent });
-  registerEventSubCompanionRuntime({ pushCompanionEvent });
+  registerEventSubCompanionRuntime({ pushCompanionEvent, hasCompanionConnection });
   registerEventSubAlertRuntime({ pushAlertEvent });
   registerEventSubDashboardRuntime({ pushDashboardEvent });
   registerEventSubTwitchRuntime({ send: sayInChannel });
@@ -231,6 +232,26 @@ function registerTwitchRuntimes(): void {
   registerRewardPricingRuntime({ pushPricingUpdate });
   registerTimerCommandsRuntime({ send: sayInChannel, getLoginUserIds: getActiveChannelUserIds });
   registerTwitchGuildResolutionRuntime({ resolveGuildIdForDiscordId });
+}
+
+/**
+ * Refunds advanced command uses and channel-point redemptions a restart left waiting for a
+ * companion acknowledgement (their timers lived in the old process). Runs before Twitch chat and
+ * EventSub start, so it can't catch a new use or redemption; a failure is logged, not fatal — the
+ * rows stay pending for the next start.
+ * @returns Resolves once both sweeps have been attempted.
+ */
+async function sweepPendingCompanionAcks(): Promise<void> {
+  try {
+    await sweepPendingAdvancedCommandUsage();
+  } catch (err) {
+    log.error('Failed to refund pending advanced command uses:', err);
+  }
+  try {
+    await sweepPendingRedemptionAcks();
+  } catch (err) {
+    log.error('Failed to refund redemptions pending companion confirmation:', err);
+  }
 }
 
 /**
@@ -298,14 +319,7 @@ async function main(): Promise<void> {
   });
   await primeOwnerAlertBaseline();
   startOwnerAlertWatcher();
-  // Refund advanced command uses a restart left waiting for a companion acknowledgement (their
-  // timers lived in the old process). Runs before Twitch chat connects, so it can't catch a new
-  // use; a failure is logged, not fatal — the rows stay pending for the next start.
-  try {
-    await sweepPendingAdvancedCommandUsage();
-  } catch (err) {
-    log.error('Failed to refund pending advanced command uses:', err);
-  }
+  await sweepPendingCompanionAcks();
   // Don't let a Twitch chat failure (e.g. a revoked bot token or an IRC outage) abort startup —
   // the web panel must still come up so the owner can reconnect the bot via /admin/bot-auth.
   try {

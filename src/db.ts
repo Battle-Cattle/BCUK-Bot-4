@@ -111,6 +111,14 @@ export type { StreamerEventType, StreamerEvent } from './db/eventLog';
 export { recordStreamerEvent, getRecentStreamerEvents } from './db/eventLog';
 export type { RedemptionProgress, RedemptionEffect } from './db/redemptionLedger';
 export { getRedemptionProgress, markRedemptionEffect, pruneRedemptionLedger } from './db/redemptionLedger';
+export type {
+  RedemptionAckStatus, RedemptionRefundReason, PendingRedemptionAck,
+} from './db/redemptionCompanionAck';
+export {
+  listCompanionConfirmationRewardIds, isCompanionConfirmationRequired, setCompanionConfirmationRequired,
+  recordPendingRedemptionAck, claimRedemptionAck, releaseRedemptionAck, updateRedemptionAckStatus,
+  getRedemptionAckStreamerId, listPendingRedemptionAcks, pruneResolvedRedemptionAcks,
+} from './db/redemptionCompanionAck';
 
 // ─── SFX ────────────────────────────────────────────────────────────────────
 
@@ -201,12 +209,14 @@ export type {
   TimerCommandInput, TimerCommandForScheduler,
 } from './db/timerCommands';
 export {
-  TimerCommandNotFoundError, TimerSelfServiceDeniedError,
-  updateOwnTimerCommand, setOwnTimerCommandEnabled, removeOwnTimerCommand, discardOwnNewTimerCommand,
-  getAllTimerCommandsWithAssignments, addTimerCommand, updateTimerCommand,
-  removeTimerCommand, setTimerCommandEnabled, getAllEnabledTimerCommandsWithChannel,
-  assignUserToTimer, assignUsersToTimer, unassignUserFromTimer,
+  TimerCommandNotFoundError, TimerSelfServiceDeniedError, getAllTimerCommandsWithAssignments,
 } from './db/timerCommands';
+export {
+  updateOwnTimerCommand, setOwnTimerCommandEnabled, removeOwnTimerCommand, discardOwnNewTimerCommand,
+  addTimerCommand, updateTimerCommand, removeTimerCommand, setTimerCommandEnabled,
+  assignUserToTimer, assignUsersToTimer, unassignUserFromTimer,
+} from './db/timerCommandWrites';
+export { getEnabledTimerCommandsForScheduler } from './db/timerCommandCache';
 
 // ─── Streamdeck API keys ─────────────────────────────────────────────────────
 

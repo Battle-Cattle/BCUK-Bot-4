@@ -31,7 +31,7 @@ import {
 import { getValidToken } from '../twitchUserTokens';
 import { updateRewardCost, deleteCustomReward, TwitchRewardUnsupportedError, TwitchRewardAuthError } from '../twitchApi';
 import {
-  applyRedemptionPricing, applyDecayTick, resetAndDeletePricing, deleteRewardAndPricing,
+  applyRedemptionPricing, applyDecayTick, resetAndDeletePricing, deleteRewardAndPricing, revertRedemptionPricing,
   registerRewardPricingRuntime, __resetPushRateLimiterForTests,
 } from './rewardPricingService';
 
@@ -76,6 +76,31 @@ beforeEach(() => {
   // otherwise leak between tests (e.g. a push in one test silently rate-limiting
   // the next test's push, since both use the same default reward key).
   __resetPushRateLimiterForTests();
+});
+
+describe('revertRedemptionPricing', () => {
+  it('no-ops when the reward has no enabled pricing config', async () => {
+    vi.mocked(getPricingForReward).mockResolvedValue(makeRow({ enabled: false }));
+    await revertRedemptionPricing(1, 'rwd1', Date.now());
+    expect(recordPricingUpdate).not.toHaveBeenCalled();
+  });
+
+  it('takes the redemption increment back off demand and pushes the lowered price', async () => {
+    // cooldown 300 / (2 × 1800) → increment 1/12; a just-applied increment on top of 0.25 demand.
+    const now = Date.now();
+    vi.mocked(getPricingForReward).mockResolvedValue(makeRow({
+      demand: 0.25 + 1 / 12, demand_updated_at: String(now), last_pushed_cost: 999, last_redemption_id: 'redemption-1',
+    }));
+    await revertRedemptionPricing(1, 'rwd1', now);
+
+    expect(updateRewardCost).toHaveBeenCalledWith('bc1', 'rwd1', expect.any(Number), 'user-token');
+    const fields = vi.mocked(recordPricingUpdate).mock.calls[0]![2];
+    expect(fields.demand).toBeCloseTo(0.25, 3);
+    // The revert isn't a redemption: it leaves the idempotency key alone and writes no ledger flag.
+    expect(fields.lastRedemptionId).toBe('redemption-1');
+    expect(fields.pricingAppliedRedemptionId).toBeNull();
+    expect(getRedemptionProgress).not.toHaveBeenCalled();
+  });
 });
 
 describe('applyRedemptionPricing', () => {

@@ -8,6 +8,9 @@ vi.mock('../../db', () => ({
 vi.mock('../../audio/soundSelector', () => ({ pickWeightedRandom: vi.fn() }));
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 vi.mock('../pricing/rewardPricingService', () => ({ applyRedemptionPricing: vi.fn().mockResolvedValue(undefined) }));
+vi.mock('./twitchEventSubRedemptionAcks', () => ({
+  prepareRedemptionConfirmation: vi.fn(), pushRedemptionForConfirmation: vi.fn(),
+}));
 
 import { handleRedemption } from './twitchEventSubRedemption';
 import { seenRedemptionIds, pendingRedemptionIds } from './twitchEventSubRedemptionDedup';
@@ -19,6 +22,7 @@ import {
 } from '../../db';
 import { pickWeightedRandom } from '../../audio/soundSelector';
 import { applyRedemptionPricing } from '../pricing/rewardPricingService';
+import { prepareRedemptionConfirmation, pushRedemptionForConfirmation } from './twitchEventSubRedemptionAcks';
 
 const mockPushOverlayEvent = vi.fn();
 registerEventSubOverlayRuntime({ pushOverlayEvent: mockPushOverlayEvent });
@@ -37,6 +41,8 @@ beforeEach(() => {
   vi.mocked(recordStreamerEvent).mockResolvedValue(101);
   vi.mocked(getRedemptionProgress).mockReset().mockResolvedValue(null);
   vi.mocked(markRedemptionEffect).mockReset().mockResolvedValue(undefined);
+  vi.mocked(prepareRedemptionConfirmation).mockReset().mockResolvedValue('none');
+  vi.mocked(pushRedemptionForConfirmation).mockReset().mockResolvedValue(undefined);
 });
 
 // ---------------------------------------------------------------------------
@@ -85,13 +91,63 @@ describe('handleRedemption', () => {
     expect(getStreamerById).toHaveBeenCalledWith(streamerId);
     expect(mockPushCompanionEvent).toHaveBeenCalledWith('999888777', {
       type: 'channel_points_redemption',
+      id: 'redemption-1',
       rewardId: 'reward-abc',
       rewardTitle: 'Cool Reward',
       userLogin: 'redeemer',
       userName: 'Redeemer',
       userInput: '',
+      ackRequired: false,
       redeemedAt: expect.any(String),
     });
+    expect(pushRedemptionForConfirmation).not.toHaveBeenCalled();
+  });
+
+  it('records a confirmation (which arms its timer) and pushes for confirmation when the reward requires it', async () => {
+    vi.mocked(getVideosForReward).mockResolvedValue([]);
+    vi.mocked(prepareRedemptionConfirmation).mockResolvedValue('pending');
+
+    await handleRedemption('streamer', event, CONFIG, streamerId);
+
+    expect(prepareRedemptionConfirmation).toHaveBeenCalledWith(
+      { id: 'redemption-1', rewardId: 'reward-abc', rewardTitle: 'Cool Reward', userLogin: 'redeemer' }, streamerId, 'streamer',
+    );
+    expect(pushRedemptionForConfirmation).toHaveBeenCalledWith('999888777', expect.objectContaining({ id: 'redemption-1', ackRequired: true }));
+    expect(mockPushCompanionEvent).not.toHaveBeenCalled();
+    // The confirmation record is a required effect, so it's written before the redemption is marked handled.
+    expect(vi.mocked(prepareRedemptionConfirmation).mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(markRedemptionEffect).mock.invocationCallOrder.at(-1)!);
+  });
+
+  it('still resolves without pushing when the streamer lookup fails (the armed timer refunds it)', async () => {
+    vi.mocked(getVideosForReward).mockResolvedValue([]);
+    vi.mocked(prepareRedemptionConfirmation).mockResolvedValue('pending');
+    vi.mocked(getStreamerById).mockRejectedValueOnce(new Error('db down'));
+
+    await expect(handleRedemption('streamer', event, CONFIG, streamerId)).resolves.toBe(true);
+
+    expect(pushRedemptionForConfirmation).not.toHaveBeenCalled();
+  });
+
+  it('does not push a redemption whose confirmation an earlier attempt already resolved', async () => {
+    vi.mocked(getVideosForReward).mockResolvedValue([]);
+    vi.mocked(prepareRedemptionConfirmation).mockResolvedValue('resolved');
+
+    await expect(handleRedemption('streamer', event, CONFIG, streamerId)).resolves.toBe(true);
+
+    expect(pushRedemptionForConfirmation).not.toHaveBeenCalled();
+    expect(mockPushCompanionEvent).not.toHaveBeenCalled();
+    expect(markRedemptionEffect).toHaveBeenCalledWith('redemption-1', streamerId, 'handled');
+  });
+
+  it('rejects without marking the redemption handled when recording the confirmation fails', async () => {
+    vi.mocked(getVideosForReward).mockResolvedValue([]);
+    vi.mocked(prepareRedemptionConfirmation).mockRejectedValueOnce(new Error('db down'));
+
+    await expect(handleRedemption('streamer', event, CONFIG, streamerId)).rejects.toThrow('db down');
+
+    expect(markRedemptionEffect).not.toHaveBeenCalledWith('redemption-1', streamerId, 'handled');
+    expect(mockPushCompanionEvent).not.toHaveBeenCalled();
   });
 
   it('pushes a companion event in addition to triggering the overlay when videos are configured', async () => {

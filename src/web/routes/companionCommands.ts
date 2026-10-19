@@ -1,17 +1,16 @@
 // Companion-app API for the streamer's advanced commands: the list (so the app's mappings window
-// can offer command names), and the acknowledgement the app sends after running a command's
-// actions — a failure (or no acknowledgement in time) refunds the viewer.
+// can offer command names), the progress pings it sends while a command's actions are still
+// running, and the acknowledgement it sends after — a failure (or no acknowledgement in time)
+// refunds the viewer.
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import { requireCompanionKey } from '../middleware';
 import { getAdvancedCommandUsageStreamerId, getStreamerByDiscordId, listAdvancedCommands } from '../../db';
-import { acknowledgeAdvancedCommandUse } from '../../commands/advancedCommands/advancedCommandRefunds';
+import { acknowledgeAdvancedCommandUse, extendAdvancedCommandAck } from '../../commands/advancedCommands/advancedCommandRefunds';
+import { handleCompanionAck, handleCompanionProgress } from './companionAck';
 
 const log = createLogger('CompanionCommands');
 const router = Router();
-
-const EVENT_ID_PATTERN = /^[0-9a-f-]{36}$/i;
-const MAX_ACK_ERROR_LENGTH = 255;
 
 /**
  * GET /api/companion/commands — bearer-token authenticated via `requireCompanionKey`. Lists the
@@ -45,18 +44,6 @@ router.get('/commands', requireCompanionKey, async (req, res) => {
 });
 
 /**
- * Validates an acknowledgement body.
- * @param body - The parsed JSON body.
- * @returns The event id, outcome and error text, or null if malformed.
- */
-function parseAck(body: unknown): { eventId: string; ok: boolean; error: string | null } | null {
-  const { eventId, ok, error } = (body ?? {}) as { eventId?: unknown; ok?: unknown; error?: unknown };
-  if (typeof eventId !== 'string' || !EVENT_ID_PATTERN.test(eventId) || typeof ok !== 'boolean') return null;
-  if (error != null && typeof error !== 'string') return null;
-  return { eventId, ok, error: typeof error === 'string' ? error.slice(0, MAX_ACK_ERROR_LENGTH) : null };
-}
-
-/**
  * POST /api/companion/commands/ack — the companion app reports whether it ran an
  * `advanced_command` event's actions. Success marks the use succeeded; failure refunds the
  * viewer. The event must belong to the authenticated streamer.
@@ -65,27 +52,28 @@ function parseAck(body: unknown): { eventId: string; ok: boolean; error: string 
  *   after the acknowledgement timeout), 400 for a malformed body, 404 for an unknown or
  *   another streamer's event, or 500 on an error.
  */
-router.post('/commands/ack', requireCompanionKey, async (req, res) => {
-  const ack = parseAck(req.body);
-  if (!ack) {
-    res.status(400).json({ ok: false, error: 'Expected { eventId, ok, error? }' });
-    return;
-  }
-  try {
-    const [streamer, ownerId] = await Promise.all([
-      getStreamerByDiscordId(req.companionDiscordId!),
-      getAdvancedCommandUsageStreamerId(ack.eventId),
-    ]);
-    if (ownerId === null || ownerId !== streamer?.id) {
-      res.status(404).json({ ok: false, error: 'event_not_found' });
-      return;
-    }
-    const resolved = await acknowledgeAdvancedCommandUse(ack.eventId, { ok: ack.ok, error: ack.error });
-    res.json({ ok: true, resolved });
-  } catch (err) {
-    log.error('Failed to acknowledge advanced command:', err);
-    res.status(500).json({ ok: false, error: 'Failed to acknowledge' });
-  }
-});
+router.post('/commands/ack', requireCompanionKey, (req, res) => handleCompanionAck(req, res, {
+  getOwnerStreamerId: getAdvancedCommandUsageStreamerId,
+  acknowledge: acknowledgeAdvancedCommandUse,
+  log,
+  failureLabel: 'Failed to acknowledge advanced command:',
+}));
+
+/**
+ * POST /api/companion/commands/progress — the companion app reports it's still running an
+ * `advanced_command` event's actions (sent periodically before the acknowledgement), restarting
+ * the acknowledgement timeout so long actions aren't refunded mid-run. The event must belong to
+ * the authenticated streamer.
+ * @param req - Express request; JSON body `{ eventId }`.
+ * @param res - `{ ok: true, extended }` (`extended` false once the use is resolved or has been held
+ *   as long as allowed), 400 for a malformed body, 404 for an unknown or another streamer's event,
+ *   or 500 on an error.
+ */
+router.post('/commands/progress', requireCompanionKey, (req, res) => handleCompanionProgress(req, res, {
+  getOwnerStreamerId: getAdvancedCommandUsageStreamerId,
+  extend: extendAdvancedCommandAck,
+  log,
+  failureLabel: 'Failed to record advanced command progress:',
+}));
 
 export default router;

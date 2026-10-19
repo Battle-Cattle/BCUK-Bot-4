@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computePrice, decayDemand, applyRedemption, computeRedemptionIncrement } from './rewardPricingMath';
+import { computePrice, decayDemand, applyRedemption, computeRedemptionIncrement, revertRedemption } from './rewardPricingMath';
 
 const config = { baseCost: 200, maxMultiplier: 4, curve: 1.5 };
 
@@ -159,5 +159,26 @@ describe('applyRedemption', () => {
     // Applying decay first means the increment survives even after demand fully decays.
     const result = applyRedemption(1, 1e9, 1800, 0.2);
     expect(result).toBeCloseTo(0.2, 10);
+  });
+});
+
+describe('revertRedemption', () => {
+  it('undoes an increment applied just now', () => {
+    const after = applyRedemption(0.3, 0, 1800, 0.2);
+    expect(revertRedemption(after, 0, 1800, 0.2, 0)).toBeCloseTo(0.3);
+  });
+
+  it('subtracts only the decayed share of an older increment, matching decay of the rest', () => {
+    // 0.3 + 0.2 applied, then one half-life passes: demand is 0.25, of which 0.1 is the increment.
+    const after = applyRedemption(0.3, 0, 1800, 0.2);
+    expect(revertRedemption(after, 1800, 1800, 0.2, 1800)).toBeCloseTo(0.15);
+  });
+
+  it('clamps at zero', () => {
+    expect(revertRedemption(0.05, 0, 1800, 0.2, 0)).toBe(0);
+  });
+
+  it('treats a non-positive half-life as no decay', () => {
+    expect(revertRedemption(0.5, 10, 0, 0.2, 10)).toBeCloseTo(0.3);
   });
 });

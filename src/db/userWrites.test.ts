@@ -7,10 +7,12 @@ vi.mock('./users', () => ({
 }));
 vi.mock('./customCommandCache', () => ({ invalidateCustomCommandLookupCache: vi.fn() }));
 vi.mock('./advancedCommandCache', () => ({ invalidateAdvancedCommandLookupCache: vi.fn() }));
+vi.mock('./timerCommandCache', () => ({ invalidateTimerCommandCache: vi.fn() }));
 
 import { upsertUserRecord, setTwitchBotEnabledRecord, deleteUnlinkedUserRecord } from './users';
 import { invalidateCustomCommandLookupCache } from './customCommandCache';
 import { invalidateAdvancedCommandLookupCache } from './advancedCommandCache';
+import { invalidateTimerCommandCache } from './timerCommandCache';
 import { upsertUser, updateTwitchBotEnabled, deleteUnlinkedUser } from './userWrites';
 
 beforeEach(() => {
@@ -106,5 +108,32 @@ describe('advanced command cache invalidation', () => {
     await updateTwitchBotEnabled('1', true);
     await deleteUnlinkedUser('1');
     expect(invalidateAdvancedCommandLookupCache).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('timer command cache invalidation', () => {
+  it('invalidates the timer command cache on a Twitch name change, including a Twitch unlink (null)', async () => {
+    vi.mocked(upsertUserRecord).mockResolvedValue(true);
+    await upsertUser('1', 'Alice', 0, 'alice_chan');
+    await upsertUser('1', 'Alice', 0, null);
+    expect(invalidateTimerCommandCache).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not invalidate the timer command cache when the Twitch name is untouched', async () => {
+    await upsertUser('1', 'Alice', 0);
+    expect(invalidateTimerCommandCache).not.toHaveBeenCalled();
+  });
+
+  it('invalidates the timer command cache when the Twitch bot is toggled or a user deleted', async () => {
+    vi.mocked(deleteUnlinkedUserRecord).mockResolvedValue(true);
+    await updateTwitchBotEnabled('1', false);
+    await deleteUnlinkedUser('1');
+    expect(invalidateTimerCommandCache).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not invalidate the timer command cache when disabling the Twitch bot fails', async () => {
+    vi.mocked(setTwitchBotEnabledRecord).mockRejectedValue(new Error('DB error'));
+    await expect(updateTwitchBotEnabled('1', false)).rejects.toThrow('DB error');
+    expect(invalidateTimerCommandCache).not.toHaveBeenCalled();
   });
 });

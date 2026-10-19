@@ -50,11 +50,13 @@ function buildApp() {
 
 const sampleEvent: CompanionEvent = {
   type: 'channel_points_redemption',
+  id: '17fa2df1-ad76-4804-bfa5-a40ef63efe63',
   rewardId: 'r1',
   rewardTitle: 'Test Reward',
   userLogin: 'viewer1',
   userName: 'Viewer1',
   userInput: '',
+  ackRequired: false,
   redeemedAt: new Date().toISOString(),
 };
 

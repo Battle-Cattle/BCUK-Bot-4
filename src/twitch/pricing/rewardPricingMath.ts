@@ -120,3 +120,30 @@ export function applyRedemption(
   const decayed = decayDemand(demand, elapsedSeconds, halfLifeSeconds);
   return Math.min(1, Math.max(0, decayed + redemptionIncrement));
 }
+
+/**
+ * Takes one earlier redemption's increment back off demand (the redemption was refunded): first
+ * decays for elapsed time, then subtracts what is left of that redemption's increment — the
+ * increment decays at the same half-life as the rest of demand, so after `secondsSinceRedemption`
+ * only that share of it is still part of `demand` — then clamps to [0,1].
+ *
+ * @param demand - Current demand value.
+ * @param elapsedSeconds - Real seconds elapsed since the demand value was last updated.
+ * @param halfLifeSeconds - Streamer's configured half-life, in seconds.
+ * @param redemptionIncrement - The increment the redemption added (see {@link computeRedemptionIncrement}).
+ * @param secondsSinceRedemption - Real seconds since the redemption's increment was applied.
+ * @returns The updated demand, clamped to [0,1].
+ */
+export function revertRedemption(
+  demand: number,
+  elapsedSeconds: number,
+  halfLifeSeconds: number,
+  redemptionIncrement: number,
+  secondsSinceRedemption: number,
+): number {
+  const decayed = decayDemand(demand, elapsedSeconds, halfLifeSeconds);
+  const remaining = halfLifeSeconds > 0
+    ? redemptionIncrement * Math.pow(2, -Math.max(0, secondsSinceRedemption) / halfLifeSeconds)
+    : redemptionIncrement;
+  return Math.min(1, Math.max(0, decayed - remaining));
+}

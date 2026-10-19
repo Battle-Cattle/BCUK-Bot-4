@@ -6,7 +6,7 @@ import {
 } from '../../db';
 import { getValidToken } from '../twitchUserTokens';
 import { updateRewardCost, deleteCustomReward, TwitchRewardUnsupportedError, TwitchRewardAuthError } from '../twitchApi';
-import { computePrice, decayDemand, applyRedemption, computeRedemptionIncrement } from './rewardPricingMath';
+import { computePrice, decayDemand, applyRedemption, computeRedemptionIncrement, revertRedemption } from './rewardPricingMath';
 import { createLogger } from '../../shared/logger';
 import { createRuntimeRegistry } from '../../shared/runtimeRegistry';
 
@@ -137,6 +137,17 @@ async function pushRewardCostUpdate(
 }
 
 /**
+ * What moves a reward's demand in {@link syncRewardPrice}: decay alone (a scheduler tick or an
+ * admin resync), a redemption's increment (keyed by its id, so a retry can't apply it twice), or
+ * taking a refunded redemption's increment back off (with when it was applied, so only the share
+ * of it that hasn't already decayed away is removed).
+ */
+type PricingChange =
+  | { kind: 'decay' }
+  | { kind: 'redemption'; redemptionId: string }
+  | { kind: 'revert'; redeemedAtMs: number };
+
+/**
  * Recomputes demand and price for one reward and persists the result, pushing the new
  * cost to Twitch only when it differs from the last pushed cost — since `newCost` is
  * already rounded to `row.round_to_nearest` (see `computePrice`), this comparison (and
@@ -154,29 +165,26 @@ async function pushRewardCostUpdate(
  *
  * @param streamerId - DB row ID of the owning streamer.
  * @param twitchRewardId - Twitch reward UUID.
- * @param applyIncrement - True for a redemption (decay + increment); false for a decay-only tick.
- * @param redemptionId - The redemption's own id when `applyIncrement` is true, so the idempotency
- *   guard can detect (and no-op on) a retry of the same redemption; null for a decay-only tick,
- *   which doesn't correspond to any single redemption.
+ * @param change - What moves demand: see {@link PricingChange}. A redemption's id lets the
+ *   idempotency guard detect (and no-op on) a retry of the same redemption.
  * @param settingsHint - Optional pre-fetched settings, passed by the decay scheduler when it has
  *   already loaded a streamer's settings once for this tick — avoids re-querying the same row for
  *   every one of that streamer's enabled rewards. Fetched fresh when omitted.
  */
 async function syncRewardPrice(
-  streamerId: number, twitchRewardId: string, applyIncrement: boolean, redemptionId: string | null, settingsHint?: StreamerPricingSettings,
+  streamerId: number, twitchRewardId: string, change: PricingChange, settingsHint?: StreamerPricingSettings,
 ): Promise<void> {
   const row = await getPricingForReward(streamerId, twitchRewardId);
   if (!row?.enabled) return;
 
   // Idempotency guard: a retried redemption (see handleRedemption's dedup pending/handled
   // lifecycle) must not double-apply its increment if this reward already processed it.
-  if (applyIncrement && redemptionId && await isRedemptionAlreadyPriced(streamerId, row.last_redemption_id, redemptionId)) return;
+  const redemptionId = change.kind === 'redemption' ? change.redemptionId : null;
+  if (redemptionId && await isRedemptionAlreadyPriced(streamerId, row.last_redemption_id, redemptionId)) return;
 
   const settings = settingsHint ?? await getPricingSettingsForStreamer(streamerId);
   const now = Date.now();
-  // demand_updated_at is BIGINT epoch ms — safe to coerce, won't exceed MAX_SAFE_INTEGER until year 275760.
-  const elapsedSeconds = Math.max(0, (now - Number(row.demand_updated_at)) / 1000);
-  const newDemand = computeNewDemand(row, settings, elapsedSeconds, applyIncrement);
+  const newDemand = computeNewDemand(row, settings, change, now);
 
   const newCost = computePrice(newDemand, {
     baseCost: row.base_cost,
@@ -196,8 +204,8 @@ async function syncRewardPrice(
     demand: newDemand,
     demandUpdatedAtMs: now,
     lastPushedCost,
-    lastRedemptionId: applyIncrement ? redemptionId : row.last_redemption_id,
-    pricingAppliedRedemptionId: applyIncrement ? redemptionId : null,
+    lastRedemptionId: redemptionId ?? row.last_redemption_id,
+    pricingAppliedRedemptionId: redemptionId,
   });
 
   await publishPricingSideEffects(streamerId, row.id, { rewardId: twitchRewardId, cost: newCost, demand: newDemand, recordedAt: now });
@@ -226,20 +234,23 @@ async function isRedemptionAlreadyPriced(streamerId: number, lastRedemptionId: s
 }
 
 /**
- * Computes a reward's new demand after `elapsedSeconds` of decay, plus one redemption's increment
- * when `applyIncrement` is true.
+ * Computes a reward's new demand: decayed for the time since `row.demand_updated_at`, then moved
+ * by `change` (a redemption's increment added, or a refunded redemption's remaining increment
+ * taken back off).
  * @param row - The reward's current pricing row.
  * @param settings - The owning streamer's pricing settings.
- * @param elapsedSeconds - Seconds since `row.demand_updated_at`.
- * @param applyIncrement - True for a redemption; false for a decay-only tick.
+ * @param change - What moves demand.
+ * @param now - The current time (epoch ms).
  * @returns The new demand value.
  */
-function computeNewDemand(
-  row: RewardPricingRow, settings: StreamerPricingSettings, elapsedSeconds: number, applyIncrement: boolean,
-): number {
-  if (!applyIncrement) return decayDemand(row.demand, elapsedSeconds, settings.half_life_seconds);
+function computeNewDemand(row: RewardPricingRow, settings: StreamerPricingSettings, change: PricingChange, now: number): number {
+  // demand_updated_at is BIGINT epoch ms — safe to coerce, won't exceed MAX_SAFE_INTEGER until year 275760.
+  const elapsedSeconds = Math.max(0, (now - Number(row.demand_updated_at)) / 1000);
+  if (change.kind === 'decay') return decayDemand(row.demand, elapsedSeconds, settings.half_life_seconds);
   const increment = computeRedemptionIncrement(row.cooldown_seconds, settings.half_life_seconds, settings.time_to_max_multiplier);
-  return applyRedemption(row.demand, elapsedSeconds, settings.half_life_seconds, increment);
+  if (change.kind === 'redemption') return applyRedemption(row.demand, elapsedSeconds, settings.half_life_seconds, increment);
+  const secondsSinceRedemption = (now - change.redeemedAtMs) / 1000;
+  return revertRedemption(row.demand, elapsedSeconds, settings.half_life_seconds, increment, secondsSinceRedemption);
 }
 
 /**
@@ -280,7 +291,22 @@ async function publishPricingSideEffects(
  * @param redemptionId - Twitch's own id of the redemption being applied.
  */
 export async function applyRedemptionPricing(streamerId: number, twitchRewardId: string, redemptionId: string): Promise<void> {
-  await pricingQueue.run(queueKey(streamerId, twitchRewardId), () => syncRewardPrice(streamerId, twitchRewardId, true, redemptionId));
+  await pricingQueue.run(queueKey(streamerId, twitchRewardId), () => syncRewardPrice(streamerId, twitchRewardId, { kind: 'redemption', redemptionId }));
+}
+
+/**
+ * Takes a refunded redemption's increment back off a reward's dynamic pricing (see
+ * `revertRedemption`), and pushes the lowered price to Twitch if it changed. Called when a reward
+ * that requires companion confirmation is refunded, so a redemption that didn't happen doesn't
+ * leave the price raised. No-ops when the reward has no enabled pricing config. The caller makes
+ * sure this runs at most once per redemption (its confirmation row is resolved exactly once).
+ *
+ * @param streamerId - DB row ID of the owning streamer.
+ * @param twitchRewardId - Twitch reward UUID that was redeemed.
+ * @param redeemedAtMs - When the redemption's increment was applied (epoch ms).
+ */
+export async function revertRedemptionPricing(streamerId: number, twitchRewardId: string, redeemedAtMs: number): Promise<void> {
+  await pricingQueue.run(queueKey(streamerId, twitchRewardId), () => syncRewardPrice(streamerId, twitchRewardId, { kind: 'revert', redeemedAtMs }));
 }
 
 /**
@@ -293,7 +319,7 @@ export async function applyRedemptionPricing(streamerId: number, twitchRewardId:
  * @param settingsHint - Optional pre-fetched settings for this streamer; see {@link syncRewardPrice}.
  */
 export async function applyDecayTick(streamerId: number, twitchRewardId: string, settingsHint?: StreamerPricingSettings): Promise<void> {
-  await pricingQueue.run(queueKey(streamerId, twitchRewardId), () => syncRewardPrice(streamerId, twitchRewardId, false, null, settingsHint));
+  await pricingQueue.run(queueKey(streamerId, twitchRewardId), () => syncRewardPrice(streamerId, twitchRewardId, { kind: 'decay' }, settingsHint));
 }
 
 /**
