@@ -8,8 +8,8 @@ vi.mock('../db', () => ({
 
 import { getLoyaltyPointsConfig, adjustLoyaltyPointsBalance, isExcludedFromLoyaltyPoints } from '../db';
 import {
-  awardPointsForChatMessage, tryClaimPointsCooldown, clearPointsCooldowns,
-  awardPointsForSub, awardPointsForGiftSub, getRemainingCooldownSeconds,
+  awardPointsForChatMessage, clearPointsCooldowns,
+  awardPointsForSub, awardPointsForGiftSub,
 } from './pointsEarnHandler';
 
 const ENABLED_CONFIG = { enabled: true, pointsPerMessage: 1, cooldownSeconds: 60, pointsPerSub: 100, pointsPerGiftSub: 100 };
@@ -25,67 +25,6 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
-});
-
-// ─── tryClaimPointsCooldown ───────────────────────────────────────────────────
-
-describe('tryClaimPointsCooldown', () => {
-  it('succeeds on the first claim for a (streamer, viewer) pair', () => {
-    expect(tryClaimPointsCooldown(1, 'viewer', 60)).toBe(true);
-  });
-
-  it('fails on a second claim within the cooldown window', () => {
-    tryClaimPointsCooldown(1, 'viewer', 60);
-    expect(tryClaimPointsCooldown(1, 'viewer', 60)).toBe(false);
-  });
-
-  it('succeeds again once the cooldown has elapsed', () => {
-    tryClaimPointsCooldown(1, 'viewer', 60);
-    vi.advanceTimersByTime(60_000);
-    expect(tryClaimPointsCooldown(1, 'viewer', 60)).toBe(true);
-  });
-
-  it('does not share cooldown state between different streamers for the same viewer', () => {
-    tryClaimPointsCooldown(1, 'viewer', 60);
-    expect(tryClaimPointsCooldown(2, 'viewer', 60)).toBe(true);
-  });
-
-  it('does not share cooldown state between different viewers on the same streamer', () => {
-    tryClaimPointsCooldown(1, 'alice', 60);
-    expect(tryClaimPointsCooldown(1, 'bob', 60)).toBe(true);
-  });
-
-  it('honors a shorter configured cooldown', () => {
-    tryClaimPointsCooldown(1, 'viewer', 10);
-    vi.advanceTimersByTime(10_000);
-    expect(tryClaimPointsCooldown(1, 'viewer', 10)).toBe(true);
-  });
-});
-
-// ─── getRemainingCooldownSeconds ──────────────────────────────────────────────
-
-describe('getRemainingCooldownSeconds', () => {
-  it('returns 0 for a pair that has never claimed the cooldown', () => {
-    expect(getRemainingCooldownSeconds(1, 'viewer', 60)).toBe(0);
-  });
-
-  it('returns the whole seconds remaining, rounded up, right after a claim', () => {
-    tryClaimPointsCooldown(1, 'viewer', 60);
-    vi.advanceTimersByTime(17_400); // 17.4s elapsed => 42.6s remaining
-    expect(getRemainingCooldownSeconds(1, 'viewer', 60)).toBe(43);
-  });
-
-  it('returns 0 once the cooldown has fully elapsed', () => {
-    tryClaimPointsCooldown(1, 'viewer', 60);
-    vi.advanceTimersByTime(60_000);
-    expect(getRemainingCooldownSeconds(1, 'viewer', 60)).toBe(0);
-  });
-
-  it('does not itself claim the cooldown', () => {
-    tryClaimPointsCooldown(1, 'viewer', 60);
-    getRemainingCooldownSeconds(1, 'viewer', 60);
-    expect(tryClaimPointsCooldown(1, 'viewer', 60)).toBe(false);
-  });
 });
 
 // ─── awardPointsForChatMessage ────────────────────────────────────────────────
@@ -135,7 +74,10 @@ describe('awardPointsForChatMessage', () => {
     await awardPointsForChatMessage(1, 'somebot');
     expect(isExcludedFromLoyaltyPoints).toHaveBeenCalledWith(1, 'somebot');
     expect(adjustLoyaltyPointsBalance).not.toHaveBeenCalled();
-    expect(tryClaimPointsCooldown(1, 'somebot', 60)).toBe(true);
+
+    vi.mocked(isExcludedFromLoyaltyPoints).mockResolvedValue(false);
+    await awardPointsForChatMessage(1, 'somebot');
+    expect(adjustLoyaltyPointsBalance).toHaveBeenCalledWith(1, 'somebot', 1);
   });
 
   it('tracks cooldowns independently per streamer', async () => {

@@ -5,20 +5,21 @@ vi.mock('../db', () => ({
   resolveLoyaltyPointsGambleOutcome: vi.fn(),
   getLoyaltyPointsConfig: vi.fn(),
   isExcludedFromLoyaltyPoints: vi.fn(),
+  adjustLoyaltyPointsBalance: vi.fn(),
 }));
-vi.mock('./pointsEarnHandler', () => ({ tryClaimPointsCooldown: vi.fn(), getRemainingCooldownSeconds: vi.fn() }));
 
 // Shared so a test can assert on the error logged by gambleHandler.ts's module-level `log`
 // instance (created once via `createLogger('Gamble')` at import time).
 const { logErrorSpy } = vi.hoisted(() => ({ logErrorSpy: vi.fn() }));
 vi.mock('../shared/logger', () => ({ createLogger: () => ({ info: vi.fn(), error: logErrorSpy }) }));
 
-import { getLoyaltyPointsBalance, resolveLoyaltyPointsGambleOutcome, getLoyaltyPointsConfig, isExcludedFromLoyaltyPoints } from '../db';
-import { tryClaimPointsCooldown, getRemainingCooldownSeconds } from './pointsEarnHandler';
-import { executeGambleCommandForTwitch, registerGambleTwitchRuntime } from './gambleHandler';
+import { getLoyaltyPointsBalance, resolveLoyaltyPointsGambleOutcome, getLoyaltyPointsConfig, isExcludedFromLoyaltyPoints, adjustLoyaltyPointsBalance } from '../db';
+import { awardPointsForChatMessage, clearPointsCooldowns } from './pointsEarnHandler';
+import { executeGambleCommandForTwitch, registerGambleTwitchRuntime, clearGambleCooldowns } from './gambleHandler';
 
 const SEND = vi.fn();
 let randomSpy: ReturnType<typeof vi.spyOn>;
+let now: number;
 const ENABLED_CONFIG = { enabled: true, pointsPerMessage: 1, cooldownSeconds: 60, pointsPerSub: 100, pointsPerGiftSub: 100 };
 
 beforeEach(() => {
@@ -29,8 +30,11 @@ beforeEach(() => {
   vi.mocked(resolveLoyaltyPointsGambleOutcome).mockResolvedValue(900);
   vi.mocked(getLoyaltyPointsConfig).mockResolvedValue(ENABLED_CONFIG);
   vi.mocked(isExcludedFromLoyaltyPoints).mockResolvedValue(false);
-  vi.mocked(tryClaimPointsCooldown).mockReturnValue(true);
-  vi.mocked(getRemainingCooldownSeconds).mockReturnValue(42);
+  vi.mocked(adjustLoyaltyPointsBalance).mockResolvedValue(0);
+  clearGambleCooldowns();
+  clearPointsCooldowns();
+  now = 1_000_000;
+  vi.spyOn(Date, 'now').mockImplementation(() => now);
   randomSpy = vi.spyOn(Math, 'random');
 });
 
@@ -62,8 +66,11 @@ describe('executeGambleCommandForTwitch', () => {
     await executeGambleCommandForTwitch('channel', 1, '!gamble 100', 'somebot', '!gamble');
     expect(isExcludedFromLoyaltyPoints).toHaveBeenCalledWith(1, 'somebot');
     expect(SEND).not.toHaveBeenCalled();
-    expect(tryClaimPointsCooldown).not.toHaveBeenCalled();
     expect(resolveLoyaltyPointsGambleOutcome).not.toHaveBeenCalled();
+
+    vi.mocked(isExcludedFromLoyaltyPoints).mockResolvedValue(false);
+    await executeGambleCommandForTwitch('channel', 1, '!gamble 100', 'somebot', '!gamble');
+    expect(resolveLoyaltyPointsGambleOutcome).toHaveBeenCalledOnce();
   });
 
   it('no-ops when the streamer has a config row but enabled is false', async () => {
@@ -75,8 +82,10 @@ describe('executeGambleCommandForTwitch', () => {
   it('sends a usage reply for an invalid amount, without consuming the cooldown', async () => {
     await executeGambleCommandForTwitch('channel', 1, '!gamble abc', 'alice', '!gamble');
     expect(SEND).toHaveBeenCalledWith('channel', expect.stringContaining('Usage: !gamble'));
-    expect(tryClaimPointsCooldown).not.toHaveBeenCalled();
     expect(resolveLoyaltyPointsGambleOutcome).not.toHaveBeenCalled();
+
+    await executeGambleCommandForTwitch('channel', 1, '!gamble 100', 'alice', '!gamble');
+    expect(resolveLoyaltyPointsGambleOutcome).toHaveBeenCalledOnce();
   });
 
   it('sends a usage reply for an amount above the caller\'s balance', async () => {
@@ -85,19 +94,36 @@ describe('executeGambleCommandForTwitch', () => {
     expect(SEND).toHaveBeenCalledWith('channel', expect.stringContaining('Usage: !gamble'));
   });
 
-  it('does not gamble when the cooldown is active, and replies with the remaining time', async () => {
-    vi.mocked(tryClaimPointsCooldown).mockReturnValue(false);
-    vi.mocked(getRemainingCooldownSeconds).mockReturnValue(42);
+  it('does not gamble while a previous bet\'s cooldown is active, and replies with the remaining time', async () => {
     await executeGambleCommandForTwitch('channel', 1, '!gamble 100', 'alice', '!gamble');
-    expect(resolveLoyaltyPointsGambleOutcome).not.toHaveBeenCalled();
-    expect(getRemainingCooldownSeconds).toHaveBeenCalledWith(1, 'alice', 60);
-    expect(SEND).toHaveBeenCalledWith('channel', '@alice still on cooldown — try again in 42s.');
+    now += 18_000;
+    await executeGambleCommandForTwitch('channel', 1, '!gamble 100', 'alice', '!gamble');
+    expect(resolveLoyaltyPointsGambleOutcome).toHaveBeenCalledOnce();
+    expect(SEND).toHaveBeenLastCalledWith('channel', '@alice still on cooldown — try again in 42s.');
   });
 
   it('uses the streamer\'s configured cooldown', async () => {
     vi.mocked(getLoyaltyPointsConfig).mockResolvedValue({ enabled: true, pointsPerMessage: 1, cooldownSeconds: 15, pointsPerSub: 100, pointsPerGiftSub: 100 });
     await executeGambleCommandForTwitch('channel', 1, '!gamble 100', 'alice', '!gamble');
-    expect(tryClaimPointsCooldown).toHaveBeenCalledWith(1, 'alice', 15);
+    now += 15_000;
+    await executeGambleCommandForTwitch('channel', 1, '!gamble 100', 'alice', '!gamble');
+    expect(resolveLoyaltyPointsGambleOutcome).toHaveBeenCalledTimes(2);
+  });
+
+  it('is not put on cooldown by a preceding chat-earn award (ordinary chat or other commands)', async () => {
+    await awardPointsForChatMessage(1, 'alice');
+    expect(adjustLoyaltyPointsBalance).toHaveBeenCalledOnce();
+
+    await executeGambleCommandForTwitch('channel', 1, '!gamble 5', 'alice', '!gamble');
+
+    expect(resolveLoyaltyPointsGambleOutcome).toHaveBeenCalledWith(1, 'alice', 5, expect.any(Boolean));
+    expect(SEND).not.toHaveBeenCalledWith('channel', expect.stringContaining('cooldown'));
+  });
+
+  it('does not put chat-earn on cooldown', async () => {
+    await executeGambleCommandForTwitch('channel', 1, '!gamble 5', 'alice', '!gamble');
+    await awardPointsForChatMessage(1, 'alice');
+    expect(adjustLoyaltyPointsBalance).toHaveBeenCalledWith(1, 'alice', 1);
   });
 
   it('resolves the stake debit and outcome atomically in one call', async () => {

@@ -237,9 +237,9 @@ function handleTwitchMessage(channel: string, user: string, message: string, msg
     // would otherwise run the same query three times per chat message.
     const streamerIdPromise = resolveStreamerIdForTwitchChannel(normalizedChannel);
     const earnPromise = streamerIdPromise.then((streamerId) => {
-      // Skip chat-earn for a !gamble message itself — it would otherwise race
-      // executeGambleCommandForTwitch below for the same shared points cooldown and almost
-      // always win it first, silently dropping the bet (see GAMBLE_COMMAND's doc comment).
+      // Skip chat-earn for a !gamble message itself — spending points isn't chatting. !points
+      // does earn (it's a chat message like any other), and chat-earn's cooldown is independent
+      // of !gamble's, so no message here can put !gamble on cooldown either way.
       if (streamerId !== null && command !== GAMBLE_COMMAND) {
         return awardPointsForChatMessage(streamerId, user);
       }
