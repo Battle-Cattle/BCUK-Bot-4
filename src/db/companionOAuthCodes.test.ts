@@ -27,7 +27,7 @@ vi.mock('./pool', () => {
 vi.mock('mysql2/promise', () => ({ default: {} }));
 
 import { getPool } from './pool';
-import { createCode, exchangeCodeForToken } from './companionOAuthCodes';
+import { createCode, exchangeCodeForToken, pkceS256Challenge } from './companionOAuthCodes';
 import { createHash } from 'crypto';
 import { makeMockConnection } from '../test-utils/mockMysqlPool';
 
@@ -54,6 +54,22 @@ describe('createCode', () => {
     expect(params[0]).toBe(sha256hex(plain));
     expect(params[1]).toBe('123');
     expect(params[2]).toBe(60);
+    expect(params[3]).toBeNull();
+  });
+
+  it('stores the PKCE challenge with the code when one was sent', async () => {
+    const execute = vi.fn().mockResolvedValue([{}]);
+    vi.mocked(getPool).mockReturnValue({ execute } as any);
+    await createCode('123', 'challenge');
+    const [sql, params] = execute.mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain('code_challenge');
+    expect(params[3]).toBe('challenge');
+  });
+});
+
+describe('pkceS256Challenge', () => {
+  it('matches the RFC 7636 appendix B example', () => {
+    expect(pkceS256Challenge('dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk')).toBe('E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM');
   });
 });
 
@@ -123,5 +139,21 @@ describe('exchangeCodeForToken', () => {
     expect(conn.rollback).toHaveBeenCalledTimes(1);
     expect(conn.commit).not.toHaveBeenCalled();
     expect(conn.release).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('exchangeCodeForToken with PKCE', () => {
+  it('requires the stored challenge to match the verifier\'s, and passes null without a verifier', async () => {
+    const execute = vi.fn().mockResolvedValue([{ affectedRows: 0 }]);
+    const conn = buildConn({ execute });
+    vi.mocked(getPool).mockReturnValue({ getConnection: vi.fn().mockResolvedValue(conn) } as any);
+
+    await exchangeCodeForToken('code', 'dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk');
+    const [sql, params] = execute.mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain('code_challenge IS NULL OR code_challenge = ?');
+    expect(params[1]).toBe('E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM');
+
+    await exchangeCodeForToken('code');
+    expect((execute.mock.calls[1] as [string, unknown[]])[1][1]).toBeNull();
   });
 });

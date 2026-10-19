@@ -14,16 +14,27 @@ const CODE_TTL_SECONDS = 60;
  * the app and DB clocks drift.
  *
  * @param discordId - Discord snowflake the code will resolve to once consumed.
+ * @param codeChallenge - The app's PKCE S256 challenge, or null if it didn't send one. When set,
+ *   the code only exchanges with the matching `code_verifier` (see {@link exchangeCodeForToken}).
  * @returns The plaintext code (only ever returned here — only the hash is stored).
  */
-export async function createCode(discordId: string): Promise<string> {
+export async function createCode(discordId: string, codeChallenge: string | null = null): Promise<string> {
   const { secret: plain, hash } = generateSecretAndHash(24);
   await getPool().execute(
-    `INSERT INTO companion_oauth_codes (code_hash, discord_id, expires_at, used_at)
-     VALUES (?, ?, DATE_ADD(NOW(), INTERVAL ? SECOND), NULL)`,
-    [hash, discordId, CODE_TTL_SECONDS],
+    `INSERT INTO companion_oauth_codes (code_hash, discord_id, expires_at, used_at, code_challenge)
+     VALUES (?, ?, DATE_ADD(NOW(), INTERVAL ? SECOND), NULL, ?)`,
+    [hash, discordId, CODE_TTL_SECONDS, codeChallenge],
   );
   return plain;
+}
+
+/**
+ * The PKCE S256 challenge for a verifier: base64url (no padding) of its SHA-256 (RFC 7636 §4.2).
+ * @param codeVerifier - The app's plaintext code verifier.
+ * @returns The challenge to compare against the one stored with the code.
+ */
+export function pkceS256Challenge(codeVerifier: string): string {
+  return createHash('sha256').update(codeVerifier).digest('base64url');
 }
 
 /**
@@ -33,16 +44,25 @@ export async function createCode(discordId: string): Promise<string> {
  * being redeemed twice concurrently. Shared by `createCode`'s expiry check and
  * `exchangeCodeForToken` (within a transaction), so both run identical mark-used-then-lookup SQL.
  *
+ * A code issued with a PKCE challenge only matches when `verifierChallenge` equals it; a code
+ * issued without one matches regardless (`code_challenge = NULL` is never true, so a missing
+ * verifier never satisfies a stored challenge).
+ *
  * @param executor - Pool or transaction connection to run the query on.
  * @param hash - SHA-256 hash of the plaintext code.
- * @returns The Discord ID the code was issued for, or null if invalid/expired/already used.
+ * @param verifierChallenge - S256 challenge of the presented code verifier, or null if none was sent.
+ * @returns The Discord ID the code was issued for, or null if invalid/expired/already used, or its
+ *   PKCE challenge doesn't match.
  */
-async function consumeCodeOnConnection(executor: mysql.Pool | mysql.PoolConnection, hash: string): Promise<string | null> {
+async function consumeCodeOnConnection(
+  executor: mysql.Pool | mysql.PoolConnection, hash: string, verifierChallenge: string | null,
+): Promise<string | null> {
   const [result] = await executor.execute<mysql.ResultSetHeader>(
     `UPDATE companion_oauth_codes
      SET used_at = NOW()
-     WHERE code_hash = ? AND used_at IS NULL AND expires_at > NOW()`,
-    [hash],
+     WHERE code_hash = ? AND used_at IS NULL AND expires_at > NOW()
+       AND (code_challenge IS NULL OR code_challenge = ?)`,
+    [hash, verifierChallenge],
   );
   if (result.affectedRows === 0) return null;
 
@@ -67,16 +87,19 @@ export interface CompanionTokenExchange {
  * entire Discord OAuth login).
  *
  * @param code - Plaintext code presented by the companion app.
+ * @param codeVerifier - The app's PKCE code verifier, or null if it didn't send one. Required when
+ *   the code was issued with a challenge.
  * @returns The plaintext companion app token and its owning Discord ID (the caller needs the
  *   latter to disconnect any SSE connection still open under a token this issue just replaced),
- *   or null if the code is invalid/expired/already used.
+ *   or null if the code is invalid/expired/already used, or fails its PKCE check.
  */
-export async function exchangeCodeForToken(code: string): Promise<CompanionTokenExchange | null> {
+export async function exchangeCodeForToken(code: string, codeVerifier: string | null = null): Promise<CompanionTokenExchange | null> {
   const hash = createHash('sha256').update(code).digest('hex');
+  const verifierChallenge = codeVerifier === null ? null : pkceS256Challenge(codeVerifier);
   class CodeNotFoundError extends Error {}
   try {
     return await withTransaction(async (conn) => {
-      const discordId = await consumeCodeOnConnection(conn, hash);
+      const discordId = await consumeCodeOnConnection(conn, hash, verifierChallenge);
       // Throwing (rather than returning null) rolls back the "used" mark applied by
       // consumeCodeOnConnection above, so an invalid/expired/already-used code — or the
       // edge case where the row vanishes between the UPDATE and the follow-up SELECT —
