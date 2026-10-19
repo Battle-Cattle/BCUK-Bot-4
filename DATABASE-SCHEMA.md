@@ -346,7 +346,7 @@ defined.
 | `streamer_id` | `INT` PK | FK to `streamer.id` ON DELETE CASCADE |
 | `enabled` | `TINYINT(1)` | Opt-in switch; `0` (the default) means the feature is off for this streamer |
 | `points_per_message` | `INT` | Points awarded per chat message, subject to `cooldown_seconds` |
-| `cooldown_seconds` | `INT` | Minimum seconds between chat-earn awards for the same viewer; also the `!gamble` cooldown (shared, not stacked) |
+| `cooldown_seconds` | `INT` | Minimum seconds between chat-earn awards for the same viewer; also the length of the separate `!gamble` cooldown (tracked independently, so chatting never blocks a bet) |
 | `points_per_sub` | `INT` | Awarded on a sub or resub |
 | `points_per_gift_sub` | `INT` | Multiplied by the gift count and awarded to the gifter (not the recipients) |
 | `updated_at` | `TIMESTAMP` | |

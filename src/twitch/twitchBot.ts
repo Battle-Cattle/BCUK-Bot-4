@@ -238,13 +238,9 @@ function handleTwitchMessage(channel: string, user: string, message: string, msg
     const streamerIdPromise = resolveStreamerIdForTwitchChannel(normalizedChannel);
     fireAndForget(
       streamerIdPromise.then((streamerId) => {
-        // Skip chat-earn for a !gamble message itself — it would otherwise race
-        // executeGambleCommandForTwitch below for the same shared points cooldown and almost
-        // always win it first, silently dropping the bet (see GAMBLE_COMMAND's doc comment).
-        // Also skip it for !points — that command has no cooldown of its own, but without this
-        // exemption it would still claim the shared cooldown as an ordinary chat message,
-        // silently blocking an immediately-following !gamble for up to the full cooldown
-        // duration (see POINTS_COMMAND's doc comment).
+        // Skip chat-earn for the points commands themselves (!gamble, !points) — spending or
+        // checking points isn't chatting. Chat-earn's cooldown is independent of !gamble's, so
+        // no message here can put !gamble on cooldown either way.
         if (streamerId !== null && command !== GAMBLE_COMMAND && command !== POINTS_COMMAND) {
           return awardPointsForChatMessage(streamerId, user);
         }

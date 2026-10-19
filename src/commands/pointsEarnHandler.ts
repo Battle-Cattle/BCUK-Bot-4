@@ -1,57 +1,14 @@
 import { getLoyaltyPointsConfig, adjustLoyaltyPointsBalance, isExcludedFromLoyaltyPoints, type LoyaltyPointsConfig } from '../db';
+import { createPerViewerCooldown } from './perViewerCooldown';
 
-// A per-(streamer, viewer) last-earn timestamp, used by both the passive chat-earn path and
-// `!gamble`'s shared cooldown (see tryClaimPointsCooldown below). Unlike `cooldownGate.ts`'s
-// `createCooldownGate()`, this cooldown's duration must be configurable per streamer
-// (`LoyaltyPointsConfig.cooldownSeconds`), which `createCooldownGate()` doesn't support — it's
-// hardcoded to the fixed `GLOBAL_COOLDOWN_MS` constant.
-const lastEarnedAt = new Map<string, number>();
+// Passive chat-earn's own per-(streamer, viewer) cooldown. Deliberately separate from `!gamble`'s
+// (see gambleHandler.ts): chatting or running other commands must never put `!gamble` on cooldown.
+const chatEarnCooldown = createPerViewerCooldown();
 
-/** Builds this cooldown's composite key: earning is per-streamer, so the same viewer chatting
- *  on two different streamers' channels must never share a cooldown. */
-function cooldownKey(streamerId: number, twitchUsername: string): string {
-  return `${streamerId}:${twitchUsername}`;
-}
-
-/**
- * Claims the shared points cooldown for a (streamer, viewer) pair if they're currently off
- * cooldown, recording the claim time. Used by both passive chat-earn and `!gamble`, so a viewer
- * can't alternate between the two to bypass either one's cooldown.
- * @param streamerId - The streamer's `streamer.id`.
- * @param twitchUsername - The viewer's Twitch login.
- * @param cooldownSeconds - The streamer's configured (or default) cooldown length.
- * @returns True if the claim succeeded (caller may proceed); false if still on cooldown.
- */
-export function tryClaimPointsCooldown(streamerId: number, twitchUsername: string, cooldownSeconds: number): boolean {
-  const key = cooldownKey(streamerId, twitchUsername);
-  const now = Date.now();
-  if (now - (lastEarnedAt.get(key) ?? 0) < cooldownSeconds * 1000) return false;
-  lastEarnedAt.set(key, now);
-  return true;
-}
-
-/** Test-only: clears every recorded points cooldown claim, so tests don't bleed state into
- *  each other through this module-level map. */
+/** Test-only: clears every recorded chat-earn cooldown claim, so tests don't bleed state into
+ *  each other through this module-level state. */
 export function clearPointsCooldowns(): void {
-  lastEarnedAt.clear();
-}
-
-/**
- * Returns how many whole seconds remain before a (streamer, viewer) pair is off the shared points
- * cooldown, without claiming it. Used to give `!gamble` a concrete "try again in Ns" reply when
- * {@link tryClaimPointsCooldown} has just failed for it — the claim time this reads is whatever a
- * prior claim (passive chat-earn, or an earlier `!gamble`) left behind, since a failed claim never
- * writes to `lastEarnedAt`.
- * @param streamerId - The streamer's `streamer.id`.
- * @param twitchUsername - The viewer's Twitch login.
- * @param cooldownSeconds - The streamer's configured (or default) cooldown length.
- * @returns Whole seconds remaining, rounded up; 0 if the pair is already off cooldown.
- */
-export function getRemainingCooldownSeconds(streamerId: number, twitchUsername: string, cooldownSeconds: number): number {
-  const key = cooldownKey(streamerId, twitchUsername);
-  const elapsedMs = Date.now() - (lastEarnedAt.get(key) ?? 0);
-  const remainingMs = cooldownSeconds * 1000 - elapsedMs;
-  return remainingMs > 0 ? Math.ceil(remainingMs / 1000) : 0;
+  chatEarnCooldown.clear();
 }
 
 /**
@@ -81,7 +38,7 @@ async function getConfigIfEligible(streamerId: number, twitchUsername: string): 
 export async function awardPointsForChatMessage(streamerId: number, twitchUsername: string): Promise<void> {
   const config = await getConfigIfEligible(streamerId, twitchUsername);
   if (!config) return;
-  if (!tryClaimPointsCooldown(streamerId, twitchUsername, config.cooldownSeconds)) return;
+  if (!chatEarnCooldown.tryClaim(streamerId, twitchUsername, config.cooldownSeconds)) return;
   await adjustLoyaltyPointsBalance(streamerId, twitchUsername, config.pointsPerMessage);
 }
 

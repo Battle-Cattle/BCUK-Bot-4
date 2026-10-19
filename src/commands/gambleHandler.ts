@@ -4,14 +4,12 @@ import { resolveCommand, extractArgs } from './commandUtils';
 import { createRuntimeRegistry } from '../shared/runtimeRegistry';
 import type { TwitchSendRuntime } from './twitchRuntime';
 import { parseGambleAmount } from './gambleAmount';
-import { tryClaimPointsCooldown, getRemainingCooldownSeconds } from './pointsEarnHandler';
+import { createPerViewerCooldown } from './perViewerCooldown';
 
 const log = createLogger('Gamble');
 
 /** The `!gamble` command token. Exported so `twitchBot.ts` can skip the passive chat-earn
- *  award for a `!gamble` message itself, which would otherwise race `executeGambleCommandForTwitch`
- *  for the same shared points cooldown and almost always win it first (its config lookup is a
- *  cache hit, where gamble's balance lookup is an uncached DB query) — silently dropping the bet. */
+ *  award for a `!gamble` message itself — placing a bet isn't chatting. */
 export const GAMBLE_COMMAND = '!gamble';
 const USAGE_MESSAGE = 'Usage: !gamble <amount>, where <amount> is a number (e.g. 100, 1,000, 5k), a percentage of your balance (e.g. 40%), or "all". The amount must be at least 1 and no more than your current balance.';
 const BALANCE_CHANGED_MESSAGE = 'Your balance changed before that bet could be placed — try again.';
@@ -26,6 +24,16 @@ const gambleRuntime = createRuntimeRegistry<TwitchSendRuntime>();
 /** Stores the Twitch chat runtime used to send gamble results. Call once from index.ts after the Twitch bot is ready. */
 export function registerGambleTwitchRuntime(runtime: TwitchSendRuntime): void {
   gambleRuntime.register(runtime);
+}
+
+// `!gamble`'s own per-(streamer, viewer) cooldown, using the streamer's configured cooldown length.
+// Deliberately independent of passive chat-earn's: a viewer's chat messages and other commands
+// must never put `!gamble` on cooldown, so only a previous bet can.
+const gambleCooldown = createPerViewerCooldown();
+
+/** Test-only: clears every recorded `!gamble` cooldown claim, so tests don't bleed state. */
+export function clearGambleCooldowns(): void {
+  gambleCooldown.clear();
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -94,15 +102,12 @@ async function sendGambleMessage(channel: string, message: string): Promise<void
 
 /**
  * Handles a Twitch chat message that may be a `!gamble` command: parses the bet amount (a plain
- * number, `1,000`, `5k`, `40%`, or `all`), enforces the shared points cooldown (the same one
- * passive chat-earn uses, so a viewer can't alternate between the two to dodge either one's
- * cooldown), and sends the result via the registered Twitch runtime. No-ops silently if the
+ * number, `1,000`, `5k`, `40%`, or `all`), enforces `!gamble`'s own cooldown (claimed only by a
+ * previous bet — chat messages and other commands never touch it), and sends the result via the registered Twitch runtime. No-ops silently if the
  * streamer hasn't opted into Loyalty Points, or if the sender is on the streamer's "Exclude bot"
  * list (an excluded bot keeps whatever balance it had, but can't gamble it). An invalid amount gets a usage reply without
  * consuming the cooldown — only an actual gamble does that. A bet still on cooldown gets a
- * "try again in Ns" reply rather than silence, since the cooldown can be claimed by something
- * other than the viewer's own prior `!gamble` (passive chat-earn, including other commands —
- * see `twitchBot.ts`'s chat-earn dispatch), which was confusing with no feedback at all.
+ * "try again in Ns" reply rather than silence.
  *
  * @param channel - Twitch channel the message was sent in (also the send target).
  * @param streamerId - The channel's linked `streamer.id`, resolved by the caller — no-ops
@@ -133,8 +138,8 @@ export async function executeGambleCommandForTwitch(
     return;
   }
 
-  if (!tryClaimPointsCooldown(streamerId, username, config.cooldownSeconds)) {
-    const remaining = getRemainingCooldownSeconds(streamerId, username, config.cooldownSeconds);
+  if (!gambleCooldown.tryClaim(streamerId, username, config.cooldownSeconds)) {
+    const remaining = gambleCooldown.getRemainingSeconds(streamerId, username, config.cooldownSeconds);
     await sendGambleMessage(channel, `@${username} still on cooldown — try again in ${remaining}s.`);
     return;
   }
