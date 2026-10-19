@@ -77,6 +77,48 @@ export function __resetPushRateLimiterForTests(): void {
   lastPushedAt.clear();
 }
 
+// How long after a redemption its raised price is pushed to Twitch. Pushing straight away can
+// land before Twitch has finished processing the redemption itself, and Twitch then shows the new
+// (higher) price as what the viewer paid. The redemption's demand is still recorded immediately;
+// only the Twitch push waits. Long enough that the push rate limiter's window (`MIN_PUSH_INTERVAL_MS`)
+// has normally passed by the time it fires, so the deferred push isn't skipped.
+const REDEMPTION_PUSH_DELAY_MS = 5_000;
+const pendingRedemptionPushes = new Map<string, ReturnType<typeof setTimeout>>();
+
+/**
+ * Schedules a deferred price sync for a reward {@link REDEMPTION_PUSH_DELAY_MS} from now, which
+ * pushes the price a redemption raised (its demand is already recorded, but `last_pushed_cost`
+ * isn't, so the sync sees the price as changed). Coalesced per reward: while a push is already
+ * pending, further redemptions ride on it rather than pushing it back, so a burst still reaches
+ * Twitch within the delay. A failure is logged; the next decay tick retries the push anyway.
+ * @param streamerId - DB row ID of the owning streamer.
+ * @param twitchRewardId - Twitch reward UUID.
+ * @returns void
+ */
+function scheduleRedemptionPush(streamerId: number, twitchRewardId: string): void {
+  const key = queueKey(streamerId, twitchRewardId);
+  if (pendingRedemptionPushes.has(key)) return;
+  const timer = setTimeout(() => {
+    pendingRedemptionPushes.delete(key);
+    applyDecayTick(streamerId, twitchRewardId).catch((err: unknown) => {
+      log.error(`Deferred price push after redemption failed for reward ${twitchRewardId}:`, err);
+    });
+  }, REDEMPTION_PUSH_DELAY_MS);
+  timer.unref();
+  pendingRedemptionPushes.set(key, timer);
+}
+
+/**
+ * Cancels every pending post-redemption price push (see {@link scheduleRedemptionPush}). Called on
+ * shutdown; a cancelled push isn't lost, since the redemption's demand is already recorded and the
+ * next decay tick after startup pushes the caught-up price.
+ * @returns void
+ */
+export function cancelPendingRedemptionPushes(): void {
+  for (const timer of pendingRedemptionPushes.values()) clearTimeout(timer);
+  pendingRedemptionPushes.clear();
+}
+
 /** Outcome of {@link pushRewardCostUpdate}. */
 interface PushCostResult {
   /** The cost to persist as `last_pushed_cost` — the new cost on success, otherwise unchanged. */
@@ -149,7 +191,9 @@ type PricingChange =
 
 /**
  * Recomputes demand and price for one reward and persists the result, pushing the new
- * cost to Twitch only when it differs from the last pushed cost — since `newCost` is
+ * cost to Twitch only when it differs from the last pushed cost (after a redemption, that push is
+ * deferred by {@link REDEMPTION_PUSH_DELAY_MS} — see {@link scheduleRedemptionPush} — and
+ * `last_pushed_cost` is left unchanged until it happens) — since `newCost` is
  * already rounded to `row.round_to_nearest` (see `computePrice`), this comparison (and
  * therefore the Twitch push) naturally only fires when the *rounded* price changes, not
  * on every sub-step fluctuation in demand. No-ops entirely (no DB
@@ -194,7 +238,9 @@ async function syncRewardPrice(
   });
 
   let lastPushedCost = row.last_pushed_cost;
-  if (newCost !== row.last_pushed_cost) {
+  if (newCost !== row.last_pushed_cost && redemptionId) {
+    scheduleRedemptionPush(streamerId, twitchRewardId);
+  } else if (newCost !== row.last_pushed_cost) {
     const result = await pushRewardCostUpdate(streamerId, twitchRewardId, newCost, row.last_pushed_cost);
     if (result.unsupported) return; // markPricingUnsupported already disabled the row; no need to also record demand.
     lastPushedCost = result.lastPushedCost;
@@ -280,7 +326,9 @@ async function publishPricingSideEffects(
 
 /**
  * Applies a single redemption to a reward's dynamic pricing: decays for elapsed time,
- * adds the global redemption increment, and pushes the new price to Twitch if it changed.
+ * adds the global redemption increment, and — if the price changed — schedules the new price to be
+ * pushed to Twitch a few seconds later (see {@link scheduleRedemptionPush}), so Twitch doesn't show
+ * the raised price as what the viewer paid for this redemption.
  * Called from the EventSub redemption handler. `redemptionId` is compared against the reward's
  * `last_redemption_id` before doing anything else — a retry of the same redemption (e.g. after
  * an unrelated later step in `handleRedemption` failed and the whole redemption was retried) is

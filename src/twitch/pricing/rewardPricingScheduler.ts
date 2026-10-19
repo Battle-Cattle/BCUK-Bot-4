@@ -1,6 +1,6 @@
 import { createLogger } from '../../shared/logger';
 import { getAllEnabledPricingRows, getPricingSettingsForStreamers, type StreamerPricingSettings } from '../../db';
-import { applyDecayTick } from './rewardPricingService';
+import { applyDecayTick, cancelPendingRedemptionPushes } from './rewardPricingService';
 import { recordSchedulerRun, normalizeError } from '../../shared/healthStore';
 
 const log = createLogger('RewardPricingScheduler');
@@ -142,13 +142,14 @@ export function startRewardPricingScheduler(): void {
 }
 
 /**
- * Stops the periodic decay-tick interval (and any pending DB-shutdown recovery probe) and
- * awaits any in-flight tick before returning. Marks the scheduler stopped first, so that in-flight
+ * Stops the periodic decay-tick interval (and any pending DB-shutdown recovery probe or
+ * post-redemption price push) and awaits any in-flight tick before returning. Marks the scheduler stopped first, so that in-flight
  * tick can't restart polling (via DB-recovery resume) or schedule a new probe once it settles.
  */
 export async function stopRewardPricingScheduler(): Promise<void> {
   schedulerStopped = true;
   if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
+  cancelPendingRedemptionPushes();
   await currentTickPromise;
   if (dbShutdownRetryTimer) { clearTimeout(dbShutdownRetryTimer); dbShutdownRetryTimer = null; }
   awaitingDbRecovery = false;
