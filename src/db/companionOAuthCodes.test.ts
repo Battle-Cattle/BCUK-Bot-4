@@ -143,17 +143,17 @@ describe('exchangeCodeForToken', () => {
 });
 
 describe('exchangeCodeForToken with PKCE', () => {
-  it('requires the stored challenge to match the verifier\'s, and passes null without a verifier', async () => {
+  it('requires the stored challenge to match the verifier\'s, and no stored challenge without a verifier', async () => {
     const execute = vi.fn().mockResolvedValue([{ affectedRows: 0 }]);
     const conn = buildConn({ execute });
     vi.mocked(getPool).mockReturnValue({ getConnection: vi.fn().mockResolvedValue(conn) } as any);
 
     await exchangeCodeForToken('code', 'dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk');
     const [sql, params] = execute.mock.calls[0] as [string, unknown[]];
-    expect(sql).toContain('code_challenge IS NULL OR code_challenge = ?');
-    expect(params[1]).toBe('E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM');
+    expect(sql).toContain('(code_challenge IS NULL AND ? IS NULL) OR code_challenge = ?');
+    expect(params.slice(1)).toEqual(['E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM', 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM']);
 
     await exchangeCodeForToken('code');
-    expect((execute.mock.calls[1] as [string, unknown[]])[1][1]).toBeNull();
+    expect((execute.mock.calls[1] as [string, unknown[]])[1].slice(1)).toEqual([null, null]);
   });
 });

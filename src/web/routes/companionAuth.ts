@@ -1,6 +1,6 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
-import { exchangeCodeForToken, revokeToken } from '../../db';
+import { exchangeCodeForToken, revokeTokenByHash } from '../../db';
 import { isLoopbackRedirectUri } from './validation';
 import { renderError } from './viewHelpers';
 import { authLimiter } from '../rateLimits';
@@ -106,15 +106,19 @@ router.post('/api/companion/oauth/token', authLimiter, async (req, res) => {
  * POST /api/companion/token/revoke — the companion app logging out revokes the token it
  * authenticated with, so a copy of it stops working too, and ends any SSE connection still open
  * under it. Bearer-authenticated by `requireCompanionKey`, so only an active token can revoke
- * itself (each user has one companion token at a time).
- * @param req - Express request; `req.companionDiscordId` is set by `requireCompanionKey`.
- * @param res - `{ ok: true }`, 401 from `requireCompanionKey` for an unknown or already-revoked
- *   token, or 500 on a DB error.
+ * itself (each user has one companion token at a time). Only the exact token presented is revoked:
+ * if a re-login replaced it after `requireCompanionKey` ran, the new token and its connections are
+ * left alone.
+ * @param req - Express request; `req.companionDiscordId`/`req.companionTokenHash` are set by
+ *   `requireCompanionKey`.
+ * @param res - `{ ok: true }` (also when the token was replaced or revoked in the meantime), 401
+ *   from `requireCompanionKey` for an unknown or already-revoked token, or 500 on a DB error.
  */
 router.post('/api/companion/token/revoke', authLimiter, requireCompanionKey, async (req, res) => {
   try {
-    await revokeToken(req.companionDiscordId!);
-    disconnectCompanionConnections(req.companionDiscordId!);
+    if (await revokeTokenByHash(req.companionDiscordId!, req.companionTokenHash!)) {
+      disconnectCompanionConnections(req.companionDiscordId!);
+    }
     res.json({ ok: true });
   } catch (err) {
     log.error('Companion token revoke failed:', err);

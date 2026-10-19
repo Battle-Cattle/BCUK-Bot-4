@@ -771,7 +771,7 @@ Expected constraints and behavior:
 
 - Consuming a code (`consumeCodeOnConnection` in `src/db/companionOAuthCodes.ts`) is a single `UPDATE ... WHERE used_at IS NULL AND expires_at > NOW()`, so concurrent redemption attempts of the same code cannot both succeed.
 - `exchangeCodeForToken()` marks the code used and issues the companion token in one DB transaction, so a failure issuing the token rolls back the "used" mark instead of permanently burning the code.
-- The consuming `UPDATE` also requires `code_challenge IS NULL OR code_challenge = <S256 of the presented verifier>`, so a code issued with a PKCE challenge can't be exchanged without its verifier (added by `0005_companion_oauth_pkce.sql`).
+- The consuming `UPDATE` also requires `(code_challenge IS NULL AND <no verifier presented>) OR code_challenge = <S256 of the presented verifier>`, so a code issued with a PKCE challenge can't be exchanged without its verifier, and one issued without a challenge can't be exchanged with a verifier (added by `0005_companion_oauth_pkce.sql`).
 
 ## `webauthn_credentials`
 

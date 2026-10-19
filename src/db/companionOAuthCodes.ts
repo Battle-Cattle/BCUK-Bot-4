@@ -44,9 +44,10 @@ export function pkceS256Challenge(codeVerifier: string): string {
  * being redeemed twice concurrently. Shared by `createCode`'s expiry check and
  * `exchangeCodeForToken` (within a transaction), so both run identical mark-used-then-lookup SQL.
  *
- * A code issued with a PKCE challenge only matches when `verifierChallenge` equals it; a code
- * issued without one matches regardless (`code_challenge = NULL` is never true, so a missing
- * verifier never satisfies a stored challenge).
+ * A code issued with a PKCE challenge only matches when `verifierChallenge` equals it, and a code
+ * issued without one only matches when no verifier was sent (RFC 9700 §4.8.2: a verifier with no
+ * stored challenge means the login didn't come from this client, e.g. an injected code).
+ * `code_challenge = NULL` is never true, so a missing verifier never satisfies a stored challenge.
  *
  * @param executor - Pool or transaction connection to run the query on.
  * @param hash - SHA-256 hash of the plaintext code.
@@ -61,8 +62,8 @@ async function consumeCodeOnConnection(
     `UPDATE companion_oauth_codes
      SET used_at = NOW()
      WHERE code_hash = ? AND used_at IS NULL AND expires_at > NOW()
-       AND (code_challenge IS NULL OR code_challenge = ?)`,
-    [hash, verifierChallenge],
+       AND ((code_challenge IS NULL AND ? IS NULL) OR code_challenge = ?)`,
+    [hash, verifierChallenge, verifierChallenge],
   );
   if (result.affectedRows === 0) return null;
 

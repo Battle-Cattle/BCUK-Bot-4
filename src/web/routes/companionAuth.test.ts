@@ -4,7 +4,7 @@ import { mockLogger } from '../../test-utils/loggerMock';
 /** Mocks `../../db` so `exchangeCodeForToken` is stubbed instead of hitting a real Twitch/DB call. */
 vi.mock('../../db', () => ({
   exchangeCodeForToken: vi.fn(),
-  revokeToken: vi.fn(),
+  revokeTokenByHash: vi.fn(),
 }));
 vi.mock('../middleware', () => ({
   requireCompanionKey: (req: any, res: any, next: any) => {
@@ -13,6 +13,7 @@ vi.mock('../middleware', () => ({
       return;
     }
     req.companionDiscordId = 'user1';
+    req.companionTokenHash = 'hash1';
     next();
   },
 }));
@@ -29,7 +30,7 @@ vi.mock('./companionEvents', () => ({ disconnectCompanionConnections: vi.fn() })
 import express from 'express';
 import supertest from 'supertest';
 import router from './companionAuth';
-import { exchangeCodeForToken, revokeToken } from '../../db';
+import { exchangeCodeForToken, revokeTokenByHash } from '../../db';
 import { disconnectCompanionConnections } from './companionEvents';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
@@ -201,22 +202,31 @@ describe('PKCE on the companion login', () => {
 // ─── POST /api/companion/token/revoke ─────────────────────────────────────────
 
 describe('POST /api/companion/token/revoke', () => {
-  it('revokes the caller\'s token and ends its open SSE connections', async () => {
+  it('revokes the exact token the caller presented and ends its open SSE connections', async () => {
+    vi.mocked(revokeTokenByHash).mockResolvedValueOnce(true);
     const res = await supertest(buildApp()).post('/api/companion/token/revoke').set('Authorization', 'Bearer good-token');
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ ok: true });
-    expect(revokeToken).toHaveBeenCalledWith('user1');
+    expect(revokeTokenByHash).toHaveBeenCalledWith('user1', 'hash1');
     expect(disconnectCompanionConnections).toHaveBeenCalledWith('user1');
+  });
+
+  it('leaves the connections alone when the token was replaced or revoked after authenticating', async () => {
+    vi.mocked(revokeTokenByHash).mockResolvedValueOnce(false);
+    const res = await supertest(buildApp()).post('/api/companion/token/revoke').set('Authorization', 'Bearer good-token');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ok: true });
+    expect(disconnectCompanionConnections).not.toHaveBeenCalled();
   });
 
   it('refuses an unknown or already-revoked token', async () => {
     const res = await supertest(buildApp()).post('/api/companion/token/revoke').set('Authorization', 'Bearer stale');
     expect(res.status).toBe(401);
-    expect(revokeToken).not.toHaveBeenCalled();
+    expect(revokeTokenByHash).not.toHaveBeenCalled();
   });
 
   it('returns 500 when revoking fails', async () => {
-    vi.mocked(revokeToken).mockRejectedValueOnce(new Error('DB down'));
+    vi.mocked(revokeTokenByHash).mockRejectedValueOnce(new Error('DB down'));
     const res = await supertest(buildApp()).post('/api/companion/token/revoke').set('Authorization', 'Bearer good-token');
     expect(res.status).toBe(500);
     expect(disconnectCompanionConnections).not.toHaveBeenCalled();
