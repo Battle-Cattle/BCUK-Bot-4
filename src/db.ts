@@ -247,6 +247,7 @@ export {
   findDiscordIdByTokenHash,
   getTokenStatus,
   revokeToken,
+  revokeTokenByHash,
 } from './db/companionTokens';
 export { createCode, exchangeCodeForToken } from './db/companionOAuthCodes';
 

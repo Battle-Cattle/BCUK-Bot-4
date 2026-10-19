@@ -97,3 +97,21 @@ export async function revokeToken(discordId: string): Promise<void> {
     [discordId],
   );
 }
+
+/**
+ * Revokes one specific companion app token: the user's current token, only if it is still the
+ * one with `keyHash` and not already revoked. A request authenticated with a token that has since
+ * been replaced (re-login issues a new token on the same row) therefore can't revoke the new one.
+ *
+ * @param discordId - Discord snowflake the token belongs to.
+ * @param keyHash - SHA-256 hash of the token to revoke.
+ * @returns True if that token was active and is now revoked, false otherwise.
+ */
+export async function revokeTokenByHash(discordId: string, keyHash: string): Promise<boolean> {
+  const [result] = await getPool().execute<mysql.ResultSetHeader>(
+    `UPDATE companion_app_tokens SET revoked_at = NOW()
+     WHERE discord_id = ? AND key_hash = ? AND revoked_at IS NULL`,
+    [discordId, keyHash],
+  );
+  return result.affectedRows > 0;
+}
