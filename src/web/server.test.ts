@@ -374,11 +374,19 @@ async function withListeningServer(testApp: express.Express, fn: (probe: () => P
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const { port } = server.address() as AddressInfo;
   const agent = new http.Agent({ keepAlive: true, maxSockets: 1 });
-  /** Sends one GET to the probe route over the shared keep-alive socket, draining the body so the socket is reused. */
+  /**
+   * Sends one GET to the probe route over the shared keep-alive socket, draining the body so the
+   * socket is reused. Rejects on a request/response error or a response cut off before its end,
+   * so a broken probe fails the test at once instead of hanging the loop until the timeout.
+   */
   const probe = (): Promise<number> => new Promise((resolve, reject) => {
     http.get({ host: '127.0.0.1', port, path: '/__limiter_probe', agent }, (res) => {
       res.resume();
       res.on('end', () => resolve(res.statusCode ?? 0));
+      res.on('error', reject);
+      res.on('close', () => {
+        if (!res.complete) reject(new Error('Probe response closed before completion'));
+      });
     }).on('error', reject);
   });
   try {
