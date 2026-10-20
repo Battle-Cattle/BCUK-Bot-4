@@ -161,6 +161,36 @@ describe('applyRedemptionPricing', () => {
     }
   });
 
+  it('does not let a decay tick inside the delay push the raised price early', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(getPricingForReward).mockResolvedValue(makeRow({ demand: 0, last_pushed_cost: null }));
+      await applyRedemptionPricing(1, 'rwd1', 'redemption-1');
+      await vi.advanceTimersByTimeAsync(2_000);
+      await applyDecayTick(1, 'rwd1'); // a scheduler tick landing inside the delay
+      expect(updateRewardCost).not.toHaveBeenCalled();
+      expect(recordPricingUpdate).toHaveBeenLastCalledWith(1, 'rwd1', expect.objectContaining({ lastPushedCost: null }));
+
+      await vi.advanceTimersByTimeAsync(3_000);
+      expect(updateRewardCost).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('still pushes a revert immediately while a redemption push is pending', async () => {
+    vi.useFakeTimers();
+    try {
+      const now = Date.now();
+      vi.mocked(getPricingForReward).mockResolvedValue(makeRow({ demand: 0.5, last_pushed_cost: 999 }));
+      await applyRedemptionPricing(1, 'rwd1', 'redemption-1');
+      await revertRedemptionPricing(1, 'rwd1', now);
+      expect(updateRewardCost).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('logs (rather than throws) when the deferred push fails', async () => {
     vi.useFakeTimers();
     try {

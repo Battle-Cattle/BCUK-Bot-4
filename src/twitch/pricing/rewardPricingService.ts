@@ -109,6 +109,21 @@ function scheduleRedemptionPush(streamerId: number, twitchRewardId: string): voi
 }
 
 /**
+ * Whether a sync must leave the Twitch push to the deferred post-redemption push rather than
+ * pushing now: always for a redemption, and for a decay tick while a redemption's push is still
+ * pending (otherwise a tick landing inside the delay would push the raised price early). A revert
+ * only lowers the price, so it always pushes immediately.
+ * @param streamerId - DB row ID of the owning streamer.
+ * @param twitchRewardId - Twitch reward UUID.
+ * @param change - What moved demand in this sync.
+ * @returns True if the push should be (or already is) deferred.
+ */
+function isPushDeferred(streamerId: number, twitchRewardId: string, change: PricingChange): boolean {
+  if (change.kind === 'redemption') return true;
+  return change.kind === 'decay' && pendingRedemptionPushes.has(queueKey(streamerId, twitchRewardId));
+}
+
+/**
  * Cancels every pending post-redemption price push (see {@link scheduleRedemptionPush}). Called on
  * shutdown; a cancelled push isn't lost, since the redemption's demand is already recorded and the
  * next decay tick after startup pushes the caught-up price.
@@ -238,7 +253,7 @@ async function syncRewardPrice(
   });
 
   let lastPushedCost = row.last_pushed_cost;
-  if (newCost !== row.last_pushed_cost && redemptionId) {
+  if (newCost !== row.last_pushed_cost && isPushDeferred(streamerId, twitchRewardId, change)) {
     scheduleRedemptionPush(streamerId, twitchRewardId);
   } else if (newCost !== row.last_pushed_cost) {
     const result = await pushRewardCostUpdate(streamerId, twitchRewardId, newCost, row.last_pushed_cost);
