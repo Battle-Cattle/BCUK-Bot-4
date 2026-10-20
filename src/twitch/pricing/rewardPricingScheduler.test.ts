@@ -8,10 +8,10 @@ const { mockLogger } = vi.hoisted(() => ({
 /** Mocks the shared logger so the scheduler's log calls don't produce real output during tests. */
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 vi.mock('../../db', () => ({ getAllEnabledPricingRows: vi.fn(), getPricingSettingsForStreamers: vi.fn() }));
-vi.mock('./rewardPricingService', () => ({ applyDecayTick: vi.fn() }));
+vi.mock('./rewardPricingService', () => ({ applyDecayTick: vi.fn(), cancelPendingRedemptionPushes: vi.fn() }));
 
 import { getAllEnabledPricingRows, getPricingSettingsForStreamers } from '../../db';
-import { applyDecayTick } from './rewardPricingService';
+import { applyDecayTick, cancelPendingRedemptionPushes } from './rewardPricingService';
 import { runDecayTick, startRewardPricingScheduler, stopRewardPricingScheduler } from './rewardPricingScheduler';
 
 const settings = { half_life_seconds: 1800, time_to_max_multiplier: 2 };
@@ -175,6 +175,12 @@ describe('startRewardPricingScheduler / stopRewardPricingScheduler', () => {
     await stopRewardPricingScheduler();
     await vi.advanceTimersByTimeAsync(30_000);
     expect(getAllEnabledPricingRows).toHaveBeenCalledTimes(1);
+  });
+
+  it('stop cancels any pending post-redemption price pushes', async () => {
+    vi.mocked(cancelPendingRedemptionPushes).mockClear();
+    await stopRewardPricingScheduler();
+    expect(cancelPendingRedemptionPushes).toHaveBeenCalledTimes(1);
   });
 
   it('pauses polling when the DB server itself is shutting down, and resumes once it recovers', async () => {
