@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { Client } from 'discord.js';
+import type { Client } from 'discord.js';
 import { isKeyApprovedForGuild } from '../../db';
 import { getActiveGuildForUser } from '../../discord/voicePresence';
 import { getDiscordClient } from '../../discord/discordClientStore';
