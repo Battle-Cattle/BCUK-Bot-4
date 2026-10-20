@@ -65,7 +65,7 @@
     "@types/supertest": "^7.2.1",
     "@vitest/coverage-v8": "^5.0.5",
     "@vitest/eslint-plugin": "^1.6.27",
-    "eslint": "^10.12.0",
+    "eslint": "^10.13.0",
     "eslint-plugin-jsdoc": "^65.3.6",
     "eslint-plugin-sonarjs": "^4.2.2",
     "globals": "^17.13.0",
