@@ -18,6 +18,7 @@ vi.mock('../shared/logger', () => ({ createLogger: () => log }));
 vi.mock('discord.js', () => ({
   Client: vi.fn(),
   ChannelType: { GuildVoice: 2 },
+  WebSocketShardEvents: { Dispatch: 'dispatch' },
 }));
 
 // Each joinVoiceChannel call returns a fresh fake connection so per-guild
@@ -57,8 +58,8 @@ function makeClient(channelType: number = 2) {
     id: channelId,
     type: channelType,
     name: `vc-${channelId}`,
-    client: { on: vi.fn(), off: vi.fn(), getMaxListeners: () => 10, setMaxListeners: vi.fn() },
-    guild: { shard: { send: vi.fn() } },
+    client: { on: vi.fn(), off: vi.fn(), getMaxListeners: () => 10, setMaxListeners: vi.fn(), ws: { on: vi.fn(), send: vi.fn(async () => undefined) } },
+    guild: { shardId: 0 },
   }));
   const client = {
     guilds: {

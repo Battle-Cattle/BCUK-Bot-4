@@ -1,4 +1,4 @@
-// Fallback for a stuck discord.js gateway reconnect loop. discord.js's own WebSocketManager is
+// Fallback for a stuck discord.js gateway reconnect loop. The @discordjs/ws WebSocketManager is
 // documented (see registerConnectionHandlers's docstring in `discordBot.ts`) as retrying every
 // recoverable gateway disconnect on its own, forever, without our help.
 import { createLogger } from '../shared/logger';
@@ -6,16 +6,16 @@ import { sendOwnerAlert } from './ownerAlerts';
 
 const log = createLogger('Discord');
 
-// In practice that retry loop can itself get stuck — observed in production as a run of
-// 'shardReconnecting'/'shardError' events during a sustained `Unexpected server response: 503`
-// incident, followed by total silence: no further 'shardReconnecting', 'shardError', 'shardReady'
-// or 'shardDisconnect' for many minutes, well beyond discord.js's own reconnect backoff (which
-// caps out well under a minute). Because that failure mode never reaches 'shardDisconnect' (no
-// close code — the socket never even opened), the self-heal in registerConnectionHandlers never
-// fires either, leaving the process alive-but-permanently-disconnected until someone notices and
-// restarts it manually. This watchdog is the fallback: if no shard activity of any kind is seen
-// for GATEWAY_STALL_THRESHOLD_MS while not fully connected, force a fresh login exactly as
-// 'shardDisconnect' does.
+// In practice that retry loop can itself get stuck — observed in production (on discord.js v14)
+// as a run of shard reconnect/error events during a sustained `Unexpected server response: 503`
+// incident, followed by total silence: no further reconnect, error, ready or disconnect events
+// for many minutes, well beyond discord.js's own reconnect backoff (which caps out well under a
+// minute). Because that failure mode never reaches an unrecoverable close (no close code — the
+// socket never even opened), the self-heal in registerConnectionHandlers never fires either,
+// leaving the process alive-but-permanently-disconnected until someone notices and restarts it
+// manually. This watchdog is the fallback: if no shard activity of any kind is seen for
+// GATEWAY_STALL_THRESHOLD_MS while not fully connected, force a fresh login exactly as an
+// unrecoverable close does.
 
 /** How often {@link checkGatewayStall} polls for a stuck gateway reconnect loop. */
 const GATEWAY_STALL_CHECK_INTERVAL_MS = 30_000;
@@ -34,8 +34,8 @@ let gatewayWatchdogTimer: NodeJS.Timeout | null = null;
 /**
  * Tracks live gateway connectivity for {@link checkGatewayStall} — distinct from
  * `getDiscordClient()` returning non-null, which only means a `Client` was *at some point*
- * promoted to ready and stays in the store until `stopDiscordBot()`/`shardDisconnect` explicitly
- * clear it. A `shardError` on an already-ready client does *not* clear it, so gating the watchdog
+ * promoted to ready and stays in the store until `stopDiscordBot()`/an unrecoverable shard close
+ * explicitly clear it. A shard error on an already-ready client does *not* clear it, so gating the watchdog
  * on client existence would silently defeat it for exactly the incident it exists to catch: a
  * previously-ready shard that errors out and then goes silent. Mirrors `recordDiscordConnected`'s
  * true/false transitions one-for-one, kept separately so this module's stall detection doesn't
@@ -87,7 +87,7 @@ export function recordShardActivity(): void {
  * (see {@link gatewayConnected}), no recovery from a previous stall is still outstanding (see
  * {@link isWatchdogRecoveryPending}), and no shard activity has been recorded for
  * {@link GATEWAY_STALL_THRESHOLD_MS}, discord.js's own reconnect loop is presumed stuck. Logs, DMs
- * the owner, and forces a fresh login the same way `shardDisconnect` does (including tearing down
+ * the owner, and forces a fresh login the same way an unrecoverable shard close does (including tearing down
  * orphaned voice connections first).
  *
  * Skipped while a login-failure backoff retry is pending (`hooks.isReconnectPending`): that backoff
@@ -113,7 +113,7 @@ function checkGatewayStall(): void {
 export interface GatewayWatchdogHooks {
   /** Whether a login-failure backoff retry is already scheduled (the watchdog stands down). */
   isReconnectPending: () => boolean;
-  /** Tears the current client down (voice connections included), as `shardDisconnect` does. */
+  /** Tears the current client down (voice connections included), as an unrecoverable shard close does. */
   stop: () => void;
   /** Starts a fresh login. */
   start: () => void;
@@ -142,7 +142,7 @@ export function stopGatewayWatchdog(): void {
 
 /**
  * Records whether the gateway is currently connected (see {@link gatewayConnected}).
- * @param connected - True on `clientReady`/`shardReady`/`shardResume`, false on errors and disconnects.
+ * @param connected - True on `clientReady` and shard `Ready`/`Resumed`, false on errors and disconnects.
  */
 export function setGatewayConnected(connected: boolean): void {
   gatewayConnected = connected;

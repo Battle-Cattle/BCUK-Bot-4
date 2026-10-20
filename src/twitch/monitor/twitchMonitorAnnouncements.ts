@@ -1,5 +1,6 @@
 import { createLogger } from '../../shared/logger';
-import { TextChannel, EmbedBuilder } from 'discord.js';
+import type { EmbedBuilder } from '@discordjs/builders';
+import { TextChannel } from 'discord.js';
 
 const log = createLogger('TwitchMonitor');
 import { getDiscordClient } from '../../discord/discordClientStore';
