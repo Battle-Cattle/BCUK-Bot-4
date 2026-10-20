@@ -150,6 +150,10 @@ Export `registerXRuntime(runtime)` from the handler file to store the platform c
 
 ---
 
+## Related repos
+
+`BCUK-Companion-Core`, `BCUK-Companion-ExpiredMinotaur` and `BCUK-StreamDeck-Plugin` follow the same code standards, adapted to their language: tests with every change, docstrings on every function, Qlty's complexity limits. Their `CLAUDE.md` files carry the same "PR Reviews (Qlty)" and "PR Reviews (CodeRabbit)" sections, word for word. When you change a shared rule here, make the same change in those three files.
+
 ## PR Reviews (Qlty)
 
 Qlty's PR comments (code smells such as file/function complexity, too many returns, duplication, plus diff-coverage gaps) are this repo's standards, not optional suggestions. **Never dismiss, defer or resolve a Qlty finding without fixing it**, and never reply that it "stays as is" or belongs in a follow-up. Fix every finding in the same PR, whether it's an inline review comment or a row in the "new issues" or coverage summary:
