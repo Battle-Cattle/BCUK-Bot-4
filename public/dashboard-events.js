@@ -21,6 +21,7 @@ const EVENT_LABELS = {
 
 const MAX_DISPLAYED_EVENTS = 20;
 
+/** Builds one activity-feed row: the event type's icon, who did what (with any detail) and how long ago. */
 function renderEventItem(ev) {
   const item = document.createElement('div');
   item.className = 'event-item';
@@ -50,6 +51,7 @@ function renderEventItem(ev) {
   return item;
 }
 
+/** Replaces the feed's contents with `events`, or an empty-state message when there are none. */
 function renderEvents(container, events) {
   clearChildren(container);
   if (events.length === 0) {
@@ -62,6 +64,7 @@ function renderEvents(container, events) {
   for (const ev of events) container.appendChild(renderEventItem(ev));
 }
 
+/** Adds a newly arrived event to the top of the feed, keeping at most MAX_DISPLAYED_EVENTS rows. */
 function prependEvent(container, ev) {
   const emptyMsg = container.querySelector('.empty-msg');
   if (emptyMsg) emptyMsg.remove();

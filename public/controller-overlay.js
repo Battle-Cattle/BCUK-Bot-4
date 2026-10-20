@@ -1,3 +1,4 @@
+/** Shorthand for `document.getElementById`. */
 const $ = id => document.getElementById(id);
 const statusEl = $('status');
 let gamepadIdx = null, polling = false;

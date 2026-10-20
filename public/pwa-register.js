@@ -6,6 +6,7 @@
   var UPDATE_INTERVAL_MS = 30 * 60 * 1000;
   var hasRefreshingController = false;
 
+  /** Tells a waiting service worker to activate now instead of after every tab closes. */
   function forceActivateWaitingWorker(registration) {
     if (!registration || !registration.waiting) {
       return;
@@ -14,6 +15,7 @@
     registration.waiting.postMessage({ type: 'SKIP_WAITING' });
   }
 
+  /** Activates a service worker as soon as it finishes installing. */
   function watchInstallingWorker(registration) {
     if (!registration || !registration.installing) {
       return;
@@ -33,6 +35,7 @@
     });
   }
 
+  /** Checks for a new service worker every UPDATE_INTERVAL_MS, and whenever the page becomes visible again. */
   function scheduleUpdateChecks(registration) {
     window.setInterval(function () {
       checkForUpdate(registration);
