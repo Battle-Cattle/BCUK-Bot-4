@@ -27,7 +27,11 @@ export const connections = new Map<number, Set<import('express').Response>>();
 
 export const MAX_SSE_CONNECTIONS_PER_STREAMER = DASHBOARD_EVENTS_MAX_SSE_PER_STREAMER;
 
-/** Push a streamer activity event to every open dashboard page for this streamer. */
+/**
+ * Push a streamer activity event to every open dashboard page for this streamer.
+ * @param streamerId - Internal streamer ID whose dashboards receive the event.
+ * @param event - Activity event (follow, sub, raid, redemption) sent as the SSE `data:` frame.
+ */
 export function pushDashboardEvent(streamerId: number, event: DashboardEvent): void {
   broadcastToChannel(connections, streamerId, event);
 }

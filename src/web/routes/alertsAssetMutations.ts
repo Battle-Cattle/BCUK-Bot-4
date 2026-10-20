@@ -31,6 +31,8 @@ const soundUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize
  * the DB mutation (`setAsset`) that orphaned it has already committed, so a failure here is
  * logged and swallowed rather than thrown — it must never turn an already-successful config
  * change into a failure response; it just leaves a stale file on disk for later cleanup.
+ * @param streamerId - Internal streamer ID, naming the per-streamer subfolder of `ALERT_ASSETS_FOLDER`.
+ * @param filename - Stored filename the DB used to reference, or null when there was none (a no-op).
  */
 async function removeOldAsset(streamerId: number, filename: string | null): Promise<void> {
   if (!filename) return;
@@ -101,7 +103,12 @@ async function saveUploadedAsset(
   return { successCode: `${assetLabel}_uploaded` };
 }
 
-/** Clears a streamer's asset for one alert event type, removing both the DB reference and the file on disk. */
+/**
+ * Clears a streamer's asset for one alert event type, removing both the DB reference and the file on disk.
+ * @param streamerId - Internal streamer ID whose asset is cleared.
+ * @param eventType - Alert event type (follow, sub, raid, ...) whose asset is cleared.
+ * @param setAsset - DB setter (`setAlertImage`/`setAlertSound`) for the asset kind; returns the filename it replaced.
+ */
 async function deleteAsset(streamerId: number, eventType: AlertEventType, setAsset: AssetSetter): Promise<void> {
   const previous = await setAsset(streamerId, eventType, null);
   await removeOldAsset(streamerId, previous);

@@ -60,12 +60,18 @@ function mapCustomCommand(row: mysql.RowDataPacket): DbCustomCommand {
 
 // ─── Queries ─────────────────────────────────────────────────────────────────
 
-/** Return the total number of custom commands, for the dashboard's usage-stats summary. */
+/**
+ * Return the total number of custom commands, for the dashboard's usage-stats summary.
+ * @returns The number of `custom_command` rows.
+ */
 export async function getCustomCommandCount(): Promise<number> {
   return getRowCount('custom_command');
 }
 
-/** Return all custom commands, each with its full list of assigned users. */
+/**
+ * Return all custom commands, each with its full list of assigned users.
+ * @returns Every custom command with its `assigned_users` list (empty when unassigned).
+ */
 export async function getAllCustomCommandsWithAssignments(): Promise<DbCustomCommandWithAssignments[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
     `SELECT c.command_id, c.trigger_string, c.output, c.is_discord_enabled, c.is_multi_twitch,

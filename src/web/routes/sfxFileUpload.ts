@@ -33,6 +33,9 @@ const upload = multer({
  * Strips any directory, restricts to `[A-Za-z0-9._-]`, and forces the extension
  * to match the magic-byte-detected type. Falls back to `sound.<ext>` if nothing
  * usable remains.
+ * @param originalName - The upload's client-supplied filename.
+ * @param ext - Extension from magic-byte detection, which replaces the original one.
+ * @returns The sanitized filename, e.g. `airhorn.mp3`, or `sound.<ext>` when nothing usable remains.
  */
 export function buildStoredName(originalName: string, ext: 'mp3' | 'ogg' | 'wav'): string {
   const base = path.basename(originalName);
@@ -53,6 +56,9 @@ export function buildStoredName(originalName: string, ext: 'mp3' | 'ogg' | 'wav'
  * closes the check-then-write race so two concurrent uploads of the same name can
  * never overwrite each other. Returns the stored relative filename, or null if the
  * path escapes SFX_FOLDER or no free name is found within the retry budget.
+ * @param name - Sanitized filename to store under (see {@link buildStoredName}).
+ * @param buffer - The validated audio bytes to write.
+ * @returns The stored filename relative to SFX_FOLDER, or null when no safe free name was found.
  */
 async function writeUniqueSound(name: string, buffer: Buffer): Promise<string | null> {
   const ext = path.extname(name);

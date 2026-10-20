@@ -21,7 +21,11 @@ const EVENT_LABELS = {
 
 const MAX_DISPLAYED_EVENTS = 20;
 
-/** Builds one activity-feed row: the event type's icon, who did what (with any detail) and how long ago. */
+/**
+ * Builds one activity-feed row: the event type's icon, who did what (with any detail) and how long ago.
+ * @param ev - One recent event: `eventType`, `displayName`, optional `detail` and ISO `occurredAt`.
+ * @returns The `.event-item` element for the feed.
+ */
 function renderEventItem(ev) {
   const item = document.createElement('div');
   item.className = 'event-item';
@@ -51,7 +55,11 @@ function renderEventItem(ev) {
   return item;
 }
 
-/** Replaces the feed's contents with `events`, or an empty-state message when there are none. */
+/**
+ * Replaces the feed's contents with `events`, or an empty-state message when there are none.
+ * @param container - The activity feed element to fill.
+ * @param events - Recent events to show, newest first.
+ */
 function renderEvents(container, events) {
   clearChildren(container);
   if (events.length === 0) {
@@ -64,7 +72,11 @@ function renderEvents(container, events) {
   for (const ev of events) container.appendChild(renderEventItem(ev));
 }
 
-/** Adds a newly arrived event to the top of the feed, keeping at most MAX_DISPLAYED_EVENTS rows. */
+/**
+ * Adds a newly arrived event to the top of the feed, keeping at most MAX_DISPLAYED_EVENTS rows.
+ * @param container - The activity feed element.
+ * @param ev - The event that just arrived over the live stream.
+ */
 function prependEvent(container, ev) {
   const emptyMsg = container.querySelector('.empty-msg');
   if (emptyMsg) emptyMsg.remove();

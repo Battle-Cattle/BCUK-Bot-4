@@ -1,6 +1,8 @@
 /**
  * Parses an HTML checkbox form field: present-and-`'on'` means checked, anything else
  * (absent, unchecked, or a repeated field arriving as an array) means unchecked.
+ * @param value - Raw checkbox form value (an array when repeated, undefined when unchecked).
+ * @returns True only when the value is exactly `'on'`.
  */
 export function parseCheckboxField(value: string | string[] | undefined): boolean {
   return !Array.isArray(value) && value === 'on';
@@ -10,6 +12,8 @@ export function parseCheckboxField(value: string | string[] | undefined): boolea
  * Parse a positive integer id form field. A repeated field (arriving as an array) is
  * rejected rather than silently taking the first value, so a duplicated/tampered id
  * can't slip past validation — mirrors `parsePositiveBigIntId`.
+ * @param value - Raw form value (an array when repeated).
+ * @returns The ID as a positive safe integer, or null when missing, malformed, repeated, or out of range.
  */
 export function parsePositiveIntId(value: string | string[] | undefined): number | null {
   if (Array.isArray(value)) return null;
@@ -22,6 +26,8 @@ export function parsePositiveIntId(value: string | string[] | undefined): number
  * Parse a positive BIGINT id form field directly to `bigint`, avoiding precision loss above
  * `Number.MAX_SAFE_INTEGER`. A repeated field (arriving as an array) is rejected rather than
  * silently taking the first value, so a duplicated/tampered id can't slip past validation.
+ * @param value - Raw form value (an array when repeated).
+ * @returns The ID as a positive `bigint`, or null when missing, malformed, or repeated.
  */
 export function parsePositiveBigIntId(value: string | string[] | undefined): bigint | null {
   if (Array.isArray(value)) return null;

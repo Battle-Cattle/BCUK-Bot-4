@@ -16,7 +16,11 @@ import type { StreamsErrorCode } from './streamsErrors';
 const log = createLogger('Web');
 const router = Router();
 
-/** Returns true if any of the given form values is missing, non-string, or blank after trimming. */
+/**
+ * Returns true if any of the given form values is missing, non-string, or blank after trimming.
+ * @param values - Raw form field values to check.
+ * @returns True when at least one value is missing or blank.
+ */
 function hasMissingValues(...values: Array<string | undefined>): boolean {
   return values.some((value) => typeof value !== 'string' || value.trim().length === 0);
 }

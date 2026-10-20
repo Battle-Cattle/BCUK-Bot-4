@@ -22,6 +22,8 @@ const router = Router();
  * below runs `requireGuildContext` first, which already guarantees `currentGuildId`
  * is set (or redirects away) before this function ever runs.
  *
+ * @param req - Request whose session holds the current guild ID.
+ * @param res - Response used to send the 400 when no guild is selected.
  * @returns The current guild ID, or null when the response has already been sent.
  */
 function getSessionGuildId(req: Request, res: Response): string | null {

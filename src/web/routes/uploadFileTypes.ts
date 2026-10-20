@@ -8,6 +8,8 @@
  * size (each of the 4 size bytes has its top bit clear). Checking the full
  * header — not just the 3-byte tag — avoids misidentifying truncated/junk
  * payloads as MP3.
+ * @param buf - Uploaded file bytes.
+ * @returns True when the buffer begins with a valid ID3v2 header.
  */
 function isValidId3Header(buf: Buffer): boolean {
   if (buf.length < 10) return false;
@@ -26,6 +28,7 @@ const OGG_MAGIC = Buffer.from([0x4f, 0x67, 0x67, 0x53]); // "OggS"
  * @param buf - The buffer to inspect.
  * @param bytes - The expected byte sequence.
  * @param offset - Byte offset in `buf` to compare at; defaults to 0.
+ * @returns True when the bytes match at `offset`.
  */
 export function startsWithBytes(buf: Buffer, bytes: Buffer, offset = 0): boolean {
   return buf.length >= offset + bytes.length && buf.subarray(offset, offset + bytes.length).equals(bytes);
@@ -36,6 +39,8 @@ export function startsWithBytes(buf: Buffer, bytes: Buffer, offset = 0): boolean
  * byte 1) followed by a valid version/layer/bitrate/sample-rate. Validates the full 4-byte header
  * and rejects the reserved bit combinations so junk like `FF E0 00 00` — which only matches the
  * sync — isn't mistaken for MP3.
+ * @param buf - Uploaded file bytes.
+ * @returns True when the first 4 bytes are a valid MPEG audio frame header.
  */
 export function isValidMpegFrameHeader(buf: Buffer): boolean {
   if (buf.length < 4) return false;
@@ -55,6 +60,8 @@ export function isValidMpegFrameHeader(buf: Buffer): boolean {
  * - OGG: `OggS` at offset 0
  * - MP3: a complete 10-byte ID3v2 header at offset 0, or a valid MPEG audio
  *   frame header (see {@link isValidMpegFrameHeader})
+ * @param buf - Uploaded file bytes.
+ * @returns The detected format, or null when it is none of them.
  */
 export function detectAudioType(buf: Buffer): 'mp3' | 'ogg' | 'wav' | null {
   if (startsWithBytes(buf, RIFF_MAGIC) && startsWithBytes(buf, WAVE_MAGIC, 8)) return 'wav';
@@ -70,6 +77,8 @@ export function detectAudioType(buf: Buffer): 'mp3' | 'ogg' | 'wav' | null {
  * - GIF: `GIF87a` or `GIF89a` signature
  * - JPEG: `\xFF\xD8\xFF` signature
  * - WEBP: `RIFF....WEBP` container
+ * @param buf - Uploaded file bytes.
+ * @returns The detected format, or null when it is none of them (including SVG).
  */
 export function detectImageType(buf: Buffer): 'png' | 'gif' | 'jpeg' | 'webp' | null {
   if (buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
@@ -95,6 +104,8 @@ export function detectImageType(buf: Buffer): 'png' | 'gif' | 'jpeg' | 'webp' | 
  * Detect video type from buffer magic bytes, independent of the client-supplied MIME type.
  * WebM: EBML header 0x1A 0x45 0xDF 0xA3
  * MP4: ftyp box signature at bytes 4–7: 0x66 0x74 0x79 0x70
+ * @param buf - Uploaded file bytes.
+ * @returns The detected format, or null when it is neither.
  */
 export function detectVideoType(buf: Buffer): 'webm' | 'mp4' | null {
   if (buf.subarray(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]))) {

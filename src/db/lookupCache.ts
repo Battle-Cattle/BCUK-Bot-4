@@ -251,6 +251,8 @@ class CacheManager<TCache extends RefreshingLookupCache> implements ManagedLooku
  * - Multiple concurrent getCache() calls coalesce to one in-flight refresh
  * - Version tracking ensures stale results from old refreshes don't overwrite newer data
  * - Handles invalidation during in-flight refresh correctly by checking version numbers
+ * @param options - Cache name (for logs), TTL, refresh backoff bounds, and the empty/load factories.
+ * @returns A cache exposing `getCache()` and `invalidate()`.
  */
 export function createManagedLookupCache<TCache extends RefreshingLookupCache>(
   options: ManagedLookupCacheOptions<TCache>,

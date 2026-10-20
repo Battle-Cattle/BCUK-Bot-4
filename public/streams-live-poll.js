@@ -23,7 +23,11 @@ document.addEventListener('click', function (event) {
   setLiveToggleState(liveToggleBtn, expanded);
 });
 
-/** Returns the confirmation message for disconnecting a streamer's Twitch connection. */
+/**
+ * Returns the confirmation message for disconnecting a streamer's Twitch connection.
+ * @param t - The submitted form; its `data-twitch-name` names the streamer.
+ * @returns The text shown in the disconnect-Twitch confirm() prompt.
+ */
 function getDisconnectTwitchConfirmationMessage(t) {
   return 'Disconnect Twitch for ' + (t.dataset.twitchName || 'this streamer') + '?';
 }

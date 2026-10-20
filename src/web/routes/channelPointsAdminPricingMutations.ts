@@ -28,6 +28,9 @@ export const router = Router();
  * falls through to the next source, so saving a pricing config never fails on a Twitch hiccup.
  * Keeps pricing's cooldown mirroring the reward's real Twitch cooldown instead of a
  * separately-edited value.
+ * @param streamer - The requesting streamer, whose Twitch token is used for the reward lookup.
+ * @param twitchRewardId - Twitch ID of the custom reward being priced.
+ * @returns The cooldown in seconds to store on the pricing config.
  */
 async function resolveCooldownSecondsForPricing(streamer: DbStreamerEventSub, twitchRewardId: string): Promise<number> {
   try {

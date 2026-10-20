@@ -20,7 +20,11 @@ export const connections = new Map<number, Set<import('express').Response>>();
 
 export const MAX_SSE_CONNECTIONS_PER_STREAMER = CHANNEL_POINTS_MAX_SSE_PER_STREAMER;
 
-/** Push a reward price/demand update to every open Channel Points admin page for this streamer. */
+/**
+ * Push a reward price/demand update to every open Channel Points admin page for this streamer.
+ * @param streamerId - Internal streamer ID whose admin pages receive the update.
+ * @param event - Price/demand point sent as the SSE `data:` frame.
+ */
 export function pushPricingUpdate(streamerId: number, event: PricingUpdateEvent): void {
   broadcastToChannel(connections, streamerId, event);
 }

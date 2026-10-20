@@ -34,6 +34,8 @@ export interface SfxTriggerRow {
 /**
  * Look up a trigger by its command string (case-insensitive).
  * Hidden triggers ARE included — the hidden flag only affects public listing, not playback.
+ * @param command Full prefixed command string, e.g. `!clap`; matched case-insensitively.
+ * @returns The trigger, or null when no trigger has that command.
  */
 export async function findTrigger(command: string): Promise<SfxTrigger | null> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
@@ -56,6 +58,8 @@ export async function findTrigger(command: string): Promise<SfxTrigger | null> {
 /**
  * Return all sound files associated with a trigger (including hidden ones).
  * Hidden files are still played — `hidden` only controls public listing.
+ * @param triggerId The owning `sfxtrigger` id.
+ * @returns The trigger's sound files (empty when it has none).
  */
 export async function findSoundFiles(triggerId: bigint): Promise<SfxFile[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
@@ -81,7 +85,10 @@ export interface PublicSfxTrigger {
   description: string | null;
 }
 
-/** Return all non-hidden SFX triggers for public display, ordered by category then command. */
+/**
+ * Return all non-hidden SFX triggers for public display, ordered by category then command.
+ * @returns The non-hidden triggers with their category names.
+ */
 export async function getPublicSfxTriggers(): Promise<PublicSfxTrigger[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
     `SELECT t.trigger_command AS triggerCommand, c.name AS categoryName, t.description
@@ -97,7 +104,10 @@ export async function getPublicSfxTriggers(): Promise<PublicSfxTrigger[]> {
   }));
 }
 
-/** Return the total number of SFX triggers, for the dashboard's usage-stats summary. */
+/**
+ * Return the total number of SFX triggers, for the dashboard's usage-stats summary.
+ * @returns The number of `sfxtrigger` rows, hidden ones included.
+ */
 export async function getSfxTriggerCount(): Promise<number> {
   return getRowCount('sfxtrigger');
 }
@@ -107,7 +117,10 @@ export interface SfxCategory {
   name: string;
 }
 
-/** Return all SFX categories ordered by name, for populating management dropdowns. */
+/**
+ * Return all SFX categories ordered by name, for populating management dropdowns.
+ * @returns Every `sfxcategory` row, ordered by name.
+ */
 export async function getAllCategories(): Promise<SfxCategory[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
     `SELECT id, name FROM sfxcategory ORDER BY name`,
@@ -115,7 +128,11 @@ export async function getAllCategories(): Promise<SfxCategory[]> {
   return rows.map((r) => ({ id: r.id, name: r.name }));
 }
 
-/** Create a new SFX category. Returns the new category id. */
+/**
+ * Create a new SFX category. Returns the new category id.
+ * @param name Display name of the category.
+ * @returns The new `sfxcategory` id.
+ */
 export async function createCategory(name: string): Promise<number> {
   const [result] = await getPool().execute<mysql.ResultSetHeader>(
     `INSERT INTO sfxcategory (name) VALUES (?)`,
@@ -163,6 +180,7 @@ export async function deleteCategory(id: number): Promise<boolean> {
  * @param categoryId Category id, or null for uncategorised.
  * @param description Optional public description, or null.
  * @param hidden Whether the trigger is hidden from the public listing.
+ * @returns The new `sfxtrigger` id.
  */
 export async function createSfxTrigger(
   command: string,
@@ -220,6 +238,7 @@ export async function updateSfxTrigger(
  * would otherwise return a filename list that the transaction's own delete never
  * matched.
  * @param id Trigger id.
+ * @returns The deleted sound files' relative paths, or null when the trigger didn't exist.
  */
 export async function deleteSfxTrigger(id: bigint): Promise<{ files: string[] } | null> {
   return withTransactionOrNotFound(async (conn, notFound) => {
@@ -247,6 +266,7 @@ export async function deleteSfxTrigger(id: bigint): Promise<{ files: string[] } 
  * @param file Relative path (within SFX_FOLDER) of the stored audio file.
  * @param weight Weighted-random selection weight (>= 1).
  * @param hidden Whether the file is hidden from the public listing.
+ * @returns The new `sfx` row id.
  */
 export async function addSfxFile(
   triggerId: bigint,
@@ -265,6 +285,7 @@ export async function addSfxFile(
  * Look up a sound file's stored relative path by its `sfx` row id, for streaming
  * playback. Returns null if no such row exists.
  * @param id sfx row id.
+ * @returns The file's relative path within SFX_FOLDER, or null when no row has that id.
  */
 export async function getSfxFileById(id: number): Promise<{ file: string } | null> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
@@ -304,6 +325,7 @@ export async function updateSfxFile(id: number, weight: number, hidden: boolean)
  * own `DELETE` — that would otherwise still commit and return the filename even
  * though nothing was actually removed.
  * @param id sfx row id.
+ * @returns The deleted file's relative path, or null when no row had that id.
  */
 export async function deleteSfxFile(id: number): Promise<string | null> {
   return withTransactionOrNotFound(async (conn, notFound) => {
@@ -324,7 +346,10 @@ export async function deleteSfxFile(id: number): Promise<string | null> {
   });
 }
 
-/** Return all SFX triggers (including hidden) with their associated sound files, for the admin panel. */
+/**
+ * Return all SFX triggers (including hidden) with their associated sound files, for the admin panel.
+ * @returns Every trigger with its sound files.
+ */
 export async function getAllSfxTriggers(): Promise<SfxTriggerRow[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
     `SELECT

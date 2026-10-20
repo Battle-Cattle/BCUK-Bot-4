@@ -57,7 +57,11 @@ const DEFAULT_STREAMER_PRICING_SETTINGS: StreamerPricingSettings = {
 /** Fallback cooldown (seconds) used for a reward's pricing math when it has no Twitch-enforced cooldown. */
 export const DEFAULT_PRICING_COOLDOWN_SECONDS = 60;
 
-/** Maps a raw `reward_pricing` row into a {@link RewardPricingRow}, coercing numeric/bit columns. */
+/**
+ * Maps a raw `reward_pricing` row into a {@link RewardPricingRow}, coercing numeric/bit columns.
+ * @param r - Row selected from `reward_pricing`.
+ * @returns The mapped pricing row.
+ */
 function mapRow(r: mysql.RowDataPacket): RewardPricingRow {
   return {
     id: r.id,
@@ -87,6 +91,7 @@ const REWARD_PRICING_SELECT = `
  *
  * @param streamerId - DB row ID of the owning streamer.
  * @param twitchRewardId - Twitch reward UUID.
+ * @returns The pricing row, or null when the reward has none.
  */
 export async function getPricingForReward(streamerId: number, twitchRewardId: string): Promise<RewardPricingRow | null> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
@@ -102,6 +107,7 @@ export async function getPricingForReward(streamerId: number, twitchRewardId: st
  *
  * @param id - Primary key of the `reward_pricing` row.
  * @param streamerId - DB row ID of the owning streamer.
+ * @returns The pricing row, or null when it doesn't exist or belongs to another streamer.
  */
 export async function getPricingConfigById(id: number, streamerId: number): Promise<RewardPricingRow | null> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
@@ -115,6 +121,7 @@ export async function getPricingConfigById(id: number, streamerId: number): Prom
  * List every reward pricing row (configured or not yet enabled) belonging to a streamer.
  *
  * @param streamerId - DB row ID of the streamer.
+ * @returns The streamer's pricing rows (empty when none).
  */
 export async function getPricingConfigsForStreamer(streamerId: number): Promise<RewardPricingRow[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
@@ -127,6 +134,7 @@ export async function getPricingConfigsForStreamer(streamerId: number): Promise<
 /**
  * List every reward pricing row across all streamers where dynamic pricing is enabled.
  * Used by the periodic decay scheduler to find rows that need a decay tick.
+ * @returns Every pricing row with dynamic pricing enabled.
  */
 export async function getAllEnabledPricingRows(): Promise<RewardPricingRow[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
@@ -272,6 +280,7 @@ export async function updatePricingCooldownForReward(streamerId: number, twitchR
  * settings row yet, e.g. before they've ever saved this form.
  *
  * @param streamerId - DB row ID of the streamer.
+ * @returns The streamer's settings, or a copy of `DEFAULT_STREAMER_PRICING_SETTINGS` when they have no row.
  */
 export async function getPricingSettingsForStreamer(streamerId: number): Promise<StreamerPricingSettings> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(

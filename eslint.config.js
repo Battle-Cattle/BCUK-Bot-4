@@ -271,6 +271,20 @@ module.exports = tseslint.config(
     },
   },
   {
+    // CLAUDE.md "Docstrings": the JSDoc also says what each parameter is and what the function
+    // returns. A destructured parameter needs only its root `@param`. This block covers the folders
+    // whose tags are in; the rest of src/ gets the same rules in its own block until both have landed.
+    files: ['public/**/*.js', 'src/*.ts', 'src/db/**/*.ts', 'src/web/**/*.ts'],
+    ignores: ['public/vendor/**', 'src/**/*.test.ts'],
+    plugins: { jsdoc },
+    rules: {
+      'jsdoc/require-param': ['error', { checkDestructured: false }],
+      'jsdoc/require-param-description': 'error',
+      'jsdoc/require-returns': 'error',
+      'jsdoc/require-returns-description': 'error',
+    },
+  },
+  {
     // A stray `.only`/`.skip` or an assertion-free test silently weakens CI.
     files: ['src/**/*.test.ts'],
     plugins: { vitest },

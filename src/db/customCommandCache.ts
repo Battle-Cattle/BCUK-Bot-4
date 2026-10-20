@@ -44,7 +44,11 @@ function createEmptyCustomCommandLookupCache(): CustomCommandLookupCache {
   };
 }
 
-/** Index a flat list of override rows by guild_id → command_id for O(1) overlay lookups. */
+/**
+ * Index a flat list of override rows by guild_id → command_id for O(1) overlay lookups.
+ * @param overrides - Every guild command override row.
+ * @returns A map from guild ID to a map from command_id to that guild's override.
+ */
 function buildOverridesByGuild(
   overrides: DbGuildCommandOverride[],
 ): Map<string, Map<number, DbGuildCommandOverride>> {

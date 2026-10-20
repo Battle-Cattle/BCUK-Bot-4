@@ -28,7 +28,10 @@ export class ReservedCommandError extends Error {
   }
 }
 
-/** Throws {@link ReservedCommandError} if `trigger` (trimmed, lowercased) matches a built-in command. */
+/**
+ * Throws {@link ReservedCommandError} if `trigger` (trimmed, lowercased) matches a built-in command.
+ * @param trigger - Command string to check, e.g. `!help`.
+ */
 export function assertNotReservedCommand(trigger: string): void {
   const normalized = normalizeCommand(trigger) ?? '';
   if (RESERVED_BUILT_IN_COMMANDS.has(normalized)) {

@@ -21,6 +21,7 @@ interface SqlExistsCheckPlan {
  * Builds the SQL + params for checking whether `normalizedCommands` collide with an existing `custom_command` row.
  * @param placeholders - `IN (...)` placeholder string sized for `normalizedCommands.length`.
  * @param normalizedCommands - Normalized command strings to check for a collision.
+ * @param options - Optional exclusions for the check.
  * @param options.excludeCustomCommandId - A `command_id` to exclude from the check.
  * @returns The SQL and params to run via {@link executeExistsCheck}.
  */
@@ -45,6 +46,7 @@ function buildCustomCommandExistsCheckPlan(
  * Builds the SQL + params for checking whether `normalizedCommands` collide with an existing `counter` row's trigger/check command.
  * @param placeholders - `IN (...)` placeholder string sized for `normalizedCommands.length`.
  * @param normalizedCommands - Normalized command strings to check for a collision.
+ * @param options - Optional exclusion and guild scope for the check.
  * @param options.excludeCounterId - A counter `id` to exclude from the check.
  * @param options.guildId - When given, scopes the check to counters in this guild only (the same
  *   trigger/check command may exist in a different guild's counter without colliding). Omit to

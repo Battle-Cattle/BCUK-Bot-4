@@ -12,6 +12,7 @@ import { withInvalidation } from './withInvalidation';
  * the custom-command lookup cache, since overrides affect Discord command resolution.
  * @param guildId - BIGINT snowflake as a string.
  * @param commandId - The catalog command's command_id.
+ * @param override - The override's settings.
  * @param override.isDisabled - When true, the command does not fire in this guild.
  * @param override.output - Replacement Discord output, or null to use the catalog output.
  * @returns Resolves once the upsert (and cache invalidation) completes.

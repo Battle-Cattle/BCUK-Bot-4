@@ -124,7 +124,10 @@ app.use(streamdeckPluginDownloadRouter);
 app.use(
   '/vendor/simplewebauthn',
   express.static(path.join(__dirname, '../../node_modules/@simplewebauthn/browser/dist/bundle'), {
-    /** Forces revalidation on every response, matching the public/ static assets below. */
+    /**
+     * Forces revalidation on every response, matching the public/ static assets below.
+     * @param res - The response for the vendored SimpleWebAuthn file being served.
+     */
     setHeaders: (res) => {
       res.setHeader('Cache-Control', 'no-cache');
     },
@@ -138,7 +141,10 @@ app.use(
 // serviceWorker.ts), since those fetches would otherwise also read from the stale HTTP cache.
 app.use(
   express.static(path.join(__dirname, '../../public'), {
-    /** Forces revalidation on every static asset response instead of allowing heuristic HTTP caching. */
+    /**
+     * Forces revalidation on every static asset response instead of allowing heuristic HTTP caching.
+     * @param res - The response for the public/ static file being served.
+     */
     setHeaders: (res) => {
       res.setHeader('Cache-Control', 'no-cache');
     },

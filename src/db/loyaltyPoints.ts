@@ -26,7 +26,11 @@ export interface LoyaltyPointsConfig {
   pointsPerGiftSub: number;
 }
 
-/** Maps a raw `loyalty_points_config` table row to a {@link LoyaltyPointsConfig}. */
+/**
+ * Maps a raw `loyalty_points_config` table row to a {@link LoyaltyPointsConfig}.
+ * @param row - Row selected from `loyalty_points_config`.
+ * @returns The mapped loyalty points config.
+ */
 function mapLoyaltyPointsConfig(row: mysql.RowDataPacket): LoyaltyPointsConfig {
   return {
     enabled: !!row.enabled,

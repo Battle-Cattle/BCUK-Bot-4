@@ -49,7 +49,10 @@ export class CounterNotFoundError extends Error {
 // ─── Row mapper ───────────────────────────────────────────────────────────────
 
 /** Maps a raw `counter` table row to a {@link DbCounter}. `guild_id` is a Discord snowflake
- *  (BIGINT) — kept as the string the driver returns, never coerced to `Number`. */
+ *  (BIGINT) — kept as the string the driver returns, never coerced to `Number`.
+ * @param row - Row selected from `counter`.
+ * @returns The mapped counter.
+ */
 export function mapCounter(row: mysql.RowDataPacket): DbCounter {
   return {
     id: row.id,
@@ -132,7 +135,11 @@ export async function getCountersForGuild(guildId: string): Promise<DbCounter[]>
   return rows.map(mapCounter);
 }
 
-/** Return the number of counters belonging to one guild, for the dashboard's usage-stats summary. */
+/**
+ * Return the number of counters belonging to one guild, for the dashboard's usage-stats summary.
+ * @param guildId - Discord snowflake of the guild.
+ * @returns The number of `counter` rows in that guild.
+ */
 export async function getCounterCount(guildId: string): Promise<number> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
     'SELECT COUNT(*) AS count FROM counter WHERE guild_id = ?',
@@ -147,7 +154,12 @@ export async function getCounterCount(guildId: string): Promise<number> {
 // ─── Collision check ──────────────────────────────────────────────────────────
 
 /** Returns true if any of the given commands conflict with an existing counter in this guild
- *  (optionally excluding one by ID). Counters in other guilds never collide. */
+ *  (optionally excluding one by ID). Counters in other guilds never collide.
+ * @param guildId - Discord snowflake of the guild to check within.
+ * @param commandOrCommands - One command string, or several (a list with duplicates counts as taken).
+ * @param excludeCounterId - A counter `id` to skip, e.g. the one being edited.
+ * @returns True if any command collides with a counter in the guild or a custom command.
+ */
 export async function isCounterCommandTaken(guildId: string, commandOrCommands: string | string[], excludeCounterId?: number): Promise<boolean> {
   if (Array.isArray(commandOrCommands)) {
     const normalizedCommands = normalizeCommandList(commandOrCommands);

@@ -5,7 +5,11 @@ import { getPool } from './pool';
 /** A pool or a transaction connection — anything a query helper can run SQL on. */
 export type SqlExecutor = mysql.Pool | mysql.PoolConnection;
 
-/** Converts a MySQL BIT(1) column value (Buffer, number, or boolean) to a boolean. */
+/**
+ * Converts a MySQL BIT(1) column value (Buffer, number, or boolean) to a boolean.
+ * @param value The raw BIT(1) value from the driver.
+ * @returns True when the value is 1.
+ */
 export function fromBit(value: unknown): boolean {
   if (Buffer.isBuffer(value)) return value[0] === 1;
   // Mirrors the previous loose `value == 1`: true for 1, true and '1' (number/boolean/string forms).

@@ -120,6 +120,7 @@ export function __resetRecentRotationsForTests(): void {
 /**
  * The plaintext of this user's rotation within the dedupe window, if there was one.
  * @param discordId - Key owner's Discord snowflake.
+ * @returns The plaintext key from a rotation within `ROTATE_DEDUPE_WINDOW_MS`, or null when there is none.
  */
 function recentRotationPlain(discordId: string): string | null {
   const recent = recentRotations.get(discordId);
@@ -156,6 +157,7 @@ async function rotateAndRemember(discordId: string): Promise<string> {
  * @param discordId - Requesting user's Discord snowflake.
  * @param accessLevel - The user's access level in `guildId`, for auto-approval.
  * @param guildId - The guild to request access for.
+ * @returns The plaintext key to show (a new or rotated key, or one re-shown from the dedupe window), or null when there is none to show.
  */
 async function applyKeyRequest(discordId: string, accessLevel: number, guildId: string): Promise<string | null> {
   const existing = await getGuildStatusForKey(discordId, guildId);
@@ -213,6 +215,7 @@ router.post('/streamdeck-key/request', csrfProtection, async (req, res) => {
  * @param discordId - Key owner's Discord snowflake.
  * @param submittedVersion - The key marker the rotate form was rendered with, or null if the
  *   form didn't carry one (e.g. a page cached from before markers existed).
+ * @returns The new plaintext key, or the one from a rotation still within the dedupe window.
  * @throws {KeyAlreadyRotatedError} when the form was rendered for a key that has since been
  *   replaced, so a resubmitted form can't rotate a second time.
  */

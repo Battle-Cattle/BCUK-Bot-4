@@ -105,7 +105,11 @@ self.addEventListener('fetch', (event) => {
   }
 });
 
-/** Fetches a navigation from the network, falling back to the cached offline page. */
+/**
+ * Fetches a navigation from the network, falling back to the cached offline page.
+ * @param {Request} request - The navigation request.
+ * @returns {Promise<Response>} The network response, else the cached /offline.html, else a network error response.
+ */
 async function handleNavigationRequest(request) {
   try {
     return await fetch(request);
@@ -151,7 +155,11 @@ function staleWhileRevalidate(request) {
   return { responsePromise, updatePromise };
 }
 
-/** True for icons and files with a static-asset extension. */
+/**
+ * True for icons and files with a static-asset extension.
+ * @param {string} pathname - The request URL's path.
+ * @returns {boolean} True when the path should be served stale-while-revalidate.
+ */
 function isStaticAsset(pathname) {
   return (
     pathname.startsWith('/icons/') ||
@@ -159,7 +167,11 @@ function isStaticAsset(pathname) {
   );
 }
 
-/** True when a path is, or is under, one of BYPASS_PATH_PREFIXES. */
+/**
+ * True when a path is, or is under, one of BYPASS_PATH_PREFIXES.
+ * @param {string} pathname - The request URL's path.
+ * @returns {boolean} True when the worker must leave the request to the network untouched.
+ */
 function isBypassPath(pathname) {
   return BYPASS_PATH_PREFIXES.some(
     (prefix) => pathname === prefix || pathname.startsWith(prefix + '/')
