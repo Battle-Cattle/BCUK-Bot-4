@@ -1,12 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { mockLogger } from '../../test-utils/loggerMock';
+
+const { mockLog } = vi.hoisted(() => ({
+  mockLog: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+}));
 
 vi.mock('../../db', () => ({
   getVideosForReward: vi.fn(), getStreamerById: vi.fn(), recordStreamerEvent: vi.fn(),
   getRedemptionProgress: vi.fn(), markRedemptionEffect: vi.fn(),
 }));
 vi.mock('../../audio/soundSelector', () => ({ pickWeightedRandom: vi.fn() }));
-vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
+vi.mock('../../shared/logger', () => ({ createLogger: () => mockLog }));
 vi.mock('../pricing/rewardPricingService', () => ({ applyRedemptionPricing: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('./twitchEventSubRedemptionAcks', () => ({
   prepareRedemptionConfirmation: vi.fn(), pushRedemptionForConfirmation: vi.fn(),
@@ -208,6 +211,35 @@ describe('handleRedemption', () => {
       ['redemption-1', streamerId, 'handled'],
     ]);
     expect(seenRedemptionIds.has('redemption-1')).toBe(true);
+  });
+
+  it('warns about a live duplicate, but logs a reconciliation replay of a handled redemption only at debug', async () => {
+    vi.mocked(getVideosForReward).mockResolvedValue([]);
+    await expect(handleRedemption('streamer', event, CONFIG, streamerId)).resolves.toBe(true);
+
+    await expect(handleRedemption('streamer', event, CONFIG, streamerId, 'reconciliation')).resolves.toBe(false);
+    expect(mockLog.warn).not.toHaveBeenCalled();
+    expect(mockLog.debug).toHaveBeenCalledWith(expect.stringContaining('Duplicate reconciliation redemption notification'));
+
+    await expect(handleRedemption('streamer', event, CONFIG, streamerId)).resolves.toBe(false);
+    expect(mockLog.warn).toHaveBeenCalledWith(expect.stringContaining('Duplicate live redemption notification'));
+  });
+
+  it('logs a reconciliation replay the durable ledger already records as handled only at debug', async () => {
+    vi.mocked(getRedemptionProgress).mockResolvedValue({ dashboardRecorded: true, pricingApplied: true, handled: true });
+
+    await expect(handleRedemption('streamer', event, CONFIG, streamerId, 'reconciliation')).resolves.toBe(false);
+
+    expect(mockLog.warn).not.toHaveBeenCalled();
+    expect(mockLog.debug).toHaveBeenCalledWith(expect.stringContaining('from reconciliation already handled (durable record)'));
+  });
+
+  it('warns when a live redemption is one the durable ledger already records as handled', async () => {
+    vi.mocked(getRedemptionProgress).mockResolvedValue({ dashboardRecorded: true, pricingApplied: true, handled: true });
+
+    await expect(handleRedemption('streamer', event, CONFIG, streamerId)).resolves.toBe(false);
+
+    expect(mockLog.warn).toHaveBeenCalledWith(expect.stringContaining('from live already handled (durable record)'));
   });
 
   it('drops a redemption the durable ledger already records as handled, after the in-memory cache forgot it', async () => {

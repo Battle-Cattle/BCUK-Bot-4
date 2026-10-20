@@ -78,9 +78,9 @@ async function fetchRedemptionsNewerThan(
 }
 
 /**
- * Replays each fetched redemption through {@link handleRedemption} (its own dedup makes an
- * already-delivered redemption a no-op), logging genuine catches and per-redemption failures.
- * Redemptions with an unparseable `redeemed_at` are skipped.
+ * Replays each fetched redemption through {@link handleRedemption} as a `'reconciliation'` source
+ * (its own dedup makes an already-delivered redemption a no-op, logged only at debug), logging
+ * genuine catches and per-redemption failures. Redemptions with an unparseable `redeemed_at` are skipped.
  * @param info - Dispatch info for the redemption's streamer.
  * @param redemptions - Redemptions fetched for one reward this tick.
  * @returns The latest `redeemed_at` (epoch ms) that was handled successfully and the earliest one
@@ -101,7 +101,7 @@ async function replayRedemptions(
       continue;
     }
     try {
-      const processed = await handleRedemption(info.login, toRedemptionEvent(info.login, r), info.config ?? DEFAULT_EVENT_CONFIG, info.streamerId);
+      const processed = await handleRedemption(info.login, toRedemptionEvent(info.login, r), info.config ?? DEFAULT_EVENT_CONFIG, info.streamerId, 'reconciliation');
       // Only log as a genuine catch when handleRedemption actually processed it — its own
       // dedup means most redemptions in this window were already delivered live, and logging
       // those as "missed" would be false (see reconcileReward's doc comment).

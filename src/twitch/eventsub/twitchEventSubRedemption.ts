@@ -30,6 +30,13 @@ export interface RedemptionEvent {
 }
 
 /**
+ * Where a redemption reached {@link handleRedemption} from: `'live'` — an EventSub WebSocket
+ * notification; `'reconciliation'` — a replay by the Helix reconciliation poll
+ * (`twitchEventSubReconciliation.ts`), which routinely re-fetches redemptions already handled live.
+ */
+export type RedemptionSource = 'live' | 'reconciliation';
+
+/**
  * Same as `recordAndPushDashboardEvent` (`twitchEventSubEffects.ts`), but lets a failure propagate to the caller instead
  * of logging and swallowing it. Used only by {@link handleRedemption}, where a failed dashboard
  * record must cause the whole redemption to be retried (via its dedup pending/handled lifecycle)
@@ -111,6 +118,10 @@ async function recordAndPushDashboardEventOrThrow(
  * @param event - Redemption event payload including reward ID and user details.
  * @param _config - Streamer event config (unused for redemptions; reserved for future use).
  * @param streamerId - DB row ID of the streamer, used to scope video lookups and resolve the owning Discord ID.
+ * @param source - Where the redemption came from (defaults to `'live'`). Only sets how loudly a
+ *   dropped duplicate is logged: a live duplicate is a warning (it points at a stale extra
+ *   subscription or a second bot process), while a reconciliation replay of a redemption already
+ *   handled is the poll's normal case, logged at debug.
  * @returns True if the redemption was actually processed; false if it was dropped as a duplicate
  *   — callers (e.g. reconciliation) use this to tell a genuine catch from a redemption that was
  *   already delivered live.
@@ -120,9 +131,10 @@ export async function handleRedemption(
   event: RedemptionEvent,
   _config: EventSubConfig,
   streamerId: number,
+  source: RedemptionSource = 'live',
 ): Promise<boolean> {
   if (isDuplicateRedemption(event.id)) {
-    log.warn(`Duplicate redemption notification for "${event.reward.title}" (id=${event.id}) — ignoring`);
+    logDuplicate(source, `Duplicate ${source} redemption notification for "${event.reward.title}" (id=${event.id}) — ignoring`);
     return false;
   }
 
@@ -137,7 +149,7 @@ export async function handleRedemption(
       // Completed before, beyond what the in-memory cache still remembers (e.g. a reconciliation
       // replay older than REDEMPTION_DEDUP_TTL_MS). Re-remember it so later duplicates stay cheap.
       markRedemptionHandled(event.id);
-      log.warn(`Redemption "${event.reward.title}" (id=${event.id}) already handled (durable record) — ignoring`);
+      logDuplicate(source, `Redemption "${event.reward.title}" (id=${event.id}) from ${source} already handled (durable record) — ignoring`);
       return false;
     }
     await applyRecordedRedemptionEffects(event, streamerId, progress);
@@ -179,6 +191,17 @@ export async function handleRedemption(
     clearPendingRedemption(event.id);
     throw err;
   }
+}
+
+/**
+ * Logs a dropped duplicate redemption: a warning when it arrived live, debug when it came from a
+ * reconciliation replay (see {@link RedemptionSource}).
+ * @param source - Where the duplicate came from.
+ * @param message - The log message.
+ */
+function logDuplicate(source: RedemptionSource, message: string): void {
+  if (source === 'live') log.warn(message);
+  else log.debug(message);
 }
 
 /**
