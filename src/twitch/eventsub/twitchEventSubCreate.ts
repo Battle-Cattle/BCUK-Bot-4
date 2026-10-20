@@ -10,7 +10,7 @@ import type { SubSpec } from './twitchEventSubSubscriptionGroups';
 
 const log = createLogger('EventSub');
 
-// Tracks "login:type:tokenHash" triples that failed with 403 — skipped until bot restarts or
+// Tracks "login:type:tokenHash" triples that failed with 401 or 403 — skipped until bot restarts or
 // token changes. Hashed rather than storing the raw access token: the key only needs to change
 // when the token does (so a refreshed token naturally computes a different key and retries),
 // not to retain the token's actual value in process memory for the (unbounded, until
@@ -27,7 +27,7 @@ function hashToken(token: string): string {
 }
 
 /**
- * Returns true if any subscription for the given login has previously failed with a 403.
+ * Returns true if any subscription for the given login has previously failed with a 401 or 403 (a `TwitchAuthError`).
  * @param login - Streamer's Twitch login, as used in the skip key.
  * @returns True if at least one auth-failed skip key exists for that login.
  */
