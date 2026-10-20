@@ -6,8 +6,7 @@ import type { TwitchSendRuntime } from './twitchRuntime';
 
 const log = createLogger('Points');
 
-/** The `!points` command token. Exported so `twitchBot.ts` can skip the passive chat-earn award
- *  for a `!points` message itself — checking your balance isn't chatting. */
+/** The `!points` command token. */
 export const POINTS_COMMAND = '!points';
 const LEADERBOARD_SIZE = 5;
 const LEADERBOARD_SUBCOMMANDS = new Set(['leaderboard', 'top']);

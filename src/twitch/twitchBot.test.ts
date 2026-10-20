@@ -164,7 +164,6 @@ vi.mock('../commands/pointsEarnHandler', () => ({
 
 vi.mock('../commands/pointsHandler', () => ({
   executePointsCommandForTwitch: vi.fn(),
-  POINTS_COMMAND: '!points',
 }));
 
 vi.mock('../commands/gambleHandler', () => ({
@@ -481,14 +480,30 @@ describe('handleTwitchMessage', () => {
     expect(awardPointsForChatMessage).not.toHaveBeenCalled();
   });
 
-  it('does not award passive chat-earn points for a !points message, since checking your balance isn\'t chatting', async () => {
+  it('awards chat-earn points for a !points message before replying, so the reported balance includes them', async () => {
+    let finishAward!: () => void;
+    vi.mocked(awardPointsForChatMessage).mockImplementation(() => new Promise<void>((resolve) => { finishAward = resolve; }));
+    vi.mocked(executePointsCommandForTwitch).mockResolvedValue(undefined);
+
+    sendMessage('#streamer', 'alice', '!points');
+
+    await waitFor(() => expect(awardPointsForChatMessage).toHaveBeenCalledWith(42, 'alice'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(executePointsCommandForTwitch).not.toHaveBeenCalled();
+
+    finishAward();
+    await waitFor(() => expect(executePointsCommandForTwitch).toHaveBeenCalledOnce());
+    expect(executePointsCommandForTwitch).toHaveBeenCalledWith('streamer', 42, '!points', 'alice', '!points');
+  });
+
+  it('still replies to !points when the chat-earn award fails', async () => {
+    vi.mocked(awardPointsForChatMessage).mockRejectedValue(new Error('db down'));
     vi.mocked(executePointsCommandForTwitch).mockResolvedValue(undefined);
 
     sendMessage('#streamer', 'alice', '!points');
 
     await waitFor(() => expect(executePointsCommandForTwitch).toHaveBeenCalledOnce());
     expect(executePointsCommandForTwitch).toHaveBeenCalledWith('streamer', 42, '!points', 'alice', '!points');
-    expect(awardPointsForChatMessage).not.toHaveBeenCalled();
   });
 
   it('resolves the target guild via the linked streamer\'s active voice presence', async () => {
