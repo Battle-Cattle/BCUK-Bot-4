@@ -10,10 +10,12 @@ let sortCol = null;   // 'command' | 'category' | null
 let sortDir = 'asc';  // 'asc' | 'desc'
 let query   = '';
 
+/** The table's current rows, in display order. */
 function getRows() {
   return Array.from(tbody.querySelectorAll('tr'));
 }
 
+/** Hides rows whose command, category and description don't contain the search query, and shows the "no results" message when none match. */
 function applyFilter() {
   const rows = getRows();
   let visible = 0;
@@ -31,6 +33,7 @@ function applyFilter() {
   if (cmdCount)  cmdCount.textContent = String(visible);
 }
 
+/** Reorders the rows by `col` ("category" or "command"), case-insensitively, in the current direction. */
 function applySort(col) {
   const rows = getRows();
 
@@ -44,6 +47,7 @@ function applySort(col) {
   rows.forEach((row) => tbody.appendChild(row));
 }
 
+/** Shows the current sort column and direction on the headers (aria-sort and the arrow icon). */
 function updateSortHeaders() {
   headers.forEach((th) => {
     const col = th.dataset.col;
@@ -58,6 +62,7 @@ function updateSortHeaders() {
   });
 }
 
+/** Sorts by a clicked header's column, reversing the direction when it's already the sort column. */
 function activateSort(th) {
   const col = th.dataset.col;
   if (sortCol === col) {

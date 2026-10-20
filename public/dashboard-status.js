@@ -1,6 +1,7 @@
 /* global clearChildren, relativeTime, setClass, setText */
 /* ── Status rendering & polling ──────────────────────────── */
 
+/** Lists each monitored channel with its live/offline dot, or "None configured." when there are none. */
 function renderChannels(container, channelMap) {
   clearChildren(container);
   const entries = Object.entries(channelMap);
@@ -56,6 +57,7 @@ function renderChannels(container, channelMap) {
   }
 }
 
+/** Updates the dashboard (Discord bot, voice connection, last played sound, channels) from an /api/status response. */
 function applyStatus(status) {
   // Discord bot
   const discordOn = status.discord.ready;
@@ -103,6 +105,7 @@ function applyStatus(status) {
 let consecutiveFailures = 0;
 const STALE_THRESHOLD = 3;
 
+/** Polls /api/status and applies it, showing "(status unavailable)" after STALE_THRESHOLD failures in a row. */
 async function fetchStatus() {
   try {
     const res = await fetch('/api/status');

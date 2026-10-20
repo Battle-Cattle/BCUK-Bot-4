@@ -253,6 +253,24 @@ module.exports = tseslint.config(
     },
   },
   {
+    // The same Docstrings rule for the panel's browser scripts (no TypeScript, so JSDoc may carry types).
+    files: ['public/**/*.js'],
+    ignores: ['public/vendor/**'],
+    plugins: { jsdoc },
+    rules: {
+      'jsdoc/require-jsdoc': ['error', {
+        publicOnly: false,
+        require: { FunctionDeclaration: true, MethodDefinition: true },
+        contexts: [
+          'Program > VariableDeclaration > VariableDeclarator > ArrowFunctionExpression',
+          'Program > VariableDeclaration > VariableDeclarator > FunctionExpression',
+        ],
+      }],
+      'jsdoc/check-param-names': ['error', { checkDestructured: false }],
+      'jsdoc/check-tag-names': 'error',
+    },
+  },
+  {
     // A stray `.only`/`.skip` or an assertion-free test silently weakens CI.
     files: ['src/**/*.test.ts'],
     plugins: { vitest },
