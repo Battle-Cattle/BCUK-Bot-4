@@ -27,7 +27,11 @@ export interface EventSubMessage {
   };
 }
 
-/** Validates the Twitch-supplied reconnect URL against a strict allowlist. */
+/**
+ * Validates the Twitch-supplied reconnect URL against a strict allowlist.
+ * @param reconnectUrl - The `reconnect_url` from a `session_reconnect` message.
+ * @returns A `wss://<host>/ws` URL rebuilt from the validated parts (query kept), or null if any check fails.
+ */
 export function buildReconnectUrl(reconnectUrl: string): string | null {
   let parsed: URL;
   try { parsed = new URL(reconnectUrl); } catch { return null; }
@@ -67,7 +71,11 @@ export function purgeExpiredMessageIds(): void {
 // Purge expired entries on a fixed interval so isDuplicate stays O(1).
 setInterval(purgeExpiredMessageIds, MESSAGE_TTL_MS).unref();
 
-/** Returns true if messageId has been seen within MESSAGE_TTL_MS; records it otherwise. */
+/**
+ * Returns true if messageId has been seen within MESSAGE_TTL_MS; records it otherwise.
+ * @param messageId - The message's `metadata.message_id`.
+ * @returns True for a repeat within the TTL; false for a first sighting (which is then recorded).
+ */
 export function isDuplicate(messageId: string): boolean {
   const now = Date.now();
   const expiry = seenMessageIds.get(messageId);
@@ -76,7 +84,11 @@ export function isDuplicate(messageId: string): boolean {
   return false;
 }
 
-/** Returns true if the ISO timestamp is older than MESSAGE_TTL_MS or unparseable. */
+/**
+ * Returns true if the ISO timestamp is older than MESSAGE_TTL_MS or unparseable.
+ * @param timestamp - The message's `metadata.message_timestamp` (ISO 8601).
+ * @returns True if the message is too old or its timestamp can't be parsed.
+ */
 export function isStale(timestamp: string): boolean {
   const ts = Date.parse(timestamp);
   return !Number.isFinite(ts) || Date.now() - ts > MESSAGE_TTL_MS;

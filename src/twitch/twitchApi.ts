@@ -76,6 +76,7 @@ export function authHeaders(token: string): Record<string, string> {
 /**
  * Clears the cached app token on a 401 response, so the next call re-fetches rather than
  * reusing an invalidated token until `appTokenExpiry`. No-ops for any other status.
+ * @param res - Helix response from an app-token-authenticated request.
  */
 function invalidateAppTokenIfUnauthorized(res: Response): void {
   if (res.status === 401) { cachedAppToken = null; appTokenExpiry = 0; }
@@ -296,6 +297,7 @@ function customRewardUrl(broadcasterId: string, rewardId?: string): string {
  * synchronous admin action, so a transient network error is worth retrying rather than surfacing.
  * @param broadcasterId - Twitch user ID whose custom rewards to list.
  * @param userToken - Broadcaster OAuth user token with the channel:manage:redemptions scope.
+ * @param options - Optional listing filters.
  * @param options.onlyManageable - List only rewards this app's client ID created (Helix
  *   `only_manageable_rewards`). Twitch only lets an app read or update redemptions of those, so a
  *   caller that goes on to fetch redemptions should set this rather than query rewards it can't use.
@@ -443,7 +445,14 @@ export interface CustomRewardInput {
   should_redemptions_skip_request_queue?: boolean;
 }
 
-/** Throws the standard reward-management errors for a non-OK Helix response; otherwise no-ops. */
+/**
+ * Throws the standard reward-management errors for a non-OK Helix response; otherwise no-ops.
+ * @param res - Helix response from a custom-reward create/update/delete call.
+ * @param label - Calling function's name, used in the error message.
+ * @param rewardId - Twitch reward UUID to name in the message, if the call targeted one.
+ * @throws {TwitchRewardUnsupportedError} On 403.
+ * @throws {TwitchRewardAuthError} On 401.
+ */
 function throwForRewardManagementFailure(res: Response, label: string, rewardId?: string): void {
   const suffix = rewardId ? ` reward ${rewardId}` : '';
   if (res.status === 403) throw new TwitchRewardUnsupportedError(`[TwitchAPI] ${label}:${suffix} cannot be managed by this app (403)`);
@@ -460,6 +469,7 @@ function throwForRewardManagementFailure(res: Response, label: string, rewardId?
  * @param broadcasterId - Twitch user ID to create the reward for.
  * @param userToken - Broadcaster OAuth user token with the channel:manage:redemptions scope.
  * @param input - The reward's fields (title/cost required, the rest optional).
+ * @returns The created reward as Twitch returned it (including its new id).
  * @throws {TwitchRewardUnsupportedError} When Twitch returns 403 (channel points aren't
  *   available for the broadcaster, e.g. not affiliate/partner).
  * @throws {TwitchRewardAuthError} When Twitch returns 401 (invalid token, or missing the
@@ -488,6 +498,7 @@ export async function createCustomReward(broadcasterId: string, userToken: strin
  * @param rewardId - Twitch reward UUID to update.
  * @param userToken - Broadcaster OAuth user token with the channel:manage:redemptions scope.
  * @param input - The fields to update; omitted fields are left unchanged on Twitch.
+ * @returns The reward's full state after the update, as Twitch returned it.
  * @throws {TwitchRewardUnsupportedError} When Twitch returns 403 (reward created by a
  *   different client_id, or channel points aren't available for the broadcaster).
  * @throws {TwitchRewardAuthError} When Twitch returns 401 (invalid token, or missing the
@@ -605,6 +616,8 @@ export interface SharedChatSession {
  * Returns the active shared chat session for a broadcaster, or null if none exists.
  * A 403 response is treated as null — app tokens may lack the required channel scope
  * for some broadcasters; the caller falls back to no dedup in that case.
+ * @param broadcasterId - Twitch user ID of the broadcaster to look up.
+ * @returns The broadcaster's shared chat session, or null on 404/403.
  */
 export async function getSharedChatSession(broadcasterId: string): Promise<SharedChatSession | null> {
   const token = await getAppToken();

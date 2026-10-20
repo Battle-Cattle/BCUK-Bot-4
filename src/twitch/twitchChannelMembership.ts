@@ -67,7 +67,11 @@ function markJoinedIfCurrent(channel: string, generation: number): void {
   if (generation === connectionGeneration) confirmedJoinedChannels.add(channel);
 }
 
-/** See {@link markJoinedIfCurrent} — the corresponding part-side update. */
+/**
+ * See {@link markJoinedIfCurrent} — the corresponding part-side update.
+ * @param channel - The channel a part call resolved for.
+ * @param generation - The {@link connectionGeneration} captured when that part call was issued.
+ */
 function markPartedIfCurrent(channel: string, generation: number): void {
   if (generation === connectionGeneration) confirmedJoinedChannels.delete(channel);
 }
@@ -102,6 +106,7 @@ function isGenerationStale(generation: number): boolean {
  * {@link markJoinedIfCurrent}) — but its other accessor functions still read
  * `_client`/`_connected`/`activeChannels` live, not a snapshot, since reconciliation can run long
  * after this bundle was built.
+ * @returns The accessor/mutator bundle, with `markJoined`/`markParted` bound to the current generation.
  */
 function membershipDeps(): MembershipDeps {
   const generation = connectionGeneration;
@@ -131,6 +136,7 @@ export function setChatClient(c: ChatClient | null): void {
  * {@link connectionGeneration} — see their docs for why nothing can be trusted as still-joined
  * across a reconnect, including a join/part call issued before this disconnect that only settles
  * afterward.
+ * @param v - True when the chat client has connected, false when it has disconnected.
  */
 export function setConnected(v: boolean): void {
   _connected = v;
@@ -140,7 +146,10 @@ export function setConnected(v: boolean): void {
   }
 }
 
-/** Registers a callback fired each time the bot successfully joins a channel. */
+/**
+ * Registers a callback fired each time the bot successfully joins a channel.
+ * @param fn - Called with the normalized channel name after each confirmed join; replaces any earlier hook.
+ */
 export function setChannelJoinedHook(fn: (channel: string) => void): void {
   _onChannelJoined = fn;
 }
@@ -294,7 +303,10 @@ export async function initializeActiveChannels(): Promise<void> {
   }
 }
 
-/** Joins a Twitch channel, throttled to respect Twitch rate limits. Serialised via mutationQueue. */
+/**
+ * Joins a Twitch channel, throttled to respect Twitch rate limits. Serialised via mutationQueue.
+ * @param channel - Twitch channel name; normalized first (a leading `#` and case are ignored).
+ */
 export async function joinTwitchChannel(channel: string): Promise<void> {
   const normalized = normalizeTwitchChannelName(channel);
   if (!normalized) {
@@ -401,12 +413,18 @@ export async function partTwitchChannel(channel: string): Promise<void> {
   });
 }
 
-/** Returns the set of channels the bot is currently tracking as active. */
+/**
+ * Returns the set of channels the bot is currently tracking as active.
+ * @returns The live set of normalized channel names the bot should be in (not a copy).
+ */
 export function getActiveChannels(): ReadonlySet<string> {
   return activeChannels;
 }
 
-/** Returns a map of channel login → Twitch user ID for all active channels. */
+/**
+ * Returns a map of channel login → Twitch user ID for all active channels.
+ * @returns The live map (not a copy); a channel whose ID lookup failed is absent.
+ */
 export function getActiveChannelUserIds(): ReadonlyMap<string, string> {
   return activeChannelUserIds;
 }
@@ -423,6 +441,7 @@ export function clearMembershipState(): void {
  * Test-only: seeds {@link confirmedJoinedChannels} directly, standing in for a real `client.join()`
  * having already succeeded — since it's no longer driven off the mock client's `currentChannels`
  * (see {@link confirmedJoinedChannels}'s doc for why production code doesn't trust that either).
+ * @param channels - Normalized channel names to mark joined, replacing the current set.
  */
 export function __setConfirmedJoinedChannelsForTests(channels: Iterable<string>): void {
   confirmedJoinedChannels.clear();

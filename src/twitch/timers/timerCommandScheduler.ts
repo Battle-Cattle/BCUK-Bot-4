@@ -22,7 +22,10 @@ interface TimerCommandsRuntime extends TwitchSendRuntime {
 
 const timerCommandsRuntime = createRuntimeRegistry<TimerCommandsRuntime>();
 
-/** Stores the Twitch chat runtime used to post timer messages. Call once from index.ts after the Twitch bot is ready. */
+/**
+ * Stores the Twitch chat runtime used to post timer messages. Call once from index.ts after the Twitch bot is ready.
+ * @param runtime - The bot's send function plus its channel login → Twitch user ID lookup.
+ */
 export function registerTimerCommandsRuntime(runtime: TimerCommandsRuntime): void {
   timerCommandsRuntime.register(runtime);
 }
@@ -80,6 +83,7 @@ function rebaseIfMessageCountReset(channel: string, state: TimerRuntimeState): v
  * to `null` (treated as "not currently in Shared Chat" by callers).
  * @param channels - Twitch channel logins to resolve.
  * @param loginUserIds - Map from channel login to Twitch user id.
+ * @returns Channel login → Shared Chat session id, or null when not in a session or unresolvable.
  */
 async function resolveSessionIdsByChannel(
   channels: readonly string[],
@@ -135,6 +139,7 @@ async function sendTimerRow(row: TimerCommandForScheduler, now: number, sessionK
  * `timerCommandCooldowns.ts`), and sends the picked rows concurrently via `Promise.allSettled` so
  * one channel's send failure can't block another's. No-ops (re-uses the in-flight promise) if a
  * tick is already running.
+ * @returns A promise that settles when the tick (or the already-running one) finishes.
  */
 export async function runTimerCommandTick(): Promise<void> {
   if (tickRunning) return currentTickPromise;

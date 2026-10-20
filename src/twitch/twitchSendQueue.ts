@@ -66,12 +66,19 @@ const lastNonPrivilegedSendAtByChannel = new Map<string, number>();
 // also guarantees sends are never reordered relative to each other, including across channels.
 const globalQueue = createMutationQueue<'global'>();
 
-/** Resolves after `ms` milliseconds. */
+/**
+ * Resolves after `ms` milliseconds.
+ * @param ms - Delay in milliseconds.
+ * @returns A promise that resolves once the delay has elapsed.
+ */
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => { setTimeout(resolve, ms); });
 }
 
-/** Drops entries older than the rolling window from {@link sentTimestamps} (mutated in place). */
+/**
+ * Drops entries older than the rolling window from {@link sentTimestamps} (mutated in place).
+ * @param now - Current time in epoch ms.
+ */
 function pruneExpired(now: number): void {
   let oldest = sentTimestamps[0];
   while (oldest !== undefined && now - oldest >= WINDOW_MS) {
@@ -83,6 +90,7 @@ function pruneExpired(now: number): void {
 /**
  * Waits until the shared 30s window has room for one more send under `limit`, pruning expired
  * entries first and re-checking after however long the oldest remaining entry takes to age out.
+ * @param limit - Maximum sends allowed in the window for this send's privilege level.
  */
 async function waitForWindowRoom(limit: number): Promise<void> {
   for (;;) {
@@ -94,7 +102,10 @@ async function waitForWindowRoom(limit: number): Promise<void> {
   }
 }
 
-/** Waits, if needed, so a non-privileged send to `channel` respects {@link NON_PRIVILEGED_CHANNEL_FLOOR_MS}. */
+/**
+ * Waits, if needed, so a non-privileged send to `channel` respects {@link NON_PRIVILEGED_CHANNEL_FLOOR_MS}.
+ * @param channel - Twitch channel name the message is about to be sent to.
+ */
 async function waitForChannelFloor(channel: string): Promise<void> {
   const last = lastNonPrivilegedSendAtByChannel.get(channel);
   if (last === undefined) return;

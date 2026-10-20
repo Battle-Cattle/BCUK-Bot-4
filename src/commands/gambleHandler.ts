@@ -21,7 +21,10 @@ const BALANCE_CHANGED_MESSAGE = 'Your balance changed before that bet could be p
 
 const gambleRuntime = createRuntimeRegistry<TwitchSendRuntime>();
 
-/** Stores the Twitch chat runtime used to send gamble results. Call once from index.ts after the Twitch bot is ready. */
+/**
+ * Stores the Twitch chat runtime used to send gamble results. Call once from index.ts after the Twitch bot is ready.
+ * @param runtime - Twitch runtime whose `send` posts chat messages.
+ */
 export function registerGambleTwitchRuntime(runtime: TwitchSendRuntime): void {
   gambleRuntime.register(runtime);
 }
@@ -87,8 +90,12 @@ async function getConfigIfAllowedToGamble(streamerId: number, twitchUsername: st
   return config;
 }
 
-/** Sends `message` to `channel` via the registered Twitch runtime, logging (rather than
- *  throwing) on failure. No-ops if no runtime has been registered yet. */
+/**
+ * Sends `message` to `channel` via the registered Twitch runtime, logging (rather than
+ * throwing) on failure. No-ops if no runtime has been registered yet.
+ * @param channel - Twitch channel login the `!gamble` was sent in.
+ * @param message - Chat reply to send.
+ */
 async function sendGambleMessage(channel: string, message: string): Promise<void> {
   const runtime = gambleRuntime.get();
   if (!runtime) return;

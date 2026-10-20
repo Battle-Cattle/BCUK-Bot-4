@@ -25,19 +25,32 @@ export interface BuildTestAppOptions {
   mockRender?: MockRenderPreset | ((view: string, locals: unknown, res: Response) => void);
 }
 
-/** Installs the body parser(s) requested via `BuildTestAppOptions.bodyParser`. */
+/**
+ * Installs the body parser(s) requested via `BuildTestAppOptions.bodyParser`.
+ * @param app - The test app to install parsers on.
+ * @param bodyParser - Which parser(s) to install, or undefined for none.
+ */
 function applyBodyParser(app: Express, bodyParser: BuildTestAppOptions['bodyParser']): void {
   if (bodyParser === 'json' || bodyParser === 'both') app.use(express.json());
   if (bodyParser === 'urlencoded' || bodyParser === 'both') app.use(express.urlencoded({ extended: false }));
 }
 
-/** Builds the `req.session` value for a request, from `session` (verbatim) or `sessionUser` (wrapped as `{ user }`). */
+/**
+ * Builds the `req.session` value for a request, from `session` (verbatim) or `sessionUser` (wrapped as `{ user }`).
+ * @param options - The test app options.
+ * @returns `options.session` if that key was passed, otherwise `{ user: options.sessionUser }`.
+ */
 function resolveSessionValue(options: BuildTestAppOptions): unknown {
   if (Object.prototype.hasOwnProperty.call(options, 'session')) return options.session;
   return { user: options.sessionUser };
 }
 
-/** Builds the `res.render` replacement for a given `mockRender` preset or custom function, bound to one response. */
+/**
+ * Builds the `res.render` replacement for a given `mockRender` preset or custom function, bound to one response.
+ * @param mockRender - Preset name or custom render function.
+ * @param res - The response the stub writes to.
+ * @returns A function to assign to `res.render`.
+ */
 function makeRenderStub(
   mockRender: NonNullable<BuildTestAppOptions['mockRender']>,
   res: Response,
@@ -50,7 +63,11 @@ function makeRenderStub(
   }) as unknown as Response['render'];
 }
 
-/** Installs the `req.session`/`res.render` stub middleware for the options that requested one. */
+/**
+ * Installs the `req.session`/`res.render` stub middleware for the options that requested one.
+ * @param app - The test app to install the middleware on.
+ * @param options - The test app options; no middleware is added unless they set `session`, `sessionUser` or `mockRender`.
+ */
 function applySessionAndRenderStub(app: Express, options: BuildTestAppOptions): void {
   const hasSessionUser = Object.prototype.hasOwnProperty.call(options, 'sessionUser');
   const hasSession = Object.prototype.hasOwnProperty.call(options, 'session');
@@ -74,6 +91,8 @@ function applySessionAndRenderStub(app: Express, options: BuildTestAppOptions): 
  * (as JSON or plain text) instead of rendering a real EJS template, and the router(s) under test
  * mounted last. Mirrors the hand-rolled `buildApp()` helpers previously duplicated across
  * `src/web/routes/*.test.ts`.
+ * @param options - Router(s) to mount plus the optional body parser, session and render stubs.
+ * @returns The configured Express app, ready for supertest.
  */
 export function buildTestApp(options: BuildTestAppOptions): Express {
   const app = express();

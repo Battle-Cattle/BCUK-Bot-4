@@ -20,7 +20,11 @@ let currentTickPromise: Promise<void> = Promise.resolve();
  */
 let schedulerStopped = false;
 
-/** True if `error` is MySQL's `ER_SERVER_SHUTDOWN` (errno 1053) — the DB server itself is restarting/shutting down. */
+/**
+ * True if `error` is MySQL's `ER_SERVER_SHUTDOWN` (errno 1053) — the DB server itself is restarting/shutting down.
+ * @param error - Whatever a failed DB call threw.
+ * @returns True if its `code` or `errno` identifies a server shutdown.
+ */
 function isServerShutdownError(error: unknown): boolean {
   const err = error as { code?: string; errno?: number } | null | undefined;
   return err?.code === 'ER_SERVER_SHUTDOWN' || err?.errno === 1053;
@@ -80,6 +84,7 @@ function resumeAfterDbRecovery(): void {
  * `applyDecayTick` re-reads fresh, so a tick-old value is harmless. No-ops (re-uses the
  * in-flight promise) if a tick is already running, so a slow tick can't overlap with the next
  * interval firing.
+ * @returns A promise that settles when the tick (or the already-running one) finishes.
  */
 export async function runDecayTick(): Promise<void> {
   if (tickRunning) return currentTickPromise;

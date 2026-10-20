@@ -21,7 +21,12 @@ interface CommandSessionCooldown {
 
 const commandSessionLastFiredAt = new Map<string, CommandSessionCooldown>();
 
-/** Composite key for {@link commandSessionLastFiredAt}: one cooldown per (timer, Shared Chat session). */
+/**
+ * Composite key for {@link commandSessionLastFiredAt}: one cooldown per (timer, Shared Chat session).
+ * @param timerId - DB id of the timer command.
+ * @param sessionId - Twitch Shared Chat session id.
+ * @returns The key `<timerId>::<sessionId>`.
+ */
 function commandSessionKey(timerId: number, sessionId: string): string {
   return `${timerId}::${sessionId}`;
 }
@@ -29,7 +34,10 @@ function commandSessionKey(timerId: number, sessionId: string): string {
 /** A stale command-session cooldown entry is kept around for this many multiples of its own cooldown length before being pruned, so the map doesn't grow unbounded as Shared Chat sessions come and go over long uptimes. */
 const COMMAND_SESSION_COOLDOWN_PRUNE_FACTOR = 10;
 
-/** Drops command-session cooldown entries old enough (relative to their own recorded cooldown length) that the session or assignment behind them is almost certainly gone. */
+/**
+ * Drops command-session cooldown entries old enough (relative to their own recorded cooldown length) that the session or assignment behind them is almost certainly gone.
+ * @param now - Current time in epoch ms.
+ */
 function pruneStaleCommandSessionCooldowns(now: number): void {
   for (const [key, entry] of commandSessionLastFiredAt) {
     if (now - entry.firedAt > entry.cooldownMs * COMMAND_SESSION_COOLDOWN_PRUNE_FACTOR) {
@@ -60,27 +68,42 @@ const channelLastFiredAt = new Map<string, ChannelCooldown>();
 
 const CHANNEL_MIN_SPACING_PRUNE_MS = 10 * CHANNEL_MIN_SPACING_MS;
 
-/** Drops channel-floor entries older than {@link CHANNEL_MIN_SPACING_PRUNE_MS} so the map doesn't grow unbounded as channels stop being assigned any timer over long uptimes. */
+/**
+ * Drops channel-floor entries older than {@link CHANNEL_MIN_SPACING_PRUNE_MS} so the map doesn't grow unbounded as channels stop being assigned any timer over long uptimes.
+ * @param now - Current time in epoch ms.
+ */
 function pruneStaleChannelCooldowns(now: number): void {
   for (const [channel, entry] of channelLastFiredAt) {
     if (now - entry.firedAt > CHANNEL_MIN_SPACING_PRUNE_MS) channelLastFiredAt.delete(channel);
   }
 }
 
-/** Drops every stale cooldown entry in both maps. Call once per scheduler tick. */
+/**
+ * Drops every stale cooldown entry in both maps. Call once per scheduler tick.
+ * @param now - Current time in epoch ms.
+ */
 export function pruneStaleCooldowns(now: number): void {
   pruneStaleCommandSessionCooldowns(now);
   pruneStaleChannelCooldowns(now);
 }
 
-/** Releases a command-session cooldown reservation if it's still the one made at `now` (not a newer one made since). */
+/**
+ * Releases a command-session cooldown reservation if it's still the one made at `now` (not a newer one made since).
+ * @param sessionKey - The {@link commandSessionKey} reserved for the pick, or null if none was (no-op).
+ * @param now - The epoch-ms tick time the reservation was made at.
+ */
 function releaseCommandSessionReservation(sessionKey: string | null, now: number): void {
   if (!sessionKey) return;
   const entry = commandSessionLastFiredAt.get(sessionKey);
   if (entry?.firedAt === now) commandSessionLastFiredAt.delete(sessionKey);
 }
 
-/** Releases a channel-floor reservation if it's still the one made at `now` for `timerId` (not a newer/different one made since). */
+/**
+ * Releases a channel-floor reservation if it's still the one made at `now` for `timerId` (not a newer/different one made since).
+ * @param channel - Twitch channel name the reservation was made for.
+ * @param timerId - DB id of the timer command that made the reservation.
+ * @param now - The epoch-ms tick time the reservation was made at.
+ */
 function releaseChannelReservation(channel: string, timerId: number, now: number): void {
   const entry = channelLastFiredAt.get(channel);
   if (entry?.firedAt === now && entry.timerId === timerId) channelLastFiredAt.delete(channel);
@@ -102,7 +125,12 @@ export interface PickedRow {
 /** Resolves a row's current `lastFiredAt`, used to pick whichever of a group of contending rows has waited longest. Supplied by the caller since that state lives in the scheduler, not here. */
 export type LastFiredAtLookup = (row: TimerCommandForScheduler) => number;
 
-/** Picks whichever of `rows` has gone longest without firing (oldest per `lastFiredAtOf`), breaking ties by keeping the first. */
+/**
+ * Picks whichever of `rows` has gone longest without firing (oldest per `lastFiredAtOf`), breaking ties by keeping the first.
+ * @param rows - Contending rows; must be non-empty.
+ * @param lastFiredAtOf - Resolves a row's current `lastFiredAt` (epoch ms).
+ * @returns The row with the smallest `lastFiredAt`.
+ */
 function pickLongestWaiting(rows: readonly TimerCommandForScheduler[], lastFiredAtOf: LastFiredAtLookup): TimerCommandForScheduler {
   return rows.reduce((oldest, row) => (lastFiredAtOf(row) < lastFiredAtOf(oldest) ? row : oldest));
 }
@@ -209,6 +237,7 @@ function applyChannelFloor(layer1Survivors: readonly PickedRow[], now: number, l
  * @param sessionIdByChannel - Each row's channel's resolved Shared Chat session id (or null).
  * @param now - Current time in epoch ms, shared across the whole tick.
  * @param lastFiredAtOf - Resolves a row's current `lastFiredAt`, for the longest-waiting tie-break.
+ * @returns The rows to fire this tick, each with the session cooldown key reserved for it (or null).
  */
 export function pickRowsToFire(
   eligibleRows: readonly TimerCommandForScheduler[],

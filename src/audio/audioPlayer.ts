@@ -63,7 +63,11 @@ interface GuildVoiceState {
 
 const states = new Map<string, GuildVoiceState>();
 
-/** Returns the voice state for a guild, creating an empty record on first use. */
+/**
+ * Returns the voice state for a guild, creating an empty record on first use.
+ * @param guildId - Discord snowflake of the guild.
+ * @returns The existing or newly created voice state record for that guild.
+ */
 function getState(guildId: string): GuildVoiceState {
   return getOrCreate(states, guildId, () => ({
     guildId,
@@ -84,7 +88,10 @@ function getState(guildId: string): GuildVoiceState {
   }));
 }
 
-/** True if any guild currently holds a live voice connection. */
+/**
+ * True if any guild currently holds a live voice connection.
+ * @returns True if at least one guild has a non-null connection.
+ */
 function anyConnected(): boolean {
   for (const state of states.values()) {
     if (state.connection) return true;
@@ -104,7 +111,10 @@ const VOICE_CONNECT_TIMEOUT_MS = 30_000;
  */
 const SLOW_PLAYBACK_START_MS = 500;
 
-/** Cancels and nulls any pending reconnect timer for the given guild state. */
+/**
+ * Cancels and nulls any pending reconnect timer for the given guild state.
+ * @param state - The guild voice state whose reconnect timer to clear.
+ */
 function clearReconnectTimer(state: GuildVoiceState): void {
   if (state.reconnectTimer) {
     clearTimeout(state.reconnectTimer);
@@ -112,7 +122,11 @@ function clearReconnectTimer(state: GuildVoiceState): void {
   }
 }
 
-/** Schedules an exponential-backoff voice reconnect for a guild, skipping if one is already pending. */
+/**
+ * Schedules an exponential-backoff voice reconnect for a guild, skipping if one is already pending.
+ * @param state - The guild voice state to reconnect.
+ * @param reason - Why the rejoin is needed, included in the warning log.
+ */
 function scheduleReconnect(state: GuildVoiceState, reason: string): void {
   if (!state.shouldAutoReconnect || !state.client || state.reconnectTimer || state.connection) return;
 
@@ -131,7 +145,11 @@ function scheduleReconnect(state: GuildVoiceState, reason: string): void {
   }, delay);
 }
 
-/** Returns this guild's audio player, lazily creating it with playing, idle and error handlers on first use. */
+/**
+ * Returns this guild's audio player, lazily creating it with playing, idle and error handlers on first use.
+ * @param state - The guild voice state that owns the player.
+ * @returns The guild's audio player.
+ */
 function getPlayer(state: GuildVoiceState): DjsAudioPlayer {
   if (!state.player) {
     const guildPlayer = createAudioPlayer({
@@ -174,7 +192,10 @@ function logPlaybackStart(state: GuildVoiceState): void {
   else log.debug(message);
 }
 
-/** Stops this guild's audio player (if any) and marks it not-playing, ignoring stop errors. */
+/**
+ * Stops this guild's audio player (if any) and marks it not-playing, ignoring stop errors.
+ * @param state - The guild voice state whose player to stop.
+ */
 function stopGuildPlayer(state: GuildVoiceState): void {
   try {
     state.player?.stop(true);
@@ -189,6 +210,7 @@ function stopGuildPlayer(state: GuildVoiceState): void {
  * stops this guild's own player and clears this guild's own voice status —
  * status is scoped per guild, so tearing down one guild's connection never
  * affects another guild's reported state.
+ * @param state - The guild voice state to tear down.
  */
 function tearDownGuild(state: GuildVoiceState): void {
   state.currentChannelId = null;
@@ -196,7 +218,11 @@ function tearDownGuild(state: GuildVoiceState): void {
   setVoiceDisconnected(state.guildId);
 }
 
-/** Builds the ConnectionHandlerDeps callbacks bound to a specific guild's mutable voice state. */
+/**
+ * Builds the ConnectionHandlerDeps callbacks bound to a specific guild's mutable voice state.
+ * @param state - The guild voice state the callbacks read and mutate.
+ * @returns Connection-handler dependencies scoped to that guild.
+ */
 function makeDeps(state: GuildVoiceState): ConnectionHandlerDeps {
   return {
     getAttemptId: () => state.currentAttemptId,
@@ -362,7 +388,10 @@ function handleConnectFailure(
   }
 }
 
-/** Tears down a single guild's voice connection and reconnect state. */
+/**
+ * Tears down a single guild's voice connection and reconnect state.
+ * @param state - The guild voice state to disconnect.
+ */
 function disconnectGuild(state: GuildVoiceState): void {
   state.currentAttemptId += 1;
   // Any in-flight attempt is now stale; clearing this lets it destroy its connection when it notices.
@@ -403,6 +432,7 @@ export function disconnect(guildId?: string): void {
  * Returns true if a sound is currently being played in the given guild.
  *
  * @param guildId - Guild to check.
+ * @returns True while the guild's player has a sound in progress; false for unknown guilds.
  */
 export function isPlaying(guildId: string): boolean {
   return states.get(guildId)?.playing ?? false;
@@ -412,6 +442,7 @@ export function isPlaying(guildId: string): boolean {
  * Returns true if the bot is joined to a voice channel.
  *
  * @param guildId - Restrict the check to one guild; omit to test whether any guild is connected.
+ * @returns True if the given guild (or, with no guild, any guild) has a live voice connection.
  */
 export function isConnected(guildId?: string): boolean {
   if (guildId === undefined) return anyConnected();
@@ -422,6 +453,7 @@ export function isConnected(guildId?: string): boolean {
  * Returns the current voice channel ID for a guild, or null if not connected there.
  *
  * @param guildId - Guild to read the current channel for.
+ * @returns Discord snowflake of the joined voice channel, or null when not connected in that guild.
  */
 export function getCurrentChannelId(guildId: string): string | null {
   return states.get(guildId)?.currentChannelId ?? null;

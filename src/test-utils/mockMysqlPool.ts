@@ -16,6 +16,8 @@ export interface MockConnection {
  * `mockResolvedValue`/`mockResolvedValueOnce` for specific row/result data.
  * `beginTransaction`/`commit`/`rollback` resolve to `undefined`; `release` and
  * `destroy` are plain spies. Pass `overrides` to replace any field wholesale.
+ * @param overrides - Mocks to use in place of the defaults.
+ * @returns A new fake connection.
  */
 export function makeMockConnection(overrides: Partial<MockConnection> = {}): MockConnection {
   return {
@@ -57,6 +59,8 @@ export interface MakeMockPoolOptions {
  * Builds a fake mysql2 `Pool` covering the shapes used across `src/db/*.test.ts`: a top-level
  * `execute`/`query` resolving to row data, and `getConnection()` resolving to a fake transactional
  * connection (also exposed as `_conn` for direct assertions, e.g. `pool._conn.commit`).
+ * @param options - Rows, metadata, a full result tuple and/or the connection to return.
+ * @returns A new fake pool whose `getConnection()` resolves to `_conn`.
  */
 export function makeMockPool(options: MakeMockPoolOptions = {}): MockPool {
   const { rows = [], meta = [], executeResult, connection } = options;

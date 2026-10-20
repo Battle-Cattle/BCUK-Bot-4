@@ -20,11 +20,17 @@ export function createRuntimeRegistry<T>(): {
 } {
   let runtime: T | null = null;
   return {
-    /** Stores `runtime` as the current singleton, replacing any previously-registered one. */
+    /**
+     * Stores `runtime` as the current singleton, replacing any previously-registered one.
+     * @param r - The runtime to store.
+     */
     register: (r: T): void => {
       runtime = r;
     },
-    /** Returns the currently-registered runtime, or null if none has been registered yet. */
+    /**
+     * Returns the currently-registered runtime, or null if none has been registered yet.
+     * @returns The registered runtime, or null.
+     */
     get: (): T | null => runtime,
   };
 }

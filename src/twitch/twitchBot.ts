@@ -103,7 +103,10 @@ interface TwitchChannelDiscordIdCache extends RefreshingLookupCache {
   discordIdByChannel: Map<string, string>;
 }
 
-/** Returns a fresh, empty Twitch-channel → discord_id cache. */
+/**
+ * Returns a fresh, empty Twitch-channel → discord_id cache.
+ * @returns A cache with no entries and `loadedAt` 0, so it reads as expired.
+ */
 function createEmptyTwitchChannelDiscordIdCache(): TwitchChannelDiscordIdCache {
   return { loadedAt: 0, discordIdByChannel: new Map() };
 }
@@ -126,6 +129,8 @@ const twitchChannelDiscordIdLookupCache = createManagedLookupCache<TwitchChannel
  * A channel absent from the bulk cache falls back to a live lookup — the cache has no
  * per-key invalidation, so a channel linked since the last bulk refresh would otherwise
  * stay unresolved for up to the cache's TTL instead of working on the very next message.
+ * @param normalizedChannel - Normalized (lowercase, no `#`) Twitch channel name.
+ * @returns The linked user's Discord ID, or null if no user has that `twitch_name`.
  */
 async function resolveDiscordIdForTwitchChannel(normalizedChannel: string): Promise<string | null> {
   const cache = await twitchChannelDiscordIdLookupCache.getCache();
@@ -140,14 +145,22 @@ export function __resetTwitchChannelDiscordIdCacheForTests(): void {
   twitchChannelDiscordIdLookupCache.invalidate();
 }
 
-/** Resolves which guild a Twitch chat command should target: the linked streamer's active voice guild. */
+/**
+ * Resolves which guild a Twitch chat command should target: the linked streamer's active voice guild.
+ * @param normalizedChannel - Normalized (lowercase, no `#`) Twitch channel name.
+ * @returns The Discord guild ID, or null if the channel isn't linked or no guild resolves.
+ */
 async function resolveGuildIdForTwitchCommand(normalizedChannel: string): Promise<string | null> {
   const discordId = await resolveDiscordIdForTwitchChannel(normalizedChannel);
   if (!discordId) return null;
   return resolveGuildIdForDiscordId(discordId);
 }
 
-/** Resolves a Twitch channel's `streamer.id`, or null if it isn't linked to a streamer row. */
+/**
+ * Resolves a Twitch channel's `streamer.id`, or null if it isn't linked to a streamer row.
+ * @param normalizedChannel - Normalized (lowercase, no `#`) Twitch channel name.
+ * @returns The streamer row's DB id, or null if unlinked.
+ */
 async function resolveStreamerIdForTwitchChannel(normalizedChannel: string): Promise<number | null> {
   const discordId = await resolveDiscordIdForTwitchChannel(normalizedChannel);
   if (!discordId) return null;

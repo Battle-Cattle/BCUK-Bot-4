@@ -34,7 +34,11 @@ interface ClientDispatcher {
 // WeakMap so a client that's discarded (e.g. in tests) doesn't keep its dispatcher alive.
 const dispatchers = new WeakMap<Client, ClientDispatcher>();
 
-/** Routes one raw gateway packet to its guild's registered methods, if any. No-ops for non-voice packets or unregistered guilds. */
+/**
+ * Routes one raw gateway packet to its guild's registered methods, if any. No-ops for non-voice packets or unregistered guilds.
+ * @param dispatcher - The client's dispatcher holding per-guild adapter methods.
+ * @param packet - Raw gateway packet (`t` event name, `d` payload) received from the client.
+ */
 function dispatchRawPacket(dispatcher: ClientDispatcher, packet: RawPacket): void {
   if (packet.t !== 'VOICE_STATE_UPDATE' && packet.t !== 'VOICE_SERVER_UPDATE') return;
 
@@ -51,7 +55,11 @@ function dispatchRawPacket(dispatcher: ClientDispatcher, packet: RawPacket): voi
   }
 }
 
-/** Returns `client`'s shared dispatcher, registering its single 'raw' listener on first use. */
+/**
+ * Returns `client`'s shared dispatcher, registering its single 'raw' listener on first use.
+ * @param client - Discord client whose raw gateway events to route.
+ * @returns The client's existing or newly registered dispatcher.
+ */
 function getOrCreateDispatcher(client: Client): ClientDispatcher {
   const existing = dispatchers.get(client);
   if (existing) return existing;
@@ -63,7 +71,11 @@ function getOrCreateDispatcher(client: Client): ClientDispatcher {
   return dispatcher;
 }
 
-/** Creates the gateway payload sender that routes voice data through the channel's guild shard. */
+/**
+ * Creates the gateway payload sender that routes voice data through the channel's guild shard.
+ * @param channel - Voice channel whose guild shard the payloads are sent through.
+ * @returns A sender returning true if the payload was sent, false if the shard send threw.
+ */
 function makeSendPayload(channel: VoiceBasedChannel): (payload: unknown) => boolean {
   return function sendPayload(payload: unknown): boolean {
     try {
@@ -78,6 +90,10 @@ function makeSendPayload(channel: VoiceBasedChannel): (payload: unknown) => bool
 /**
  * Registers a raw-gateway adapter for one connection, tearing down the guild's
  * previous adapter first so registrations do not accumulate across reconnects.
+ * @param channel - Voice channel the connection is joining.
+ * @param methods - Library methods from @discordjs/voice that receive voice state and server updates.
+ * @param state - The guild's adapter cleanup state, holding the previous registration's cleanup.
+ * @returns Implementer methods for @discordjs/voice: a payload sender and an idempotent destroy.
  */
 function registerAdapter(
   channel: VoiceBasedChannel,

@@ -29,7 +29,10 @@ type MultiTwitchRuntime = TwitchBroadcastRuntime;
 
 const multiTwitchRuntime = createRuntimeRegistry<MultiTwitchRuntime>();
 
-/** Stores the concrete Twitch chat runtime (send/getActiveChannels/getLoginUserIds) so `!multi` can be broadcast. Call once from index.ts after the Twitch bot is ready. */
+/**
+ * Stores the concrete Twitch chat runtime (send/getActiveChannels/getLoginUserIds) so `!multi` can be broadcast. Call once from index.ts after the Twitch bot is ready.
+ * @param runtime - Twitch runtime with send, active-channel and login-to-user-id lookups.
+ */
 export function registerMultiTwitchRuntime(runtime: MultiTwitchRuntime): void {
   multiTwitchRuntime.register(runtime);
 }
@@ -41,6 +44,10 @@ export function registerMultiTwitchRuntime(runtime: MultiTwitchRuntime): void {
  * participant channel the bot has currently joined, de-duplicating channels that
  * share a Twitch shared-chat session via {@link sendDedupedBySession} so only one
  * message is sent per session.
+ * @param sourceChannel - Twitch login of the channel `!multi` was used in.
+ * @param participants - Twitch logins of the MultiTwitch group members.
+ * @param message - The `!multi` URL message to send.
+ * @param runtime - The registered Twitch runtime used to send and resolve channels.
  * @returns True if the message was sent to at least one channel/session.
  */
 async function broadcastToGroupChannels(

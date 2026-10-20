@@ -19,7 +19,10 @@ const log = createLogger('EventSub');
  *  call is scoped by the streamer's *user token*, which Twitch also matches against subscriptions
  *  where the token's user is a moderator (e.g. `channel.follow`'s `moderator_user_id`) rather than
  *  the broadcaster — so without this filter, another broadcaster's subscription (on a channel this
- *  streamer moderates) could be mistaken for this streamer's own and wrongly kept or deleted. */
+ *  streamer moderates) could be mistaken for this streamer's own and wrongly kept or deleted.
+ *  @param condition - A listed subscription's condition object.
+ *  @param uid - The streamer's Twitch broadcaster user ID.
+ *  @returns True if `broadcaster_user_id` or `to_broadcaster_user_id` equals `uid`. */
 function isOwnSubscription(condition: Record<string, string>, uid: string): boolean {
   return condition.broadcaster_user_id === uid || condition.to_broadcaster_user_id === uid;
 }
@@ -75,7 +78,10 @@ async function deleteStaleSubscriptions(
 
 /** Resolves the broadcaster's Twitch user ID. Uses the stored OAuth ID if available;
  *  falls back to a Helix lookup for raid-only streamers (welcome message and/or
- *  auto-shoutout) who haven't connected OAuth. */
+ *  auto-shoutout) who haven't connected OAuth.
+ *  @param streamer - The streamer's EventSub DB row (stored `twitch_user_id` and `twitch_name`).
+ *  @param config - The streamer's event config; the Helix fallback only runs if a raid feature is enabled.
+ *  @returns The Twitch user ID, or null if there's no stored ID and no fallback applies or the lookup fails. */
 async function resolveBroadcasterId(streamer: DbStreamerEventSub, config: EventSubConfig | null): Promise<string | null> {
   if (streamer.twitch_user_id) return streamer.twitch_user_id;
   if (!config?.raid_enabled && !config?.raid_shoutout_enabled) return null;
@@ -124,6 +130,8 @@ interface SubscriptionResult {
  * Twitch hadn't yet revoked its subscriptions) or bound to the live session but not `enabled`
  * (e.g. `authorization_revoked`) — it's deleted first so the fresh create can't 409 against it and
  * leave the *new* session with no working subscription for that spec.
+ * @param sessionId - ID of the live EventSub WebSocket session to bind subscriptions to.
+ * @param data - The streamer's uid, token, login, config and enabled alert types.
  * @returns The desired-types set, a type → id map of subscriptions actually created (or
  *   confirmed already-live on this session) this round (a type is absent from `created` on a
  *   genuine race — see {@link deleteStaleSubscriptions} — or when the create 409'd, since Twitch
@@ -182,7 +190,11 @@ async function createSubscriptionsForStreamer(
  *  Returns an empty array (and logs) on failure — callers treat that the same as "nothing exists
  *  yet" and create fresh. Each returned subscription's `status` is Twitch's own subscription state
  *  (see {@link ensureSubscription}) — callers must not assume a matching type/condition/session is
- *  actually receiving notifications without also checking it. */
+ *  actually receiving notifications without also checking it.
+ *  @param token - Streamer's user access token used for the listing.
+ *  @param uid - Streamer's Twitch broadcaster user ID to keep subscriptions for.
+ *  @param name - Streamer's Twitch login, used only in the failure log.
+ *  @returns The streamer's own subscriptions, or an empty array if the listing failed. */
 async function listOwnSubscriptions(
   token: string, uid: string, name: string,
 ): Promise<Array<{ id: string; type: string; condition: Record<string, string>; sessionId?: string; status?: string }>> {
@@ -203,6 +215,7 @@ async function listOwnSubscriptions(
  * bulk-JOIN fetch of `streamer_event_config`. Per-streamer token refresh (`getValidToken`) and
  * broadcaster-ID resolution run concurrently across streamers via `Promise.all` — each streamer
  * is independent, so this doesn't wait on one streamer's token refresh before starting the next.
+ * @returns Subscription data for every streamer whose broadcaster ID resolved; others are skipped.
  */
 export async function loadStreamersForEventSub(): Promise<StreamerEventSubData[]> {
   const streamers = await getAllEventSubStreamers();
@@ -238,7 +251,10 @@ export async function fetchValidEventSubToken(streamerId: number): Promise<strin
  *  {@link SubscribeOutcome}) — `StreamerConnection` needs all three to tell "nothing wanted" or
  *  "every create failed on auth/scope" (stop: retrying can't help until the user reconnects
  *  Twitch) apart from "creates failed on a transient Twitch outage" (keep the connection and retry),
- *  which a single live count would conflate. */
+ *  which a single live count would conflate.
+ *  @param sessionId - ID of the streamer's dedicated EventSub WebSocket session.
+ *  @param data - The streamer's uid, token, login, config, DB id and enabled alert types.
+ *  @returns The desired, live and transient-failure spec counts for this pass. */
 export async function subscribeForStreamer(
   sessionId: string, data: StreamerEventSubData,
 ): Promise<SubscribeOutcome> {

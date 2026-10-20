@@ -4,7 +4,14 @@ import { twitchFetch, authHeaders } from '../twitchApi';
 import { TwitchAuthError } from '../twitchUserTokens';
 
 /** Creates an EventSub subscription via WebSocket transport. Returns the subscription ID,
- *  or null if the subscription already exists (409). Throws on other failures. */
+ *  or null if the subscription already exists (409). Throws on other failures.
+ *  @param type - EventSub subscription type, e.g. `channel.channel_points_custom_reward_redemption.add`.
+ *  @param version - Version of the subscription type, e.g. `1`.
+ *  @param condition - Twitch condition object for the subscription (e.g. `{ broadcaster_user_id }`).
+ *  @param sessionId - ID of the EventSub WebSocket session to bind the subscription to.
+ *  @param token - User access token authorised for the subscription's scopes.
+ *  @returns The new subscription's ID, or null on 409 (already exists).
+ *  @throws TwitchAuthError on 401/403; Error on any other non-OK status or an empty response. */
 export async function createEventSubSubscription(
   type: string,
   version: string,
@@ -50,7 +57,10 @@ export async function createEventSubSubscription(
  *  left over from a prior (possibly dead) session. `status` is Twitch's own subscription state
  *  (e.g. `enabled`, `authorization_revoked`, `notification_failures_exceeded`) — a subscription
  *  bound to the live session isn't necessarily receiving notifications; callers must check
- *  `status === 'enabled'` before treating it as such. */
+ *  `status === 'enabled'` before treating it as such.
+ *  @param token - User or app access token to list subscriptions with.
+ *  @param userId - Twitch user ID to filter by (`user_id` query param); omit for no filter.
+ *  @returns Every matching subscription across all pages. */
 export async function listEventSubSubscriptions(
   token: string,
   userId?: string,

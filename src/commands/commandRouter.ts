@@ -18,7 +18,11 @@ interface GuildCommandState {
 
 const guildStates = new Map<string, GuildCommandState>();
 
-/** Returns the cooldown/in-flight state for a guild, creating a fresh record on first use. */
+/**
+ * Returns the cooldown/in-flight state for a guild, creating a fresh record on first use.
+ * @param guildId - Discord snowflake of the guild.
+ * @returns The guild's existing or newly created command state.
+ */
 function getGuildCommandState(guildId: string): GuildCommandState {
   return getOrCreate(guildStates, guildId, () => ({ lastPlayedAt: 0, inFlight: false }));
 }
