@@ -5,7 +5,9 @@ import { mockLogger } from '../test-utils/loggerMock';
 vi.mock('../shared/logger', () => ({ createLogger: mockLogger }));
 vi.mock('./discordClientStore', () => ({ getDiscordClient: vi.fn() }));
 
-vi.mock('discord.js', () => {
+// The error classes come from `@discordjs/rest` (the same classes discord.js re-exports); the
+// error codes and channel types are the real `discord-api-types` enums.
+vi.mock('@discordjs/rest', () => {
   class DiscordAPIError extends Error {
     code: number;
     status: number;
@@ -24,16 +26,7 @@ vi.mock('discord.js', () => {
       this.status = status;
     }
   }
-  return {
-    DiscordAPIError,
-    HTTPError,
-    RESTJSONErrorCodes: {
-      UnknownMessage: 10008,
-      UnknownChannel: 10003,
-      MissingAccess: 50001,
-    },
-    ChannelType: { GuildVoice: 2 },
-  };
+  return { DiscordAPIError, HTTPError };
 });
 
 const UNKNOWN_MESSAGE = 10008;
@@ -49,7 +42,7 @@ import {
   tryEditDiscordMessage,
   trySendDiscordReply,
 } from './discordUtils';
-import { DiscordAPIError, HTTPError } from 'discord.js';
+import { DiscordAPIError, HTTPError } from '@discordjs/rest';
 import { getDiscordClient } from './discordClientStore';
 
 // The mock above replaces DiscordAPIError with a simpler single-arg constructor.

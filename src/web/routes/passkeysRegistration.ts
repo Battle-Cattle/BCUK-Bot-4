@@ -1,6 +1,6 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
-import { escapeMarkdown } from 'discord.js';
+import { escapeMarkdown } from '@discordjs/formatters';
 import {
   generateRegistrationOptions,
   verifyRegistrationResponse,

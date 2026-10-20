@@ -1,7 +1,9 @@
 // Discord REST lookups and DMs made through the bot's client: member display names, user
 // profiles and direct messages. Separate from `discordBot.ts` so web routes and other callers
 // can use them without importing the bot's lifecycle, command dispatch and gateway handling.
-import { Routes, makeURLSearchParams, type APIGuildMember, type Guild } from 'discord.js';
+import { makeURLSearchParams } from '@discordjs/rest';
+import { Routes, type APIGuildMember } from 'discord-api-types/v10';
+import type { Guild } from 'discord.js';
 import { createLogger } from '../shared/logger';
 import { getDiscordClient } from './discordClientStore';
 

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 
-vi.mock('discord.js', () => ({
+vi.mock('@discordjs/builders', () => ({
   EmbedBuilder: class MockEmbedBuilder {
     private _data: Record<string, unknown> = {};
     setTitle(t: string) { this._data.title = t; return this; }
