@@ -253,20 +253,6 @@ module.exports = tseslint.config(
     },
   },
   {
-    // CLAUDE.md "Docstrings": the JSDoc also says what each parameter is and what the function
-    // returns. A destructured parameter needs only its root `@param`. This block covers the folders
-    // whose tags are in; public/, src/db and src/web get the same rules in their own block.
-    files: ['src/audio/**/*.ts', 'src/commands/**/*.ts', 'src/discord/**/*.ts', 'src/shared/**/*.ts', 'src/test-utils/**/*.ts', 'src/twitch/**/*.ts', 'src/types/**/*.ts'],
-    ignores: ['src/**/*.test.ts'],
-    plugins: { jsdoc },
-    rules: {
-      'jsdoc/require-param': ['error', { checkDestructured: false }],
-      'jsdoc/require-param-description': 'error',
-      'jsdoc/require-returns': 'error',
-      'jsdoc/require-returns-description': 'error',
-    },
-  },
-  {
     // The same Docstrings rule for the panel's browser scripts (no TypeScript, so JSDoc may carry types).
     files: ['public/**/*.js'],
     ignores: ['public/vendor/**'],
@@ -286,9 +272,9 @@ module.exports = tseslint.config(
   },
   {
     // CLAUDE.md "Docstrings": the JSDoc also says what each parameter is and what the function
-    // returns. A destructured parameter needs only its root `@param`. This block covers the folders
-    // whose tags are in; the rest of src/ gets the same rules in its own block until both have landed.
-    files: ['public/**/*.js', 'src/*.ts', 'src/db/**/*.ts', 'src/web/**/*.ts'],
+    // returns, in src/ and the public/ browser scripts alike. A destructured parameter needs only its
+    // root `@param`.
+    files: ['public/**/*.js', 'src/**/*.ts'],
     ignores: ['public/vendor/**', 'src/**/*.test.ts'],
     plugins: { jsdoc },
     rules: {
