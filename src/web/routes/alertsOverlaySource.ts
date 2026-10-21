@@ -35,7 +35,11 @@ export const connections = new Map<string, Set<import('express').Response>>();
 
 export const MAX_SSE_CONNECTIONS_PER_CHANNEL = ALERT_MAX_SSE_PER_CHANNEL;
 
-/** Push a customisable alert to all browser sources connected for this channel. */
+/**
+ * Push a customisable alert to all browser sources connected for this channel.
+ * @param login - Twitch channel login the overlay is keyed by (matched case-insensitively).
+ * @param alert - Alert payload sent as the SSE `data:` frame.
+ */
 export function pushAlertEvent(login: string, alert: AlertPayload): void {
   const key = login.toLowerCase();
   const remaining = broadcastToChannel(connections, key, alert);

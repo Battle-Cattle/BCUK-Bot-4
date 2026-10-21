@@ -2,18 +2,29 @@
 
 var liveItemsByKey = Object.create(null);
 
-/** Returns the expandable detail `<tr>` for a live row key, or null if it isn't rendered. */
+/**
+ * Returns the expandable detail `<tr>` for a live row key, or null if it isn't rendered.
+ * @param liveKey - The row key from getLiveRowKey.
+ * @returns The matching detail row element, or null.
+ */
 function findLiveDetailRow(liveKey) {
   return document.querySelector('tr.live-detail-row[data-live-key="' + CSS.escape(liveKey) + '"]');
 }
 
-/** Syncs a live row's ▶/▼ toggle button label and aria-expanded to its expanded state. */
+/**
+ * Syncs a live row's ▶/▼ toggle button label and aria-expanded to its expanded state.
+ * @param button - The row's expand/collapse toggle button.
+ * @param expanded - Whether the row's details are now shown.
+ */
 function setLiveToggleState(button, expanded) {
   button.textContent = expanded ? '▼' : '▶';
   button.setAttribute('aria-expanded', expanded ? 'true' : 'false');
 }
 
-/** Renders a live row's Discord message previews the first time its details are shown. */
+/**
+ * Renders a live row's Discord message previews the first time its details are shown.
+ * @param liveKey - The row key from getLiveRowKey; unknown keys and already-hydrated rows are ignored.
+ */
 function hydrateLivePreviewGrid(liveKey) {
   var detailRow = findLiveDetailRow(liveKey);
   if (!(detailRow instanceof HTMLElement)) return;
@@ -31,7 +42,10 @@ function hydrateLivePreviewGrid(liveKey) {
   grid.dataset.hydrated = 'true';
 }
 
-/** Replaces the live table body with a single full-width message row. */
+/**
+ * Replaces the live table body with a single full-width message row.
+ * @param text - The message to show, e.g. a loading or error notice.
+ */
 function setLiveTableMessage(text) {
   var tbody = document.getElementById('live-tbody');
   if (!tbody) return;

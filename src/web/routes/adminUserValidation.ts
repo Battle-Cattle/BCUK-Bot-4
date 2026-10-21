@@ -12,6 +12,7 @@ import { normalizeTwitchChannelName } from '../../twitch/twitchChannelName';
  *
  * @param req The incoming request (reads `getSessionUser(req).currentGuildId`).
  * @param res The response, used to redirect when no guild is set.
+ * @returns The session's current guild ID, or null after redirecting to `/guild/select`.
  */
 export function resolveGuildId(req: Request, res: Response): string | null {
   const guildId = getSessionUser(req).currentGuildId;
@@ -29,6 +30,7 @@ export function resolveGuildId(req: Request, res: Response): string | null {
  *
  * @param res The response, used to redirect on absent/invalid input.
  * @param rawId The raw `discord_id` value from the request body.
+ * @returns The trimmed Discord snowflake, or null once a redirect has been sent.
  */
 export function resolveValidDiscordId(res: Response, rawId: string | undefined): string | null {
   const trimmed = trimField(rawId);
@@ -46,18 +48,28 @@ export function resolveValidDiscordId(res: Response, rawId: string | undefined):
 /**
  * Returns `'invalid_discord_id'` when `id` doesn't look like a Discord snowflake, else null.
  * Derives its answer from `normalizeDiscordId` rather than maintaining a second snowflake regex.
+ * @param id Trimmed `discord_id` form value to check.
+ * @returns `'invalid_discord_id'` when malformed, or null when it is a valid snowflake.
  */
 export function discordIdError(id: string): string | null {
   return normalizeDiscordId(id) ? null : 'invalid_discord_id';
 }
 
-/** Returns `'invalid_access_level'` when `levelStr` isn't a known `AccessLevel` value, else null. */
+/**
+ * Returns `'invalid_access_level'` when `levelStr` isn't a known `AccessLevel` value, else null.
+ * @param levelStr Raw `access_level` form value (a decimal string).
+ * @returns `'invalid_access_level'` when not a known level, or null when valid.
+ */
 export function accessLevelError(levelStr: string): string | null {
   if (!/^\d+$/.test(levelStr)) return 'invalid_access_level';
   return (Object.values(AccessLevel) as number[]).includes(Number(levelStr)) ? null : 'invalid_access_level';
 }
 
-/** Parses a form checkbox/boolean value (`'true'`/`'1'`/`'false'`/`'0'`) into a boolean, or null if unrecognized. */
+/**
+ * Parses a form checkbox/boolean value (`'true'`/`'1'`/`'false'`/`'0'`) into a boolean, or null if unrecognized.
+ * @param val Raw `twitch_enabled` form value, or undefined when the field was absent.
+ * @returns The parsed flag, or null when the value is missing or unrecognized.
+ */
 export function parseTwitchEnabled(val: string | undefined): boolean | null {
   if (val === 'true' || val === '1') return true;
   if (val === 'false' || val === '0') return false;

@@ -58,6 +58,7 @@ export async function recordPricingHistory(
  *
  * @param rewardPricingId - Primary key of the `reward_pricing` row.
  * @param sinceMs - Epoch ms lower bound (inclusive) for returned points.
+ * @returns The history points since `sinceMs`, oldest first (empty when none).
  */
 export async function getPricingHistory(rewardPricingId: number, sinceMs: number): Promise<RewardPricingHistoryPoint[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(

@@ -1,10 +1,16 @@
 /* global confirmSubmit, registerCopyToClipboardHandler */
-/** Returns the confirmation message for revoking the current user's Streamdeck API key. */
+/**
+ * Returns the confirmation message for revoking the current user's Streamdeck API key.
+ * @returns {string} The text shown in the revoke-key confirm() prompt.
+ */
 function getRevokeKeyConfirmationMessage() {
   return 'Revoke your API key? It will stop working immediately.';
 }
 
-/** Returns the confirmation message for rotating (generating a new) Streamdeck API key. */
+/**
+ * Returns the confirmation message for rotating (generating a new) Streamdeck API key.
+ * @returns {string} The text shown in the rotate-key confirm() prompt.
+ */
 function getRotateKeyConfirmationMessage() {
   return 'Generate a new API key? Your current key will stop working immediately, everywhere it was set up.';
 }

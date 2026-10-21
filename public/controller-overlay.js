@@ -1,16 +1,29 @@
-/** Shorthand for `document.getElementById`. */
+/**
+ * Shorthand for `document.getElementById`.
+ * @param id - The element id to look up.
+ * @returns The matching element, or null when the page has none.
+ */
 const $ = id => document.getElementById(id);
 const statusEl = $('status');
 let gamepadIdx = null, polling = false;
 
-/** Highlights (or resets) a simple on/off control such as the A button. */
+/**
+ * Highlights (or resets) a simple on/off control such as the A button.
+ * @param id - Element id of the SVG shape for the control.
+ * @param on - Whether the control is currently pressed (falsy resets it).
+ */
 function setActive(id, on) {
   const el = $(id); if (!el) return;
   el.style.filter = on ? 'brightness(3)' : '';
   el.setAttribute('fill', on ? '#00d4ff' : '#272727');
 }
 
-/** Ring fill for the left stick: bright when clicked, tinted while deflected, dark at rest. */
+/**
+ * Ring fill for the left stick: bright when clicked, tinted while deflected, dark at rest.
+ * @param clicked - Whether the left stick is pressed in (L3).
+ * @param moved - Whether the stick is deflected past the dead zone.
+ * @returns The SVG fill colour for the stick's ring.
+ */
 function lsRingFill(clicked, moved) {
   if (clicked) return '#00d4ff';
   return moved ? '#0a2a3a' : '#222';

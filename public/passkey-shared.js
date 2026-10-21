@@ -6,7 +6,7 @@ window.BCUKPasskey = (function () {
   /**
    * Resolves true when this browser/device can create and use a platform passkey
    * (fingerprint, face or device PIN).
-   * @returns {Promise<boolean>}
+   * @returns {Promise<boolean>} True when WebAuthn and a platform authenticator are available; false otherwise, including when the check throws.
    */
   async function isSupported() {
     if (!window.SimpleWebAuthnBrowser || !window.SimpleWebAuthnBrowser.browserSupportsWebAuthn()) return false;
@@ -22,7 +22,7 @@ window.BCUKPasskey = (function () {
    * @param {string} url - Endpoint path.
    * @param {object} body - Request body.
    * @param {string} [csrfToken] - Sent as X-CSRF-Token when given.
-   * @returns {Promise<{ ok: boolean, status: number, data: any }>}
+   * @returns {Promise<{ ok: boolean, status: number, data: any }>} The response's ok flag and HTTP status, with `data` the parsed JSON body or null when it isn't JSON.
    */
   async function postJson(url, body, csrfToken) {
     var headers = { 'Content-Type': 'application/json' };
@@ -55,7 +55,7 @@ window.BCUKPasskey = (function () {
 
   /**
    * Guesses a friendly label for the current device from the user agent.
-   * @returns {string}
+   * @returns {string} A platform name such as "iPhone" or "Windows PC", or "Passkey" when none matches.
    */
   function guessDeviceLabel() {
     var ua = navigator.userAgent || '';
@@ -69,7 +69,7 @@ window.BCUKPasskey = (function () {
    * when the prompt is dismissed or times out (deliberately indistinguishable, per the WebAuthn
    * spec). Anything else is a real failure worth showing.
    * @param {any} err - The rejection from the SimpleWebAuthn browser call.
-   * @returns {boolean}
+   * @returns {boolean} True for a user cancellation or timeout, false for a real error.
    */
   function isUserCancellation(err) {
     return !!err && (err.code === 'ERROR_CEREMONY_ABORTED' || err.name === 'NotAllowedError');

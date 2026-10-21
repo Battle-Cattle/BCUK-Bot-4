@@ -23,7 +23,11 @@ const connectionOwners = new WeakMap<Response, string>();
 // broadcasts until the re-check passes, so a just-removed member never receives a push while it runs.
 const pendingAccessCheck = new WeakSet<Response>();
 
-/** Whether a connection may receive status broadcasts (i.e. it isn't still awaiting its access re-check). */
+/**
+ * Whether a connection may receive status broadcasts (i.e. it isn't still awaiting its access re-check).
+ * @param res - The SSE connection's response.
+ * @returns True once the connection has passed its access re-check.
+ */
 const isVerifiedConnection = (res: Response): boolean => !pendingAccessCheck.has(res);
 
 export const MAX_SSE_CONNECTIONS_PER_GUILD = DASHBOARD_STATUS_MAX_SSE_PER_GUILD;

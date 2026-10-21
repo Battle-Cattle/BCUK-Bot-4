@@ -21,7 +21,10 @@ export function connectionOptions(): mysql.ConnectionOptions {
   };
 }
 
-/** Returns the shared connection pool, creating it on first use. */
+/**
+ * Returns the shared connection pool, creating it on first use.
+ * @returns The process-wide mysql2 pool.
+ */
 export function getPool(): mysql.Pool {
   if (!pool) {
     pool = mysql.createPool({

@@ -56,7 +56,11 @@ const ERROR_MESSAGES: Record<string, string> = {
   passkey_dm_failed:             'The bot could not DM you the confirmation code. Allow direct messages from members of a server the bot is in, then try again.',
 };
 
-/** Looks up a `userSettings` page error code in {@link ERROR_MESSAGES}, for use as an EJS template helper. */
+/**
+ * Looks up a `userSettings` page error code in {@link ERROR_MESSAGES}, for use as an EJS template helper.
+ * @param key - Error code from the `error` query param.
+ * @returns The friendly message, or a generic "An error occurred (<key>)." for an unknown code.
+ */
 function getFriendlyError(key: string): string {
   return getFriendlyErrorMessage(ERROR_MESSAGES, key);
 }
@@ -230,10 +234,21 @@ export function hasOverlongMessage(body: Record<string, string | undefined>): bo
 export function buildEventSubConfig(
   body: Record<string, string | undefined>, current: EventSubConfig | null, isConnected: boolean,
 ): EventSubConfig {
-  /** Checkbox value if the form's inputs were enabled (a missing key is unticked), else the saved value, else unchecked. */
+  /**
+   * Checkbox value if the form's inputs were enabled (a missing key is unticked), else the saved value, else unchecked.
+   * @param key - Boolean config field to resolve.
+   * @returns Whether the field is enabled.
+   */
   const flag = (key: keyof EventSubConfig): boolean =>
     key in body || isConnected ? parseCheckboxField(body[key]) : Boolean(current?.[key]);
-  /** Trimmed message if submitted and non-blank, else the saved message, else `fallback`. */
+  /**
+   * Resolves a message field. When the key was submitted, its trimmed value is used, or
+   * `fallback` if it was blank. When the key is absent, the saved message is kept, or
+   * `fallback` if none was saved.
+   * @param key - Message config field to resolve.
+   * @param fallback - Default message used when nothing usable was submitted or saved.
+   * @returns The message to save.
+   */
   const msg = (key: keyof EventSubConfig, fallback: string): string =>
     key in body ? (trimField(body[key]) || fallback) : ((current?.[key] as string | undefined) ?? fallback);
 

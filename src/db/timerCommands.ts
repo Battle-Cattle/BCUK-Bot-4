@@ -89,12 +89,19 @@ function mapRow(r: mysql.RowDataPacket): DbTimerCommand {
   };
 }
 
-/** Whether a timer command exists for `id`. */
+/**
+ * Whether a timer command exists for `id`.
+ * @param id - Primary key of the `timer_command` row.
+ * @returns True if the row exists.
+ */
 async function timerCommandExists(id: number): Promise<boolean> {
   return rowExists(getPool(), 'timer_command', 'id', id);
 }
 
-/** Return all timer commands, each with its full list of assigned users, for the manager admin page. */
+/**
+ * Return all timer commands, each with its full list of assigned users, for the manager admin page.
+ * @returns Every timer command with its `assigned_users` list (empty when unassigned).
+ */
 export async function getAllTimerCommandsWithAssignments(): Promise<DbTimerCommandWithAssignments[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
     `SELECT tc.id, tc.name, tc.message, tc.interval_seconds, tc.min_messages, tc.require_live, tc.enabled,
@@ -370,6 +377,7 @@ export async function discardOwnNewTimerCommand(id: number, discordId: string): 
  * normalized (lowercased) form — an un-normalized channel here would silently and permanently
  * miss that counter, blocking `min_messages` forever with no error. The scheduler reads this
  * through `timerCommandCache.ts` rather than on every tick.
+ * @returns One entry per enabled timer and assigned, bot-enabled Twitch channel (lowercased).
  */
 export async function getAllEnabledTimerCommandsWithChannel(): Promise<TimerCommandForScheduler[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(

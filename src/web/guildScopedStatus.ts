@@ -84,6 +84,7 @@ async function getCachedGuildInfo(guildId: string): Promise<CachedGuildInfo> {
  * @param guildId - Guild to scope the snapshot to, or null if no guild is selected (e.g. an
  *   anonymous dashboard visitor) — returns a snapshot with no guild name and no Twitch
  *   channels, without any DB lookup.
+ * @returns The guild-scoped Discord, voice and Twitch status snapshot.
  */
 export async function getGuildScopedStatus(guildId: string | null): Promise<GuildScopedStatus> {
   const status = getStatus(guildId);

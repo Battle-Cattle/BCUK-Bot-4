@@ -27,7 +27,10 @@ const MAX_TRIGGER_COMMAND_LENGTH = 100;
 
 let openaiClient: OpenAI | null = null;
 
-/** Lazily constructs (and caches) the OpenAI client, so importing this module never requires `OPENAI_API_KEY` to be set. */
+/**
+ * Lazily constructs (and caches) the OpenAI client, so importing this module never requires `OPENAI_API_KEY` to be set.
+ * @returns The shared OpenAI client, created on first call.
+ */
 function getOpenAiClient(): OpenAI {
   if (!openaiClient) openaiClient = new OpenAI({ apiKey: OPENAI_API_KEY });
   return openaiClient;

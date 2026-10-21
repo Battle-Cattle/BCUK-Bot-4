@@ -11,7 +11,12 @@ interface AlertConfigLookupCache extends RefreshingLookupCache {
   byKey: Map<string, AlertConfig>;
 }
 
-/** Builds the cache key for one streamer/event-type pair. */
+/**
+ * Builds the cache key for one streamer/event-type pair.
+ * @param streamerId - The `streamer.id` the alert config belongs to.
+ * @param eventType - The alert event type.
+ * @returns A `streamerId:eventType` key.
+ */
 function cacheKey(streamerId: number, eventType: AlertEventType): string {
   return `${streamerId}:${eventType}`;
 }

@@ -39,17 +39,30 @@ const WARNING_MESSAGES: Record<string, string> = {
   chat_start_failed: 'Account connected, but the chat client failed to start. Check server logs — it will retry the next time the bot restarts.',
 };
 
-/** Looks up a `botAuth` page error code in {@link ERROR_MESSAGES}, for use as an EJS template helper. */
+/**
+ * Looks up a `botAuth` page error code in {@link ERROR_MESSAGES}, for use as an EJS template helper.
+ * @param key - Error code from the `error` query param.
+ * @returns The friendly message, or a generic "An error occurred (<key>)." for an unknown code.
+ */
 function getFriendlyError(key: string): string {
   return getFriendlyErrorMessage(ERROR_MESSAGES, key);
 }
 
-/** Looks up a `botAuth` page warning code in {@link WARNING_MESSAGES}, for use as an EJS template helper. */
+/**
+ * Looks up a `botAuth` page warning code in {@link WARNING_MESSAGES}, for use as an EJS template helper.
+ * @param key - Warning code from the `warning` query param.
+ * @returns The friendly message, or a generic "An error occurred (<key>)." for an unknown code.
+ */
 function getFriendlyWarning(key: string): string {
   return getFriendlyErrorMessage(WARNING_MESSAGES, key);
 }
 
-/** Query-param filter mirroring `validation.ts`'s `filterQueryParam` for this route's small, page-local known-value sets. */
+/**
+ * Query-param filter mirroring `validation.ts`'s `filterQueryParam` for this route's small, page-local known-value sets.
+ * @param value - Raw query param value (any type Express parsed it as).
+ * @param known - The codes this page recognises.
+ * @returns `value` when it is a string in `known`, else undefined.
+ */
 function filterKnown(value: unknown, known: Set<string>): string | undefined {
   return typeof value === 'string' && known.has(value) ? value : undefined;
 }

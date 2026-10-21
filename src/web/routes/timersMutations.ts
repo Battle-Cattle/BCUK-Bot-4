@@ -28,6 +28,10 @@ const MAX_INT_COLUMN_VALUE = 2147483647;
  * {@link MIN_INTERVAL_SECONDS}) and `min_messages` (matching `chk_timer_command_min_messages`,
  * `min` = 0, since "no minimum" is valid) — validated here so a bad value redirects with a
  * clear error code instead of surfacing as an opaque DB constraint/range failure.
+ * @param value - Raw form value (an array when repeated).
+ * @param min - Smallest allowed value, inclusive.
+ * @param max - Largest allowed value, inclusive.
+ * @returns The parsed integer, or null when missing, not a whole number, repeated, or out of range.
  */
 function parseIntFieldInRange(value: string | string[] | undefined, min: number, max: number): number | null {
   if (Array.isArray(value)) return null;
@@ -41,7 +45,11 @@ type TimerFieldsResult =
   | { ok: true; input: TimerCommandInput }
   | { ok: false; errorCode: 'missing_fields' | 'invalid_interval' | 'invalid_min_messages' };
 
-/** Parses and validates the timer fields shared by the add and update forms, reporting which field failed. */
+/**
+ * Parses and validates the timer fields shared by the add and update forms, reporting which field failed.
+ * @param body - Parsed add/update timer form body.
+ * @returns `{ ok: true, input }` with the validated timer input, or `{ ok: false, errorCode }` naming the failed field.
+ */
 function parseTimerCommandFields(body: Record<string, string | string[] | undefined>): TimerFieldsResult {
   const name = normalizeRequiredText(body.name as string | undefined);
   const message = normalizeRequiredText(body.message as string | undefined);

@@ -10,7 +10,10 @@ let sortCol = null;   // 'command' | 'category' | null
 let sortDir = 'asc';  // 'asc' | 'desc'
 let query   = '';
 
-/** The table's current rows, in display order. */
+/**
+ * The table's current rows, in display order.
+ * @returns Every `<tr>` in the SFX table body, hidden ones included.
+ */
 function getRows() {
   return Array.from(tbody.querySelectorAll('tr'));
 }
@@ -33,7 +36,10 @@ function applyFilter() {
   if (cmdCount)  cmdCount.textContent = String(visible);
 }
 
-/** Reorders the rows by `col` ("category" or "command"), case-insensitively, in the current direction. */
+/**
+ * Reorders the rows by `col` ("category" or "command"), case-insensitively, in the current direction.
+ * @param col - The column to sort by: "category", or anything else for "command".
+ */
 function applySort(col) {
   const rows = getRows();
 
@@ -62,7 +68,10 @@ function updateSortHeaders() {
   });
 }
 
-/** Sorts by a clicked header's column, reversing the direction when it's already the sort column. */
+/**
+ * Sorts by a clicked header's column, reversing the direction when it's already the sort column.
+ * @param th - The clicked `.th-sortable` header; its `data-col` names the column.
+ */
 function activateSort(th) {
   const col = th.dataset.col;
   if (sortCol === col) {

@@ -42,7 +42,12 @@ interface AssignmentRequestFields {
   discordId: string;
 }
 
-/** Reads and presence-checks `idField`/`discord_id` from `req.body`, or null if either is missing. */
+/**
+ * Reads and presence-checks `idField`/`discord_id` from `req.body`, or null if either is missing.
+ * @param req - Request whose body holds the assignment form.
+ * @param idField - Body field naming the entity ID (e.g. `command_id`, `timer_id`).
+ * @returns The raw entity ID and Discord ID strings, or null when either is missing or blank.
+ */
 function readAssignmentFields(req: Request, idField: string): AssignmentRequestFields | null {
   const body = req.body as Record<string, string | undefined>;
   const rawId = body[idField];
@@ -187,6 +192,7 @@ async function handleUnassign<TId>(req: Request, res: Response, options: Assignm
  * remove only themselves. Shared by `commandAssignments.ts` and `timerAssignments.ts`, which
  * previously duplicated this same shape end to end.
  * @param options - See {@link AssignmentRouterOptions}.
+ * @returns A router with the assign and unassign POST routes mounted under `basePath`.
  */
 export function createAssignmentRouter<TId>(options: AssignmentRouterOptions<TId>): Router {
   const router = Router();

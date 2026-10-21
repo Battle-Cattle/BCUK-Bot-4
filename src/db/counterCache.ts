@@ -32,7 +32,11 @@ function createEmptyCounterLookupCache(): CounterLookupCache {
 }
 
 /** Builds this cache's composite key: counters are per-guild, so the same command string in two
- *  different guilds must never collide with each other. */
+ *  different guilds must never collide with each other.
+ * @param guildId - Discord snowflake of the guild that owns the counter.
+ * @param normalizedCommand - Trimmed, lowercased trigger or check command.
+ * @returns A `guildId:command` key.
+ */
 function cacheKey(guildId: string, normalizedCommand: string): string {
   return `${guildId}:${normalizedCommand}`;
 }
@@ -91,7 +95,11 @@ export function invalidateCounterLookupCache(): void {
 }
 
 /** Looks up a counter by its trigger or check command string within one guild; returns null if
- *  not found in that guild (even if the same command matches a counter in a different guild). */
+ *  not found in that guild (even if the same command matches a counter in a different guild).
+ * @param guildId - Discord snowflake of the guild to search in.
+ * @param command - Raw command string; normalized before the lookup.
+ * @returns A copy of the matched counter, or null when there is no match or the command is blank.
+ */
 export async function findCounterByCommand(guildId: string, command: string): Promise<DbMatchedCounter | null> {
   const normalizedCommand = normalizeCommand(command);
   if (!normalizedCommand) return null;

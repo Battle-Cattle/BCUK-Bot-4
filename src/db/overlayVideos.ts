@@ -25,7 +25,11 @@ export interface OverlayWeightedVideo {
   weight: number;
 }
 
-/** Maps a raw `overlay_video` row to an {@link OverlayVideo}. */
+/**
+ * Maps a raw `overlay_video` row to an {@link OverlayVideo}.
+ * @param r - Row selected from `overlay_video`.
+ * @returns The mapped overlay video.
+ */
 function mapVideo(r: mysql.RowDataPacket): OverlayVideo {
   return {
     id: r.id,

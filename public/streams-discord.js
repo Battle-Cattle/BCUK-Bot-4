@@ -1,6 +1,10 @@
 /* global formatValue, sanitizeUrl, createLink */
 
-/** The preview's plain message text, or a muted placeholder when the message has none. */
+/**
+ * The preview's plain message text, or a muted placeholder when the message has none.
+ * @param content - The message text, or an empty string when there is none.
+ * @returns The `.discord-message-content` element.
+ */
 function createMessageContent(content) {
   var div = document.createElement('div');
   div.className = 'discord-message-content';
@@ -15,7 +19,12 @@ function createMessageContent(content) {
   return div;
 }
 
-/** The embed's title, linked to its URL when that URL passed sanitizeUrl. */
+/**
+ * The embed's title, linked to its URL when that URL passed sanitizeUrl.
+ * @param embed - The preview's embed; its `title` is shown.
+ * @param safeEmbedUrl - The embed URL after sanitizeUrl, or null to render the title unlinked.
+ * @returns The `.discord-embed-title` element.
+ */
 function createEmbedTitle(embed, safeEmbedUrl) {
   var div = document.createElement('div');
   div.className = 'discord-embed-title';
@@ -32,7 +41,11 @@ function createEmbedTitle(embed, safeEmbedUrl) {
   return div;
 }
 
-/** The embed's name/value fields, or a muted placeholder when it has none. */
+/**
+ * The embed's name/value fields, or a muted placeholder when it has none.
+ * @param fields - The embed's `{ name, value }` fields; anything not an array counts as none.
+ * @returns The `.discord-embed-fields` element.
+ */
 function createEmbedFields(fields) {
   var div = document.createElement('div');
   div.className = 'discord-embed-fields';
@@ -63,7 +76,11 @@ function createEmbedFields(fields) {
   return div;
 }
 
-/** The embed's thumbnail when it has a safe https URL, otherwise a muted placeholder. */
+/**
+ * The embed's thumbnail when it has a safe https URL, otherwise a muted placeholder.
+ * @param safeImageUrl - The https thumbnail URL after sanitizeUrl, or null when unavailable.
+ * @returns The `.discord-embed-image` element.
+ */
 function createEmbedImage(safeImageUrl) {
   var div = document.createElement('div');
   div.className = 'discord-embed-image';
@@ -83,7 +100,13 @@ function createEmbedImage(safeImageUrl) {
   return div;
 }
 
-/** A Discord-style embed preview: accent bar, title, fields and image. */
+/**
+ * A Discord-style embed preview: accent bar, title, fields and image.
+ * @param embed - The preview's embed (`title`, `fields`).
+ * @param safeEmbedUrl - The sanitized embed URL, or null to leave the title unlinked.
+ * @param safeImageUrl - The sanitized https thumbnail URL, or null for a placeholder and no footer link.
+ * @returns The `.discord-embed-preview` element.
+ */
 function createDiscordEmbed(embed, safeEmbedUrl, safeImageUrl) {
   var preview = document.createElement('div');
   preview.className = 'discord-embed-preview';
@@ -110,7 +133,12 @@ function createDiscordEmbed(embed, safeEmbedUrl, safeImageUrl) {
   return preview;
 }
 
-/** A titled preview of a Discord live-announcement message: its text and, when it has one, its embed. */
+/**
+ * A titled preview of a Discord live-announcement message: its text and, when it has one, its embed.
+ * @param title - Heading for the preview, e.g. "Live Announcement Preview".
+ * @param preview - The message preview from GET /admin/streams/live (`content`, optional `embed`), or null/undefined.
+ * @returns The `.live-message-preview` section.
+ */
 function createMessagePreview(title, preview) {
   var embed = preview && preview.embed ? preview.embed : null;
   var content = preview ? formatValue(preview.content, '') : '';
