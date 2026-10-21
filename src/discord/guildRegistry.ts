@@ -49,22 +49,36 @@ export async function reloadGuildRegistry(): Promise<void> {
   log.info(`Loaded ${registry.size} guild(s) into the registry.`);
 }
 
-/** Returns true if the given guild ID is registered and the bot should serve it. */
+/**
+ * Returns true if the given guild ID is registered and the bot should serve it.
+ * @param guildId - Discord snowflake of the guild.
+ * @returns True if the guild is in the loaded registry.
+ */
 export function isRegisteredGuild(guildId: string): boolean {
   return registry.has(guildId);
 }
 
-/** Returns the cached guild config for an ID, or undefined if it is not registered. */
+/**
+ * Returns the cached guild config for an ID, or undefined if it is not registered.
+ * @param guildId - Discord snowflake of the guild.
+ * @returns The guild's cached DB row, or undefined if it isn't registered.
+ */
 export function getRegisteredGuild(guildId: string): DbGuild | undefined {
   return registry.get(guildId);
 }
 
-/** Returns the IDs of every registered guild. */
+/**
+ * Returns the IDs of every registered guild.
+ * @returns Discord snowflakes of all registered guilds, as a new array.
+ */
 export function getRegisteredGuildIds(): string[] {
   return [...registry.keys()];
 }
 
-/** Returns every registered guild's config. */
+/**
+ * Returns every registered guild's config.
+ * @returns All registered guilds' DB rows, as a new array.
+ */
 export function getRegisteredGuilds(): DbGuild[] {
   return [...registry.values()];
 }

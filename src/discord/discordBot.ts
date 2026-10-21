@@ -45,7 +45,10 @@ function clearReconnectTimer(): void {
   }
 }
 
-/** Schedules an exponential-backoff retry of {@link startDiscordBot}, skipping if one is already pending. */
+/**
+ * Schedules an exponential-backoff retry of {@link startDiscordBot}, skipping if one is already pending.
+ * @param reason - Why the reconnect is needed, included in the warning log.
+ */
 function scheduleReconnect(reason: string): void {
   if (reconnectTimer) return;
   const delay = Math.min(RECONNECT_BASE_DELAY_MS * 2 ** reconnectAttempts, RECONNECT_MAX_DELAY_MS);
@@ -97,7 +100,10 @@ export function waitForDiscordReady(timeoutMs: number): Promise<void> {
   });
 }
 
-/** Test-only: how many {@link waitForDiscordReady} callers are still waiting on `clientReady`. */
+/**
+ * Test-only: how many {@link waitForDiscordReady} callers are still waiting on `clientReady`.
+ * @returns The number of pending ready waiters.
+ */
 export function __getReadyWaiterCountForTests(): number {
   return readyWaiters.length;
 }

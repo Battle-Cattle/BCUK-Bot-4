@@ -22,6 +22,8 @@ const counterCooldown = createCooldownGate();
 /**
  * Resolves the cooldown key for a Discord message: guild-scoped when sent in a guild
  * channel, falling back to a per-DM-channel key for the rare case of a DM invocation.
+ * @param message - The Discord message that invoked the counter.
+ * @returns `discord:<guildId>` for guild messages, or `discord:dm:<channelId>` for DMs.
  */
 function discordCooldownKey(message: Message): string {
   return message.guildId ? `discord:${message.guildId}` : `discord:dm:${message.channelId}`;
@@ -45,14 +47,22 @@ export function forgetGuildCounterCooldown(guildId: string): void {
 
 const counterRuntime = createRuntimeRegistry<TwitchSendRuntime>();
 
-/** Stores the Twitch chat runtime used to send counter responses. Call once from index.ts after the Twitch bot is ready. */
+/**
+ * Stores the Twitch chat runtime used to send counter responses. Call once from index.ts after the Twitch bot is ready.
+ * @param runtime - Twitch runtime whose `send` posts chat messages.
+ */
 export function registerCounterTwitchRuntime(runtime: TwitchSendRuntime): void {
   counterRuntime.register(runtime);
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/** Replaces every `%d` placeholder in `template` with `value`. */
+/**
+ * Replaces every `%d` placeholder in `template` with `value`.
+ * @param template - The counter's response template containing `%d` placeholders.
+ * @param value - The counter's current value to substitute.
+ * @returns The template with every `%d` replaced.
+ */
 function formatCounterMessage(template: string, value: number): string {
   return template.replace(/%d/g, String(value));
 }

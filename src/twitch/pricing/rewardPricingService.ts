@@ -160,6 +160,7 @@ interface PushCostResult {
  * @param twitchRewardId - Twitch reward UUID.
  * @param newCost - The recomputed cost to push.
  * @param previousLastPushedCost - The reward's current `last_pushed_cost`, returned unchanged on failure.
+ * @returns The `last_pushed_cost` to persist, and whether the reward was marked unsupported (403).
  */
 async function pushRewardCostUpdate(
   streamerId: number, twitchRewardId: string, newCost: number, previousLastPushedCost: number | null,

@@ -18,12 +18,18 @@ export class BackoffRetry {
     private readonly maxAttempts: number,
   ) {}
 
-  /** Whether a retry is currently scheduled. */
+  /**
+   * Whether a retry is currently scheduled.
+   * @returns True while a retry timer is set and hasn't yet fired or been cancelled.
+   */
   get pending(): boolean {
     return this.timer !== null;
   }
 
-  /** Consecutive attempts scheduled since the last {@link reset}. */
+  /**
+   * Consecutive attempts scheduled since the last {@link reset}.
+   * @returns The attempt count, 0 after a reset.
+   */
   get attempts(): number {
     return this.attemptCount;
   }

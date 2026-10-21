@@ -53,17 +53,27 @@ export interface SchedulerHealth {
 /** The set of scheduler names tracked by {@link recordSchedulerRun}. */
 export type SchedulerName = 'counter' | 'rewardPricing' | 'timer';
 
-/** Clones a `Date | null` field so a snapshot's copy can never alias (and thus mutate) internal state. */
+/**
+ * Clones a `Date | null` field so a snapshot's copy can never alias (and thus mutate) internal state.
+ * @param d - Date to copy, or null.
+ * @returns A new Date with the same time, or null.
+ */
 function cloneDate(d: Date | null): Date | null {
   return d ? new Date(d.getTime()) : null;
 }
 
-/** Returns a fresh, disconnected/no-history EventSub health record. */
+/**
+ * Returns a fresh, disconnected/no-history EventSub health record.
+ * @returns A new EventSub health record with no connection history.
+ */
 function defaultEventSubHealth(): EventSubHealth {
   return { connected: false, lastConnectedAt: null, lastDisconnectedAt: null, reconnectAttempts: 0, lastError: null };
 }
 
-/** Returns a fresh, never-run scheduler health record. */
+/**
+ * Returns a fresh, never-run scheduler health record.
+ * @returns A new scheduler health record with no runs and `lastRunOk` true.
+ */
 function defaultSchedulerHealth(): SchedulerHealth {
   return { lastRunAt: null, lastRunOk: true, lastError: null };
 }
@@ -107,19 +117,29 @@ function notifyHealthChanged(): void {
   for (const listener of healthChangeListeners) listener();
 }
 
-/** Returns a guarded copy of an error message: `err.message` for an `Error`, `undefined` otherwise. */
+/**
+ * Normalizes an error to a message string: `err.message` for an `Error`, `String(error)` otherwise.
+ * @param error - Error value to normalize, or undefined when there was no error.
+ * @returns The message for an `Error`, `String(error)` for other values, or undefined if `error` is undefined.
+ */
 function normalizeError(error: unknown): string | undefined {
   if (error === undefined) return undefined;
   return error instanceof Error ? error.message : String(error);
 }
 
-/** Records the Discord gateway client's connected/disconnected state. Notifies registered listeners. */
+/**
+ * Records the Discord gateway client's connected/disconnected state. Notifies registered listeners.
+ * @param connected - True when the gateway is connected, false when it dropped.
+ */
 export function recordDiscordConnected(connected: boolean): void {
   state.discordConnected = connected;
   notifyHealthChanged();
 }
 
-/** Records the Twitch chat client's connected/disconnected state. Notifies registered listeners. */
+/**
+ * Records the Twitch chat client's connected/disconnected state. Notifies registered listeners.
+ * @param connected - True when Twitch chat is connected, false when it dropped.
+ */
 export function recordTwitchChatConnected(connected: boolean): void {
   state.twitchChatConnected = connected;
   notifyHealthChanged();
@@ -241,6 +261,7 @@ export interface HealthSnapshot {
  * cloned via {@link cloneDate}) so a caller mutating the returned object — including calling a
  * mutator method directly on one of its `Date` fields — can never affect internal state — same
  * spirit as `statusStore.ts`'s `getStatus()`.
+ * @returns A detached copy of the current health state.
  */
 export function getHealthSnapshot(): HealthSnapshot {
   return {

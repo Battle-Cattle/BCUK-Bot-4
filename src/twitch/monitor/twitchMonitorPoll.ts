@@ -102,7 +102,13 @@ export async function handlePollStreamer(
   }
 }
 
-/** Dispatches poll results to each streamer, serializing same-login rows (shared offline-timer state) and parallelizing across logins. */
+/**
+ * Dispatches poll results to each streamer, serializing same-login rows (shared offline-timer state) and parallelizing across logins.
+ * @param liveStates - Shared per-streamer live-state map, keyed by streamer ID.
+ * @param loginToUserId - Resolved Twitch login (lowercased) → user ID map for the current poll batch.
+ * @param streamers - Every monitored streamer row; rows without a Twitch name are skipped.
+ * @param liveByUserId - Currently-live streams from the poll, keyed by Twitch user ID.
+ */
 export async function dispatchStreamerPolls(
   liveStates: Map<string, LiveState>,
   loginToUserId: Map<string, string>,

@@ -7,6 +7,9 @@ import path from 'path';
  *
  * Uses path.posix so behaviour is consistent across platforms (base paths are
  * always POSIX-style since the bot targets Linux).
+ * @param base - Directory the result must stay inside.
+ * @param parts - Path segments to resolve against `base`.
+ * @returns The resolved absolute POSIX path, or null if it escapes `base`.
  */
 export function safeResolve(base: string, ...parts: string[]): string | null {
   const resolvedBase = path.posix.resolve(base);

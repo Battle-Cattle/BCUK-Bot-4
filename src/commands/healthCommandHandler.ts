@@ -25,12 +25,20 @@ const SUMMARY_TRUNCATE_LENGTH = 1900;
 /** Appended to a truncated `!health` summary (see {@link formatHealthSummary}). */
 const TRUNCATION_MARKER = '\n… (truncated)';
 
-/** Formats a `Date | null` for display, or `'—'` if absent. */
+/**
+ * Formats a `Date | null` for display, or `'—'` if absent.
+ * @param date - Timestamp to show, or null if the event never happened.
+ * @returns The locale-formatted date, or `—` for null.
+ */
 function formatDate(date: Date | null): string {
   return date ? date.toLocaleString() : '—';
 }
 
-/** Formats the Discord/Twitch-chat/DB connectivity lines for the `!health` summary. */
+/**
+ * Formats the Discord/Twitch-chat/DB connectivity lines for the `!health` summary.
+ * @param snapshot - Current health snapshot.
+ * @returns One line each for Discord, Twitch chat and the DB.
+ */
 function formatConnectivityLines(snapshot: HealthSnapshot): string[] {
   return [
     `Discord: ${snapshot.discordConnected ? '🟢 connected' : '🔴 disconnected'}`,
@@ -41,7 +49,11 @@ function formatConnectivityLines(snapshot: HealthSnapshot): string[] {
   ];
 }
 
-/** Formats one line per tracked EventSub streamer, or `[]` if none are tracked yet. */
+/**
+ * Formats one line per tracked EventSub streamer, or `[]` if none are tracked yet.
+ * @param snapshot - Current health snapshot.
+ * @returns An `EventSub:` header followed by one line per streamer, or an empty array.
+ */
 function formatEventSubLines(snapshot: HealthSnapshot): string[] {
   const entries = Object.entries(snapshot.eventsub);
   if (entries.length === 0) return [];
@@ -54,14 +66,22 @@ function formatEventSubLines(snapshot: HealthSnapshot): string[] {
   ];
 }
 
-/** Formats the Twitch stream-monitor's last-poll line for the `!health` summary. */
+/**
+ * Formats the Twitch stream-monitor's last-poll line for the `!health` summary.
+ * @param snapshot - Current health snapshot.
+ * @returns The monitor status line with its last poll time and error.
+ */
 function formatMonitorLine(snapshot: HealthSnapshot): string {
   return `Monitor: ${snapshot.monitor.lastPollOk ? '🟢 ok' : '🔴 failing'} (last poll ${formatDate(snapshot.monitor.lastPollAt)}${
     snapshot.monitor.lastError ? `, last error: ${snapshot.monitor.lastError}` : ''
   })`;
 }
 
-/** Formats one line per tracked scheduler, or `[]` if none are tracked yet. */
+/**
+ * Formats one line per tracked scheduler, or `[]` if none are tracked yet.
+ * @param snapshot - Current health snapshot.
+ * @returns A `Schedulers:` header followed by one line per scheduler, or an empty array.
+ */
 function formatSchedulerLines(snapshot: HealthSnapshot): string[] {
   const entries = Object.entries(snapshot.schedulers);
   if (entries.length === 0) return [];
@@ -74,7 +94,11 @@ function formatSchedulerLines(snapshot: HealthSnapshot): string[] {
   ];
 }
 
-/** Formats the most recent errors (newest first, capped at {@link RECENT_ERROR_COUNT}), or `[]` if none. */
+/**
+ * Formats the most recent errors (newest first, capped at {@link RECENT_ERROR_COUNT}), or `[]` if none.
+ * @param snapshot - Current health snapshot.
+ * @returns A `Recent errors:` header followed by one line per error, or an empty array.
+ */
 function formatRecentErrorLines(snapshot: HealthSnapshot): string[] {
   if (snapshot.errors.length === 0) return [];
   const recent = snapshot.errors.slice(-RECENT_ERROR_COUNT).reverse();

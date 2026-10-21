@@ -25,7 +25,11 @@ const countdownCooldown = createCooldownGate();
 // the first is still sending and interleave its steps.
 const countdownsInProgress = new Set<string>();
 
-/** Delays for `ms` milliseconds. */
+/**
+ * Delays for `ms` milliseconds.
+ * @param ms - Delay in milliseconds.
+ * @returns A promise that resolves after the delay.
+ */
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -34,7 +38,10 @@ type CountdownTwitchRuntime = TwitchSendRuntime;
 
 const countdownRuntime = createRuntimeRegistry<CountdownTwitchRuntime>();
 
-/** Stores the Twitch chat runtime used to send `!321` countdown steps. Call once from index.ts after the Twitch bot is ready. */
+/**
+ * Stores the Twitch chat runtime used to send `!321` countdown steps. Call once from index.ts after the Twitch bot is ready.
+ * @param runtime - Twitch runtime whose `send` posts chat messages.
+ */
 export function registerCountdownTwitchRuntime(runtime: CountdownTwitchRuntime): void {
   countdownRuntime.register(runtime);
 }

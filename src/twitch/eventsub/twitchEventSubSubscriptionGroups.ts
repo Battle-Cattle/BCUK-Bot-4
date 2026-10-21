@@ -37,6 +37,7 @@ interface SubscriptionGroup {
  * @param group - The subscription group to evaluate.
  * @param config - The streamer's event response configuration, or null if unset.
  * @param enabledAlerts - Event types with an enabled alerts-overlay config row for this streamer.
+ * @returns True if the group's subscriptions are wanted.
  */
 export function isGroupEnabled(
   group: SubscriptionGroup,
@@ -54,6 +55,7 @@ export function isGroupEnabled(
  * `DEFAULT_EVENT_CONFIG` for alert-only streamers — but that's moot for these groups since they
  * never subscribe for one.)
  * @param config - The streamer's event response configuration, or null if unset.
+ * @returns True if a config row exists.
  */
 function hasCompletedEventSubSetup(config: EventSubConfig | null): boolean {
   return Boolean(config);
@@ -109,6 +111,7 @@ export const SUBSCRIPTION_GROUPS: SubscriptionGroup[] = [
  * every member of `ALERT_EVENT_TYPES` — catching a new alert type being added without also being
  * wired into a subscription group's `alertTypes` (which would otherwise compile fine and only
  * surface as "the subscription is never created" at runtime).
+ * @returns A new set of every alert type listed in any group's `alertTypes`.
  */
 export function getAlertTypesCoveredBySubscriptionGroups(): Set<AlertEventType> {
   return new Set(SUBSCRIPTION_GROUPS.flatMap((group) => group.alertTypes));

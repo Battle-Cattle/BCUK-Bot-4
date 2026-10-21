@@ -11,6 +11,7 @@ export interface CooldownGate {
  * throttle the custom-command and counter-trigger chat handlers per guild/channel, mirroring
  * the per-guild cooldown `commandRouter.ts` already applies to SFX triggers — without it, any
  * unprivileged chat member can spam a matching message as fast as they can send it.
+ * @returns A new gate with its own empty claim-time map.
  */
 export function createCooldownGate(): CooldownGate {
   const lastClaimedAt = new Map<string, number>();
@@ -19,6 +20,8 @@ export function createCooldownGate(): CooldownGate {
     /**
      * Returns true and records `now` for `key` if it is off cooldown; returns false — leaving
      * the recorded time untouched — if a previous claim for `key` is still within the window.
+     * @param key - Throttle scope, e.g. `discord:<guildId>` or a Twitch channel key.
+     * @returns True if the claim was granted, false if `key` is still on cooldown.
      */
     tryClaim(key: string): boolean {
       const now = Date.now();
@@ -28,7 +31,10 @@ export function createCooldownGate(): CooldownGate {
       return true;
     },
 
-    /** Forgets `key`'s recorded claim time. Safe to call for a key with no state (no-op). */
+    /**
+     * Forgets `key`'s recorded claim time. Safe to call for a key with no state (no-op).
+     * @param key - Throttle scope whose claim time to drop.
+     */
     forget(key: string): void {
       lastClaimedAt.delete(key);
     },

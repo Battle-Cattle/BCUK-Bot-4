@@ -21,7 +21,10 @@ export function onStatusChanged(listener: (guildId: string | null) => void): voi
   statusChangeListeners.add(listener);
 }
 
-/** Invokes every registered status-change listener (see {@link onStatusChanged}) with `guildId`. */
+/**
+ * Invokes every registered status-change listener (see {@link onStatusChanged}) with `guildId`.
+ * @param guildId - Guild whose voice status changed, or null for a change not scoped to one guild.
+ */
 function notifyStatusChanged(guildId: string | null): void {
   for (const listener of statusChangeListeners) listener(guildId);
 }
@@ -45,7 +48,10 @@ export interface VoiceStatus {
   lastPlayedAt: Date | null;
 }
 
-/** Returns a fresh, disconnected/idle voice status record. */
+/**
+ * Returns a fresh, disconnected/idle voice status record.
+ * @returns A new voice status with nothing connected or playing.
+ */
 function defaultVoiceStatus(): VoiceStatus {
   return {
     connected: false,
@@ -67,7 +73,11 @@ const state = {
   twitch: new Map<string, ChannelStatus>(),
 };
 
-/** Returns a guild's voice status, creating a default (disconnected/idle) record on first use. */
+/**
+ * Returns a guild's voice status, creating a default (disconnected/idle) record on first use.
+ * @param guildId - Discord snowflake of the guild.
+ * @returns The guild's live (mutable) voice status record.
+ */
 function getVoiceState(guildId: string): VoiceStatus {
   return getOrCreate(state.voice, guildId, defaultVoiceStatus);
 }
@@ -85,6 +95,7 @@ export function clearVoiceStatus(guildId: string): void {
 /**
  * Marks the Discord bot as ready with its tag. Notifies the registered status-change
  * listener (see {@link onStatusChanged}) with `null` since this isn't scoped to one guild.
+ * @param tag - The bot user's Discord tag, e.g. `BCUKBot#1234`.
  */
 export function setDiscordReady(tag: string): void {
   state.discord.ready = true;
@@ -149,7 +160,10 @@ export function setVoiceIdle(guildId: string): void {
   notifyStatusChanged(guildId);
 }
 
-/** Returns a fresh, disconnected channel status record with no connection history yet. */
+/**
+ * Returns a fresh, disconnected channel status record with no connection history yet.
+ * @returns A new channel status that is disconnected and not live.
+ */
 function defaultChannelStatus(): ChannelStatus {
   return { connected: false, lastConnectedAt: null, lastDisconnectedAt: null, isLive: false };
 }
@@ -175,6 +189,8 @@ function updateChannel(map: Map<string, ChannelStatus>, key: string, connected: 
  * `channel` doesn't normalize to a valid Twitch login (see {@link normalizeTwitchChannelName});
  * otherwise notifies the registered status-change listener (see {@link onStatusChanged}) with
  * `null`, since channel state isn't scoped to one guild.
+ * @param channel - Twitch channel name, with or without a leading `#`; normalized before use.
+ * @param connected - Whether the bot is now joined to the channel.
  */
 export function setTwitchChannel(channel: string, connected: boolean): void {
   const key = normalizeTwitchChannelName(channel);
@@ -188,6 +204,8 @@ export function setTwitchChannel(channel: string, connected: boolean): void {
  * doesn't normalize to a valid Twitch login (see {@link normalizeTwitchChannelName}) or the
  * channel isn't tracked yet; otherwise notifies the registered status-change listener (see
  * {@link onStatusChanged}) with `null`, since channel state isn't scoped to one guild.
+ * @param login - Twitch login of the channel; normalized before use.
+ * @param isLive - Whether the channel is currently live.
  */
 export function setTwitchChannelLive(login: string, isLive: boolean): void {
   const key = normalizeTwitchChannelName(login);
@@ -209,6 +227,7 @@ export function setTwitchChannelLive(login: string, isLive: boolean): void {
  * DB lookups this in-memory store deliberately stays free of.
  *
  * @param guildId - Guild to read voice status for, or null if none is selected.
+ * @returns Copies of the Discord status, the guild's voice status and every Twitch channel's status, keyed by login.
  */
 export function getStatus(guildId: string | null) {
   return {

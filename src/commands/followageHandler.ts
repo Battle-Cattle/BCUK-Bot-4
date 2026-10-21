@@ -26,7 +26,10 @@ type FollowageRuntime = TwitchSendRuntime;
 
 const followageRuntime = createRuntimeRegistry<FollowageRuntime>();
 
-/** Stores the Twitch chat runtime used to send `!followage` replies. Call once from index.ts after the Twitch bot is ready. */
+/**
+ * Stores the Twitch chat runtime used to send `!followage` replies. Call once from index.ts after the Twitch bot is ready.
+ * @param runtime - Twitch runtime whose `send` posts chat messages.
+ */
 export function registerFollowageRuntime(runtime: FollowageRuntime): void {
   followageRuntime.register(runtime);
 }
@@ -36,6 +39,9 @@ export function registerFollowageRuntime(runtime: FollowageRuntime): void {
 /**
  * Adds `months` calendar months to `date` (UTC), clamping the day to the target month's
  * length so e.g. 31 Jan + 1 month is 28/29 Feb rather than rolling over into March.
+ * @param date - Start date; not mutated.
+ * @param months - Number of calendar months to add.
+ * @returns A new date `months` months later, with the day clamped to the target month.
  */
 function addMonthsClamped(date: Date, months: number): Date {
   const year = date.getUTCFullYear();
@@ -46,7 +52,12 @@ function addMonthsClamped(date: Date, months: number): Date {
   return result;
 }
 
-/** Formats `n` with `unit`, pluralised when `n !== 1` (e.g. `1 year`, `2 years`). */
+/**
+ * Formats `n` with `unit`, pluralised when `n !== 1` (e.g. `1 year`, `2 years`).
+ * @param n - The count.
+ * @param unit - Singular unit name, e.g. `year`.
+ * @returns The count and unit, e.g. `2 years`.
+ */
 function plural(n: number, unit: string): string {
   return `${n} ${unit}${n === 1 ? '' : 's'}`;
 }
@@ -80,7 +91,11 @@ export function formatFollowDuration(followedAt: Date, now: Date): string {
   return parts.length > 0 ? parts.join(', ') : 'less than a day';
 }
 
-/** Formats a follow date as e.g. `12 Mar 2024` (UTC). */
+/**
+ * Formats a follow date as e.g. `12 Mar 2024` (UTC).
+ * @param date - The follow date.
+ * @returns The date formatted as `D Mon YYYY` in UTC.
+ */
 function formatFollowDate(date: Date): string {
   return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
 }

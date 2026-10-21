@@ -15,6 +15,7 @@ const guildResolutionRuntime = createRuntimeRegistry<TwitchGuildResolutionRuntim
  * Stores the Discord-side guild-resolution runtime used by `twitchBot.ts`. Call once from
  * `index.ts`, wired to `discord/voicePresence.ts`'s `resolveGuildIdForDiscordId`, before the
  * Twitch bot starts.
+ * @param runtime - Provides `resolveGuildIdForDiscordId`, mapping a Discord user ID to their active voice guild ID.
  */
 export function registerTwitchGuildResolutionRuntime(runtime: TwitchGuildResolutionRuntime): void {
   guildResolutionRuntime.register(runtime);

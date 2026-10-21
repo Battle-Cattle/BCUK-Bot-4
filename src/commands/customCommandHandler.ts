@@ -53,7 +53,10 @@ interface TwitchChatRuntime extends TwitchBroadcastRuntime {
 
 const twitchChatRuntime = createRuntimeRegistry<TwitchChatRuntime>();
 
-/** Stores the concrete Twitch chat runtime (send/getActiveChannels/getLoginUserIds) so Twitch custom commands can be sent and broadcast. Call once from index.ts after the Twitch bot is ready. */
+/**
+ * Stores the concrete Twitch chat runtime (send/getActiveChannels/getLoginUserIds) so Twitch custom commands can be sent and broadcast. Call once from index.ts after the Twitch bot is ready.
+ * @param runtime - Twitch runtime with send, active-channel, login-to-user-id and MultiTwitch lookups.
+ */
 export function registerTwitchChatRuntime(runtime: TwitchChatRuntime): void {
   twitchChatRuntime.register(runtime);
 }
@@ -65,7 +68,12 @@ interface LookupResult {
   isMultiTwitch: boolean;
 }
 
-/** Looks up `command` via the supplied platform-specific finder and returns its response/multi-twitch flag, or null if no custom command matches. */
+/**
+ * Looks up `command` via the supplied platform-specific finder and returns its response/multi-twitch flag, or null if no custom command matches.
+ * @param command - Lowercased, prefixed command token, e.g. `!clap`.
+ * @param findCustomCommand - Platform-specific lookup returning the matching command row, or null.
+ * @returns The command's output template and multi-twitch flag, or null if nothing matches.
+ */
 async function lookupCommand(
   command: string,
   findCustomCommand: (cmd: string) => Promise<{ output: string; is_multi_twitch: boolean } | null>,
@@ -86,6 +94,10 @@ async function lookupCommand(
  * token), and `{arg}` (the first whitespace-delimited word of `{args}`) substituted
  * in. Shared by both the Discord and Twitch execute paths so the placeholder set
  * stays in sync between them.
+ * @param rawResponse - The command's output template.
+ * @param rawMessage - Full chat message text, used to extract `{args}`/`{arg}`.
+ * @param username - Invoking username for `{user}`; null or undefined substitutes an empty string.
+ * @returns The response with all placeholders filled in.
  */
 function buildFilledResponse(rawResponse: string, rawMessage: string, username?: string | null): string {
   const args = extractArgs(rawMessage);
@@ -124,6 +136,8 @@ setInterval(purgeExpiredSessionCache, SESSION_CACHE_TTL_MS).unref();
  * (stale-while-revalidate) and triggers at most one background refresh per
  * user via `inFlightRefreshes`; a failed refresh keeps the last known value
  * but shortens the retry window to SHORT_RETRY_TTL_MS.
+ * @param userId - Twitch user ID of the channel (broadcaster).
+ * @returns The channel's shared-chat session ID, or null if it isn't in a shared-chat session or the lookup failed.
  */
 export async function resolveSharedChatSessionId(userId: string): Promise<string | null> {
   const now = Date.now();
@@ -162,6 +176,10 @@ export async function resolveSharedChatSessionId(userId: string): Promise<string
  * share a Twitch shared-chat session are de-duplicated via {@link sendDedupedBySession}
  * so only one message is sent per session. Returns true if at least one channel
  * received the message.
+ * @param sourceChannel - Twitch login of the channel the command was used in.
+ * @param command - Lowercased, prefixed command token used to check registration per channel.
+ * @param output - Filled-in response text to send.
+ * @returns True if at least one channel received the message; false if none did or no runtime is registered.
  */
 async function broadcastToActiveChannels(sourceChannel: string, command: string, output: string): Promise<boolean> {
   const runtime = twitchChatRuntime.get();
