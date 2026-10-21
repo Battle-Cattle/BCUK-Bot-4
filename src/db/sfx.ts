@@ -238,7 +238,8 @@ export async function updateSfxTrigger(
  * would otherwise return a filename list that the transaction's own delete never
  * matched.
  * @param id Trigger id.
- * @returns The deleted sound files' relative paths, or null when the trigger didn't exist.
+ * @returns An object whose `files` holds the deleted sound files' relative paths, or null
+ *   when the trigger didn't exist.
  */
 export async function deleteSfxTrigger(id: bigint): Promise<{ files: string[] } | null> {
   return withTransactionOrNotFound(async (conn, notFound) => {

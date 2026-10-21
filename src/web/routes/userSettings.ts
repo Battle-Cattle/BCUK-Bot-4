@@ -242,7 +242,9 @@ export function buildEventSubConfig(
   const flag = (key: keyof EventSubConfig): boolean =>
     key in body || isConnected ? parseCheckboxField(body[key]) : Boolean(current?.[key]);
   /**
-   * Trimmed message if submitted and non-blank, else the saved message, else `fallback`.
+   * Resolves a message field. When the key was submitted, its trimmed value is used, or
+   * `fallback` if it was blank. When the key is absent, the saved message is kept, or
+   * `fallback` if none was saved.
    * @param key - Message config field to resolve.
    * @param fallback - Default message used when nothing usable was submitted or saved.
    * @returns The message to save.
