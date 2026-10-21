@@ -210,6 +210,7 @@ export async function restartTwitchMonitor(): Promise<void> {
  * Returns whether `login`'s stream is currently tracked as live by the monitor. Used by timer
  * commands' `require_live` gate.
  * @param login - Twitch login name to check.
+ * @returns True if the monitor currently holds a live state for that login (case-insensitive).
  */
 export function isChannelLive(login: string): boolean {
   return liveStates.getByLogin(login.toLowerCase()) !== undefined;
@@ -235,6 +236,8 @@ export function getChannelStreamStart(login: string): Date | null {
  * Returns the current multitwitch URL and participant logins for the group that
  * the given channel belongs to, or null if the channel is not live, not in a
  * multitwitch-enabled group, or fewer than two streamers are live in the group.
+ * @param login - Twitch login name of the channel asking (case-insensitive).
+ * @returns The group's multitwitch URL and live participant logins, or null as described above.
  */
 export function getMultiTwitchDataForChannel(login: string): MultiTwitchGroupInfo | null {
   const loginLower = login.toLowerCase();

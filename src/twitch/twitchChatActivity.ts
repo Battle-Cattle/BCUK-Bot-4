@@ -6,12 +6,19 @@
  */
 const messageCounts = new Map<string, number>();
 
-/** Records one chat message seen in `channel`, incrementing its running total. */
+/**
+ * Records one chat message seen in `channel`, incrementing its running total.
+ * @param channel - Normalized Twitch channel name the message was sent in.
+ */
 export function recordChatMessage(channel: string): void {
   messageCounts.set(channel, (messageCounts.get(channel) ?? 0) + 1);
 }
 
-/** Returns the running chat message count for `channel`, or 0 if none have been recorded yet. */
+/**
+ * Returns the running chat message count for `channel`, or 0 if none have been recorded yet.
+ * @param channel - Normalized Twitch channel name.
+ * @returns Messages seen in that channel since startup (or since it was last forgotten).
+ */
 export function getMessageCount(channel: string): number {
   return messageCounts.get(channel) ?? 0;
 }
@@ -20,6 +27,7 @@ export function getMessageCount(channel: string): number {
  * Forgets a channel's recorded chat activity, so it stops occupying memory once the bot is no
  * longer active in it. Safe to call for a channel with no state (no-op). Called from
  * `partTwitchChannel`; a channel the bot joins again later starts fresh.
+ * @param channel - Normalized Twitch channel name.
  */
 export function forgetChannelChatActivity(channel: string): void {
   messageCounts.delete(channel);

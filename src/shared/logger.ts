@@ -98,7 +98,11 @@ const rootLogger = winstonCreateLogger({
   ],
 });
 
-/** Returns a child logger tagged with the given module label. */
+/**
+ * Returns a child logger tagged with the given module label.
+ * @param module - Label shown on every line this logger writes, e.g. `Discord`.
+ * @returns A winston child logger of the root logger.
+ */
 export function createLogger(module: string) {
   return rootLogger.child({ label: module });
 }

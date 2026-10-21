@@ -19,7 +19,12 @@ function parseKey(secret: string): Buffer {
   return Buffer.from(secret, 'hex');
 }
 
-/** Encrypts a plaintext string and returns a prefixed `enc:iv.tag.data` token. */
+/**
+ * Encrypts a plaintext string and returns a prefixed `enc:iv.tag.data` token.
+ * @param plaintext - Token to encrypt.
+ * @param secret - `EVENTSUB_TOKEN_SECRET`: a 64-character hex AES-256 key.
+ * @returns `enc:` followed by the base64 IV, auth tag and ciphertext joined with dots.
+ */
 export function encryptToken(plaintext: string, secret: string): string {
   const key = parseKey(secret);
   const iv = randomBytes(12);
@@ -33,6 +38,9 @@ export function encryptToken(plaintext: string, secret: string): string {
  * Decrypts a token produced by encryptToken.
  * Throws if a plaintext token is encountered when a secret is available — the EventSub
  * OAuth flow must be re-run to produce an encrypted token.
+ * @param stored - Token as stored in the DB, expected to start with `enc:`.
+ * @param secret - `EVENTSUB_TOKEN_SECRET`: a 64-character hex AES-256 key.
+ * @returns The decrypted plaintext token.
  */
 export function decryptToken(stored: string, secret: string): string {
   if (!stored.startsWith(ENC_PREFIX)) {

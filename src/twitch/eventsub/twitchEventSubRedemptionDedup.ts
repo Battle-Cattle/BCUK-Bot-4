@@ -40,6 +40,8 @@ setInterval(purgeExpiredRedemptionIds, REDEMPTION_DEDUP_TTL_MS).unref();
  * or is currently being processed by another in-flight call. Otherwise claims the id as pending
  * (via pendingRedemptionIds) and returns false — the caller must follow up with
  * markRedemptionHandled on success or clearPendingRedemption on failure.
+ * @param redemptionId - Twitch channel-points redemption ID.
+ * @returns True if the redemption is already handled or in flight; false if this call claimed it.
  */
 export function isDuplicateRedemption(redemptionId: string): boolean {
   const now = Date.now();
@@ -50,13 +52,19 @@ export function isDuplicateRedemption(redemptionId: string): boolean {
   return false;
 }
 
-/** Marks a redemption as successfully processed: moves it from in-flight to the TTL'd completed set. */
+/**
+ * Marks a redemption as successfully processed: moves it from in-flight to the TTL'd completed set.
+ * @param redemptionId - Twitch channel-points redemption ID claimed by {@link isDuplicateRedemption}.
+ */
 export function markRedemptionHandled(redemptionId: string): void {
   pendingRedemptionIds.delete(redemptionId);
   seenRedemptionIds.set(redemptionId, Date.now() + REDEMPTION_DEDUP_TTL_MS);
 }
 
-/** Clears an in-flight claim without marking it completed, so a later attempt is not treated as a duplicate. */
+/**
+ * Clears an in-flight claim without marking it completed, so a later attempt is not treated as a duplicate.
+ * @param redemptionId - Twitch channel-points redemption ID claimed by {@link isDuplicateRedemption}.
+ */
 export function clearPendingRedemption(redemptionId: string): void {
   pendingRedemptionIds.delete(redemptionId);
 }

@@ -7,8 +7,13 @@ export interface PerViewerCooldown {
   clear(): void;
 }
 
-/** Builds the composite key: cooldowns are per-streamer, so the same viewer on two different
- *  streamers' channels must never share one. */
+/**
+ * Builds the composite key: cooldowns are per-streamer, so the same viewer on two different
+ * streamers' channels must never share one.
+ * @param streamerId - The streamer's `streamer.id`.
+ * @param twitchUsername - The viewer's Twitch login.
+ * @returns The `streamerId:twitchUsername` map key.
+ */
 function cooldownKey(streamerId: number, twitchUsername: string): string {
   return `${streamerId}:${twitchUsername}`;
 }

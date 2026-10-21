@@ -2,7 +2,10 @@ import { type Client } from 'discord.js';
 
 let client: Client | null = null;
 
-/** Returns the Discord.js Client once it has fired `clientReady`, or null before then. */
+/**
+ * Returns the Discord.js Client once it has fired `clientReady`, or null before then.
+ * @returns The ready client, or null if it isn't ready yet or has been cleared.
+ */
 export function getDiscordClient(): Client | null { return client; }
 
 /**

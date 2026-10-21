@@ -20,25 +20,43 @@ export function parseGambleAmount(input: string, balance: number): number | null
   return rounded;
 }
 
-/** Parses the `all`/`ALL` keyword as the full balance; null for anything else. */
+/**
+ * Parses the `all`/`ALL` keyword as the full balance; null for anything else.
+ * @param trimmed - The whitespace-trimmed bet token.
+ * @param balance - The caller's current points balance.
+ * @returns `balance` if the token is `all` (any case), otherwise null.
+ */
 function parseAllKeyword(trimmed: string, balance: number): number | null {
   return trimmed.toLowerCase() === 'all' ? balance : null;
 }
 
-/** Parses a trailing-`%` percentage of balance, floored; null if it doesn't end in `%`, or the
- *  percentage isn't a finite positive number. */
+/**
+ * Parses a trailing-`%` percentage of balance, floored; null if it doesn't end in `%`, or the
+ * percentage isn't a finite positive number.
+ * @param trimmed - The whitespace-trimmed bet token, e.g. `40%`.
+ * @param balance - The caller's current points balance the percentage is taken of.
+ * @returns The floored share of `balance`, or null if the token isn't a valid percentage.
+ */
 function parsePercentAmount(trimmed: string, balance: number): number | null {
   if (!trimmed.endsWith('%')) return null;
   const percent = Number(trimmed.slice(0, -1));
   return Number.isFinite(percent) && percent > 0 ? Math.floor(balance * (percent / 100)) : null;
 }
 
-/** Parses a `k`/`K`-suffixed integer as ×1000; null for anything else. */
+/**
+ * Parses a `k`/`K`-suffixed integer as ×1000; null for anything else.
+ * @param trimmed - The whitespace-trimmed bet token, e.g. `5k`.
+ * @returns The amount multiplied by 1000, or null if the token has no `k`/`K` suffix.
+ */
 function parseThousandsSuffixAmount(trimmed: string): number | null {
   return /^[0-9]+[kK]$/.test(trimmed) ? Number(trimmed.slice(0, -1)) * 1000 : null;
 }
 
-/** Parses a plain (optionally thousands-separated) integer; null for anything else. */
+/**
+ * Parses a plain (optionally thousands-separated) integer; null for anything else.
+ * @param trimmed - The whitespace-trimmed bet token, e.g. `1,000`.
+ * @returns The integer with commas removed, or null if it isn't all digits.
+ */
 function parsePlainIntegerAmount(trimmed: string): number | null {
   const withoutCommas = trimmed.replace(/,/g, '');
   return /^[0-9]+$/.test(withoutCommas) ? Number(withoutCommas) : null;
@@ -47,6 +65,9 @@ function parsePlainIntegerAmount(trimmed: string): number | null {
 /**
  * Resolves the raw numeric amount a bet token represents, before the min/max range check, by
  * trying each accepted format in turn.
+ * @param trimmed - The whitespace-trimmed bet token.
+ * @param balance - The caller's current points balance, for `all` and percentages.
+ * @returns The first format's parsed amount (possibly fractional or out of range), or null if no format matches.
  */
 function resolveAmount(trimmed: string, balance: number): number | null {
   const parsers: Array<() => number | null> = [

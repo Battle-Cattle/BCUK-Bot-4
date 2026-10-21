@@ -10,26 +10,37 @@ import type { SubSpec } from './twitchEventSubSubscriptionGroups';
 
 const log = createLogger('EventSub');
 
-// Tracks "login:type:tokenHash" triples that failed with 403 — skipped until bot restarts or
+// Tracks "login:type:tokenHash" triples that failed with 401 or 403 — skipped until bot restarts or
 // token changes. Hashed rather than storing the raw access token: the key only needs to change
 // when the token does (so a refreshed token naturally computes a different key and retries),
 // not to retain the token's actual value in process memory for the (unbounded, until
 // clearAuthFailedSubs runs) lifetime of this Set.
 const authFailedSubs = new Set<string>();
 
-/** Derives the skip-key's token component without retaining the raw access token. */
+/**
+ * Derives the skip-key's token component without retaining the raw access token.
+ * @param token - The streamer's Twitch user access token.
+ * @returns The token's SHA-256 digest as hex.
+ */
 function hashToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }
 
-/** Returns true if any subscription for the given login has previously failed with a 403. */
+/**
+ * Returns true if any subscription for the given login has previously failed with a 401 or 403 (a `TwitchAuthError`).
+ * @param login - Streamer's Twitch login, as used in the skip key.
+ * @returns True if at least one auth-failed skip key exists for that login.
+ */
 export function hasAuthFailedSubs(login: string): boolean {
   const prefix = `${login}:`;
   for (const key of authFailedSubs) if (key.startsWith(prefix)) return true;
   return false;
 }
 
-/** Clears all auth-failed subscription records for the given login. */
+/**
+ * Clears all auth-failed subscription records for the given login.
+ * @param login - Streamer's Twitch login whose skip keys (for every type and token) are removed.
+ */
 export function clearAuthFailedSubs(login: string): void {
   const prefix = `${login}:`;
   for (const key of authFailedSubs) if (key.startsWith(prefix)) authFailedSubs.delete(key);
@@ -41,7 +52,10 @@ export function clearAuthFailedSubs(login: string): void {
  *  subscription from matching (the create would then 409 against it). Any key with a non-empty
  *  value on either side must match exactly, so a same-type subscription with a genuinely different
  *  condition (e.g. a leftover from an older API version whose condition shape has since changed)
- *  is still told apart from the one this spec wants. */
+ *  is still told apart from the one this spec wants.
+ *  @param a - One EventSub condition object (e.g. from the list response).
+ *  @param b - The other condition object (e.g. the spec's wanted condition).
+ *  @returns True if every key's value matches, with missing and `""` treated as equal. */
 export function conditionsEqual(a: Record<string, string>, b: Record<string, string>): boolean {
   const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
   for (const key of keys) {
@@ -63,6 +77,11 @@ export function conditionsEqual(a: Record<string, string>, b: Record<string, str
  *   `live` with its id), and whether a stale `existing` subscription was actually deleted here — `false` on a failed delete
  *   attempt, so the caller knows not to treat that id as already gone (it must remain eligible for
  *   {@link deleteStaleSubscriptions} to retry in the same round).
+ * @param sessionId - ID of the live EventSub WebSocket session the subscription must be bound to.
+ * @param spec - The subscription type, version and condition wanted.
+ * @param token - Streamer's user access token used for the delete and create calls.
+ * @param name - Streamer's Twitch login, used in logs and the auth-failure skip key.
+ * @param existing - The streamer's current subscription matching this spec, or undefined if none was listed.
  */
 export async function ensureSubscription(
   sessionId: string, spec: SubSpec, token: string, name: string,
@@ -104,7 +123,13 @@ export type SubscribeAttempt = { kind: 'live'; id: string | null } | { kind: 'au
  *  A 409 Conflict (`createEventSubSubscription` returns null) means an identical subscription
  *  already exists, so it counts as live — but with no id, so {@link deleteStaleSubscriptions} won't
  *  prune other same-type subscriptions on its account (it can't tell which one is the live one).
- *  Callers use a non-null id to identify "the subscription created this round" when pruning. */
+ *  Callers use a non-null id to identify "the subscription created this round" when pruning.
+ *  @param sessionId - ID of the EventSub WebSocket session to bind the subscription to.
+ *  @param spec - The subscription type, version and condition to create.
+ *  @param token - Streamer's user access token for the create call.
+ *  @param login - Streamer's Twitch login, used in logs and the auth-failure skip key.
+ *  @returns `live` with the new id (or null on 409), `auth` on a scope/auth failure or a skipped
+ *    known auth failure, or `transient` on any other error. */
 async function subscribe(sessionId: string, spec: SubSpec, token: string, login: string): Promise<SubscribeAttempt> {
   const skipKey = `${login}:${spec.type}:${hashToken(token)}`;
   if (authFailedSubs.has(skipKey)) return { kind: 'auth' };

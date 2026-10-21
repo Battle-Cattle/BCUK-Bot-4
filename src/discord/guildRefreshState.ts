@@ -18,7 +18,10 @@ export interface RefreshState {
   finishedAt: number | null;
 }
 
-/** Returns a fresh idle `RefreshState`, used as the default for a guild with no recorded refresh. */
+/**
+ * Returns a fresh idle `RefreshState`, used as the default for a guild with no recorded refresh.
+ * @returns A new `RefreshState` with outcome `idle`, zero counts and no timestamps.
+ */
 function idleRefreshState(): RefreshState {
   return { outcome: 'idle', updatedCount: 0, failureCount: 0, startedAt: null, finishedAt: null };
 }

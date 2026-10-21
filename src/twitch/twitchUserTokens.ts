@@ -133,7 +133,12 @@ export async function refreshUserToken(refreshToken: string): Promise<OAuthToken
   return postTokenRequest({ grant_type: 'refresh_token', refresh_token: refreshToken }, 'refreshUserToken');
 }
 
-/** Validates a user access token and returns the owning user's ID and login, or null if invalid. */
+/**
+ * Validates a user access token and returns the owning user's ID and login, or null if invalid.
+ * @param accessToken - Twitch user OAuth access token to validate.
+ * @returns The token owner's Twitch user ID and login, or null if Twitch rejects it (400/401).
+ * @throws If Twitch returns any other non-OK status.
+ */
 export async function getUserFromToken(accessToken: string): Promise<{ id: string; login: string } | null> {
   const res = await twitchFetch('https://id.twitch.tv/oauth2/validate', {
     headers: { Authorization: `OAuth ${accessToken}` },
