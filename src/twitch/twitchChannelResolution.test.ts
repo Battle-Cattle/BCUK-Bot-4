@@ -60,6 +60,14 @@ describe('resolveDiscordIdForTwitchChannel', () => {
     expect(findUserByTwitchName).toHaveBeenCalledWith('streamer');
   });
 
+  it('still resolves via the live lookup when the first bulk load fails, serving the empty fallback cache', async () => {
+    vi.mocked(getAllTwitchLinkedUsers).mockRejectedValue(new Error('db down'));
+    vi.mocked(findUserByTwitchName).mockResolvedValue({ discord_id: 'streamer-discord-id' } as any);
+
+    expect(await resolveDiscordIdForTwitchChannel('streamer')).toBe('streamer-discord-id');
+    expect(findUserByTwitchName).toHaveBeenCalledWith('streamer');
+  });
+
   it('returns null for a channel no user has linked', async () => {
     expect(await resolveDiscordIdForTwitchChannel('nobody')).toBeNull();
     expect(findUserByTwitchName).toHaveBeenCalledWith('nobody');

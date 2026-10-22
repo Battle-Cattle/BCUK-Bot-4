@@ -28,6 +28,11 @@ describe('findStreamerIdByDiscordId', () => {
     expect(await findStreamerIdByDiscordId('999')).toBeNull();
   });
 
+  it('returns null rather than throwing when the first load fails, serving the empty fallback cache', async () => {
+    vi.mocked(getAllStreamerIds).mockRejectedValue(new Error('db down'));
+    expect(await findStreamerIdByDiscordId('111')).toBeNull();
+  });
+
   it('serves repeated lookups from one bulk load instead of querying per call', async () => {
     await findStreamerIdByDiscordId('111');
     await findStreamerIdByDiscordId('111');
