@@ -18,6 +18,7 @@ import * as loyaltyPointsWrites from './db/loyaltyPointsWrites';
 import * as loyaltyPointsExclusionWrites from './db/loyaltyPointsExclusionWrites';
 import * as advancedCommandWrites from './db/advancedCommandWrites';
 import * as timerCommandWrites from './db/timerCommandWrites';
+import * as streamMonitorWrites from './db/streamMonitorWrites';
 import { pingDb } from './db/health';
 
 // The facade must hand out the cache-invalidating wrappers, never the raw DB-module writes of
@@ -35,6 +36,7 @@ describe('db facade', () => {
     ['loyaltyPointsExclusionWrites', loyaltyPointsExclusionWrites],
     ['advancedCommandWrites', advancedCommandWrites],
     ['timerCommandWrites', timerCommandWrites],
+    ['streamMonitorWrites', streamMonitorWrites],
   ])('re-exports every %s wrapper', (_name, writes) => {
     const entries = Object.entries(writes);
     expect(entries.length).toBeGreaterThan(0);
