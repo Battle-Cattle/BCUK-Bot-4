@@ -93,6 +93,9 @@ router.get('/sfx', requireApiKey, async (req, res) => {
 /**
  * Plays a random weighted sound file for the SFX trigger named in the request
  * body, in whichever guild the key owner is currently connected to voice in.
+ * The sound goes to the bot's own voice channel in that guild, which may differ
+ * from the owner's (e.g. a bot parked in a dedicated stream channel); that's
+ * intended (see #830).
  */
 router.post('/sfx', stampRequestStart, requireApiKey, async (req, res) => {
   const { command } = (req.body ?? {}) as { command?: unknown };
