@@ -117,10 +117,11 @@ function tryClaimGuildSlot(
 
 /**
  * Handle a raw chat message from Twitch or Discord.
- * Looks the first word up as an SFX trigger first and returns quietly if it isn't one,
- * so ordinary chat never claims the guild's in-flight slot (which would silently drop a
- * concurrent real trigger) or logs cooldown noise. Only then checks cooldown/playing state
- * and claims the slot before playing.
+ * Returns straight away for a message with no command token (ordinary chat without a `!`/`#`
+ * prefix). A prefixed one is looked up as an SFX trigger first, returning quietly if it isn't
+ * one, so a non-trigger like `!hello` never claims the guild's in-flight slot (which would
+ * silently drop a concurrent real trigger) or logs cooldown noise. Only then checks
+ * cooldown/playing state and claims the slot before playing.
  * Cooldown and in-flight state are tracked per guild so a trigger in one guild
  * never blocks or cools down a trigger in another.
  *
@@ -129,8 +130,8 @@ function tryClaimGuildSlot(
  * @param guildId    The guild to target; null when no active guild could be
  *   resolved (e.g. a Twitch command fired while the streamer isn't
  *   connected to voice anywhere) — the command is skipped, with a warning
- *   logged only if the message actually matches a known trigger (most chat
- *   messages don't, and would otherwise spam this warning on every message).
+ *   logged only if the message actually matches a known trigger (a prefixed
+ *   non-trigger would otherwise log this warning too).
  * @param precomputedCommand - Already-parsed command token from the caller's single
  *   `extractCommand` call for this message, or omit to parse `rawMessage` here.
  */
@@ -140,8 +141,8 @@ export async function handleCommand(
   guildId: string | null,
   precomputedCommand?: string | null,
 ): Promise<void> {
-  // Extract the first word of the message — this is matched directly against
-  // trigger_command in the DB, which already includes whatever prefix is used
+  // The message's first word (null without a !/# prefix) — matched directly against
+  // trigger_command in the DB, which already includes the prefix
   const command = resolveCommand(rawMessage, precomputedCommand);
   if (!command) return;
 
