@@ -187,6 +187,15 @@ describe('POST /sfx', () => {
     expect(vi.mocked(playFile)).not.toHaveBeenCalled();
   });
 
+  it('returns a JSON 500 when the guild-approval lookup fails', async () => {
+    vi.mocked(isKeyApprovedForGuild).mockRejectedValue(new Error('db down'));
+
+    const res = await supertest(buildApp()).post('/sfx').send({ command: '!ding' }).expect(500);
+
+    expect(res.body).toEqual({ ok: false, error: 'Database error' });
+    expect(vi.mocked(playFile)).not.toHaveBeenCalled();
+  });
+
   it('returns 503 when Discord client is not ready', async () => {
     vi.mocked(getDiscordClient).mockReturnValue(null);
 
