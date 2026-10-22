@@ -4,7 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import ffmpegPath from 'ffmpeg-static';
 import { SFX_FOLDER } from '../shared/config';
-import { isConnected, startPlayback } from './audioPlayer';
+import { isReady, startPlayback } from './audioPlayer';
 import { safeResolve } from '../shared/pathUtils';
 
 const log = createLogger('SFXPlayer');
@@ -39,14 +39,15 @@ function getRealSfxRoot(): string {
 
 /**
  * Play a local sound file into the given guild's connected voice channel.
- * Throws if that guild isn't connected (checked both before and after resolving the
- * file) or the file does not exist.
+ * Throws if that guild's voice connection isn't Ready (checked both before and after
+ * resolving the file; a connection that's recovering from a drop counts as not connected,
+ * since a sound started then plays late or never) or the file does not exist.
  *
  * @param filePath - Sound file path, relative to the SFX folder.
  * @param guildId - Guild whose voice connection to play the file into.
  */
 export async function playFile(filePath: string, guildId: string): Promise<void> {
-  if (!isConnected(guildId)) {
+  if (!isReady(guildId)) {
     throw new VoiceNotConnectedError();
   }
 
@@ -78,7 +79,7 @@ export async function playFile(filePath: string, guildId: string): Promise<void>
   // Re-check after the realpath/stat awaits: the guild may have disconnected (or been
   // forgotten) meanwhile, and startPlayback would otherwise recreate its state and play
   // into a player no connection is subscribed to.
-  if (!isConnected(guildId)) {
+  if (!isReady(guildId)) {
     throw new VoiceNotConnectedError();
   }
 

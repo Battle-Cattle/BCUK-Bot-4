@@ -450,6 +450,19 @@ export function isConnected(guildId?: string): boolean {
 }
 
 /**
+ * Returns true only while the guild's voice connection is Ready to carry audio. Unlike
+ * {@link isConnected}, this is false during the few seconds after a drop in which the
+ * connection is kept while @discordjs/voice tries to recover it: a sound started then would
+ * sit in an auto-paused player and play late, or never.
+ *
+ * @param guildId - Guild to check.
+ * @returns True if the guild has a connection in the Ready state; false otherwise, including for unknown guilds.
+ */
+export function isReady(guildId: string): boolean {
+  return states.get(guildId)?.connection?.state.status === VoiceConnectionStatus.Ready;
+}
+
+/**
  * Returns the current voice channel ID for a guild, or null if not connected there.
  *
  * @param guildId - Guild to read the current channel for.
