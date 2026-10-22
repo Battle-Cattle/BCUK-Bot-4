@@ -2,6 +2,7 @@
 // the SQL module stays small and these rules can be unit-tested without a DB mock.
 import { ALERT_TEXT_ANIMATIONS, type TextAnimation } from './alertConfig';
 import { assertNotReservedCommand } from './reservedCommands';
+import { hasCommandPrefix } from '../shared/commandPrefix';
 
 /** Lowest chat role allowed to use an advanced command (the broadcaster always can). */
 export type AdvancedCommandRole = 'everyone' | 'subscriber' | 'vip' | 'moderator';
@@ -109,17 +110,18 @@ function assertOptionalIntInRange(value: number | null, field: string, min: numb
 }
 
 /**
- * Normalises a chat trigger: trimmed and lowercased, a single word, not a built-in command.
+ * Normalises a chat trigger: trimmed and lowercased, a single word starting with a command
+ * prefix (`!` or `#`, the only messages chat treats as commands), not a built-in command.
  * @param trigger - The raw trigger, or null/blank for a Stream Deck-only command.
  * @returns The normalised trigger, or null when none was given.
- * @throws {@link AdvancedCommandValidationError} on whitespace or an over-long trigger, and
+ * @throws {@link AdvancedCommandValidationError} on whitespace, a missing prefix or an over-long trigger, and
  *   `ReservedCommandError` on a built-in command.
  */
 export function normalizeAdvancedTrigger(trigger: string | null): string | null {
   const normalized = (trigger ?? '').trim().toLowerCase();
   if (!normalized) return null;
-  if (/\s/.test(normalized) || normalized.length > MAX_ADVANCED_COMMAND_TRIGGER_LENGTH) {
-    throw new AdvancedCommandValidationError('invalid_trigger', 'Trigger must be a single word');
+  if (/\s/.test(normalized) || !hasCommandPrefix(normalized) || normalized.length > MAX_ADVANCED_COMMAND_TRIGGER_LENGTH) {
+    throw new AdvancedCommandValidationError('invalid_trigger', 'Trigger must be a single word starting with ! or #');
   }
   assertNotReservedCommand(normalized);
   return normalized;

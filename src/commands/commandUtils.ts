@@ -1,3 +1,5 @@
+import { hasCommandPrefix } from '../shared/commandPrefix';
+
 /** Minimal logger contract accepted by {@link fireAndForget} — matches `shared/logger`'s `createLogger()` return shape. */
 interface ErrorLogger {
   error: (message: string, err: unknown) => void;
@@ -18,14 +20,17 @@ export function fireAndForget(promise: Promise<void>, context: string, log: Erro
 
 /**
  * Extracts the command token from a raw message: the first whitespace-delimited
- * token, lowercased. Leading/trailing whitespace is trimmed before splitting.
+ * token, lowercased. Leading/trailing whitespace is trimmed before splitting. A message
+ * that doesn't start with a command prefix (`!` or `#`, see `shared/commandPrefix.ts`)
+ * has no command, so ordinary chat skips every handler's command lookup.
  *
  * @param rawMessage - Raw message text to extract the command from.
- * @returns The lowercased first token, or null if the message is empty/whitespace-only.
+ * @returns The lowercased first token, or null if the message is blank or doesn't start
+ *   with a command prefix.
  */
 export function extractCommand(rawMessage: string): string | null {
   const trimmed = rawMessage.trim();
-  if (!trimmed) return null;
+  if (!hasCommandPrefix(trimmed)) return null;
   return trimmed.split(/\s+/)[0]?.toLowerCase() ?? null;
 }
 

@@ -73,11 +73,12 @@ export function normalizeRequiredText(value: string | undefined): string | null 
 
 /**
  * Allowlist regex for valid trigger strings (e.g. `!clap`, `!my-cmd_1`).
- * Permits an optional single-char prefix (`!`, `?`, `#`, `@`), then one alphanumeric
- * character, followed by zero or more alphanumeric, underscore, or hyphen characters.
+ * Requires a command prefix (`!` or `#`, the only ones `extractCommand` recognises; see
+ * `shared/commandPrefix.ts`), then one alphanumeric character, followed by zero or more
+ * alphanumeric, underscore, or hyphen characters.
  * Rejects HTML-special characters such as `<`, `>`, `&`, and `"`.
  */
-const TRIGGER_RE = /^[!?#@]?[a-z0-9][a-z0-9_-]*$/;
+const TRIGGER_RE = /^[!#][a-z0-9][a-z0-9_-]*$/;
 
 /**
  * Normalizes a required single-word (no whitespace) text field to lowercase and
