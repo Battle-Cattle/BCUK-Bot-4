@@ -73,11 +73,18 @@ describe('handleCommand', () => {
   it('skips without warning when no guild is resolved and the message is not a known trigger', async () => {
     vi.mocked(findCachedSfxTrigger).mockResolvedValue(null);
 
-    await handleCommand('just chatting about stuff', 'twitch', null);
+    await handleCommand('!just chatting about stuff', 'twitch', null);
 
-    expect(vi.mocked(findCachedSfxTrigger)).toHaveBeenCalledWith('just');
+    expect(vi.mocked(findCachedSfxTrigger)).toHaveBeenCalledWith('!just');
     expect(vi.mocked(playFile)).not.toHaveBeenCalled();
     expect(log.warn).not.toHaveBeenCalled();
+  });
+
+  it('skips the trigger lookup for a message with no command prefix', async () => {
+    await handleCommand('just chatting about stuff', 'twitch', GUILD_A);
+
+    expect(vi.mocked(findCachedSfxTrigger)).not.toHaveBeenCalled();
+    expect(vi.mocked(playFile)).not.toHaveBeenCalled();
   });
 
   it('skips with a warning when a known trigger fires but no guild is resolved', async () => {
@@ -194,15 +201,15 @@ describe('handleCommand', () => {
       .mockReturnValueOnce(helloLookup as ReturnType<typeof findCachedSfxTrigger>)
       .mockResolvedValueOnce(LOOKUP);
 
-    const hello = handleCommand('hello', 'twitch', GUILD_A);
+    const hello = handleCommand('!hello', 'twitch', GUILD_A);
     await handleCommand('!ding', 'twitch', GUILD_A);
     expect(vi.mocked(playFile)).toHaveBeenCalledTimes(1);
 
     resolveHello(null);
     await hello;
     expect(vi.mocked(playFile)).toHaveBeenCalledTimes(1);
-    // Ordinary chat never reaches the cooldown/in-flight check, so it logs nothing about it.
-    expect(log.info).not.toHaveBeenCalledWith(expect.stringContaining("ignoring 'hello'"));
+    // A non-trigger never reaches the cooldown/in-flight check, so it logs nothing about it.
+    expect(log.info).not.toHaveBeenCalledWith(expect.stringContaining("ignoring '!hello'"));
   });
 
   it('looks the trigger up only once per message', async () => {

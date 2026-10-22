@@ -25,6 +25,14 @@ describe('extractCommand', () => {
   it('returns the full string lowercased when there is only one token', () => {
     expect(extractCommand('!321')).toBe('!321');
   });
+
+  it('accepts a #-prefixed command', () => {
+    expect(extractCommand('#BlameAndy now')).toBe('#blameandy');
+  });
+
+  it.each(['hello there', '?help', '@friend !so', 'gg !ding'])('returns null for %o, which has no command prefix', (message) => {
+    expect(extractCommand(message)).toBeNull();
+  });
 });
 
 describe('resolveCommand', () => {

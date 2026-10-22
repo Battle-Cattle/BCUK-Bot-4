@@ -397,7 +397,8 @@ describe('handleTwitchMessage', () => {
   it('processes messages when sourceChannelId matches channelId', () => {
     vi.mocked(executeCustomCommandForTwitch).mockResolvedValue(undefined);
     sendMessage('#streamer', 'alice', 'hello', { channelId: '111', sourceChannelId: '111' });
-    expect(executeCustomCommandForTwitch).toHaveBeenCalledWith('streamer', 'hello', 'alice', 'hello');
+    // Plain chat has no command prefix, so its command token is null.
+    expect(executeCustomCommandForTwitch).toHaveBeenCalledWith('streamer', 'hello', 'alice', null);
     expect(recordChatMessage).toHaveBeenCalledWith('streamer');
   });
 
@@ -466,8 +467,8 @@ describe('handleTwitchMessage', () => {
     // executePointsCommandForTwitch/executeGambleCommandForTwitch are still called (same as
     // executeCounterCommandForTwitch's guildId), with a null streamerId — they no-op internally
     // rather than being skipped here.
-    expect(executePointsCommandForTwitch).toHaveBeenCalledWith('streamer', null, 'hello', 'alice', 'hello');
-    expect(executeGambleCommandForTwitch).toHaveBeenCalledWith('streamer', null, 'hello', 'alice', 'hello');
+    expect(executePointsCommandForTwitch).toHaveBeenCalledWith('streamer', null, 'hello', 'alice', null);
+    expect(executeGambleCommandForTwitch).toHaveBeenCalledWith('streamer', null, 'hello', 'alice', null);
   });
 
   it('does not award passive chat-earn points for a !gamble message, since placing a bet isn\'t chatting', async () => {
