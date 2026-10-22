@@ -71,7 +71,7 @@ Stores sound files associated with a trigger.
 | `trigger_id` | `BIGINT` | FK to `sfxtrigger.id` |
 | `file` | `VARCHAR(...)` | Filename relative to `SFX_FOLDER` |
 | `trigger_command` | `VARCHAR(...)` nullable | Legacy column; not used for routing |
-| `weight` | `INT` | Weighted-random selection; non-positive values are treated like `1` by the app |
+| `weight` | `INT` | Weighted-random selection weight, at least `1` (the panel rejects lower values, and `0006_sfx_weight_at_least_one.sql` raised older rows to `1`) |
 | `hidden` | `TINYINT(1)` | Listing-only flag; hidden files still play |
 | `category_id` | `INT` nullable | FK to `sfxcategory.id` |
 

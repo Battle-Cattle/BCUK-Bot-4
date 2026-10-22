@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { mockLogger } from '../../test-utils/loggerMock';
+
+vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
 vi.mock('../../db', () => ({
   isKeyApprovedForGuild: vi.fn(),
@@ -71,6 +74,14 @@ describe('ensureGuildApproved', () => {
     const { req, res } = makeReqRes();
     await expect(ensureGuildApproved(req, res, 'guild-123')).resolves.toBe(true);
     expect(res.status).not.toHaveBeenCalled();
+  });
+
+  it('returns false and sends a JSON 500 when the approval lookup fails', async () => {
+    vi.mocked(isKeyApprovedForGuild).mockRejectedValue(new Error('db down'));
+    const { req, res } = makeReqRes();
+    await expect(ensureGuildApproved(req, res, 'guild-123')).resolves.toBe(false);
+    expect(res.status).toHaveBeenCalledWith(500);
+    expect(res.json).toHaveBeenCalledWith({ ok: false, error: 'Database error' });
   });
 
   it('returns false and sends 403 when the key is not approved', async () => {

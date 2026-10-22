@@ -36,12 +36,46 @@ describe('pickWeightedRandom', () => {
     expect(pickWeightedRandom(files)).toBe('b.mp3');
   });
 
-  it('treats zero-weight files as weight-1', () => {
-    // Both files have weight 0, treated as 1 each. totalWeight = 2.
-    vi.spyOn(Math, 'random').mockReturnValue(0); // first file wins
+  it('never picks a zero-weight file while another file has weight', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    const files: WeightedFile[] = [
+      { file: 'zero.mp3', weight: 0 },
+      { file: 'one.mp3', weight: 1 },
+    ];
+    expect(pickWeightedRandom(files)).toBe('one.mp3');
+  });
+
+  it('skips a zero-weight first file even when the random draw is exactly 0', () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    const files: WeightedFile[] = [
+      { file: 'zero.mp3', weight: 0 },
+      { file: 'one.mp3', weight: 1 },
+    ];
+    expect(pickWeightedRandom(files)).toBe('one.mp3');
+  });
+
+  it('picks uniformly when no file has a positive weight', () => {
     const files: WeightedFile[] = [
       { file: 'a.mp3', weight: 0 },
-      { file: 'b.mp3', weight: 0 },
+      { file: 'b.mp3', weight: -1 },
+      { file: 'c.mp3', weight: 0 },
+    ];
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    expect(pickWeightedRandom(files)).toBe('a.mp3');
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    expect(pickWeightedRandom(files)).toBe('b.mp3');
+    vi.spyOn(Math, 'random').mockReturnValue(0.99);
+    expect(pickWeightedRandom(files)).toBe('c.mp3');
+  });
+
+  it('never picks a negative-weight file', () => {
+    // Counted as 0, the total is 2 and 0.4 * 2 = 0.8 lands on a.mp3. (Counted as 1, as it used
+    // to be, the total is 3 and 1.2 would land on negative.mp3.)
+    vi.spyOn(Math, 'random').mockReturnValue(0.4);
+    const files: WeightedFile[] = [
+      { file: 'a.mp3', weight: 1 },
+      { file: 'negative.mp3', weight: -5 },
+      { file: 'b.mp3', weight: 1 },
     ];
     expect(pickWeightedRandom(files)).toBe('a.mp3');
   });

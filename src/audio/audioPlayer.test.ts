@@ -222,6 +222,32 @@ describe('per-guild isolation', () => {
   });
 });
 
+describe('isReady', () => {
+  it('is true for a guild whose connection is Ready', async () => {
+    const { client } = makeClient();
+    await mod.connect(client as never, 'guild-A', 'chan-1');
+    expect(mod.isReady('guild-A')).toBe(true);
+  });
+
+  it('is false while a dropped connection is still held during its recovery window', async () => {
+    const { client } = makeClient();
+    await mod.connect(client as never, 'guild-A', 'chan-1');
+    createdConnections[0]!.state.status = 'disconnected';
+
+    // Still "connected" (the connection is kept while it tries to recover) but not Ready.
+    expect(mod.isConnected('guild-A')).toBe(true);
+    expect(mod.isReady('guild-A')).toBe(false);
+  });
+
+  it('is false for an unknown or disconnected guild', async () => {
+    expect(mod.isReady('never-seen')).toBe(false);
+    const { client } = makeClient();
+    await mod.connect(client as never, 'guild-A', 'chan-1');
+    mod.disconnect('guild-A');
+    expect(mod.isReady('guild-A')).toBe(false);
+  });
+});
+
 describe('isConnected / getCurrentChannelId for unknown guilds', () => {
   it('reports not connected and null channel without throwing', () => {
     expect(mod.isConnected('never-seen')).toBe(false);

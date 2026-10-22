@@ -3,6 +3,9 @@ import type { Client } from 'discord.js';
 import { isKeyApprovedForGuild } from '../../db';
 import { getActiveGuildForUser } from '../../discord/voicePresence';
 import { getDiscordClient } from '../../discord/discordClientStore';
+import { createLogger } from '../../shared/logger';
+
+const log = createLogger('Streamdeck');
 
 /**
  * Returns the ready Discord client, or sends a 503 JSON error response and returns
@@ -40,14 +43,24 @@ export async function resolveGuildIdFromChannelId(client: Client, channelId: str
 /**
  * Confirms the request's API key is approved for `guildId`, sending a generic
  * 403 and returning false if not. Shared by every Streamdeck route so
- * approval denial always produces the same response.
+ * approval denial always produces the same response. A failed approval lookup
+ * sends a JSON 500 rather than rejecting, which Express would turn into the
+ * panel's HTML error page.
  * @param req - Request whose `apiKeyOwner` was set by `requireApiKey`.
- * @param res - Response used to send the 403.
+ * @param res - Response used to send the 403 or 500.
  * @param guildId - Discord snowflake of the guild the action targets.
- * @returns True when the key is approved for the guild, false after sending a 403.
+ * @returns True when the key is approved for the guild, false after sending a 403 or 500.
  */
 export async function ensureGuildApproved(req: Request, res: Response, guildId: string): Promise<boolean> {
-  if (!(await isKeyApprovedForGuild(req.apiKeyOwner!, guildId))) {
+  let approved: boolean;
+  try {
+    approved = await isKeyApprovedForGuild(req.apiKeyOwner!, guildId);
+  } catch (err) {
+    log.error(`Failed to check key approval for guild ${guildId}:`, err);
+    res.status(500).json({ ok: false, error: 'Database error' });
+    return false;
+  }
+  if (!approved) {
     res.status(403).json({ ok: false, error: 'Key not approved for this guild' });
     return false;
   }
@@ -60,7 +73,7 @@ export async function ensureGuildApproved(req: Request, res: Response, guildId: 
  * for that guild. Sends the appropriate error response and returns null on
  * any failure.
  * @param req - Request whose `apiKeyOwner` was set by `requireApiKey`.
- * @param res - Response used to send the 400 or 403.
+ * @param res - Response used to send the 400, 403 or 500.
  * @param client - The bot's Discord client, used to fetch the channel.
  * @param channelId - Discord snowflake of the voice channel from the request.
  * @returns Discord snowflake of the approved guild, or null after an error response was sent.
@@ -81,7 +94,7 @@ export async function resolveChannelGuildOrRespond(req: Request, res: Response, 
  * every server at a time. Sends the appropriate error response and returns
  * null on any failure.
  * @param req - Request whose `apiKeyOwner` was set by `requireApiKey`.
- * @param res - Response used to send the 503 or 403.
+ * @param res - Response used to send the 503, 403 or 500.
  * @param client - The bot's Discord client, used to find the owner's voice connection.
  * @returns Discord snowflake of the approved guild, or null after an error response was sent.
  */

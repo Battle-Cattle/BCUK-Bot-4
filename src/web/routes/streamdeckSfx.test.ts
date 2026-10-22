@@ -187,6 +187,15 @@ describe('POST /sfx', () => {
     expect(vi.mocked(playFile)).not.toHaveBeenCalled();
   });
 
+  it('returns a JSON 500 when the guild-approval lookup fails', async () => {
+    vi.mocked(isKeyApprovedForGuild).mockRejectedValue(new Error('db down'));
+
+    const res = await supertest(buildApp()).post('/sfx').send({ command: '!ding' }).expect(500);
+
+    expect(res.body).toEqual({ ok: false, error: 'Database error' });
+    expect(vi.mocked(playFile)).not.toHaveBeenCalled();
+  });
+
   it('returns 503 when Discord client is not ready', async () => {
     vi.mocked(getDiscordClient).mockReturnValue(null);
 
@@ -258,7 +267,7 @@ describe('GET /sfx', () => {
   it('returns every SFX trigger, hidden ones included, with only the fields the plugin uses', async () => {
     const triggers = [
       { triggerId: '1', triggerCommand: '!ding', description: null, hidden: false, categoryId: null, categoryName: null, files: [{ id: 1, file: 'ding.mp3', weight: 1, hidden: false }] },
-      { triggerId: '2', triggerCommand: '!secret', description: 'Shh', hidden: true, categoryId: 3, categoryName: 'Memes', files: [] },
+      { triggerId: '2', triggerCommand: '!secret', description: 'Shh', hidden: true, categoryId: 3, categoryName: 'Memes', files: [{ id: 2, file: 'shh.mp3', weight: 1, hidden: true }] },
     ];
     vi.mocked(getAllSfxTriggers).mockResolvedValue(triggers as any);
 
@@ -271,6 +280,42 @@ describe('GET /sfx', () => {
         { triggerCommand: '!secret', categoryName: 'Memes', description: 'Shh' },
       ],
     });
+  });
+
+  it('leaves out triggers with no sound files', async () => {
+    const triggers = [
+      { triggerId: '1', triggerCommand: '!ding', description: null, hidden: false, categoryId: null, categoryName: null, files: [{ id: 1, file: 'ding.mp3', weight: 1, hidden: false }] },
+      { triggerId: '2', triggerCommand: '!empty', description: null, hidden: false, categoryId: null, categoryName: null, files: [] },
+    ];
+    vi.mocked(getAllSfxTriggers).mockResolvedValue(triggers as any);
+
+    const res = await supertest(buildApp()).get('/sfx').expect(200);
+
+    expect(res.body.triggers.map((t: { triggerCommand: string }) => t.triggerCommand)).toEqual(['!ding']);
+  });
+
+  it('lists a command shared by several triggers once, as the lower-id trigger that plays', async () => {
+    const triggers = [
+      { triggerId: '10', triggerCommand: '!Ding', description: 'newer', hidden: false, categoryId: null, categoryName: 'A', files: [{ id: 3, file: 'b.mp3', weight: 1, hidden: false }] },
+      { triggerId: '9', triggerCommand: '!ding ', description: 'older', hidden: false, categoryId: null, categoryName: 'B', files: [{ id: 2, file: 'a.mp3', weight: 1, hidden: false }] },
+    ];
+    vi.mocked(getAllSfxTriggers).mockResolvedValue(triggers as any);
+
+    const res = await supertest(buildApp()).get('/sfx').expect(200);
+
+    expect(res.body.triggers).toEqual([{ triggerCommand: '!ding ', categoryName: 'B', description: 'older' }]);
+  });
+
+  it('leaves out a shared command when the lower-id trigger that plays has no sound files', async () => {
+    const triggers = [
+      { triggerId: '1', triggerCommand: '!ding', description: null, hidden: false, categoryId: null, categoryName: null, files: [] },
+      { triggerId: '2', triggerCommand: '!ding', description: null, hidden: false, categoryId: null, categoryName: null, files: [{ id: 1, file: 'ding.mp3', weight: 1, hidden: false }] },
+    ];
+    vi.mocked(getAllSfxTriggers).mockResolvedValue(triggers as any);
+
+    const res = await supertest(buildApp()).get('/sfx').expect(200);
+
+    expect(res.body.triggers).toEqual([]);
   });
 
   it('returns 500 on DB error', async () => {
