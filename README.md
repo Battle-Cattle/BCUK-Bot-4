@@ -85,3 +85,13 @@ The web panel serves uploaded files straight from disk: overlay videos from `OVE
 - Make these folders owned and writable **only** by the user the bot runs as (e.g. `chown -R bot:bot <folder> && chmod -R go-w <folder>`). Anyone else who can write there could plant a symlink to a file outside the folder and race the check.
 - Don't point them at a shared or world-writable location (e.g. `/tmp`), and don't nest one inside a directory other users can write to.
 - Keep them outside the repo checkout and away from `.env` and other secrets.
+
+### SFX file format
+
+Any format ffmpeg reads will play, but each play of most formats starts an ffmpeg process to decode and re-encode it, which adds a short delay before the sound is heard. A file that's already **48kHz stereo Opus in an `.ogg`, `.opus` or `.webm` file** goes to Discord as it is, with no ffmpeg step, so it starts fastest. To convert one (any other kind of `.ogg`, such as Vorbis or mono Opus, still plays through ffmpeg):
+
+```bash
+ffmpeg -i airhorn.mp3 -c:a libopus -b:a 96k -ar 48000 -ac 2 airhorn.ogg
+```
+
+A converted file is a new filename, so re-upload it on the SFX page (or update the `sfx.file` row) and remove the old one.

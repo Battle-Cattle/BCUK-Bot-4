@@ -11,7 +11,9 @@ vi.mock('./audioPlayer', () => ({
 }));
 
 vi.mock('@discordjs/voice', () => ({
-  createAudioResource: vi.fn((p: string) => ({ resourcePath: p })),
+  createAudioResource: vi.fn((p: unknown) => ({ resourcePath: p })),
+  demuxProbe: vi.fn(),
+  StreamType: { Arbitrary: 'arbitrary', OggOpus: 'ogg/opus', WebmOpus: 'webm/opus' },
 }));
 
 vi.mock('ffmpeg-static', () => ({ default: null }));
@@ -19,6 +21,7 @@ vi.mock('ffmpeg-static', () => ({ default: null }));
 vi.mock('fs', () => ({
   default: {
     realpathSync: vi.fn(),
+    createReadStream: vi.fn(),
     promises: {
       realpath: vi.fn(),
       stat: vi.fn(),
@@ -28,7 +31,7 @@ vi.mock('fs', () => ({
 
 import { playFile, VoiceNotConnectedError } from './sfxPlayer';
 import { isReady, startPlayback } from './audioPlayer';
-import { createAudioResource } from '@discordjs/voice';
+import { createAudioResource, demuxProbe } from '@discordjs/voice';
 import fs from 'fs';
 
 /** Builds an ENOENT-style error, matching what fs.promises.realpath throws for a missing path. */
@@ -69,7 +72,7 @@ describe('playFile', () => {
 
     await playFile('category/ding.mp3', 'guild-A');
 
-    expect(vi.mocked(createAudioResource)).toHaveBeenCalledWith(path.posix.join(SFX_ROOT, 'category', 'ding.mp3'));
+    expect(vi.mocked(createAudioResource)).toHaveBeenCalledWith(path.posix.join(SFX_ROOT, 'category', 'ding.mp3'), { inputType: 'arbitrary' });
   });
 
   it('blocks a symlink whose real path resolves outside the SFX folder', async () => {
@@ -89,7 +92,8 @@ describe('playFile', () => {
     const filePath = path.posix.join(SFX_ROOT, 'ding.mp3');
     await playFile(filePath, 'guild-A');
 
-    expect(vi.mocked(createAudioResource)).toHaveBeenCalledWith(filePath);
+    expect(vi.mocked(createAudioResource)).toHaveBeenCalledWith(filePath, { inputType: 'arbitrary' });
+    expect(vi.mocked(demuxProbe)).not.toHaveBeenCalled();
     expect(vi.mocked(startPlayback)).toHaveBeenCalledWith(expect.anything(), 'guild-A');
   });
 
@@ -123,5 +127,60 @@ describe('playFile', () => {
     vi.mocked(fs.promises.stat).mockResolvedValue({ isFile: () => false } as Awaited<ReturnType<typeof fs.promises.stat>>);
 
     await expect(playFile(path.posix.join(SFX_ROOT, 'notafile'), 'guild-A')).rejects.toThrow('Sound path is not a file');
+  });
+  describe('Opus fast path', () => {
+    const fileStat = { isFile: () => true } as Awaited<ReturnType<typeof fs.promises.stat>>;
+
+    it('plays a probed Ogg Opus file as Opus, without ffmpeg', async () => {
+      vi.mocked(isReady).mockReturnValue(true);
+      vi.mocked(fs.promises.stat).mockResolvedValue(fileStat);
+      const fileStream = { kind: 'file' };
+      const probed = { kind: 'probed', destroy: vi.fn() };
+      vi.mocked(fs.createReadStream).mockReturnValue(fileStream as never);
+      vi.mocked(demuxProbe).mockResolvedValue({ stream: probed, type: 'ogg/opus' } as never);
+
+      await playFile('ding.OGG', 'guild-A');
+
+      expect(vi.mocked(fs.createReadStream)).toHaveBeenCalledWith(path.posix.join(SFX_ROOT, 'ding.OGG'));
+      expect(vi.mocked(demuxProbe)).toHaveBeenCalledWith(fileStream);
+      expect(vi.mocked(createAudioResource)).toHaveBeenCalledWith(probed, { inputType: 'ogg/opus' });
+      expect(vi.mocked(startPlayback)).toHaveBeenCalledWith(expect.anything(), 'guild-A');
+    });
+
+    it('falls back to the probed stream through ffmpeg when an Ogg file is not Discord-ready Opus', async () => {
+      vi.mocked(isReady).mockReturnValue(true);
+      vi.mocked(fs.promises.stat).mockResolvedValue(fileStat);
+      const probed = { kind: 'probed', destroy: vi.fn() };
+      vi.mocked(fs.createReadStream).mockReturnValue({} as never);
+      vi.mocked(demuxProbe).mockResolvedValue({ stream: probed, type: 'arbitrary' } as never);
+
+      await playFile('vorbis.ogg', 'guild-A');
+
+      expect(vi.mocked(createAudioResource)).toHaveBeenCalledWith(probed, { inputType: 'arbitrary' });
+    });
+
+    it('closes the probed stream without playing if the guild disconnects during the probe', async () => {
+      vi.mocked(isReady).mockReturnValueOnce(true).mockReturnValue(false);
+      vi.mocked(fs.promises.stat).mockResolvedValue(fileStat);
+      const probed = { kind: 'probed', destroy: vi.fn() };
+      vi.mocked(fs.createReadStream).mockReturnValue({} as never);
+      vi.mocked(demuxProbe).mockResolvedValue({ stream: probed, type: 'ogg/opus' } as never);
+
+      await expect(playFile('ding.opus', 'guild-A')).rejects.toThrow(VoiceNotConnectedError);
+
+      expect(probed.destroy).toHaveBeenCalled();
+      expect(vi.mocked(createAudioResource)).not.toHaveBeenCalled();
+      expect(vi.mocked(startPlayback)).not.toHaveBeenCalled();
+    });
+
+    it('propagates a probe failure without starting playback', async () => {
+      vi.mocked(isReady).mockReturnValue(true);
+      vi.mocked(fs.promises.stat).mockResolvedValue(fileStat);
+      vi.mocked(fs.createReadStream).mockReturnValue({} as never);
+      vi.mocked(demuxProbe).mockRejectedValue(new Error('EIO'));
+
+      await expect(playFile('ding.webm', 'guild-A')).rejects.toThrow('EIO');
+      expect(vi.mocked(startPlayback)).not.toHaveBeenCalled();
+    });
   });
 });

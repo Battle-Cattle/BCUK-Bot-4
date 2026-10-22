@@ -1,5 +1,6 @@
 import { createLogger } from '../shared/logger';
-import { createAudioResource } from '@discordjs/voice';
+import { createAudioResource, demuxProbe, StreamType } from '@discordjs/voice';
+import type { Readable } from 'stream';
 import path from 'path';
 import fs from 'fs';
 import ffmpegPath from 'ffmpeg-static';
@@ -35,6 +36,31 @@ function getRealSfxRoot(): string {
     realSfxRoot = fs.realpathSync(sfxRoot);
   }
   return realSfxRoot;
+}
+
+/** Extensions whose files may already hold Opus audio that Discord can take without re-encoding. */
+const OPUS_CONTAINER_EXTENSIONS = new Set(['.ogg', '.opus', '.webm']);
+
+/** What {@link createAudioResource} is given for one sound: a file path for ffmpeg, or a probed stream. */
+interface SfxInput {
+  input: string | Readable;
+  inputType: StreamType;
+}
+
+/**
+ * Works out how to feed a sound file to the player. A file in an Opus container is probed: when
+ * it holds 48kHz stereo Opus its packets go to Discord as they are, skipping the ffmpeg spawn and
+ * Opus encode every other file pays before its first frame. Anything else (including Ogg Vorbis)
+ * goes through ffmpeg as before. Only the probe reads the file; nothing is spawned here.
+ * @param filePath - Absolute, already-validated path of the sound file.
+ * @returns The path or probed stream to play, with its stream type.
+ */
+export async function prepareSfxInput(filePath: string): Promise<SfxInput> {
+  if (!OPUS_CONTAINER_EXTENSIONS.has(path.extname(filePath).toLowerCase())) {
+    return { input: filePath, inputType: StreamType.Arbitrary };
+  }
+  const { stream, type } = await demuxProbe(fs.createReadStream(filePath));
+  return { input: stream, inputType: type };
 }
 
 /**
@@ -76,12 +102,15 @@ export async function playFile(filePath: string, guildId: string): Promise<void>
     throw new Error(`Sound path is not a file: ${resolved}`);
   }
 
-  // Re-check after the realpath/stat awaits: the guild may have disconnected (or been
+  const { input, inputType } = await prepareSfxInput(resolved);
+
+  // Re-check after the realpath/stat/probe awaits: the guild may have disconnected (or been
   // forgotten) meanwhile, and startPlayback would otherwise recreate its state and play
   // into a player no connection is subscribed to.
   if (!isReady(guildId)) {
+    if (typeof input !== 'string') input.destroy();
     throw new VoiceNotConnectedError();
   }
 
-  startPlayback(createAudioResource(resolved), guildId);
+  startPlayback(createAudioResource(input, { inputType }), guildId);
 }
