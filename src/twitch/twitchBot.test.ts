@@ -546,8 +546,8 @@ describe('handleTwitchMessage', () => {
   it('skips guild resolution and the guild-scoped handlers for a message with no command token, but still earns points', async () => {
     vi.mocked(executeGambleCommandForTwitch).mockResolvedValue(undefined);
 
-    // extractCommand treats any first word as the command token, so only a blank message has none.
-    sendMessage('#streamer', 'alice', '   ');
+    // Ordinary chat has no !/# prefix, so extractCommand gives it no command token.
+    sendMessage('#streamer', 'alice', 'hello everyone');
 
     await waitFor(() => expect(awardPointsForChatMessage).toHaveBeenCalledWith(42, 'alice'));
     await waitFor(() => expect(executeGambleCommandForTwitch).toHaveBeenCalledOnce());
