@@ -249,6 +249,16 @@ export async function getAllStreamersWithGroups(): Promise<DbStreamerFull[]> {
 }
 
 /**
+ * Returns every streamer row's `id` and `discord_id` — the minimal mapping the streamer-ID
+ * lookup cache (`streamerIdCache.ts`) bulk-loads, instead of a per-message joined lookup.
+ * @returns One entry per `streamer` row, with `discordId` as a string snowflake.
+ */
+export async function getAllStreamerIds(): Promise<{ id: number; discordId: string }[]> {
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>('SELECT id, discord_id FROM streamer');
+  return rows.map((r) => ({ id: r.id, discordId: String(r.discord_id) }));
+}
+
+/**
  * Add a streamer to a stream group. Throws if `groupId` doesn't belong to
  * `guildId`, preventing one guild from adding a streamer to another's group.
  * The ownership check and insert are done as a single `INSERT ... SELECT`

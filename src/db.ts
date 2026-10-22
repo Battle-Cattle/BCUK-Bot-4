@@ -72,9 +72,10 @@ export {
 export {
   getStreamGroupsForGuild, addStreamGroup, updateStreamGroup,
   getStreamersForGuild, getAllStreamersWithGroups,
-  addStreamer, removeStreamer, removeStreamGroupAndStreamers,
   setStreamerLive, clearStreamerLive,
 } from './db/streamMonitor';
+export { addStreamer, removeStreamer, removeStreamGroupAndStreamers } from './db/streamMonitorWrites';
+export { findStreamerIdByDiscordId } from './db/streamerIdCache';
 export type {
   DbStreamGroup, AddStreamGroupInput, UpdateStreamGroupInput,
   DbStreamer, DbStreamerFull,

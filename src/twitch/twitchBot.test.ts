@@ -95,24 +95,21 @@ vi.mock('../discord/ownerAlerts', () => ({
   sendOwnerAlert: vi.fn(),
 }));
 
-// Uses the real createManagedLookupCache (not a fake) so tests below can
-// exercise its actual TTL / stale-while-revalidate behaviour.
-vi.mock('../db', async () => {
-  const { createManagedLookupCache, DEFAULT_REFRESH_FAILURE_BACKOFF_MS, DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS } =
-    await vi.importActual<typeof import('../db/lookupCache')>('../db/lookupCache');
-  return {
-    getTwitchEnabledChannels: vi.fn(),
-    getAllTwitchLinkedUsers: vi.fn(),
-    findUserByTwitchName: vi.fn(),
-    getBotChatToken: vi.fn(),
-    saveBotChatTokenIfOwnedBy: vi.fn(),
-    clearBotChatTokenIfOwnedBy: vi.fn(),
-    getStreamerByDiscordId: vi.fn(),
-    createManagedLookupCache,
-    DEFAULT_REFRESH_FAILURE_BACKOFF_MS,
-    DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS,
-  };
-});
+vi.mock('../db', () => ({
+  getTwitchEnabledChannels: vi.fn(),
+  getBotChatToken: vi.fn(),
+  saveBotChatTokenIfOwnedBy: vi.fn(),
+  clearBotChatTokenIfOwnedBy: vi.fn(),
+  DEFAULT_REFRESH_FAILURE_BACKOFF_MS: 5_000,
+  DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS: 60_000,
+}));
+
+// The resolvers' own caching/fallback behaviour is tested in twitchChannelResolution.test.ts;
+// here they're stubs, so tests can count how often each message resolves them.
+vi.mock('./twitchChannelResolution', () => ({
+  resolveDiscordIdForTwitchChannel: vi.fn(),
+  resolveStreamerIdForDiscordId: vi.fn(),
+}));
 
 vi.mock('./twitchGuildResolutionRuntime', () => ({
   resolveGuildIdForDiscordId: vi.fn(),
@@ -187,7 +184,6 @@ import {
   stopTwitchBot,
   restartTwitchBot,
   sayInChannel,
-  __resetTwitchChannelDiscordIdCacheForTests,
   CONNECT_TIMEOUT_MS,
   DISCONNECT_TIMEOUT_MS,
 } from './twitchBot';
@@ -200,7 +196,8 @@ import {
   __setConfirmedJoinedChannelsForTests,
 } from './twitchChannelMembership';
 import * as twitchChannelMembership from './twitchChannelMembership';
-import { getTwitchEnabledChannels, getAllTwitchLinkedUsers, findUserByTwitchName, getBotChatToken, saveBotChatTokenIfOwnedBy, clearBotChatTokenIfOwnedBy, getStreamerByDiscordId } from '../db';
+import { getTwitchEnabledChannels, getBotChatToken, saveBotChatTokenIfOwnedBy, clearBotChatTokenIfOwnedBy } from '../db';
+import { resolveDiscordIdForTwitchChannel, resolveStreamerIdForDiscordId } from './twitchChannelResolution';
 import { __resetTransientRebuildStateForTests } from './twitchBotAuthProvider';
 import { sendOwnerAlert } from '../discord/ownerAlerts';
 import { resolveGuildIdForDiscordId } from './twitchGuildResolutionRuntime';
@@ -369,11 +366,10 @@ describe('handleTwitchMessage', () => {
     // the startTwitchBot() call in connectBot() above.
     vi.clearAllMocks();
     resetMockClient();
-    vi.mocked(getAllTwitchLinkedUsers).mockResolvedValue([{ twitchName: 'streamer', discordId: 'streamer-discord-id' }]);
-    vi.mocked(findUserByTwitchName).mockResolvedValue(null);
-    vi.mocked(resolveGuildIdForDiscordId).mockReturnValue('guild-A');
-    vi.mocked(getStreamerByDiscordId).mockResolvedValue({ id: 42 } as any);
-    __resetTwitchChannelDiscordIdCacheForTests();
+    vi.mocked(resolveDiscordIdForTwitchChannel).mockResolvedValue('streamer-discord-id');
+    // Mirrors the real runtime's contract: a null (unlinked) Discord ID resolves to no guild.
+    vi.mocked(resolveGuildIdForDiscordId).mockImplementation((discordId) => (discordId ? 'guild-A' : null));
+    vi.mocked(resolveStreamerIdForDiscordId).mockResolvedValue(42);
   });
 
   it('ignores messages for an invalid channel name', () => {
@@ -455,13 +451,13 @@ describe('handleTwitchMessage', () => {
   });
 
   it('does not award points when the channel has no linked streamer', async () => {
-    vi.mocked(getStreamerByDiscordId).mockResolvedValue(null);
+    vi.mocked(resolveStreamerIdForDiscordId).mockResolvedValue(null);
     vi.mocked(executePointsCommandForTwitch).mockResolvedValue(undefined);
     vi.mocked(executeGambleCommandForTwitch).mockResolvedValue(undefined);
 
     sendMessage('#streamer', 'alice', 'hello');
 
-    await waitFor(() => expect(getStreamerByDiscordId).toHaveBeenCalled());
+    await waitFor(() => expect(resolveStreamerIdForDiscordId).toHaveBeenCalledWith('streamer-discord-id'));
     expect(awardPointsForChatMessage).not.toHaveBeenCalled();
     // executePointsCommandForTwitch/executeGambleCommandForTwitch are still called (same as
     // executeCounterCommandForTwitch's guildId), with a null streamerId — they no-op internally
@@ -512,66 +508,52 @@ describe('handleTwitchMessage', () => {
     sendMessage('#streamer', 'alice', '!cmd');
 
     await waitFor(() => expect(handleCommand).toHaveBeenCalledOnce());
-    expect(getAllTwitchLinkedUsers).toHaveBeenCalled();
+    expect(resolveDiscordIdForTwitchChannel).toHaveBeenCalledWith('streamer');
     expect(resolveGuildIdForDiscordId).toHaveBeenCalledWith('streamer-discord-id');
   });
 
-  it('passes a null guildId to handleCommand when the channel has no linked Discord user', async () => {
-    vi.mocked(getAllTwitchLinkedUsers).mockResolvedValue([]);
-    vi.mocked(findUserByTwitchName).mockResolvedValue(null);
+  it('passes a null guildId to handleCommand and the counter handler when the channel has no linked Discord user', async () => {
+    vi.mocked(resolveDiscordIdForTwitchChannel).mockResolvedValue(null);
     vi.mocked(handleCommand).mockResolvedValue(undefined);
+    vi.mocked(executeCounterCommandForTwitch).mockResolvedValue(undefined);
 
     sendMessage('#streamer', 'alice', '!cmd');
 
     await waitFor(() => expect(handleCommand).toHaveBeenCalledOnce());
     expect(handleCommand).toHaveBeenCalledWith('!cmd', 'twitch', null, '!cmd');
+    await waitFor(() => expect(executeCounterCommandForTwitch).toHaveBeenCalledOnce());
+    expect(executeCounterCommandForTwitch).toHaveBeenCalledWith('streamer', '!cmd', 'alice', null, '!cmd');
+  });
+
+  it('resolves the channel\'s Discord ID, guild and streamer ID once per message, shared by every handler', async () => {
+    vi.mocked(handleCommand).mockResolvedValue(undefined);
+    vi.mocked(executeCounterCommandForTwitch).mockResolvedValue(undefined);
+    vi.mocked(executePointsCommandForTwitch).mockResolvedValue(undefined);
+    vi.mocked(executeGambleCommandForTwitch).mockResolvedValue(undefined);
+
+    sendMessage('#streamer', 'alice', '!cmd');
+
+    await waitFor(() => expect(handleCommand).toHaveBeenCalledOnce());
+    await waitFor(() => expect(executeCounterCommandForTwitch).toHaveBeenCalledOnce());
+    await waitFor(() => expect(executePointsCommandForTwitch).toHaveBeenCalledOnce());
+    await waitFor(() => expect(executeGambleCommandForTwitch).toHaveBeenCalledOnce());
+    expect(resolveDiscordIdForTwitchChannel).toHaveBeenCalledOnce();
+    expect(resolveGuildIdForDiscordId).toHaveBeenCalledOnce();
+    expect(resolveStreamerIdForDiscordId).toHaveBeenCalledExactlyOnceWith('streamer-discord-id');
+  });
+
+  it('skips guild resolution and the guild-scoped handlers for a message with no command token, but still earns points', async () => {
+    vi.mocked(executeGambleCommandForTwitch).mockResolvedValue(undefined);
+
+    // extractCommand treats any first word as the command token, so only a blank message has none.
+    sendMessage('#streamer', 'alice', '   ');
+
+    await waitFor(() => expect(awardPointsForChatMessage).toHaveBeenCalledWith(42, 'alice'));
+    await waitFor(() => expect(executeGambleCommandForTwitch).toHaveBeenCalledOnce());
+    expect(resolveDiscordIdForTwitchChannel).toHaveBeenCalledOnce();
     expect(resolveGuildIdForDiscordId).not.toHaveBeenCalled();
-  });
-
-  it('falls back to a live lookup when a channel is missing from the bulk cache, so a just-linked streamer works on the very next message', async () => {
-    // Simulate a channel that was linked after the bulk cache's last load —
-    // it's absent from the cached map even though the cache itself is fresh.
-    vi.mocked(getAllTwitchLinkedUsers).mockResolvedValue([]);
-    vi.mocked(findUserByTwitchName).mockResolvedValue({ discord_id: 'freshly-linked-discord-id' } as any);
-    vi.mocked(handleCommand).mockResolvedValue(undefined);
-
-    sendMessage('#streamer', 'alice', '!cmd');
-
-    await waitFor(() => expect(handleCommand).toHaveBeenCalledOnce());
-    expect(findUserByTwitchName).toHaveBeenCalledWith('streamer');
-    expect(resolveGuildIdForDiscordId).toHaveBeenCalledWith('freshly-linked-discord-id');
-  });
-
-  it('does not fall back to a live lookup when the channel is already present in the bulk cache', async () => {
-    vi.mocked(handleCommand).mockResolvedValue(undefined);
-
-    sendMessage('#streamer', 'alice', '!cmd');
-
-    await waitFor(() => expect(handleCommand).toHaveBeenCalledOnce());
-    expect(findUserByTwitchName).not.toHaveBeenCalled();
-  });
-
-  it('re-resolves the linked discord_id after the cache TTL expires, picking up a relink', async () => {
-    vi.mocked(handleCommand).mockResolvedValue(undefined);
-
-    sendMessage('#streamer', 'alice', '!cmd');
-    await waitFor(() => expect(handleCommand).toHaveBeenCalledTimes(1));
-    expect(getAllTwitchLinkedUsers).toHaveBeenCalledOnce();
-
-    vi.mocked(getAllTwitchLinkedUsers).mockResolvedValue([{ twitchName: 'streamer', discordId: 'new-streamer-discord-id' }]);
-    await vi.advanceTimersByTimeAsync(5 * 60 * 1000 + 1);
-
-    // The cache is now stale — this lookup kicks a background refresh but
-    // (per the shared lookupCache's stale-while-revalidate strategy) still
-    // serves the last-good mapping for this call.
-    sendMessage('#streamer', 'alice', '!again');
-    await waitFor(() => expect(handleCommand).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(getAllTwitchLinkedUsers).toHaveBeenCalledTimes(2));
-
-    // A subsequent lookup picks up the refreshed mapping.
-    sendMessage('#streamer', 'alice', '!third');
-    await waitFor(() => expect(handleCommand).toHaveBeenCalledTimes(3));
-    expect(resolveGuildIdForDiscordId).toHaveBeenLastCalledWith('new-streamer-discord-id');
+    expect(handleCommand).not.toHaveBeenCalled();
+    expect(executeCounterCommandForTwitch).not.toHaveBeenCalled();
   });
 
   it('passes the normalized channel and message to executors', () => {

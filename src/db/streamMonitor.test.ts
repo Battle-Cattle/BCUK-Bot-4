@@ -33,6 +33,7 @@ import {
   updateStreamGroup,
   getStreamersForGuild,
   getAllStreamersWithGroups,
+  getAllStreamerIds,
   addStreamer,
   removeStreamer,
   removeStreamGroupAndStreamers,
@@ -270,6 +271,16 @@ describe('removeStreamGroupAndStreamers', () => {
 });
 
 // ─── getStreamersForGuild ──────────────────────────────────────────────────────
+
+describe('getAllStreamerIds', () => {
+  it('selects every streamer row\'s id and discord_id, coercing discord_id to string', async () => {
+    const pool = makePool([{ id: 1, discord_id: 123n }, { id: 2, discord_id: '456' }]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    expect(await getAllStreamerIds()).toEqual([{ id: 1, discordId: '123' }, { id: 2, discordId: '456' }]);
+    const [sql] = pool.execute.mock.calls[0] as [string];
+    expect(sql).toBe('SELECT id, discord_id FROM streamer');
+  });
+});
 
 describe('getStreamersForGuild', () => {
   it('returns empty array when no rows', async () => {
