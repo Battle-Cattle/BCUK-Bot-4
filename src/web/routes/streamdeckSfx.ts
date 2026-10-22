@@ -39,9 +39,33 @@ function elapsedMs(res: Response): number {
   return startedAt === undefined ? 0 : Math.round(performance.now() - startedAt);
 }
 
+/** One SFX trigger as listed by `getAllSfxTriggers`. */
+type SfxTriggerListing = Awaited<ReturnType<typeof getAllSfxTriggers>>[number];
+
 /**
- * Lists all SFX triggers available to play via Streamdeck, hidden ones included (hidden only
- * keeps a trigger off the public list; it still plays). The SFX catalog itself is global (not
+ * Narrows the full trigger listing to the triggers a Play SFX press can actually play, matching
+ * the playback lookup cache: commands are matched trimmed and case-insensitively, and when two
+ * triggers share a command the lower-id one wins. A command whose winning trigger has no sound
+ * files is left out, since pressing it would only return "No sound files".
+ * @param triggers - Every SFX trigger with its sound files, in display order.
+ * @returns The playable triggers, still in display order.
+ */
+function toPlayableTriggers(triggers: SfxTriggerListing[]): SfxTriggerListing[] {
+  const winners = new Map<string, SfxTriggerListing>();
+  for (const trigger of triggers) {
+    const command = trigger.triggerCommand.trim().toLowerCase();
+    if (!command) continue;
+    const existing = winners.get(command);
+    if (!existing || BigInt(trigger.triggerId) < BigInt(existing.triggerId)) winners.set(command, trigger);
+  }
+  const playable = new Set([...winners.values()].filter((trigger) => trigger.files.length > 0));
+  return triggers.filter((trigger) => playable.has(trigger));
+}
+
+/**
+ * Lists the SFX triggers a Streamdeck key can play, hidden ones included (hidden only keeps a
+ * trigger off the public list; it still plays), leaving out any a press couldn't play (see
+ * {@link toPlayableTriggers}). The SFX catalog itself is global (not
  * guild-scoped), so this only requires the key be approved for at least one guild — matching
  * the old `requireApiKey` semantics before per-guild approval moved out of the identity lookup.
  * Each trigger carries only what the plugin's dropdown uses, not its sound files, weights or
@@ -54,7 +78,7 @@ router.get('/sfx', requireApiKey, async (req, res) => {
       res.status(403).json({ ok: false, error: 'Key not approved for any guild' });
       return;
     }
-    const triggers = (await getAllSfxTriggers()).map(({ triggerCommand, categoryName, description }) => ({
+    const triggers = toPlayableTriggers(await getAllSfxTriggers()).map(({ triggerCommand, categoryName, description }) => ({
       triggerCommand,
       categoryName,
       description,
