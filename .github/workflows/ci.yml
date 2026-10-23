@@ -29,6 +29,9 @@ jobs:
         uses: actions/setup-node@v7
         with:
           node-version: '24.x'
+          # The runner image's cached 24.x can lag behind the `engines` floor, which engine-strict
+          # (.npmrc) then rejects; always resolve the latest 24.x release instead.
+          check-latest: true
           cache: 'npm'
 
       # Restores node_modules itself, keyed on the exact OS + Node version + package.json +

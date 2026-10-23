@@ -2,7 +2,7 @@
 
 ## Node/npm version
 
-`package.json` pins `"engines": { "node": ">=24" }`, and CI (`.github/workflows/ci.yml`) installs Node `24.x` via `actions/setup-node@v4`, which brings npm 11+. **Always match that before running any `npm` command** — a sandbox's default Node (e.g. the `/opt/node22` on PATH in some environments) ships an older npm whose `npm ci` is stricter about `overrides` bookkeeping than npm 11's and can fail with a spurious `Missing: <pkg>@<version> from lock file` even against a perfectly valid, CI-green lockfile (see the `filing-cabinet`/`typescript` override in `overrides` — this bit us once). If Node 24 isn't already active:
+`package.json` pins `"engines": { "node": ">=24.22.1" }`, and CI (`.github/workflows/ci.yml`) installs Node `24.x` via `actions/setup-node@v4`, which brings npm 11+. **Always match that before running any `npm` command** — a sandbox's default Node (e.g. the `/opt/node22` on PATH in some environments) ships an older npm whose `npm ci` is stricter about `overrides` bookkeeping than npm 11's and can fail with a spurious `Missing: <pkg>@<version> from lock file` even against a perfectly valid, CI-green lockfile (see the `filing-cabinet`/`typescript` override in `overrides` — this bit us once). If Node 24 isn't already active:
 
 ```bash
 export NVM_DIR="${NVM_DIR:-/opt/nvm}" && source "$NVM_DIR/nvm.sh"
@@ -11,7 +11,7 @@ node -v   # expect 24.x
 npm -v    # expect 11.x
 ```
 
-(If `$NVM_DIR/nvm.sh` doesn't exist in a given sandbox, find whatever installs/switches Node there instead — the point is Node 24 / npm 11+, not this exact path.)
+(If `$NVM_DIR/nvm.sh` doesn't exist in a given sandbox, find whatever installs/switches Node there instead — the point is Node 24.22.1+ / npm 11+, not this exact path.) `.npmrc` sets `engine-strict=true`, so npm refuses to install on an older Node.
 
 Do this once per session before `npm install`/`npm ci`/`npm test`/etc. — don't debug an `npm ci` failure by fighting the lockfile before first checking `node -v`/`npm -v`.
 
@@ -54,7 +54,7 @@ Tests run in Vitest's `vmThreads` pool (each file gets a fresh VM context on a r
 ## Tech Stack
 
 - **Runtime:** discord.js v14, `@twurple/chat` + `@twurple/auth` (Twitch chat), `mediaplex` (Opus), express v5 + `express-session`/`express-mysql-session`, `mysql2`, `helmet`, `winston`.
-- **TypeScript:** `strict: true` plus `noUncheckedIndexedAccess` (so `rows[0]` is `T | undefined` — guard it, or use `!` only where a nearby check guarantees it, with a comment saying which), target ES2024, `moduleResolution: NodeNext`. `package.json` pins `"engines": { "node": ">=24" }` — see Node/npm version above.
+- **TypeScript:** `strict: true` plus `noUncheckedIndexedAccess` (so `rows[0]` is `T | undefined` — guard it, or use `!` only where a nearby check guarantees it, with a comment saying which), target ES2024, `moduleResolution: NodeNext`. `package.json` pins `"engines": { "node": ">=24.22.1" }` — see Node/npm version above.
 - **ESLint** (flat config, type-aware): `no-floating-promises`, `no-misused-promises`, and `no-console` are all **errors**, not warnings — these affect how code must be written (await/void everything, use `logger` not `console.*`). `no-explicit-any` is a warning; relaxed for `*.test.ts`. `eslint-plugin-jsdoc` enforces the Docstrings rule below (`require-jsdoc` on function declarations, methods and module-level arrow functions, in `src/` and the `public/` browser scripts alike; `require-param`/`require-returns`, with descriptions, for what each documented function takes and returns; `check-param-names` catches stale `@param`s), `eslint-plugin-sonarjs` adds complexity checks on source files (`sonarjs/cognitive-complexity` ≤ 15, the same metric as Qlty's function-complexity smell, plus cyclomatic `complexity` ≤ 12, `max-params` 5, `max-depth` 3, `max-nested-callbacks` 3, all errors), and `@vitest/eslint-plugin` guards tests (no `.only`/`.skip`, no assertion-free tests). The browser scripts in `public/` (classic `<script>`s, no bundler) are linted too, with browser globals: a name a script uses from another script on the same page goes in a `/* global name */` header at its top (`name:writable` if it assigns to it).
 - **Test/build scripts:** `npm run build` (`tsc -p tsconfig.build.json`), `npm run lint`, `npm run check:circular` (madge), `npm run check:unused` (knip: unused files, exports and dependencies; `knip.json`). An export used only in its own file is fine; an alias of another export needs an `@alias` JSDoc tag.
 
