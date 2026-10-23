@@ -28,6 +28,11 @@ vi.mock('../middleware', () => ({
   requireAdmin: (_req: any, _res: any, next: any) => next(),
 }));
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
+// The real queue, spied on so a test can tell when a request has reached it.
+vi.mock('../../shared/userMutationQueue', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../shared/userMutationQueue')>();
+  return { ...actual, runUserMutation: vi.fn(actual.runUserMutation) };
+});
 
 import express from 'express';
 import supertest from 'supertest';
@@ -39,6 +44,7 @@ import {
 } from '../../db';
 import { AccessLevel } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
+import { runUserMutation } from '../../shared/userMutationQueue';
 
 const GUILD_ID = '900000000000000001';
 const SESSION_USER = {
@@ -247,10 +253,12 @@ describe('POST /streamdeck-key/request', () => {
     await waitFor(() => expect(callOrder).toContain('hasApiKey-start'));
     const secondReq = supertest(app).post('/streamdeck-key/request').then((r) => r);
 
-    // Give the second request every chance to (incorrectly) start its own
-    // hasApiKey check before asserting it didn't — it should be stuck behind
-    // the mutation queue holding the first request's in-flight operation.
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    // Once the second request has been queued, every mocked DB call it could
+    // make settles within a turn of the event loop, so after one it would
+    // (incorrectly) have started its own hasApiKey check. It should instead be
+    // stuck behind the mutation queue holding the first request's operation.
+    await waitFor(() => expect(runUserMutation).toHaveBeenCalledTimes(2));
+    await new Promise((resolve) => setImmediate(resolve));
     expect(callOrder).toEqual(['hasApiKey-start']);
 
     resolveFirstHasApiKey();
