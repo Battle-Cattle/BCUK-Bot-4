@@ -8,7 +8,7 @@ import { assertNotReservedCommand } from './reservedCommands';
 import { requireTrimmedString } from './commandStringUtils';
 import { CommandNotFoundError, CommandSelfServiceDeniedError } from './commandErrors';
 import { isCommandSelfManageableBy, isCommandUnclaimedBy } from './commandSelfService';
-import { acquireNamedLock, releaseNamedLock } from './commandLocks';
+import { withCommandIdLock } from './commandIdLock';
 import { runSerializedCommandWrite } from './commandWriteGuard';
 import {
   assertDiscordTriggerAvailable, assertMultiTwitchTriggerAvailable, assertNoSingleTwitchAssignmentOverlap,
@@ -233,15 +233,8 @@ async function writeCustomCommandUpdate(
   // id-then-trigger lock order as assignment, so the two can't deadlock. The trigger-locked write
   // runs on this same connection, so an update never holds one pool connection while waiting
   // for a second.
-  const idLockConnection = await getPool().getConnection();
-  const idLockName = `bcuk_cmdid_${commandId}`;
-  try {
-    await acquireNamedLock(idLockConnection, idLockName);
-    await writeCustomCommandRow(idLockConnection, commandId, { normalizedTriggerString, normalizedOutput, fields }, selfServiceDiscordId);
-  } finally {
-    await releaseNamedLock(idLockConnection, idLockName);
-    idLockConnection.release();
-  }
+  await withCommandIdLock(commandId, (connection) =>
+    writeCustomCommandRow(connection, commandId, { normalizedTriggerString, normalizedOutput, fields }, selfServiceDiscordId));
 }
 
 /**
@@ -354,12 +347,8 @@ export async function updateOwnCustomCommand(
  *   rule holds, checked inside the transaction.
  */
 async function deleteCustomCommand(commandId: number, check?: OwnershipCheck): Promise<void> {
-  const connection = await getPool().getConnection();
-  const lockName = `bcuk_cmdid_${commandId}`;
-
-  try {
-    await acquireNamedLock(connection, lockName);
-    await runInTransaction(connection, async () => {
+  await withCommandIdLock(commandId, (connection) =>
+    runInTransaction(connection, async () => {
       if (check !== undefined) {
         await assertOwnershipWithinTransaction(connection, commandId, check);
       }
@@ -374,11 +363,7 @@ async function deleteCustomCommand(commandId: number, check?: OwnershipCheck): P
       if (result.affectedRows === 0) {
         throw new CommandNotFoundError(commandId);
       }
-    });
-  } finally {
-    await releaseNamedLock(connection, lockName);
-    connection.release();
-  }
+    }));
 }
 
 /**
@@ -428,23 +413,12 @@ export async function discardOwnNewCustomCommand(commandId: number, discordId: s
  * @param discordId - Discord snowflake of the user to assign.
  */
 export async function assignUserToCommand(commandId: number, discordId: string): Promise<void> {
-  const connection = await getPool().getConnection();
-
-  const lockNameById = `bcuk_cmdid_${commandId}`;
-  try {
-    // The outer assignUserToCommand lock serializes writes for one command id.
-    // assignUserToCommandWithinTransaction then re-reads the trigger via
-    // getCommandTriggerStringById, derives lockNameByTrigger, and acquires the
-    // session-scoped trigger lock so cross-command trigger conflicts are checked
-    // against the latest trigger string before inserting the assignment.
-    await acquireNamedLock(connection, lockNameById);
-
-    await assignUserToCommandWithinTransaction(connection, commandId, discordId);
-  } finally {
-    // Always release the id lock
-    await releaseNamedLock(connection, lockNameById);
-    connection.release();
-  }
+  // The id lock serializes writes for one command id. assignUserToCommandWithinTransaction then
+  // re-reads the trigger via getCommandTriggerStringById, derives lockNameByTrigger, and acquires
+  // the session-scoped trigger lock on the same connection, so cross-command trigger conflicts
+  // are checked against the latest trigger string before inserting the assignment.
+  await withCommandIdLock(commandId, (connection) =>
+    assignUserToCommandWithinTransaction(connection, commandId, discordId));
 }
 
 /**
@@ -459,17 +433,8 @@ export async function assignUserToCommand(commandId: number, discordId: string):
 export async function assignUsersToCommand(commandId: number, discordIds: string[]): Promise<void> {
   if (discordIds.length === 0) return;
 
-  const connection = await getPool().getConnection();
-
-  const lockNameById = `bcuk_cmdid_${commandId}`;
-  try {
-    await acquireNamedLock(connection, lockNameById);
-
-    await assignUsersToCommandWithinTransaction(connection, commandId, discordIds);
-  } finally {
-    await releaseNamedLock(connection, lockNameById);
-    connection.release();
-  }
+  await withCommandIdLock(commandId, (connection) =>
+    assignUsersToCommandWithinTransaction(connection, commandId, discordIds));
 }
 
 /**
