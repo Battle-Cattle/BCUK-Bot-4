@@ -87,7 +87,8 @@ export const CONNECT_TIMEOUT_MS = 30_000;
 /**
  * Dispatches the two handlers that need the target guild (counters and the shared SFX command
  * router), sharing one guild resolution between them. Both no-op on a message with no command
- * token (a blank message), so that case skips them and the guild resolution entirely.
+ * token (ordinary chat without a `!`/`#` prefix), so that case skips them and the guild
+ * resolution entirely.
  * @param normalizedChannel - Normalized (lowercase, no `#`) Twitch channel name.
  * @param message - Raw chat message text.
  * @param displayName - Sender's display name, or null.
