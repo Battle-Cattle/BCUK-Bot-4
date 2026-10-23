@@ -11,7 +11,7 @@ import {
   updateTimerCommand,
   type TimerCommandInput,
 } from '../../db';
-import { canManageCatalog } from './selfServiceAccess';
+import { accessErrorCode, dispatchByAccess } from './selfServiceAccess';
 
 // Which timer write the session user gets: Mod+ use the unrestricted catalog writes; a streamer
 // below Mod gets timers on their own channel only, and their updates/toggles/deletes go through the
@@ -24,9 +24,7 @@ import { canManageCatalog } from './selfServiceAccess';
  * @returns `timer_not_found`, `forbidden`, or null for any other error.
  */
 export function timerAccessErrorCode(err: unknown): string | null {
-  if (err instanceof TimerCommandNotFoundError) return 'timer_not_found';
-  if (err instanceof TimerSelfServiceDeniedError) return 'forbidden';
-  return null;
+  return accessErrorCode(err, TimerCommandNotFoundError, 'timer_not_found', TimerSelfServiceDeniedError);
 }
 
 /**
@@ -38,9 +36,8 @@ export function timerAccessErrorCode(err: unknown): string | null {
  * @returns Resolves once the update completes; rejects with the DB write's error (see
  *   {@link timerAccessErrorCode}).
  */
-export async function updateTimerAsSessionUser(req: Request, timerId: number, input: TimerCommandInput): Promise<void> {
-  if (canManageCatalog(req)) return updateTimerCommand(timerId, input);
-  return updateOwnTimerCommand(timerId, input, req.session.user!.discordId);
+export function updateTimerAsSessionUser(req: Request, timerId: number, input: TimerCommandInput): Promise<void> {
+  return dispatchByAccess(req, () => updateTimerCommand(timerId, input), (discordId) => updateOwnTimerCommand(timerId, input, discordId));
 }
 
 /**
@@ -52,9 +49,12 @@ export async function updateTimerAsSessionUser(req: Request, timerId: number, in
  * @returns Resolves once the update completes; rejects with the DB write's error (see
  *   {@link timerAccessErrorCode}).
  */
-export async function setTimerEnabledAsSessionUser(req: Request, timerId: number, enabled: boolean): Promise<void> {
-  if (canManageCatalog(req)) return setTimerCommandEnabled(timerId, enabled);
-  return setOwnTimerCommandEnabled(timerId, enabled, req.session.user!.discordId);
+export function setTimerEnabledAsSessionUser(req: Request, timerId: number, enabled: boolean): Promise<void> {
+  return dispatchByAccess(
+    req,
+    () => setTimerCommandEnabled(timerId, enabled),
+    (discordId) => setOwnTimerCommandEnabled(timerId, enabled, discordId),
+  );
 }
 
 /**
@@ -65,9 +65,8 @@ export async function setTimerEnabledAsSessionUser(req: Request, timerId: number
  * @returns Resolves once the delete completes; rejects with the DB write's error (see
  *   {@link timerAccessErrorCode}).
  */
-export async function removeTimerAsSessionUser(req: Request, timerId: number): Promise<void> {
-  if (canManageCatalog(req)) return removeTimerCommand(timerId);
-  return removeOwnTimerCommand(timerId, req.session.user!.discordId);
+export function removeTimerAsSessionUser(req: Request, timerId: number): Promise<void> {
+  return dispatchByAccess(req, () => removeTimerCommand(timerId), (discordId) => removeOwnTimerCommand(timerId, discordId));
 }
 
 /**
@@ -78,7 +77,6 @@ export async function removeTimerAsSessionUser(req: Request, timerId: number): P
  * @param timerId - ID of the timer to discard.
  * @returns Resolves once the cleanup completes; rejects if it fails or is denied.
  */
-export async function discardNewTimerAsSessionUser(req: Request, timerId: number): Promise<void> {
-  if (canManageCatalog(req)) return removeTimerCommand(timerId);
-  return discardOwnNewTimerCommand(timerId, req.session.user!.discordId);
+export function discardNewTimerAsSessionUser(req: Request, timerId: number): Promise<void> {
+  return dispatchByAccess(req, () => removeTimerCommand(timerId), (discordId) => discardOwnNewTimerCommand(timerId, discordId));
 }

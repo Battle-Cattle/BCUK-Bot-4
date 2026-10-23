@@ -7,7 +7,7 @@ import { createCustomReward, updateCustomReward, TwitchRewardUnsupportedError } 
 import { getValidToken } from '../../twitch/twitchUserTokens';
 import { parseRewardIdParam, parseCheckboxField } from './validation';
 import { requireStreamer } from './viewHelpers';
-import { logAndRedirectError } from './errorHandling';
+import { logAndRedirectError, redirectWithError } from './errorHandling';
 import {
   parseRewardFields, effectiveCooldownSeconds, handleRewardDeleteAction,
   NOT_A_STREAMER_REDIRECT,
@@ -31,10 +31,10 @@ router.post('/rewards', requireAuth, csrfProtection, async (req, res) => {
     if (!streamer) return;
 
     const input = parseRewardFields(req.body as Record<string, string | string[] | undefined>);
-    if (!input) return res.redirect('/channel-points?error=invalid_reward_fields');
+    if (!input) return redirectWithError(res, '/channel-points', 'invalid_reward_fields');
 
     const token = streamer.twitch_user_id ? await getValidToken(streamer) : null;
-    if (!streamer.twitch_user_id || !token) return res.redirect('/channel-points?error=create_failed');
+    if (!streamer.twitch_user_id || !token) return redirectWithError(res, '/channel-points', 'create_failed');
 
     await createCustomReward(streamer.twitch_user_id, token, input);
 
@@ -62,16 +62,16 @@ router.post('/rewards/:twitchRewardId', requireAuth, csrfProtection, async (req,
     if (!streamer) return;
 
     const twitchRewardId = parseRewardIdParam(req.params.twitchRewardId);
-    if (twitchRewardId === null) return res.redirect('/channel-points?error=invalid_reward_id');
+    if (twitchRewardId === null) return redirectWithError(res, '/channel-points', 'invalid_reward_id');
 
     const input = parseRewardFields(req.body as Record<string, string | string[] | undefined>);
-    if (!input) return res.redirect('/channel-points?error=invalid_reward_fields');
+    if (!input) return redirectWithError(res, '/channel-points', 'invalid_reward_fields');
     // Twitch can only refund a redemption still in the request queue, so a reward that requires
     // companion confirmation must never skip it.
     if (await isCompanionConfirmationRequired(streamer.id, twitchRewardId)) input.should_redemptions_skip_request_queue = false;
 
     const token = streamer.twitch_user_id ? await getValidToken(streamer) : null;
-    if (!streamer.twitch_user_id || !token) return res.redirect('/channel-points?error=update_failed');
+    if (!streamer.twitch_user_id || !token) return redirectWithError(res, '/channel-points', 'update_failed');
 
     const updated = await updateCustomReward(streamer.twitch_user_id, twitchRewardId, token, input);
 
@@ -126,19 +126,19 @@ router.post('/rewards/:twitchRewardId/companion-confirmation', requireAuth, csrf
     if (!streamer) return;
 
     const twitchRewardId = parseRewardIdParam(req.params.twitchRewardId);
-    if (twitchRewardId === null) return res.redirect('/channel-points?error=invalid_reward_id');
+    if (twitchRewardId === null) return redirectWithError(res, '/channel-points', 'invalid_reward_id');
 
     const required = parseCheckboxField((req.body as Record<string, string | string[] | undefined>).enabled);
     if (required) {
       const token = streamer.twitch_user_id ? await getValidToken(streamer) : null;
-      if (!streamer.twitch_user_id || !token) return res.redirect('/channel-points?error=confirmation_failed');
+      if (!streamer.twitch_user_id || !token) return redirectWithError(res, '/channel-points', 'confirmation_failed');
       await updateCustomReward(streamer.twitch_user_id, twitchRewardId, token, { should_redemptions_skip_request_queue: false });
     }
     await setCompanionConfirmationRequired(streamer.id, twitchRewardId, required);
 
     res.redirect('/channel-points?success=confirmation_saved');
   } catch (err) {
-    if (err instanceof TwitchRewardUnsupportedError) return res.redirect('/channel-points?error=confirmation_unsupported');
+    if (err instanceof TwitchRewardUnsupportedError) return redirectWithError(res, '/channel-points', 'confirmation_unsupported');
     logAndRedirectError({ res, log, logLabel: 'Companion confirmation save error:', err, basePath: '/channel-points', errorCode: 'confirmation_failed' });
   }
 });

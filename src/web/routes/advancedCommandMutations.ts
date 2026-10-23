@@ -16,7 +16,7 @@ import {
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import { requireStreamer } from './viewHelpers';
-import { logAndRedirectError } from './errorHandling';
+import { logAndRedirectError, redirectWithError } from './errorHandling';
 import { parsePositiveIntId } from './validation';
 import { advancedCommandErrorCode, parseEffectsForm, parseSettingsForm, type FormBody } from './advancedCommandForms';
 import { BASE_PATH, NOT_A_STREAMER_REDIRECT } from './advancedCommandPaths';
@@ -38,7 +38,11 @@ type CommandAction = (streamer: DbStreamerEventSub, commandId: number, body: For
  * @param outcome - Success or error code.
  */
 function redirectWith(res: Response, outcome: Outcome): void {
-  res.redirect('success' in outcome ? `${BASE_PATH}?success=${outcome.success}` : `${BASE_PATH}?error=${outcome.error}`);
+  if ('error' in outcome) {
+    redirectWithError(res, BASE_PATH, outcome.error);
+  } else {
+    res.redirect(`${BASE_PATH}?success=${outcome.success}`);
+  }
 }
 
 /**

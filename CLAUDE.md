@@ -73,7 +73,7 @@ Boot order in `main()`: verify DB connectivity (ping, exit 1 on failure) → app
 
 ## Web Server (`src/web/server.ts`)
 
-Middleware order: `helmet` (custom CSP) → `GET /healthz` → EJS views → static → body parsers → `trust proxy: 1` → session (`express-mysql-session`, backed by the `sessions` MySQL table) → rate limiters (general/session; `streamdeckLimiter` is applied per-route instead) → `res.locals.user`/csrfToken. The general/session rate limiters run after session middleware deliberately — `sessionLimiter`'s key generator needs `req.session` populated.
+Middleware order: `helmet` (custom CSP) → `GET /healthz` → EJS views → static → body parsers → `trust proxy: 1` → session (`express-mysql-session`, backed by the `sessions` MySQL table) → rate limiters (general/session; `streamdeckLimiter` is applied per-route instead) → `res.locals.user`/csrfToken → feature routes (`mountRoutes` in `src/web/routes/index.ts`, which keeps their mount order) → 404 and error handlers. The general/session rate limiters run after session middleware deliberately — `sessionLimiter`'s key generator needs `req.session` populated.
 
 Auth middleware (`src/web/middleware.ts`), applied in this order:
 1. **`requireAuth`** — session check.

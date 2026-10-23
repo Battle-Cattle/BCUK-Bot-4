@@ -10,7 +10,7 @@ import {
 import { csrfProtection } from '../csrf';
 import { requireMod } from '../middleware';
 import { normalizeRequiredText, normalizeSingleTokenRequiredText, parsePositiveIntId, parsePositiveBigIntId, parseCheckboxField } from './validation';
-import { logAndRedirectError } from './errorHandling';
+import { logAndRedirectError, redirectWithError } from './errorHandling';
 import { removeSfxFiles } from './sfxMutationsShared';
 
 const log = createLogger('Web');
@@ -35,18 +35,18 @@ function parseCategoryId(value: unknown): number | null | undefined {
 /** Create a new SFX trigger from the form fields (command, category, description, hidden), then redirect back to `/sfx`. */
 router.post('/sfx/trigger/add', requireMod, csrfProtection, async (req, res) => {
   const command = normalizeSingleTokenRequiredText(req.body.trigger_command);
-  if (!command) return res.redirect('/sfx?error=missing_fields');
+  if (!command) return redirectWithError(res, '/sfx', 'missing_fields');
 
   const categoryId = parseCategoryId(req.body.category_id);
-  if (categoryId === undefined) return res.redirect('/sfx?error=invalid_id');
+  if (categoryId === undefined) return redirectWithError(res, '/sfx', 'invalid_id');
   const description = normalizeRequiredText(req.body.description);
   const hidden = parseCheckboxField(req.body.hidden);
 
   try {
-    if (await findTrigger(command)) return res.redirect('/sfx?error=command_taken');
+    if (await findTrigger(command)) return redirectWithError(res, '/sfx', 'command_taken');
     await createSfxTrigger(command, categoryId, description, hidden);
   } catch (err) {
-    if (isMysqlDuplicateEntryError(err)) return res.redirect('/sfx?error=command_taken');
+    if (isMysqlDuplicateEntryError(err)) return redirectWithError(res, '/sfx', 'command_taken');
     return logAndRedirectError({ res, log, logLabel: 'Add SFX trigger error:', err, basePath: '/sfx', errorCode: 'add_failed' });
   }
 
@@ -57,23 +57,23 @@ router.post('/sfx/trigger/add', requireMod, csrfProtection, async (req, res) => 
 router.post('/sfx/trigger/update', requireMod, csrfProtection, async (req, res) => {
   const triggerId = parsePositiveBigIntId(req.body.trigger_id);
   const command = normalizeSingleTokenRequiredText(req.body.trigger_command);
-  if (!command) return res.redirect('/sfx?error=missing_fields');
-  if (triggerId === null) return res.redirect('/sfx?error=invalid_id');
+  if (!command) return redirectWithError(res, '/sfx', 'missing_fields');
+  if (triggerId === null) return redirectWithError(res, '/sfx', 'invalid_id');
 
   const categoryId = parseCategoryId(req.body.category_id);
-  if (categoryId === undefined) return res.redirect('/sfx?error=invalid_id');
+  if (categoryId === undefined) return redirectWithError(res, '/sfx', 'invalid_id');
   const description = normalizeRequiredText(req.body.description);
   const hidden = parseCheckboxField(req.body.hidden);
 
   try {
     const existing = await findTrigger(command);
     if (existing && existing.id !== triggerId) {
-      return res.redirect('/sfx?error=command_taken');
+      return redirectWithError(res, '/sfx', 'command_taken');
     }
     const updated = await updateSfxTrigger(triggerId, command, categoryId, description, hidden);
-    if (!updated) return res.redirect('/sfx?error=invalid_id');
+    if (!updated) return redirectWithError(res, '/sfx', 'invalid_id');
   } catch (err) {
-    if (isMysqlDuplicateEntryError(err)) return res.redirect('/sfx?error=command_taken');
+    if (isMysqlDuplicateEntryError(err)) return redirectWithError(res, '/sfx', 'command_taken');
     return logAndRedirectError({ res, log, logLabel: 'Update SFX trigger error:', err, basePath: '/sfx', errorCode: 'update_failed' });
   }
 
@@ -83,11 +83,11 @@ router.post('/sfx/trigger/update', requireMod, csrfProtection, async (req, res) 
 /** Delete the SFX trigger identified by `trigger_id` and its sound files (DB rows and disk files), then redirect back to `/sfx`. */
 router.post('/sfx/trigger/remove', requireMod, csrfProtection, async (req, res) => {
   const triggerId = parsePositiveBigIntId(req.body.trigger_id);
-  if (triggerId === null) return res.redirect('/sfx?error=invalid_id');
+  if (triggerId === null) return redirectWithError(res, '/sfx', 'invalid_id');
 
   try {
     const result = await deleteSfxTrigger(triggerId);
-    if (result === null) return res.redirect('/sfx?error=invalid_id');
+    if (result === null) return redirectWithError(res, '/sfx', 'invalid_id');
     await removeSfxFiles(result.files);
   } catch (err) {
     return logAndRedirectError({ res, log, logLabel: 'Remove SFX trigger error:', err, basePath: '/sfx', errorCode: 'remove_failed' });

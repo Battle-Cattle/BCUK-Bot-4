@@ -1,6 +1,6 @@
 import type { Response } from 'express';
 import type { Logger } from 'winston';
-import { logAndRedirectError } from './errorHandling';
+import { logAndRedirectError, redirectWithError } from './errorHandling';
 
 /** Path every streams-page error redirect targets. */
 const STREAMS_BASE_PATH = '/admin/streams';
@@ -51,7 +51,7 @@ export const STREAMS_ERROR_MESSAGES: Record<StreamsErrorCode, string> = {
  * @param errorCode - One of {@link StreamsErrorCode}.
  */
 export function redirectStreamsInvalid(res: Response, errorCode: StreamsErrorCode): void {
-  res.redirect(`${STREAMS_BASE_PATH}?error=${errorCode}`);
+  redirectWithError(res, STREAMS_BASE_PATH, errorCode);
 }
 
 /**
