@@ -17,12 +17,18 @@ fi
 
 NODE_BIN="$(command -v node || true)"
 if [ -z "$NODE_BIN" ]; then
-    echo "ERROR: node is not on PATH. Install Node 24+ first (see README Requirements)." >&2
+    echo "ERROR: node is not on PATH. Install Node first (see README Requirements)." >&2
     exit 1
 fi
-NODE_MAJOR="$("$NODE_BIN" -p 'process.versions.node.split(".")[0]')"
-if [ "$NODE_MAJOR" -lt 24 ]; then
-    echo "ERROR: $NODE_BIN is Node $NODE_MAJOR; the bot needs Node 24+." >&2
+NODE_MIN="$(sed -n 's/.*"node": ">=\([0-9.]*\)".*/\1/p' "$REPO_DIR/package.json")"
+# The unit runs this exact binary, so it must meet `engines` itself (not just whatever npm uses).
+if ! "$NODE_BIN" -e '
+    const min = process.argv[1].split(".").map(Number);
+    const cur = process.versions.node.split(".").map(Number);
+    const i = min.findIndex((part, n) => cur[n] !== part);
+    process.exit(i === -1 || cur[i] > min[i] ? 0 : 1);
+' "$NODE_MIN"; then
+    echo "ERROR: $NODE_BIN is Node $("$NODE_BIN" -v); the bot needs Node $NODE_MIN or later." >&2
     exit 1
 fi
 

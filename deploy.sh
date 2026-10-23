@@ -112,6 +112,23 @@ install_dependencies_incrementally() {
     git checkout -- package-lock.json
 }
 
+# The unit runs the node binary it was installed with (ExecStart), not whichever one is on this
+# shell's PATH, so `engine-strict` in .npmrc alone can't catch it: after upgrading Node (e.g. a new
+# nvm version in a new folder) the service would keep restarting on the old binary. Check that
+# binary against `engines` before installing anything.
+SERVICE_NODE_BIN="$("$SYSTEMCTL_BIN" show -p ExecStart --value "$SERVICE_NAME" | sed -n 's/.*path=\([^ ;]*\).*/\1/p')"
+NODE_MIN="$(sed -n 's/.*"node": ">=\([0-9.]*\)".*/\1/p' package.json)"
+if [ -z "$SERVICE_NODE_BIN" ] || ! "$SERVICE_NODE_BIN" -e '
+    const min = process.argv[1].split(".").map(Number);
+    const cur = process.versions.node.split(".").map(Number);
+    const i = min.findIndex((part, n) => cur[n] !== part);
+    process.exit(i === -1 || cur[i] > min[i] ? 0 : 1);
+' "$NODE_MIN"; then
+    echo "ERROR: $SERVICE_NAME runs ${SERVICE_NODE_BIN:-an unknown node}, which isn't Node $NODE_MIN or later."
+    echo "       Install a newer Node, then re-run: bash scripts/install-systemd-service.sh"
+    rollback
+fi
+
 echo "==> Installing dependencies..."
 if [ "$DEPS_CHANGED" -eq 0 ] && [ -d node_modules ] && install_dependencies_incrementally; then
     echo "==> Dependencies unchanged — restored dev dependencies in place."

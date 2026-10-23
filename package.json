@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Community bot",
   "engines": {
-    "node": ">=24"
+    "node": ">=24.22.1"
   },
   "scripts": {
     "dev": "ts-node src/index.ts",
