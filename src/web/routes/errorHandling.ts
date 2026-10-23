@@ -8,6 +8,18 @@ import {
 } from '../../db';
 import { renderError } from './viewHelpers';
 
+/**
+ * Redirects to `basePath` with `?error=<errorCode>`: how a POST handler reports a failure
+ * (the page's GET handler reads the code and shows its message). The query string is built
+ * with `URLSearchParams`, so a code can't break out of it.
+ * @param res - Express response object.
+ * @param basePath - Path to redirect to, without query string (e.g. `/sfx`).
+ * @param errorCode - Value for the `error` query parameter (e.g. `invalid_id`).
+ */
+export function redirectWithError(res: Response, basePath: string, errorCode: string): void {
+  res.redirect(`${basePath}?${new URLSearchParams({ error: errorCode }).toString()}`);
+}
+
 /** Arguments for {@link logAndRedirectError}. */
 export interface LogAndRedirectErrorOptions {
   /** Express response object. */
@@ -39,7 +51,7 @@ export function logAndRedirectError({
   errorCode,
 }: LogAndRedirectErrorOptions): void {
   log.error(logLabel, err);
-  res.redirect(`${basePath}?error=${errorCode}`);
+  redirectWithError(res, basePath, errorCode);
 }
 
 /** Arguments for {@link renderOrError}. */
@@ -98,11 +110,11 @@ export function handleReservedOrConflictCommandError(
   { basePath, conflictErrorCode }: ReservedOrConflictCommandErrorOptions,
 ): boolean {
   if (err instanceof ReservedCommandError) {
-    res.redirect(`${basePath}?error=reserved_command`);
+    redirectWithError(res, basePath, 'reserved_command');
     return true;
   }
   if (err instanceof CommandConflictError || isMysqlDuplicateEntryError(err)) {
-    res.redirect(`${basePath}?error=${conflictErrorCode}`);
+    redirectWithError(res, basePath, conflictErrorCode);
     return true;
   }
   return false;

@@ -6,7 +6,7 @@ import { csrfProtection } from '../csrf';
 import { requireGuildContext } from '../middleware';
 import { resolveNewAssignees } from './selfServiceAccess';
 import { normalizeRequiredText, parseCheckboxField, parsePositiveIntId } from './validation';
-import { logAndRedirectError } from './errorHandling';
+import { logAndRedirectError, redirectWithError } from './errorHandling';
 import {
   discardNewTimerAsSessionUser,
   removeTimerAsSessionUser,
@@ -122,13 +122,13 @@ async function assignUsersToNewTimer(
 router.post('/timers/add', requireGuildContext, csrfProtection, async (req, res) => {
   const body = req.body as Record<string, string | string[] | undefined>;
   const result = parseTimerCommandFields(body);
-  if (!result.ok) return res.redirect(`/timers?error=${result.errorCode}`);
+  if (!result.ok) return redirectWithError(res, '/timers', result.errorCode);
 
   let timerId: number;
   let discordIds: string[];
   try {
     const assignees = await resolveNewAssignees(req);
-    if ('error' in assignees) return res.redirect(`/timers?error=${assignees.error}`);
+    if ('error' in assignees) return redirectWithError(res, '/timers', assignees.error);
     discordIds = assignees.discordIds;
     timerId = await addTimerCommand(result.input);
   } catch (err) {
@@ -136,7 +136,7 @@ router.post('/timers/add', requireGuildContext, csrfProtection, async (req, res)
   }
 
   const assignError = await assignUsersToNewTimer(timerId, discordIds, (id) => discardNewTimerAsSessionUser(req, id));
-  if (assignError) return res.redirect(`/timers?error=${assignError}`);
+  if (assignError) return redirectWithError(res, '/timers', assignError);
 
   res.redirect('/timers');
 });
@@ -154,16 +154,16 @@ router.post('/timers/add', requireGuildContext, csrfProtection, async (req, res)
 router.post('/timers/update', requireGuildContext, csrfProtection, async (req, res) => {
   const body = req.body as Record<string, string | string[] | undefined>;
   const id = parsePositiveIntId(body.id);
-  if (id === null) return res.redirect('/timers?error=invalid_id');
+  if (id === null) return redirectWithError(res, '/timers', 'invalid_id');
 
   const result = parseTimerCommandFields(body);
-  if (!result.ok) return res.redirect(`/timers?error=${result.errorCode}`);
+  if (!result.ok) return redirectWithError(res, '/timers', result.errorCode);
 
   try {
     await updateTimerAsSessionUser(req, id, result.input);
   } catch (err) {
     const accessErrorCode = timerAccessErrorCode(err);
-    if (accessErrorCode) return res.redirect(`/timers?error=${accessErrorCode}`);
+    if (accessErrorCode) return redirectWithError(res, '/timers', accessErrorCode);
     return logAndRedirectError({ res, log, logLabel: 'Update timer command error:', err, basePath: '/timers', errorCode: 'update_failed' });
   }
 
@@ -182,13 +182,13 @@ router.post('/timers/update', requireGuildContext, csrfProtection, async (req, r
  */
 router.post('/timers/remove', requireGuildContext, csrfProtection, async (req, res) => {
   const id = parsePositiveIntId((req.body as Record<string, string | string[] | undefined>).id);
-  if (id === null) return res.redirect('/timers?error=invalid_id');
+  if (id === null) return redirectWithError(res, '/timers', 'invalid_id');
 
   try {
     await removeTimerAsSessionUser(req, id);
   } catch (err) {
     const accessErrorCode = timerAccessErrorCode(err);
-    if (accessErrorCode) return res.redirect(`/timers?error=${accessErrorCode}`);
+    if (accessErrorCode) return redirectWithError(res, '/timers', accessErrorCode);
     return logAndRedirectError({ res, log, logLabel: 'Remove timer command error:', err, basePath: '/timers', errorCode: 'remove_failed' });
   }
 
@@ -207,13 +207,13 @@ router.post('/timers/remove', requireGuildContext, csrfProtection, async (req, r
 router.post('/timers/toggle', requireGuildContext, csrfProtection, async (req, res) => {
   const body = req.body as Record<string, string | string[] | undefined>;
   const id = parsePositiveIntId(body.id);
-  if (id === null) return res.redirect('/timers?error=invalid_id');
+  if (id === null) return redirectWithError(res, '/timers', 'invalid_id');
 
   try {
     await setTimerEnabledAsSessionUser(req, id, body.enabled === 'true');
   } catch (err) {
     const accessErrorCode = timerAccessErrorCode(err);
-    if (accessErrorCode) return res.redirect(`/timers?error=${accessErrorCode}`);
+    if (accessErrorCode) return redirectWithError(res, '/timers', accessErrorCode);
     return logAndRedirectError({ res, log, logLabel: 'Toggle timer command error:', err, basePath: '/timers', errorCode: 'toggle_failed' });
   }
 

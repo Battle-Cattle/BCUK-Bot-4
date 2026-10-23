@@ -12,7 +12,7 @@ vi.mock('../../db', () => {
 });
 
 import { ReservedCommandError, CommandConflictError, isMysqlDuplicateEntryError } from '../../db';
-import { logAndRedirectError, handleReservedOrConflictCommandError, renderOrError } from './errorHandling';
+import { logAndRedirectError, handleReservedOrConflictCommandError, redirectWithError, renderOrError } from './errorHandling';
 
 describe('renderOrError', () => {
   function mockRes() {
@@ -133,5 +133,23 @@ describe('handleReservedOrConflictCommandError', () => {
       { basePath: '/counters', conflictErrorCode: 'duplicate_command' },
     );
     expect(redirect).toHaveBeenCalledWith('/counters?error=duplicate_command');
+  });
+});
+
+describe('redirectWithError', () => {
+  it('redirects to the base path with the error code', () => {
+    const res = { redirect: vi.fn() } as unknown as Response;
+
+    redirectWithError(res, '/counters', 'invalid_id');
+
+    expect(res.redirect).toHaveBeenCalledWith('/counters?error=invalid_id');
+  });
+
+  it('encodes a code so it cannot add query parameters', () => {
+    const res = { redirect: vi.fn() } as unknown as Response;
+
+    redirectWithError(res, '/sfx', 'bad&admin=1 x');
+
+    expect(res.redirect).toHaveBeenCalledWith('/sfx?error=bad%26admin%3D1+x');
   });
 });

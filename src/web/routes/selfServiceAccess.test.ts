@@ -7,7 +7,7 @@ vi.mock('../../db', () => ({
   getMemberAccessLevel: vi.fn(),
 }));
 
-import { canManageCatalog, isAssignedTo, resolveNewAssignees } from './selfServiceAccess';
+import { accessErrorCode, canManageCatalog, dispatchByAccess, isAssignedTo, resolveNewAssignees } from './selfServiceAccess';
 import { findUser, getMemberAccessLevel } from '../../db';
 
 const SELF = '111111111111111111';
@@ -86,5 +86,54 @@ describe('resolveNewAssignees', () => {
   it('returns twitch_not_linked for a streamer without a Twitch account', async () => {
     vi.mocked(findUser).mockResolvedValue({ discord_id: STREAMER_ID, twitch_name: null } as any);
     expect(await resolveNewAssignees(req(ACCESS_LEVEL_MOCK.USER))).toEqual({ error: 'twitch_not_linked' });
+  });
+});
+
+describe('dispatchByAccess', () => {
+  it('runs the catalog write for Mod+', async () => {
+    const catalog = vi.fn().mockResolvedValue('catalog');
+    const own = vi.fn().mockResolvedValue('own');
+
+    await expect(dispatchByAccess(reqWithLevel(ACCESS_LEVEL_MOCK.MOD), catalog, own)).resolves.toBe('catalog');
+    expect(own).not.toHaveBeenCalled();
+  });
+
+  it('runs the owner-checked write with the session user\'s Discord ID below Mod', async () => {
+    const catalog = vi.fn().mockResolvedValue('catalog');
+    const own = vi.fn().mockResolvedValue('own');
+
+    await expect(dispatchByAccess(reqWithLevel(0), catalog, own)).resolves.toBe('own');
+    expect(own).toHaveBeenCalledWith(SELF);
+    expect(catalog).not.toHaveBeenCalled();
+  });
+
+  it('rejects without calling either write when there is no session user', async () => {
+    const catalog = vi.fn();
+    const own = vi.fn();
+
+    await expect(dispatchByAccess(reqWithLevel(), catalog, own)).rejects.toThrow('no session user');
+    expect(catalog).not.toHaveBeenCalled();
+    expect(own).not.toHaveBeenCalled();
+  });
+
+  it('passes on the write\'s rejection', async () => {
+    const failure = new Error('db down');
+
+    await expect(dispatchByAccess(reqWithLevel(0), vi.fn(), () => Promise.reject(failure))).rejects.toBe(failure);
+  });
+});
+
+describe('accessErrorCode', () => {
+  class NotFound extends Error {}
+  class Denied extends Error {}
+
+  it('maps the not-found and denied errors to their codes', () => {
+    expect(accessErrorCode(new NotFound(), NotFound, 'thing_not_found', Denied)).toBe('thing_not_found');
+    expect(accessErrorCode(new Denied(), NotFound, 'thing_not_found', Denied)).toBe('forbidden');
+  });
+
+  it('returns null for any other error', () => {
+    expect(accessErrorCode(new Error('other'), NotFound, 'thing_not_found', Denied)).toBeNull();
+    expect(accessErrorCode('not an error', NotFound, 'thing_not_found', Denied)).toBeNull();
   });
 });

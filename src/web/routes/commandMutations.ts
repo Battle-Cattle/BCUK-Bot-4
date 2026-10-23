@@ -11,7 +11,7 @@ import { csrfProtection } from '../csrf';
 import { requireGuildContext } from '../middleware';
 import { resolveNewAssignees } from './selfServiceAccess';
 import { parsePositiveIntId } from './validation';
-import { logAndRedirectError, handleReservedOrConflictCommandError } from './errorHandling';
+import { logAndRedirectError, handleReservedOrConflictCommandError, redirectWithError } from './errorHandling';
 import {
   commandAccessErrorCode,
   discardNewCommandAsSessionUser,
@@ -74,13 +74,13 @@ async function assignUsersToNewCommand(
  */
 router.post('/commands/add', requireGuildContext, csrfProtection, async (req, res) => {
   const form = readCommandForm(req);
-  if (!form) return res.redirect('/commands?error=missing_fields');
+  if (!form) return redirectWithError(res, '/commands', 'missing_fields');
 
   let commandId: number;
   let discordIds: string[];
   try {
     const assignees = await resolveNewAssignees(req);
-    if ('error' in assignees) return res.redirect(`/commands?error=${assignees.error}`);
+    if ('error' in assignees) return redirectWithError(res, '/commands', assignees.error);
     discordIds = assignees.discordIds;
     commandId = await addCustomCommand(form.triggerString, form.output, form.isDiscordEnabled, form.isMultiTwitch);
   } catch (err) {
@@ -89,7 +89,7 @@ router.post('/commands/add', requireGuildContext, csrfProtection, async (req, re
   }
 
   const assignError = await assignUsersToNewCommand(commandId, discordIds, (id) => discardNewCommandAsSessionUser(req, id));
-  if (assignError) return res.redirect(`/commands?error=${assignError}`);
+  if (assignError) return redirectWithError(res, '/commands', assignError);
 
   res.redirect('/commands');
 });
@@ -110,18 +110,18 @@ router.post('/commands/add', requireGuildContext, csrfProtection, async (req, re
  */
 router.post('/commands/update', requireGuildContext, csrfProtection, async (req, res) => {
   const form = readCommandForm(req);
-  if (!form) return res.redirect('/commands?error=missing_fields');
+  if (!form) return redirectWithError(res, '/commands', 'missing_fields');
 
   const parsedCommandId = parsePositiveIntId((req.body as { command_id?: string }).command_id);
   if (parsedCommandId === null) {
-    return res.redirect('/commands?error=invalid_id');
+    return redirectWithError(res, '/commands', 'invalid_id');
   }
 
   try {
     await updateCommandAsSessionUser(req, parsedCommandId, form);
   } catch (err) {
     const accessErrorCode = commandAccessErrorCode(err);
-    if (accessErrorCode) return res.redirect(`/commands?error=${accessErrorCode}`);
+    if (accessErrorCode) return redirectWithError(res, '/commands', accessErrorCode);
     if (handleReservedOrConflictCommandError(err, res, COMMAND_WRITE_ERROR_OPTIONS)) return;
     return logAndRedirectError({ res, log, logLabel: 'Update custom command error:', err, basePath: '/commands', errorCode: 'update_failed' });
   }
@@ -146,14 +146,14 @@ router.post('/commands/remove', requireGuildContext, csrfProtection, async (req,
 
   const parsedCommandId = parsePositiveIntId(command_id);
   if (parsedCommandId === null) {
-    return res.redirect('/commands?error=invalid_id');
+    return redirectWithError(res, '/commands', 'invalid_id');
   }
 
   try {
     await removeCommandAsSessionUser(req, parsedCommandId);
   } catch (err) {
     const accessErrorCode = commandAccessErrorCode(err);
-    if (accessErrorCode) return res.redirect(`/commands?error=${accessErrorCode}`);
+    if (accessErrorCode) return redirectWithError(res, '/commands', accessErrorCode);
     return logAndRedirectError({ res, log, logLabel: 'Remove custom command error:', err, basePath: '/commands', errorCode: 'remove_failed' });
   }
 
