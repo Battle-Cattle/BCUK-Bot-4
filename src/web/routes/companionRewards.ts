@@ -2,7 +2,7 @@ import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import { requireCompanionKey } from '../middleware';
 import { getStreamerByDiscordId, getRedemptionAckStreamerId, listCompanionConfirmationRewardIds } from '../../db';
-import { getCustomRewards, TwitchCustomReward } from '../../twitch/twitchApi';
+import { getCustomRewards, TwitchCustomReward } from '../../twitch/twitchRewardsApi';
 import { getValidToken } from '../../twitch/twitchUserTokens';
 import { acknowledgeRedemption, extendRedemptionAck } from '../../twitch/eventsub/twitchEventSubRedemptionAcks';
 import { handleCompanionAck, handleCompanionProgress } from './companionAck';

@@ -12,7 +12,7 @@ vi.mock('../../db', () => ({
   getStreamerById: vi.fn(),
 }));
 vi.mock('../twitchUserTokens', () => ({ getValidToken: vi.fn() }));
-vi.mock('../twitchApi', () => {
+vi.mock('../twitchRewardsApi', () => {
   class TwitchRedemptionNotFoundError extends Error {}
   class TwitchRewardUnsupportedError extends Error {}
   class TwitchRewardAuthError extends Error {}
@@ -25,7 +25,7 @@ import {
   isCompanionConfirmationRequired, recordPendingRedemptionAck, getStreamerById,
 } from '../../db';
 import { getValidToken } from '../twitchUserTokens';
-import { updateRedemptionStatus, TwitchRedemptionNotFoundError } from '../twitchApi';
+import { updateRedemptionStatus, TwitchRedemptionNotFoundError } from '../twitchRewardsApi';
 import { revertRedemptionPricing } from '../pricing/rewardPricingService';
 import { registerEventSubCompanionRuntime, registerEventSubTwitchRuntime } from './twitchEventSubRuntime';
 import {

@@ -22,7 +22,7 @@ vi.mock('../middleware', () => ({
   requireAuth: (_req: any, _res: any, next: any) => next(),
 }));
 
-vi.mock('../../twitch/twitchApi', () => ({
+vi.mock('../../twitch/twitchRewardsApi', () => ({
   getCustomRewards: vi.fn(),
 }));
 
@@ -57,7 +57,7 @@ import {
   getStreamerByDiscordId, getPricingConfigsForStreamer, getPricingSettingsForStreamer, getPricingHistoryForRewards,
   listCompanionConfirmationRewardIds,
 } from '../../db';
-import { getCustomRewards } from '../../twitch/twitchApi';
+import { getCustomRewards } from '../../twitch/twitchRewardsApi';
 import { getValidToken } from '../../twitch/twitchUserTokens';
 import { hasAuthFailedSubs } from '../../twitch/eventsub/twitchEventSubCreate';
 import { buildTestApp } from '../../test-utils/expressTestApp';

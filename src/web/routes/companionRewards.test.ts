@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockLogger } from '../../test-utils/loggerMock';
 import type { DbStreamerEventSub } from '../../db';
-import type { TwitchCustomReward } from '../../twitch/twitchApi';
+import type { TwitchCustomReward } from '../../twitch/twitchRewardsApi';
 
 const DISCORD_ID = 'user-1';
 
@@ -23,7 +23,7 @@ vi.mock('../../twitch/eventsub/twitchEventSubRedemptionAcks', () => ({
   extendRedemptionAck: vi.fn(),
 }));
 
-vi.mock('../../twitch/twitchApi', () => ({
+vi.mock('../../twitch/twitchRewardsApi', () => ({
   getCustomRewards: vi.fn(),
 }));
 
@@ -37,7 +37,7 @@ import supertest from 'supertest';
 import router from './companionRewards';
 import { getStreamerByDiscordId, getRedemptionAckStreamerId, listCompanionConfirmationRewardIds } from '../../db';
 import { acknowledgeRedemption, extendRedemptionAck } from '../../twitch/eventsub/twitchEventSubRedemptionAcks';
-import { getCustomRewards } from '../../twitch/twitchApi';
+import { getCustomRewards } from '../../twitch/twitchRewardsApi';
 import { getValidToken } from '../../twitch/twitchUserTokens';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
