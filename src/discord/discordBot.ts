@@ -14,7 +14,7 @@ import { upsertGuild, getGuildById, findUser, upsertUser, setMemberAccessLevel, 
 import { runUserMutation } from '../shared/userMutationQueue';
 import { createLogger } from '../shared/logger';
 import { getDiscordClient, setDiscordClient } from './discordClientStore';
-import { logShardError } from './discordShardErrorLog';
+import { logShardError, logShardRecovered } from './discordShardErrorLog';
 import {
   recordShardActivity, setGatewayConnected, clearWatchdogRecovery, startGatewayWatchdog, stopGatewayWatchdog,
   type GatewayWatchdogHooks,
@@ -284,7 +284,9 @@ function registerClientReadyHandler(client: Client): void {
  * down) while the web panel's health dashboard kept reading the last-known `true`
  * forever. 'shardReady'/'shardResume' flip it back to `true` once the shard
  * actually recovers, since a full client replacement (via `clientReady`) isn't
- * guaranteed to happen for every recovery path.
+ * guaranteed to happen for every recovery path. They also send the "reconnected" owner DM that
+ * pairs with a 'shardError' or stall-watchdog alert (see {@link logShardRecovered}), and
+ * 'shardResume' logs the resume, so a reconnect cycle has a visible end in the log too.
  *
  * `stopDiscordBot()`/`startDiscordBot()` destroy the old `Client` and construct a brand-new one —
  * `audioPlayer.ts`'s custom (non-`voiceAdapterCreator`) voice adapter isn't registered with
@@ -318,15 +320,18 @@ function registerConnectionHandlers(client: Client): void {
     setGatewayConnected(false);
     logShardError(shardId, err);
   });
-  client.on('shardReady', () => {
+  client.on('shardReady', (shardId) => {
     recordShardActivity();
     recordDiscordConnected(true);
     setGatewayConnected(true);
+    logShardRecovered(shardId);
   });
-  client.on('shardResume', () => {
+  client.on('shardResume', (shardId, replayedEvents) => {
     recordShardActivity();
     recordDiscordConnected(true);
     setGatewayConnected(true);
+    log.info(`Shard ${shardId} resumed its gateway session (${replayedEvents} events replayed).`);
+    logShardRecovered(shardId);
   });
   client.on('shardDisconnect', (event, shardId) => {
     recordShardActivity();

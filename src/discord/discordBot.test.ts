@@ -570,6 +570,51 @@ describe('startDiscordBot — gateway watchdog', () => {
     expect(vi.mocked(healthStore.recordDiscordConnected)).toHaveBeenCalledWith(true);
   });
 
+  it('logs when a shard resumes its gateway session', () => {
+    mod.startDiscordBot();
+    findHandler('shardResume')(0, 5);
+    expect(mockLog.info).toHaveBeenCalledWith(expect.stringContaining('Shard 0 resumed'));
+  });
+
+  it.each(['shardResume', 'shardReady'])('DMs the owner that the shard reconnected on %s after a gateway connection error was alerted', async (event) => {
+    const ownerAlerts = await import('./ownerAlerts.js');
+    vi.useFakeTimers();
+    try {
+      mod.startDiscordBot();
+      findHandler('shardError')(new Error('Unexpected server response: 503'), 0);
+      vi.advanceTimersByTime(10_000);
+      findHandler(event)(0, 0);
+      expect(vi.mocked(ownerAlerts.sendOwnerAlert)).toHaveBeenLastCalledWith(expect.stringMatching(/^🟢 Shard 0 reconnected.*10s/));
+      expect(mockLog.info).toHaveBeenCalledWith(expect.stringContaining('Shard 0 reconnected'));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not DM the owner about a reconnect nobody was alerted about, and only once per outage', async () => {
+    const ownerAlerts = await import('./ownerAlerts.js');
+    mod.startDiscordBot();
+    findHandler('shardReady')(0, undefined);
+    findHandler('shardResume')(0, 0);
+    expect(vi.mocked(ownerAlerts.sendOwnerAlert)).not.toHaveBeenCalled();
+
+    findHandler('shardError')(new Error('Unexpected server response: 503'), 0);
+    findHandler('shardResume')(0, 0);
+    findHandler('shardResume')(0, 0);
+    expect(vi.mocked(ownerAlerts.sendOwnerAlert)).toHaveBeenCalledTimes(2);
+  });
+
+  it('alerts on the first error of a new outage straight away, without the previous outage\'s throttle', async () => {
+    const ownerAlerts = await import('./ownerAlerts.js');
+    mod.startDiscordBot();
+    const errorHandler = findHandler('shardError');
+    errorHandler(new Error('Unexpected server response: 503'), 0);
+    findHandler('shardResume')(0, 0);
+    errorHandler(new Error('Unexpected server response: 503'), 0);
+    expect(vi.mocked(ownerAlerts.sendOwnerAlert)).toHaveBeenCalledTimes(3);
+    expect(vi.mocked(ownerAlerts.sendOwnerAlert)).toHaveBeenLastCalledWith(expect.stringMatching(/^🔴/));
+  });
+
   it('forces a fresh login when a shard disconnects permanently', () => {
     mod.startDiscordBot();
     expect(mockInstance.login).toHaveBeenCalledOnce();
@@ -642,6 +687,14 @@ describe('startDiscordBot — gateway stall watchdog', () => {
     mod.startDiscordBot();
     await vi.advanceTimersByTimeAsync(120_000);
     expect(vi.mocked(ownerAlerts.sendOwnerAlert)).toHaveBeenCalledWith(expect.stringContaining('reconnect appears stuck'));
+  });
+
+  it('DMs the owner once the replacement client connects after a stuck-reconnect alert', async () => {
+    const ownerAlerts = await import('./ownerAlerts.js');
+    mod.startDiscordBot();
+    await vi.advanceTimersByTimeAsync(120_000);
+    findHandler('shardReady')(0, undefined);
+    expect(vi.mocked(ownerAlerts.sendOwnerAlert)).toHaveBeenLastCalledWith(expect.stringContaining('Shard 0 reconnected'));
   });
 
   it('does not force a reconnect while shard activity keeps arriving within the stall threshold', async () => {
