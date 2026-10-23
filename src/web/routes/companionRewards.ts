@@ -11,7 +11,7 @@ const log = createLogger('CompanionRewards');
 const router = Router();
 
 /** A channel-point reward as surfaced to the companion app, so it knows what redemption events to expect. */
-export interface CompanionKnownReward {
+interface CompanionKnownReward {
   id: string;
   title: string;
   prompt: string;

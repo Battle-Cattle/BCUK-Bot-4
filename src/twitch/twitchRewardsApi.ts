@@ -4,19 +4,19 @@ import { authHeaders, fetchHelixWithRetry, twitchFetch } from './twitchApi';
 import { assertHelixOk } from './helixErrors';
 
 /** A custom reward's per-stream redemption limit, as returned by Twitch (`max_per_stream_setting`). */
-export interface TwitchMaxPerStreamSetting {
+interface TwitchMaxPerStreamSetting {
   is_enabled: boolean;
   max_per_stream: number;
 }
 
 /** A custom reward's per-user-per-stream redemption limit, as returned by Twitch (`max_per_user_per_stream_setting`). */
-export interface TwitchMaxPerUserPerStreamSetting {
+interface TwitchMaxPerUserPerStreamSetting {
   is_enabled: boolean;
   max_per_user_per_stream: number;
 }
 
 /** A custom reward's global cooldown, as returned by Twitch (`global_cooldown_setting`). */
-export interface TwitchGlobalCooldownSetting {
+interface TwitchGlobalCooldownSetting {
   is_enabled: boolean;
   global_cooldown_seconds: number;
 }

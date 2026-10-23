@@ -2,15 +2,6 @@ import mysql from 'mysql2/promise';
 import { getPool } from './pool';
 import { AccessLevel, findUser, type DbUser } from './users';
 
-// ─── Types ───────────────────────────────────────────────────────────────────
-
-/** A per-guild membership row: a user's access level within one specific guild. */
-export interface DbGuildMember {
-  guild_id: string;
-  discord_id: string;
-  access_level: number;
-}
-
 // ─── Queries ─────────────────────────────────────────────────────────────────
 
 /**

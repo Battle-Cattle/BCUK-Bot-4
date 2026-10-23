@@ -30,7 +30,7 @@ const router = Router();
 const USAGE_LOG_SIZE = 50;
 
 /** Every `?error=` code the page knows how to describe; anything else is dropped. */
-export const KNOWN_ERRORS = new Set([
+const KNOWN_ERRORS = new Set([
   'not_a_streamer', 'save_failed', 'not_found', 'invalid_number', 'invalid_name', 'invalid_trigger',
   'invalid_response', 'invalid_point_cost', 'invalid_price_step', 'invalid_max_cost', 'invalid_global_cooldown',
   'invalid_user_cooldown', 'invalid_max_uses', 'invalid_max_user_uses', 'invalid_role', 'duplicate_name',
@@ -40,7 +40,7 @@ export const KNOWN_ERRORS = new Set([
 ]);
 
 /** Every `?success=` code the page shows a confirmation for. */
-export const KNOWN_SUCCESSES = new Set([
+const KNOWN_SUCCESSES = new Set([
   'added', 'saved', 'effects_saved', 'removed', 'toggled', 'image_uploaded', 'sound_uploaded',
   'image_deleted', 'sound_deleted', 'test_sent',
 ]);

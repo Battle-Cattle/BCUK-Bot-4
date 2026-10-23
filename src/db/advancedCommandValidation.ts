@@ -9,15 +9,15 @@ export type AdvancedCommandRole = 'everyone' | 'subscriber' | 'vip' | 'moderator
 
 export const ADVANCED_COMMAND_ROLES: readonly AdvancedCommandRole[] = ['everyone', 'subscriber', 'vip', 'moderator'];
 
-export const MAX_ADVANCED_COMMAND_NAME_LENGTH = 64;
-export const MAX_ADVANCED_COMMAND_TRIGGER_LENGTH = 255;
-export const MAX_ADVANCED_COMMAND_RESPONSE_LENGTH = 2000;
+const MAX_ADVANCED_COMMAND_NAME_LENGTH = 64;
+const MAX_ADVANCED_COMMAND_TRIGGER_LENGTH = 255;
+const MAX_ADVANCED_COMMAND_RESPONSE_LENGTH = 2000;
 export const MAX_ADVANCED_COMMAND_PARAMS = 10;
-export const MAX_ADVANCED_COMMAND_PARAM_KEY_LENGTH = 32;
-export const MAX_ADVANCED_COMMAND_PARAM_VALUE_LENGTH = 255;
-export const MAX_ADVANCED_COMMAND_ALERT_MESSAGE_LENGTH = 500;
+const MAX_ADVANCED_COMMAND_PARAM_KEY_LENGTH = 32;
+const MAX_ADVANCED_COMMAND_PARAM_VALUE_LENGTH = 255;
+const MAX_ADVANCED_COMMAND_ALERT_MESSAGE_LENGTH = 500;
 /** Upper bound on any cost, cooldown or cap field — keeps every value inside the INT columns. */
-export const MAX_ADVANCED_COMMAND_NUMBER = 1_000_000_000;
+const MAX_ADVANCED_COMMAND_NUMBER = 1_000_000_000;
 
 const PARAM_KEY_PATTERN = /^[A-Za-z0-9_-]+$/;
 
@@ -55,7 +55,7 @@ export interface AdvancedCommandParam {
 }
 
 /** One weighted overlay video assignment. */
-export interface AdvancedCommandVideoInput {
+interface AdvancedCommandVideoInput {
   videoId: number;
   weight: number;
 }

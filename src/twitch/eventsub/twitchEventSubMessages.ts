@@ -11,7 +11,7 @@ const log = createLogger('EventSub');
 export const MESSAGE_TTL_MS = 10 * 60 * 1000;
 
 /** Metadata fields present on every EventSub WebSocket message. */
-export interface EventSubMetadata {
+interface EventSubMetadata {
   message_type: string;
   message_id: string;
   message_timestamp: string;
