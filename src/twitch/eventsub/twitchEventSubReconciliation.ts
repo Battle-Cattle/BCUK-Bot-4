@@ -2,7 +2,7 @@ import { createLogger } from '../../shared/logger';
 import { getStreamerById, DEFAULT_EVENT_CONFIG, pruneRedemptionLedger, pruneResolvedRedemptionAcks } from '../../db';
 import { getAllStreamerInfo, type StreamerInfo } from './twitchEventSubDispatch';
 import { getValidToken } from '../twitchUserTokens';
-import { getCustomRewards, getRewardRedemptions, TwitchRewardRedemption } from '../twitchApi';
+import { getCustomRewards, getRewardRedemptions, TwitchRewardRedemption } from '../twitchRewardsApi';
 import { handleRedemption, RedemptionEvent } from './twitchEventSubRedemption';
 import {
   RECONCILIATION_POLL_INTERVAL_MS,

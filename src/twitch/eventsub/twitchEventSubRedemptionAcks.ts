@@ -23,9 +23,7 @@ import { ackTimerDelayMs, canExtendAckHold } from '../../shared/ackHold';
 import { createLogger } from '../../shared/logger';
 import { sweepPendingAcks } from '../../shared/pendingAckSweep';
 import { getValidToken } from '../twitchUserTokens';
-import {
-  updateRedemptionStatus, TwitchRedemptionNotFoundError, TwitchRewardUnsupportedError, TwitchRewardAuthError,
-} from '../twitchApi';
+import { updateRedemptionStatus, TwitchRedemptionNotFoundError, TwitchRewardUnsupportedError, TwitchRewardAuthError } from '../twitchRewardsApi';
 import { revertRedemptionPricing } from '../pricing/rewardPricingService';
 import { companionRuntimeRegistry, twitchRuntimeRegistry, type CompanionRedemptionEvent } from './twitchEventSubRuntime';
 

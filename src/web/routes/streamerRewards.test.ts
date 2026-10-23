@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('../../twitch/twitchApi', () => ({ getCustomRewards: vi.fn() }));
+vi.mock('../../twitch/twitchRewardsApi', () => ({ getCustomRewards: vi.fn() }));
 vi.mock('../../twitch/twitchUserTokens', () => ({ getValidToken: vi.fn() }));
 
-import { getCustomRewards } from '../../twitch/twitchApi';
+import { getCustomRewards } from '../../twitch/twitchRewardsApi';
 import { getValidToken } from '../../twitch/twitchUserTokens';
 import { fetchStreamerRewards } from './streamerRewards';
 
