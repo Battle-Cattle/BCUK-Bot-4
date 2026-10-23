@@ -2,7 +2,7 @@ import type { Request, Response } from 'express';
 import type { Logger } from 'winston';
 import { DEFAULT_PRICING_COOLDOWN_SECONDS } from '../../db';
 import type { DbStreamerEventSub } from '../../db';
-import type { CustomRewardInput, TwitchCustomReward } from '../../twitch/twitchApi';
+import type { CustomRewardInput, TwitchCustomReward } from '../../twitch/twitchRewardsApi';
 import { trimField, parsePositiveIntId, parseRewardIdParam, parseCheckboxField } from './validation';
 import { requireStreamer } from './viewHelpers';
 import { logAndRedirectError } from './errorHandling';

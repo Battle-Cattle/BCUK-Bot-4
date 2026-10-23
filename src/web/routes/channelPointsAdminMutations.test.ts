@@ -21,7 +21,7 @@ vi.mock('../middleware', () => ({
   requireAuth: (_req: any, _res: any, next: any) => next(),
 }));
 
-vi.mock('../../twitch/twitchApi', () => {
+vi.mock('../../twitch/twitchRewardsApi', () => {
   class TwitchRewardUnsupportedError extends Error {}
   return { createCustomReward: vi.fn(), updateCustomReward: vi.fn(), TwitchRewardUnsupportedError };
 });
@@ -39,7 +39,7 @@ import { router } from './channelPointsAdminMutations';
 import {
   getStreamerByDiscordId, updatePricingCooldownForReward, isCompanionConfirmationRequired, setCompanionConfirmationRequired,
 } from '../../db';
-import { createCustomReward, updateCustomReward, TwitchRewardUnsupportedError } from '../../twitch/twitchApi';
+import { createCustomReward, updateCustomReward, TwitchRewardUnsupportedError } from '../../twitch/twitchRewardsApi';
 import { getValidToken } from '../../twitch/twitchUserTokens';
 import { deleteRewardAndPricing } from '../../twitch/pricing/rewardPricingService';
 import { buildTestApp } from '../../test-utils/expressTestApp';

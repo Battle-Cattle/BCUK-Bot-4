@@ -5,7 +5,7 @@ import {
   type StreamerPricingSettings, type DbStreamerEventSub, type RewardPricingRow,
 } from '../../db';
 import { getValidToken } from '../twitchUserTokens';
-import { updateRewardCost, deleteCustomReward, TwitchRewardUnsupportedError, TwitchRewardAuthError } from '../twitchApi';
+import { updateRewardCost, deleteCustomReward, TwitchRewardUnsupportedError, TwitchRewardAuthError } from '../twitchRewardsApi';
 import { computePrice, decayDemand, applyRedemption, computeRedemptionIncrement, revertRedemption } from './rewardPricingMath';
 import { createLogger } from '../../shared/logger';
 import { createRuntimeRegistry } from '../../shared/runtimeRegistry';

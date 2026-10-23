@@ -8,7 +8,7 @@ import {
   getPricingConfigsForStreamer, getPricingSettingsForStreamer, getPricingHistoryForRewards, listCompanionConfirmationRewardIds,
 } from '../../db';
 import type { RewardPricingRow, StreamerPricingSettings } from '../../db';
-import type { TwitchCustomReward } from '../../twitch/twitchApi';
+import type { TwitchCustomReward } from '../../twitch/twitchRewardsApi';
 import { fetchStreamerRewards } from './streamerRewards';
 import { hasAuthFailedSubs } from '../../twitch/eventsub/twitchEventSubCreate';
 import { computePrice } from '../../twitch/pricing/rewardPricingMath';

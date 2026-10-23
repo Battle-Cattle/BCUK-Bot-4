@@ -2,6 +2,7 @@
 // `twitch/twitchUserTokens.ts`.
 import { twitchFetch, authHeaders } from '../twitchApi';
 import { TwitchAuthError } from '../twitchUserTokens';
+import { assertHelixOk } from '../helixErrors';
 
 /** Creates an EventSub subscription via WebSocket transport. Returns the subscription ID,
  *  or null if the subscription already exists (409). Throws on other failures.
@@ -72,7 +73,7 @@ export async function listEventSubSubscriptions(
   do {
     if (cursor) url.searchParams.set('after', cursor);
     const res = await twitchFetch(url.toString(), { headers: authHeaders(token) });
-    if (!res.ok) throw new Error(`[TwitchAPI] listEventSubSubscriptions failed: ${res.status}`);
+    assertHelixOk(res, 'listEventSubSubscriptions');
     const data = await res.json() as {
       data: Array<{ id: string; type: string; condition: Record<string, string>; transport?: { session_id?: string }; status?: string }>;
       pagination?: { cursor?: string };
@@ -97,6 +98,6 @@ export async function deleteEventSubSubscription(id: string, token: string): Pro
     `https://api.twitch.tv/helix/eventsub/subscriptions?id=${encodeURIComponent(id)}`,
     { method: 'DELETE', headers: authHeaders(token) },
   );
-  if (res.ok || res.status === 404) return;
-  throw new Error(`[TwitchAPI] deleteEventSubSubscription failed: ${res.status}`);
+  if (res.status === 404) return;
+  assertHelixOk(res, 'deleteEventSubSubscription');
 }

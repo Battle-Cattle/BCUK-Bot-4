@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import { updatePricingCooldownForReward, isCompanionConfirmationRequired, setCompanionConfirmationRequired } from '../../db';
-import { createCustomReward, updateCustomReward, TwitchRewardUnsupportedError } from '../../twitch/twitchApi';
+import { createCustomReward, updateCustomReward, TwitchRewardUnsupportedError } from '../../twitch/twitchRewardsApi';
 import { getValidToken } from '../../twitch/twitchUserTokens';
 import { parseRewardIdParam, parseCheckboxField } from './validation';
 import { requireStreamer } from './viewHelpers';

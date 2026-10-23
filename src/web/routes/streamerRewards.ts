@@ -1,6 +1,6 @@
 import type { Logger } from 'winston';
 import type { DbStreamerEventSub } from '../../db';
-import { getCustomRewards, type TwitchCustomReward } from '../../twitch/twitchApi';
+import { getCustomRewards, type TwitchCustomReward } from '../../twitch/twitchRewardsApi';
 import { getValidToken } from '../../twitch/twitchUserTokens';
 
 /**
