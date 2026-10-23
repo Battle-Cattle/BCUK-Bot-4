@@ -3,7 +3,6 @@
 // recoverable gateway disconnect on its own, forever, without our help.
 import { createLogger } from '../shared/logger';
 import { sendOwnerAlert } from './ownerAlerts';
-import { markGatewayStallAlerted } from './discordShardErrorLog';
 
 const log = createLogger('Discord');
 
@@ -105,7 +104,6 @@ function checkGatewayStall(): void {
   const stalledForSec = Math.round(stalledForMs / 1000);
   log.error(`No Discord gateway activity for ${stalledForSec}s — the reconnect loop appears stuck; forcing a fresh login.`);
   void sendOwnerAlert(`🔴 Discord gateway reconnect appears stuck (no activity for ${stalledForSec}s) — forcing a fresh login.`);
-  markGatewayStallAlerted();
   hooks.stop();
   // Set *after* hooks.stop() — stopDiscordBot() unconditionally clears this, so an intentional stop
   // overlapping a previous recovery never leaves it stuck pending — and before hooks.start(),
