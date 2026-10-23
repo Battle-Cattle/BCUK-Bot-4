@@ -6,6 +6,7 @@ import http from 'http';
 import net from 'net';
 import type { AddressInfo } from 'net';
 import { mockLogger } from '../test-utils/loggerMock';
+import { waitFor } from '../test-utils/waitFor';
 
 vi.mock('../shared/config', () => ({
   WEB_PORT: 3000,
@@ -462,13 +463,17 @@ describe('startWebPanel / stopWebPanel', () => {
   it('closes the server and drops in-flight connections on stop', async () => {
     const server = await startWebPanel(0);
     const { port } = server.address() as AddressInfo;
+    const accepted = new Promise<net.Socket>((resolve) => server.once('connection', resolve));
     const socket = net.connect(port, '127.0.0.1');
     const socketClosed = new Promise<void>((resolve) => socket.once('close', () => resolve()));
     socket.on('error', () => {});
     await new Promise<void>((resolve) => socket.once('connect', () => resolve()));
     // A half-sent request keeps the connection active, so a plain server.close() would wait on it.
     socket.write('GET / HTTP/1.1\r\nHost: localhost\r\n');
-    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    // Wait until the server has read it: before then the connection is idle, and server.close()
+    // alone would drop it, so the test couldn't tell whether stop drops in-flight connections.
+    const serverSocket = await accepted;
+    await waitFor(() => expect(serverSocket.bytesRead).toBeGreaterThan(0));
 
     await stopWebPanel();
 
