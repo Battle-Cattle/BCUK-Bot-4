@@ -112,7 +112,7 @@ Auth middleware (`src/web/middleware.ts`), applied in this order:
 
 **Command matching:** `trigger_string` stores the full prefixed string (e.g. `!clap`). First word is lowercased and queried directly — **no prefix stripping**.
 
-**Lightweight Discord imports:** loading `discord.js` costs ~300ms per test file, so modules that only need a few runtime values take them from the packages discord.js re-exports instead (direct dependencies, kept at the versions discord.js uses): `discord-api-types/v10` (`ChannelType`, `Routes`, `RESTJSONErrorCodes`), `@discordjs/rest` (`DiscordAPIError`, `HTTPError`, `makeURLSearchParams`), `@discordjs/builders` (`EmbedBuilder`), `@discordjs/formatters` (`escapeMarkdown`). Types-only uses are `import type { … } from 'discord.js'`. Only code that needs the client itself (`discordBot.ts`, `audioPlayer.ts`) imports `discord.js` at runtime.
+**Lightweight Discord imports:** loading `discord.js` costs ~300ms per test file, so modules that only need a few runtime values take them from the packages discord.js re-exports instead (direct dependencies, kept at the versions discord.js uses): `discord-api-types/v10` (`ChannelType`, `Routes`, `RESTJSONErrorCodes`), `@discordjs/rest` (`DiscordAPIError`, `HTTPError`, `makeURLSearchParams`), `@discordjs/builders` (`EmbedBuilder`), `@discordjs/formatters` (`escapeMarkdown`). Types-only uses are `import type { … } from 'discord.js'`. Only code that constructs the client itself (`discordBot.ts`) imports `discord.js` at runtime; `audioPlayer.ts` is handed the client and only needs its types.
 
 **Voice adapter:** `audioPlayer.ts` uses a custom `DiscordGatewayAdapterCreator` via `client.on('raw', ...)`. `guild.voiceAdapterCreator` is unused — discord.js v14 incompatibility.
 

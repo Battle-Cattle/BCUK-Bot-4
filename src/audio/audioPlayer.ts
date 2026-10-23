@@ -10,7 +10,8 @@ import {
   type VoiceConnection,
   type AudioPlayer as DjsAudioPlayer,
 } from '@discordjs/voice';
-import { Client, ChannelType, type Guild, type VoiceChannel } from 'discord.js';
+import { ChannelType } from 'discord-api-types/v10';
+import type { Client, Guild, VoiceChannel } from 'discord.js';
 import { setVoiceConnected, setVoiceDisconnected, setVoiceIdle } from '../shared/statusStore';
 
 const log = createLogger('AudioPlayer');
