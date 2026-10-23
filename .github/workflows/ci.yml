@@ -71,14 +71,15 @@ jobs:
 
       # The tests run straight from src/ (Vitest transforms on the fly), so nothing here depends on
       # the build's output: the build, lint (type-aware ESLint, about as long as the tests and mostly
-      # single-threaded), the circular-dependency check and the ts-node toolchain check all run in
-      # the background while the tests stream in the foreground (scripts/ci-parallel.sh).
+      # single-threaded), the circular-dependency and unused-code (knip) checks and the ts-node
+      # toolchain check all run in the background while the tests stream in the foreground
+      # (scripts/ci-parallel.sh).
       # Coverage is only uploaded from Ubuntu, so Windows runs plain `npm test`; lint and the
-      # circular check are platform-independent, so they run on Ubuntu only.
-      - name: Build, lint, circular-dependency check, toolchain check and tests with coverage
+      # circular and unused-code checks are platform-independent, so they run on Ubuntu only.
+      - name: Build, lint, circular-dependency and unused-code checks, toolchain check and tests with coverage
         if: matrix.os == 'ubuntu-latest'
         shell: bash
-        run: bash scripts/ci-parallel.sh test:coverage build lint check:circular test:toolchain
+        run: bash scripts/ci-parallel.sh test:coverage build lint check:circular check:unused test:toolchain
 
       - name: Build, toolchain check and tests
         if: matrix.os == 'windows-latest'

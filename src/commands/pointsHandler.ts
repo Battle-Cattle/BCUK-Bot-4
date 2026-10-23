@@ -7,7 +7,7 @@ import type { TwitchSendRuntime } from './twitchRuntime';
 const log = createLogger('Points');
 
 /** The `!points` command token. */
-export const POINTS_COMMAND = '!points';
+const POINTS_COMMAND = '!points';
 const LEADERBOARD_SIZE = 5;
 const LEADERBOARD_SUBCOMMANDS = new Set(['leaderboard', 'top']);
 

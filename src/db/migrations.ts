@@ -6,7 +6,7 @@ import { createLogger } from '../shared/logger';
 const log = createLogger('Migrations');
 
 /** The first migration: the full schema as it stood when automated migrations were introduced. */
-export const BASELINE_VERSION = '0001_baseline';
+const BASELINE_VERSION = '0001_baseline';
 
 /** Named lock held while migrating, so two processes starting at once can't both apply a file. */
 const LOCK_NAME = 'bcuk_bot_migrations';

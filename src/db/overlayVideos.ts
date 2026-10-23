@@ -10,7 +10,7 @@ export interface OverlayVideo {
   created_at: Date;
 }
 
-export interface OverlayReward {
+interface OverlayReward {
   id: number;
   streamer_id: number;
   twitch_reward_id: string;

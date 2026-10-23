@@ -2,7 +2,7 @@
 // its first character is one of these, and the panel only saves triggers that start with one.
 
 /** First characters a command token can start with. */
-export const COMMAND_PREFIXES: ReadonlySet<string> = new Set(['!', '#']);
+const COMMAND_PREFIXES: ReadonlySet<string> = new Set(['!', '#']);
 
 /**
  * Checks whether text starts with a command prefix, so it can be (or name) a chat command.

@@ -37,7 +37,7 @@ const TWITCH_USERNAME_PATTERN = /^[A-Za-z0-9_]{1,64}$/;
  * be present in their chat), plus already being a monitored streamer (needed for `streamerId` to
  * resolve at all in `twitchBot.ts`). Each flag here maps 1:1 to one of those checks.
  */
-export interface LoyaltyPointsPrerequisites {
+interface LoyaltyPointsPrerequisites {
   twitchLinked: boolean;
   chatBotEnabled: boolean;
   isMonitoredStreamer: boolean;

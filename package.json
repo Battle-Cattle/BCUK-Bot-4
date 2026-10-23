@@ -15,6 +15,7 @@
     "test:toolchain": "vitest run --config vitest.toolchain.config.mts",
     "lint": "eslint .",
     "check:circular": "node scripts/checkCircularDeps.js",
+    "check:unused": "knip",
     "deploy": "bash deploy.sh"
   },
   "dependencies": {
@@ -73,6 +74,7 @@
     "eslint-plugin-jsdoc": "^65.3.12",
     "eslint-plugin-sonarjs": "^4.2.2",
     "globals": "^17.13.0",
+    "knip": "6.40.0",
     "madge": "^8.0.0",
     "supertest": "^7.3.1",
     "ts-node": "^10.9.2",

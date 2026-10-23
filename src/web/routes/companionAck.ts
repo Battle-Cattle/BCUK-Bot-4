@@ -9,7 +9,7 @@ const EVENT_ID_PATTERN = /^[0-9a-f-]{36}$/i;
 const MAX_ACK_ERROR_LENGTH = 255;
 
 /** A validated acknowledgement body. */
-export interface CompanionAck {
+interface CompanionAck {
   eventId: string;
   ok: boolean;
   error: string | null;
@@ -30,7 +30,7 @@ function parseEventId(body: unknown): string | null {
  * @param body - The parsed JSON body.
  * @returns The event id, outcome and error text (truncated), or null if malformed.
  */
-export function parseCompanionAck(body: unknown): CompanionAck | null {
+function parseCompanionAck(body: unknown): CompanionAck | null {
   const eventId = parseEventId(body);
   const { ok, error } = (body ?? {}) as { ok?: unknown; error?: unknown };
   if (eventId === null || typeof ok !== 'boolean') return null;

@@ -66,6 +66,7 @@ const uidLastSeenAt = new Map<string, number>();
  * tick picks it ({@link resolveCutoff}), and again per redemption right before it's handled
  * (`replayRedemptions` in twitchEventSubReconciliation.ts), since a slow fetch can age a
  * redemption past the cap in between.
+ * @alias REDEMPTION_RECOVERY_WINDOW_MS
  */
 export const MAX_CURSOR_LAG_MS = REDEMPTION_RECOVERY_WINDOW_MS;
 

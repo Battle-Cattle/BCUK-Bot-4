@@ -1,0 +1,24 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": [
+    "scripts/*.{js,mjs,ts}"
+  ],
+  "project": [
+    "src/**/*.ts",
+    "scripts/**/*.{js,mjs,ts}"
+  ],
+  "vitest": {
+    "config": [
+      "vitest.config.*",
+      "vitest.toolchain.config.*"
+    ],
+    "entry": [
+      "src/**/*.test.ts",
+      "src/test-utils/**/*.ts"
+    ]
+  },
+  "ignoreDependencies": [
+    "@simplewebauthn/browser",
+    "express-serve-static-core"
+  ]
+}

@@ -55,7 +55,7 @@ interface SfxInput {
  * @param filePath - Absolute, already-validated path of the sound file.
  * @returns The path or probed stream to play, with its stream type.
  */
-export async function prepareSfxInput(filePath: string): Promise<SfxInput> {
+async function prepareSfxInput(filePath: string): Promise<SfxInput> {
   if (!OPUS_CONTAINER_EXTENSIONS.has(path.extname(filePath).toLowerCase())) {
     return { input: filePath, inputType: StreamType.Arbitrary };
   }

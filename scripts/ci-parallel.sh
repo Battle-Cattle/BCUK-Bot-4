@@ -4,7 +4,7 @@
 # collapsed GitHub Actions log group. Exits 1 if any of them failed, naming every failure.
 #
 # Usage: scripts/ci-parallel.sh <foreground-script> [background-script...]
-# e.g.   scripts/ci-parallel.sh test:coverage build lint check:circular test:toolchain
+# e.g.   scripts/ci-parallel.sh test:coverage build lint check:circular check:unused test:toolchain
 set -uo pipefail
 
 if [ "$#" -lt 1 ]; then
