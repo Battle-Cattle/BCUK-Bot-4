@@ -15,10 +15,8 @@ vi.mock('../discord/discordUtils', () => ({
 // One shared logger instance, so tests can assert on the playback-start log lines.
 const log = vi.hoisted(() => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }));
 vi.mock('../shared/logger', () => ({ createLogger: () => log }));
-vi.mock('discord.js', () => ({
-  Client: vi.fn(),
-  ChannelType: { GuildVoice: 2 },
-}));
+// The only runtime value audioPlayer takes from Discord's API types; stubbed so the test doesn't load the package.
+vi.mock('discord-api-types/v10', () => ({ ChannelType: { GuildVoice: 2 } }));
 
 // Each joinVoiceChannel call returns a fresh fake connection so per-guild
 // state can be asserted independently.
