@@ -266,8 +266,10 @@ function registerClientReadyHandler(client: Client): void {
  * making post-incident diagnosis impossible. 'shardError' is a connection-level
  * error on the gateway socket itself (distinct from the generic 'error' handler);
  * the manager keeps retrying after it, so it doesn't need any recovery action here —
- * but it's still worth an error-level log and an owner DM, throttled (see
- * {@link logShardError}) so a burst of retries during an outage doesn't flood either.
+ * but it's still worth an error-level log, throttled (see {@link logShardError}) so a burst
+ * of retries during an outage doesn't flood it. The owner hears about an outage from the
+ * health watcher instead (via `recordDiscordConnected`), which skips blips shorter than its
+ * grace period and pairs a "down" DM with a "recovered" one.
  *
  * 'shardDisconnect' fires only for an unrecoverable close code — the one case
  * where discord.js gives up and will *not* reconnect that shard on its own. With
@@ -284,7 +286,8 @@ function registerClientReadyHandler(client: Client): void {
  * down) while the web panel's health dashboard kept reading the last-known `true`
  * forever. 'shardReady'/'shardResume' flip it back to `true` once the shard
  * actually recovers, since a full client replacement (via `clientReady`) isn't
- * guaranteed to happen for every recovery path.
+ * guaranteed to happen for every recovery path. 'shardResume' also logs the resume, so a
+ * reconnect cycle has a visible end in the log.
  *
  * `stopDiscordBot()`/`startDiscordBot()` destroy the old `Client` and construct a brand-new one —
  * `audioPlayer.ts`'s custom (non-`voiceAdapterCreator`) voice adapter isn't registered with
@@ -323,10 +326,11 @@ function registerConnectionHandlers(client: Client): void {
     recordDiscordConnected(true);
     setGatewayConnected(true);
   });
-  client.on('shardResume', () => {
+  client.on('shardResume', (shardId, replayedEvents) => {
     recordShardActivity();
     recordDiscordConnected(true);
     setGatewayConnected(true);
+    log.info(`Shard ${shardId} resumed its gateway session (${replayedEvents} events replayed).`);
   });
   client.on('shardDisconnect', (event, shardId) => {
     recordShardActivity();
