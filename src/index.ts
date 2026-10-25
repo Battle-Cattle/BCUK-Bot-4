@@ -19,6 +19,7 @@ import { registerTwitchChatRuntime } from './commands/customCommandHandler';
 import { registerCounterTwitchRuntime } from './commands/counterHandler';
 import { registerPointsTwitchRuntime } from './commands/pointsHandler';
 import { registerGambleTwitchRuntime } from './commands/gambleHandler';
+import { registerRaffleTwitchRuntime, stopAllRaffles } from './commands/raffle/raffleHandler';
 import { registerMultiTwitchRuntime } from './commands/multiCommandHandler';
 import { registerShoutoutRuntime } from './commands/shoutoutHandler';
 import { registerCountdownTwitchRuntime } from './commands/countdownHandler';
@@ -149,6 +150,7 @@ async function shutdown(signal: string): Promise<void> {
   stopDbHealthCheck();
   stopEventLoopMonitor();
   stopCounterScheduler();
+  stopAllRaffles();
   stopChannelReconciliationPoll();
   await safeStop('reward pricing scheduler', stopRewardPricingScheduler);
   await safeStop('timer command scheduler', stopTimerCommandScheduler);
@@ -220,6 +222,7 @@ function registerTwitchRuntimes(): void {
   registerCounterTwitchRuntime({ send: sayInChannel });
   registerPointsTwitchRuntime({ send: sayInChannel });
   registerGambleTwitchRuntime({ send: sayInChannel });
+  registerRaffleTwitchRuntime({ send: sayInChannel, getLoginUserIds: getActiveChannelUserIds });
   registerMultiTwitchRuntime({ send: sayInChannel, getActiveChannels, getLoginUserIds: getActiveChannelUserIds });
   registerShoutoutRuntime({ send: sayInChannel });
   registerCountdownTwitchRuntime({ send: sayInChannel });

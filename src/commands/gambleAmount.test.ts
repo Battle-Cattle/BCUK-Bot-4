@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseGambleAmount } from './gambleAmount';
+import { parseGambleAmount, parsePointsAmount } from './gambleAmount';
 
 describe('parseGambleAmount', () => {
   it('parses a plain integer', () => {
@@ -85,5 +85,21 @@ describe('parseGambleAmount', () => {
   it('rejects malformed input mixing letters and digits', () => {
     expect(parseGambleAmount('5kk', 10_000)).toBeNull();
     expect(parseGambleAmount('ab5k', 10_000)).toBeNull();
+  });
+});
+
+describe('parsePointsAmount', () => {
+  it.each([
+    ['100', 100],
+    [' 1,000 ', 1000],
+    ['1k', 1000],
+    ['1K', 1000],
+    ['0', 0],
+  ])('parses %j as %d', (input, expected) => {
+    expect(parsePointsAmount(input)).toBe(expected);
+  });
+
+  it.each(['', 'all', '40%', '10.5', '-5', 'k', '1kk', 'abc'])('rejects %j', (input) => {
+    expect(parsePointsAmount(input)).toBeNull();
   });
 });

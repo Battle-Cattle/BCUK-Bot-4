@@ -167,6 +167,7 @@ export {
   resolveGambleOutcome as resolveLoyaltyPointsGambleOutcome,
   spendBalance as spendLoyaltyPoints,
   getLeaderboard as getLoyaltyPointsLeaderboard,
+  MAX_BALANCE as MAX_LOYALTY_POINTS_BALANCE,
 } from './db/loyaltyPoints';
 export { getCachedConfig as getLoyaltyPointsConfig } from './db/loyaltyPointsCache';
 export { setLoyaltyPointsConfig } from './db/loyaltyPointsWrites';
