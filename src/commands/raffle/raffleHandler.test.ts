@@ -205,6 +205,15 @@ describe('raffle lifecycle', () => {
     expect(adjustLoyaltyPointsBalance).not.toHaveBeenCalled();
   });
 
+  it('logs, rather than rejecting, when the draw itself fails', async () => {
+    await chat('streamer', '!raffle 100', true);
+    await chat('alice', '!join');
+    vi.spyOn(Math, 'random').mockImplementation(() => { throw new Error('rng broke'); });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(logErrorSpy).toHaveBeenCalledWith('Failed to draw raffle in streamer:', expect.any(Error));
+    expect(adjustLoyaltyPointsBalance).not.toHaveBeenCalled();
+  });
+
   it('cancels open raffles on stopAllRaffles', async () => {
     await chat('streamer', '!raffle 100', true);
     stopAllRaffles();
