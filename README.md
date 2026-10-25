@@ -5,7 +5,7 @@
 [![Code Coverage](https://qlty.sh/gh/Battle-Cattle/projects/BCUK-Bot-4/coverage.svg)](https://qlty.sh/gh/Battle-Cattle/projects/BCUK-Bot-4)
 ![CodeRabbit Pull Request Reviews](https://img.shields.io/coderabbit/prs/github/Battle-Cattle/BCUK-Bot-4?utm_source=oss&utm_medium=github&utm_campaign=Battle-Cattle%2FBCUK-Bot-4&labelColor=171717&color=FF570A&link=https%3A%2F%2Fcoderabbit.ai&label=CodeRabbit+Reviews)
 
-A multi-platform community bot connecting Twitch and Discord. Features custom commands, soundboard effects, counters, viewer loyalty points (chat-earn, sub bonuses, `!gamble`), and a web control panel.
+A multi-platform community bot connecting Twitch and Discord. Features custom commands, soundboard effects, counters, viewer loyalty points (chat-earn, sub bonuses, `!gamble`, `!raffle`), and a web control panel.
 
 ## Requirements
 

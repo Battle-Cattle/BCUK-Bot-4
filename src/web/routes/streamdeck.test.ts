@@ -21,6 +21,8 @@ vi.mock('../../db', () => ({
 // The advanced-commands sub-router pulls in the command runtime; its own routes are tested in
 // streamdeckAdvancedCommands.test.ts.
 vi.mock('./streamdeckAdvancedCommands', async () => ({ default: (await import('express')).Router() }));
+// Same for the raffle sub-router (streamdeckRaffle.test.ts).
+vi.mock('./streamdeckRaffle', async () => ({ default: (await import('express')).Router() }));
 
 vi.mock('../../audio/soundSelector', () => ({
   pickWeightedRandom: vi.fn(),

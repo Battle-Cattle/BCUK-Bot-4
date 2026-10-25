@@ -1,9 +1,9 @@
 import mysql, { type PoolConnection } from 'mysql2/promise';
 import { getPool, withTransaction } from './pool';
 
-// `loyalty_points.balance` is a plain INT column (see DATABASE-SCHEMA.md) — every
-// write that can increase it clamps to this rather than allowed to overflow it.
-const MAX_BALANCE = 2_147_483_647;
+/** `loyalty_points.balance` is a plain INT column (see DATABASE-SCHEMA.md) — every
+ *  write that can increase it clamps to this rather than allowed to overflow it. */
+export const MAX_BALANCE = 2_147_483_647;
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 

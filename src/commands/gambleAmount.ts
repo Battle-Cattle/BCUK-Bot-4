@@ -63,6 +63,18 @@ function parsePlainIntegerAmount(trimmed: string): number | null {
 }
 
 /**
+ * Parses a fixed points amount with no balance involved: a plain integer (`100`), thousands-separated
+ * (`1,000`) or `k`/`K`-suffixed (`5k`). Used by `!raffle`, whose prize isn't drawn from anyone's
+ * balance; range checks are the caller's.
+ * @param input - The raw amount token, e.g. the text after `!raffle`.
+ * @returns The parsed whole amount, or null if `input` isn't one of those formats.
+ */
+export function parsePointsAmount(input: string): number | null {
+  const trimmed = input.trim();
+  return parseThousandsSuffixAmount(trimmed) ?? parsePlainIntegerAmount(trimmed);
+}
+
+/**
  * Resolves the raw numeric amount a bet token represents, before the min/max range check, by
  * trying each accepted format in turn.
  * @param trimmed - The whitespace-trimmed bet token.
@@ -73,8 +85,7 @@ function resolveAmount(trimmed: string, balance: number): number | null {
   const parsers: Array<() => number | null> = [
     () => parseAllKeyword(trimmed, balance),
     () => parsePercentAmount(trimmed, balance),
-    () => parseThousandsSuffixAmount(trimmed),
-    () => parsePlainIntegerAmount(trimmed),
+    () => parsePointsAmount(trimmed),
   ];
   for (const parse of parsers) {
     const result = parse();

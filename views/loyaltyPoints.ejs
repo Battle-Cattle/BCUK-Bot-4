@@ -128,10 +128,22 @@
       </div>
 
       <div class="card card-spaced">
+        <div class="card-header"><span class="card-icon">🎟️</span><span class="card-label">Raffles</span></div>
+        <div class="card-body">
+          <p class="muted">Give points away with <code>!raffle &lt;amount&gt;</code> in your own chat (e.g. <code>!raffle 100</code>
+            or <code>!raffle 1K</code>), or with the Stream Deck plugin's Start Raffle key. Viewers enter with <code>!join</code>
+            for 60 seconds, with a reminder every 15 seconds. Entries only count in your own chat, not from shared chat;
+            during a shared-chat session the messages say so. The prize is new points, shared equally in whole points
+            between a random number of winners (100 points between 3 winners is 33 each). Up to 3 entries means one
+            winner; every 3 more entries allow one more, up to 5.</p>
+        </div>
+      </div>
+
+      <div class="card card-spaced">
         <div class="card-header"><span class="card-icon">🤖</span><span class="card-label">Excluded Bots</span></div>
         <div class="card-body">
           <p class="muted">Chat bots excluded with the leaderboard's "Exclude bot" button don't earn points,
-            can't use !gamble, and aren't shown on the leaderboard. Removing an exclusion restores their previous balance.</p>
+            can't use !gamble or enter raffles, and aren't shown on the leaderboard. Removing an exclusion restores their previous balance.</p>
           <% if (excludedUsers.length === 0) { %>
           <p class="muted">No bots are excluded.</p>
           <% } else { %>

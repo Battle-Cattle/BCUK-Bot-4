@@ -168,6 +168,10 @@ vi.mock('../commands/gambleHandler', () => ({
   GAMBLE_COMMAND: '!gamble',
 }));
 
+vi.mock('../commands/raffle/raffleHandler', () => ({
+  executeRaffleCommandForTwitch: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock('../commands/advancedCommands/advancedCommandHandler', () => ({
   executeAdvancedCommandForTwitch: vi.fn().mockResolvedValue(undefined),
 }));
@@ -214,6 +218,7 @@ import { executeFollowageForTwitch } from '../commands/followageHandler';
 import { awardPointsForChatMessage } from '../commands/pointsEarnHandler';
 import { executePointsCommandForTwitch } from '../commands/pointsHandler';
 import { executeGambleCommandForTwitch } from '../commands/gambleHandler';
+import { executeRaffleCommandForTwitch } from '../commands/raffle/raffleHandler';
 import { executeAdvancedCommandForTwitch } from '../commands/advancedCommands/advancedCommandHandler';
 import { recordChatMessage } from './twitchChatActivity';
 
@@ -449,6 +454,22 @@ describe('handleTwitchMessage', () => {
       command: '!hydrate',
       roles: { isBroadcaster: false, isMod: false, isVip: true, isSubscriber: true },
     });
+  });
+
+  it('dispatches !raffle/!join with the streamer id and whether the sender is the broadcaster', async () => {
+    sendMessage('#streamer', 'streamer', '!raffle 1K', { isBroadcaster: true });
+
+    await waitFor(() => expect(executeRaffleCommandForTwitch).toHaveBeenCalledExactlyOnceWith({
+      channel: 'streamer', streamerId: 42, message: '!raffle 1K', userLogin: 'streamer', command: '!raffle', isBroadcaster: true,
+    }));
+  });
+
+  it('dispatches !join from a viewer as a non-broadcaster', async () => {
+    sendMessage('#streamer', 'alice', '!join');
+
+    await waitFor(() => expect(executeRaffleCommandForTwitch).toHaveBeenCalledExactlyOnceWith({
+      channel: 'streamer', streamerId: 42, message: '!join', userLogin: 'alice', command: '!join', isBroadcaster: false,
+    }));
   });
 
   it('does not award points when the channel has no linked streamer', async () => {

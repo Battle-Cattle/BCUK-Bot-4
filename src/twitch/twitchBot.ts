@@ -12,6 +12,7 @@ import { executeFollowageForTwitch } from '../commands/followageHandler';
 import { awardPointsForChatMessage } from '../commands/pointsEarnHandler';
 import { executePointsCommandForTwitch } from '../commands/pointsHandler';
 import { executeGambleCommandForTwitch, GAMBLE_COMMAND } from '../commands/gambleHandler';
+import { executeRaffleCommandForTwitch } from '../commands/raffle/raffleHandler';
 import { executeAdvancedCommandForTwitch } from '../commands/advancedCommands/advancedCommandHandler';
 import { fireAndForget, extractCommand } from '../commands/commandUtils';
 import { recordChatMessage } from './twitchChatActivity';
@@ -234,7 +235,16 @@ function handleTwitchMessage(channel: string, user: string, message: string, msg
     );
     // Chat-earn needs the streamer ID on every message (not just commands); it comes from a
     // cache, so this is no per-message DB query.
-    dispatchPointsHandlers(normalizedChannel, user, message, command, discordIdPromise.then(resolveStreamerIdForDiscordId));
+    const streamerIdPromise = discordIdPromise.then(resolveStreamerIdForDiscordId);
+    dispatchPointsHandlers(normalizedChannel, user, message, command, streamerIdPromise);
+    fireAndForget(
+      streamerIdPromise.then((streamerId) =>
+        executeRaffleCommandForTwitch({
+          channel: normalizedChannel, streamerId, message, userLogin: user, command, isBroadcaster: msg.userInfo.isBroadcaster,
+        })),
+      'Raffle command error',
+      log,
+    );
   } catch (err) {
     log.error('Unexpected error in message handler:', err);
   }

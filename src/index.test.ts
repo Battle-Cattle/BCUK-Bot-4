@@ -73,6 +73,7 @@ vi.mock('./commands/customCommandHandler', () => ({ registerTwitchChatRuntime: v
 vi.mock('./commands/counterHandler', () => ({ registerCounterTwitchRuntime: vi.fn() }));
 vi.mock('./commands/pointsHandler', () => ({ registerPointsTwitchRuntime: vi.fn() }));
 vi.mock('./commands/gambleHandler', () => ({ registerGambleTwitchRuntime: vi.fn() }));
+vi.mock('./commands/raffle/raffleHandler', () => ({ registerRaffleTwitchRuntime: vi.fn(), stopAllRaffles: vi.fn() }));
 vi.mock('./commands/multiCommandHandler', () => ({ registerMultiTwitchRuntime: vi.fn() }));
 vi.mock('./commands/shoutoutHandler', () => ({ registerShoutoutRuntime: vi.fn() }));
 vi.mock('./commands/countdownHandler', () => ({ registerCountdownTwitchRuntime: vi.fn() }));
