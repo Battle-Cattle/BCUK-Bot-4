@@ -34,7 +34,11 @@ export interface DbUser {
 
 const USER_SELECT = 'discord_id, discord_name, is_twitch_bot_enabled, twitch_name, access_level, is_owner';
 
-/** Maps a raw `user` table row to a {@link DbUser}. */
+/**
+ * Maps a raw `user` table row to a {@link DbUser}.
+ * @param r - Row selected from `user`.
+ * @returns The mapped user.
+ */
 function mapUser(r: mysql.RowDataPacket): DbUser {
   return {
     discord_id: String(r.discord_id),

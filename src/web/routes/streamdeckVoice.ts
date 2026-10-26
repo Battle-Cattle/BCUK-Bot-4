@@ -20,6 +20,7 @@ const router = Router();
  * The guild's display name from the Discord client's cache, or null if it isn't cached
  * (the Stream Deck plugin then labels the group "Server <id>").
  * @param guildId - Guild to name.
+ * @returns The cached guild name, or null when the bot is offline or the guild isn't cached.
  */
 function cachedGuildName(guildId: string): string | null {
   return getDiscordClient()?.guilds.cache.get(guildId)?.name ?? null;

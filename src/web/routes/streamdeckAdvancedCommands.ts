@@ -2,40 +2,14 @@
 // point cost, cooldowns, role, live-only or caps), and enable/disable one. The commands are the
 // key owner's as a streamer, so every route resolves the key's Discord user to their streamer.
 import { createLogger } from '../../shared/logger';
-import { Router, type Request, type Response } from 'express';
-import {
-  getApprovedGuildIdsForKey, getStreamerByDiscordId, listAdvancedCommands, setAdvancedCommandEnabled,
-  type DbStreamerEventSub,
-} from '../../db';
+import { Router, type Request } from 'express';
+import { listAdvancedCommands, setAdvancedCommandEnabled } from '../../db';
 import { requireApiKey } from '../middleware';
+import { resolveStreamerOrRespond } from './streamdeckStreamerResolution';
 import { triggerAdvancedCommandFromStreamDeck } from '../../commands/advancedCommands/advancedCommandHandler';
 
 const log = createLogger('Streamdeck');
 const router = Router();
-
-/**
- * Resolves the key owner's streamer record, responding with an error if the key isn't approved
- * for any guild (the same gate as `GET /sfx`) or its owner isn't a streamer with a Twitch login.
- * @param req - The request; `req.apiKeyOwner` is set by `requireApiKey`.
- * @param res - The response, used for the error.
- * @returns The streamer (with a Twitch login), or null once an error response was sent.
- */
-async function resolveStreamerOrRespond(
-  req: Request,
-  res: Response,
-): Promise<(DbStreamerEventSub & { twitch_name: string }) | null> {
-  const discordId = req.apiKeyOwner!;
-  if ((await getApprovedGuildIdsForKey(discordId)).length === 0) {
-    res.status(403).json({ ok: false, error: 'Key not approved for any guild' });
-    return null;
-  }
-  const streamer = await getStreamerByDiscordId(discordId);
-  if (!streamer?.twitch_name) {
-    res.status(403).json({ ok: false, error: 'not_a_streamer' });
-    return null;
-  }
-  return { ...streamer, twitch_name: streamer.twitch_name };
-}
 
 /**
  * Reads a positive integer `commandId` from the JSON body.

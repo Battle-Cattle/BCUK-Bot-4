@@ -71,7 +71,7 @@ Stores sound files associated with a trigger.
 | `trigger_id` | `BIGINT` | FK to `sfxtrigger.id` |
 | `file` | `VARCHAR(...)` | Filename relative to `SFX_FOLDER` |
 | `trigger_command` | `VARCHAR(...)` nullable | Legacy column; not used for routing |
-| `weight` | `INT` | Weighted-random selection; non-positive values are treated like `1` by the app |
+| `weight` | `INT` | Weighted-random selection weight, at least `1` (the panel rejects lower values, and `0006_sfx_weight_at_least_one.sql` raised older rows to `1`) |
 | `hidden` | `TINYINT(1)` | Listing-only flag; hidden files still play |
 | `category_id` | `INT` nullable | FK to `sfxcategory.id` |
 
@@ -346,7 +346,7 @@ defined.
 | `streamer_id` | `INT` PK | FK to `streamer.id` ON DELETE CASCADE |
 | `enabled` | `TINYINT(1)` | Opt-in switch; `0` (the default) means the feature is off for this streamer |
 | `points_per_message` | `INT` | Points awarded per chat message, subject to `cooldown_seconds` |
-| `cooldown_seconds` | `INT` | Minimum seconds between chat-earn awards for the same viewer; also the `!gamble` cooldown (shared, not stacked) |
+| `cooldown_seconds` | `INT` | Minimum seconds between chat-earn awards for the same viewer; also the length of the separate `!gamble` cooldown (tracked independently, so chatting never blocks a bet) |
 | `points_per_sub` | `INT` | Awarded on a sub or resub |
 | `points_per_gift_sub` | `INT` | Multiplied by the gift count and awarded to the gifter (not the recipients) |
 | `updated_at` | `TIMESTAMP` | |
@@ -765,11 +765,13 @@ Short-lived, single-use authorization codes for the companion app's loopback OAu
 | `discord_id` | `BIGINT` | FK to `user.discord_id` ON DELETE CASCADE; the user the code resolves to once consumed |
 | `expires_at` | `DATETIME` | Computed DB-side as `NOW() + 60 seconds` at creation, so it stays consistent with the consuming query even if the app and DB clocks drift |
 | `used_at` | `DATETIME` nullable | Set when the code is consumed; `NULL` while still redeemable |
+| `code_challenge` | `VARCHAR(64)` nullable | PKCE S256 challenge (base64url SHA-256 of the app's `code_verifier`) sent to `/companion/login`; when set, the code only exchanges with the matching verifier. `NULL` for an app that didn't send one |
 
 Expected constraints and behavior:
 
 - Consuming a code (`consumeCodeOnConnection` in `src/db/companionOAuthCodes.ts`) is a single `UPDATE ... WHERE used_at IS NULL AND expires_at > NOW()`, so concurrent redemption attempts of the same code cannot both succeed.
 - `exchangeCodeForToken()` marks the code used and issues the companion token in one DB transaction, so a failure issuing the token rolls back the "used" mark instead of permanently burning the code.
+- The consuming `UPDATE` also requires `(code_challenge IS NULL AND <no verifier presented>) OR code_challenge = <S256 of the presented verifier>`, so a code issued with a PKCE challenge can't be exchanged without its verifier, and one issued without a challenge can't be exchanged with a verifier (added by `0005_companion_oauth_pkce.sql`).
 
 ## `webauthn_credentials`
 

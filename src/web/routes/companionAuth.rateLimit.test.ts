@@ -8,6 +8,7 @@ vi.mock('../../db', () => ({
 /** Mocks the shared logger so route handlers don't write real log output during tests. */
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 vi.mock('./companionEvents', () => ({ disconnectCompanionConnections: vi.fn() }));
+vi.mock('../middleware', () => ({ requireCompanionKey: (_req: unknown, _res: unknown, next: () => void) => next() }));
 
 import supertest from 'supertest';
 import router from './companionAuth';

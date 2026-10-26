@@ -10,7 +10,8 @@ import {
   type VoiceConnection,
   type AudioPlayer as DjsAudioPlayer,
 } from '@discordjs/voice';
-import { Client, ChannelType, type Guild, type VoiceChannel } from 'discord.js';
+import { ChannelType } from 'discord-api-types/v10';
+import type { Client, Guild, VoiceChannel } from 'discord.js';
 import { setVoiceConnected, setVoiceDisconnected, setVoiceIdle } from '../shared/statusStore';
 
 const log = createLogger('AudioPlayer');
@@ -55,11 +56,19 @@ interface GuildVoiceState {
   adapterFactory: VoiceAdapterFactory;
   player: DjsAudioPlayer | null;
   playing: boolean;
+  // When the current connection became Ready (Date.now()), for the playback-start log's connection age.
+  connectedAt: number | null;
+  // When startPlayback last handed the player a resource, until the player reports Playing.
+  playRequestedAt: number | null;
 }
 
 const states = new Map<string, GuildVoiceState>();
 
-/** Returns the voice state for a guild, creating an empty record on first use. */
+/**
+ * Returns the voice state for a guild, creating an empty record on first use.
+ * @param guildId - Discord snowflake of the guild.
+ * @returns The existing or newly created voice state record for that guild.
+ */
 function getState(guildId: string): GuildVoiceState {
   return getOrCreate(states, guildId, () => ({
     guildId,
@@ -75,10 +84,15 @@ function getState(guildId: string): GuildVoiceState {
     adapterFactory: createVoiceAdapterFactory(),
     player: null,
     playing: false,
+    connectedAt: null,
+    playRequestedAt: null,
   }));
 }
 
-/** True if any guild currently holds a live voice connection. */
+/**
+ * True if any guild currently holds a live voice connection.
+ * @returns True if at least one guild has a non-null connection.
+ */
 function anyConnected(): boolean {
   for (const state of states.values()) {
     if (state.connection) return true;
@@ -92,7 +106,16 @@ const RECONNECT_BASE_DELAY_MS = 5_000;
 const RECONNECT_MAX_DELAY_MS = 60_000;
 const VOICE_CONNECT_TIMEOUT_MS = 30_000;
 
-/** Cancels and nulls any pending reconnect timer for the given guild state. */
+/**
+ * A sound that takes longer than this from {@link startPlayback} to its first audio frame is
+ * logged as a warning instead of at debug level, so a growing SFX delay shows up in the logs.
+ */
+const SLOW_PLAYBACK_START_MS = 500;
+
+/**
+ * Cancels and nulls any pending reconnect timer for the given guild state.
+ * @param state - The guild voice state whose reconnect timer to clear.
+ */
 function clearReconnectTimer(state: GuildVoiceState): void {
   if (state.reconnectTimer) {
     clearTimeout(state.reconnectTimer);
@@ -100,7 +123,11 @@ function clearReconnectTimer(state: GuildVoiceState): void {
   }
 }
 
-/** Schedules an exponential-backoff voice reconnect for a guild, skipping if one is already pending. */
+/**
+ * Schedules an exponential-backoff voice reconnect for a guild, skipping if one is already pending.
+ * @param state - The guild voice state to reconnect.
+ * @param reason - Why the rejoin is needed, included in the warning log.
+ */
 function scheduleReconnect(state: GuildVoiceState, reason: string): void {
   if (!state.shouldAutoReconnect || !state.client || state.reconnectTimer || state.connection) return;
 
@@ -119,19 +146,26 @@ function scheduleReconnect(state: GuildVoiceState, reason: string): void {
   }, delay);
 }
 
-/** Returns this guild's audio player, lazily creating it with idle and error handlers on first use. */
+/**
+ * Returns this guild's audio player, lazily creating it with playing, idle and error handlers on first use.
+ * @param state - The guild voice state that owns the player.
+ * @returns The guild's audio player.
+ */
 function getPlayer(state: GuildVoiceState): DjsAudioPlayer {
   if (!state.player) {
     const guildPlayer = createAudioPlayer({
       behaviors: { noSubscriber: NoSubscriberBehavior.Pause },
     });
+    guildPlayer.on(AudioPlayerStatus.Playing, () => logPlaybackStart(state));
     guildPlayer.on(AudioPlayerStatus.Idle, () => {
       state.playing = false;
+      state.playRequestedAt = null;
       setVoiceIdle(state.guildId);
     });
     guildPlayer.on('error', (err) => {
       log.error(`Error: ${err.message}`, err);
       state.playing = false;
+      state.playRequestedAt = null;
       setVoiceIdle(state.guildId);
     });
     state.player = guildPlayer;
@@ -139,7 +173,30 @@ function getPlayer(state: GuildVoiceState): DjsAudioPlayer {
   return state.player;
 }
 
-/** Stops this guild's audio player (if any) and marks it not-playing, ignoring stop errors. */
+/**
+ * Logs how long the sound handed to {@link startPlayback} took to reach its first audio frame
+ * (ffmpeg spawn and decode), with the voice connection's age and gateway/UDP ping, so a growing
+ * SFX delay can be traced to the audio pipeline, the voice connection or neither. A no-op when no
+ * start is pending, e.g. when the player resumes from auto-pause mid-sound.
+ * @param state - The guild's voice state.
+ */
+function logPlaybackStart(state: GuildVoiceState): void {
+  if (state.playRequestedAt === null) return;
+  const now = Date.now();
+  const startupMs = now - state.playRequestedAt;
+  state.playRequestedAt = null;
+  const ping = state.connection?.ping;
+  const ageMin = state.connectedAt === null ? '?' : Math.round((now - state.connectedAt) / 60_000);
+  const message = `Playback started in guild ${state.guildId} after ${startupMs}ms`
+    + ` (voice connected ${ageMin}min, ping ws ${ping?.ws ?? '?'}ms / udp ${ping?.udp ?? '?'}ms)`;
+  if (startupMs > SLOW_PLAYBACK_START_MS) log.warn(message);
+  else log.debug(message);
+}
+
+/**
+ * Stops this guild's audio player (if any) and marks it not-playing, ignoring stop errors.
+ * @param state - The guild voice state whose player to stop.
+ */
 function stopGuildPlayer(state: GuildVoiceState): void {
   try {
     state.player?.stop(true);
@@ -154,6 +211,7 @@ function stopGuildPlayer(state: GuildVoiceState): void {
  * stops this guild's own player and clears this guild's own voice status —
  * status is scoped per guild, so tearing down one guild's connection never
  * affects another guild's reported state.
+ * @param state - The guild voice state to tear down.
  */
 function tearDownGuild(state: GuildVoiceState): void {
   state.currentChannelId = null;
@@ -161,7 +219,11 @@ function tearDownGuild(state: GuildVoiceState): void {
   setVoiceDisconnected(state.guildId);
 }
 
-/** Builds the ConnectionHandlerDeps callbacks bound to a specific guild's mutable voice state. */
+/**
+ * Builds the ConnectionHandlerDeps callbacks bound to a specific guild's mutable voice state.
+ * @param state - The guild voice state the callbacks read and mutate.
+ * @returns Connection-handler dependencies scoped to that guild.
+ */
 function makeDeps(state: GuildVoiceState): ConnectionHandlerDeps {
   return {
     getAttemptId: () => state.currentAttemptId,
@@ -234,6 +296,9 @@ export async function connect(client: Client, guildId: string, channelId: string
     releasePreviousConnection(previousConnection, joinedConnection, deps);
     state.pendingConnection = null;
     state.connection = joinedConnection;
+    // @discordjs/voice hands back the live connection when this guild is already joined, so keep
+    // its original Ready time for a reused connection; only a new one restarts the age.
+    if (joinedConnection !== previousConnection || state.connectedAt === null) state.connectedAt = Date.now();
     state.currentChannelId = channel.id;
 
     clearReconnectTimer(state);
@@ -324,7 +389,10 @@ function handleConnectFailure(
   }
 }
 
-/** Tears down a single guild's voice connection and reconnect state. */
+/**
+ * Tears down a single guild's voice connection and reconnect state.
+ * @param state - The guild voice state to disconnect.
+ */
 function disconnectGuild(state: GuildVoiceState): void {
   state.currentAttemptId += 1;
   // Any in-flight attempt is now stale; clearing this lets it destroy its connection when it notices.
@@ -365,6 +433,7 @@ export function disconnect(guildId?: string): void {
  * Returns true if a sound is currently being played in the given guild.
  *
  * @param guildId - Guild to check.
+ * @returns True while the guild's player has a sound in progress; false for unknown guilds.
  */
 export function isPlaying(guildId: string): boolean {
   return states.get(guildId)?.playing ?? false;
@@ -374,6 +443,7 @@ export function isPlaying(guildId: string): boolean {
  * Returns true if the bot is joined to a voice channel.
  *
  * @param guildId - Restrict the check to one guild; omit to test whether any guild is connected.
+ * @returns True if the given guild (or, with no guild, any guild) has a live voice connection.
  */
 export function isConnected(guildId?: string): boolean {
   if (guildId === undefined) return anyConnected();
@@ -381,9 +451,23 @@ export function isConnected(guildId?: string): boolean {
 }
 
 /**
+ * Returns true only while the guild's voice connection is Ready to carry audio. Unlike
+ * {@link isConnected}, this is false during the few seconds after a drop in which the
+ * connection is kept while @discordjs/voice tries to recover it: a sound started then would
+ * sit in an auto-paused player and play late, or never.
+ *
+ * @param guildId - Guild to check.
+ * @returns True if the guild has a connection in the Ready state; false otherwise, including for unknown guilds.
+ */
+export function isReady(guildId: string): boolean {
+  return states.get(guildId)?.connection?.state.status === VoiceConnectionStatus.Ready;
+}
+
+/**
  * Returns the current voice channel ID for a guild, or null if not connected there.
  *
  * @param guildId - Guild to read the current channel for.
+ * @returns Discord snowflake of the joined voice channel, or null when not connected in that guild.
  */
 export function getCurrentChannelId(guildId: string): string | null {
   return states.get(guildId)?.currentChannelId ?? null;
@@ -416,5 +500,6 @@ export function forgetGuild(guildId: string): void {
 export function startPlayback(resource: AudioResource, guildId: string): void {
   const state = getState(guildId);
   state.playing = true;
+  state.playRequestedAt = Date.now();
   getPlayer(state).play(resource);
 }

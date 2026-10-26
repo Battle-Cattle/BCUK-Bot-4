@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { waitFor } from '../test-utils/waitFor';
-import { mockLogger } from '../test-utils/loggerMock';
 
 // ─── Mocks ──────────────────────────────────────────────────────────────────
 
@@ -13,12 +12,13 @@ vi.mock('../shared/statusStore', () => ({
 vi.mock('../discord/discordUtils', () => ({
   isPermanentVoiceMisconfigurationError: vi.fn(() => false),
 }));
-vi.mock('../shared/logger', () => ({ createLogger: mockLogger }));
-vi.mock('discord.js', () => ({
-  Client: vi.fn(),
-  ChannelType: { GuildVoice: 2 },
-  WebSocketShardEvents: { Dispatch: 'dispatch' },
-}));
+// One shared logger instance, so tests can assert on the playback-start log lines.
+const log = vi.hoisted(() => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }));
+vi.mock('../shared/logger', () => ({ createLogger: () => log }));
+// The only runtime value audioPlayer takes from Discord's API types; stubbed so the test doesn't load the package.
+vi.mock('discord-api-types/v10', () => ({ ChannelType: { GuildVoice: 2 } }));
+// voiceAdapter's only runtime value from @discordjs/ws; stubbed for the same reason.
+vi.mock('@discordjs/ws', () => ({ WebSocketShardEvents: { Dispatch: 'dispatch' } }));
 
 // Each joinVoiceChannel call returns a fresh fake connection so per-guild
 // state can be asserted independently.
@@ -28,6 +28,7 @@ function makeConnection() {
     subscribe: vi.fn(),
     destroy: vi.fn(),
     state: { status: 'ready' },
+    ping: { ws: 42, udp: 17 },
   };
 }
 const createdConnections: ReturnType<typeof makeConnection>[] = [];
@@ -40,7 +41,7 @@ vi.mock('@discordjs/voice', () => ({
     return conn;
   }),
   entersState: vi.fn().mockResolvedValue(undefined),
-  AudioPlayerStatus: { Idle: 'idle' },
+  AudioPlayerStatus: { Idle: 'idle', Playing: 'playing' },
   VoiceConnectionStatus: { Ready: 'ready', Signalling: 'signalling', Connecting: 'connecting', Disconnected: 'disconnected', Destroyed: 'destroyed' },
   NoSubscriberBehavior: { Pause: 'pause' },
 }));
@@ -218,6 +219,32 @@ describe('per-guild isolation', () => {
     expect(mod.isConnected()).toBe(false);
     expect(vi.mocked(status.setVoiceDisconnected)).toHaveBeenCalledWith('guild-A');
     expect(vi.mocked(status.setVoiceDisconnected)).toHaveBeenCalledWith('guild-B');
+  });
+});
+
+describe('isReady', () => {
+  it('is true for a guild whose connection is Ready', async () => {
+    const { client } = makeClient();
+    await mod.connect(client as never, 'guild-A', 'chan-1');
+    expect(mod.isReady('guild-A')).toBe(true);
+  });
+
+  it('is false while a dropped connection is still held during its recovery window', async () => {
+    const { client } = makeClient();
+    await mod.connect(client as never, 'guild-A', 'chan-1');
+    createdConnections[0]!.state.status = 'disconnected';
+
+    // Still "connected" (the connection is kept while it tries to recover) but not Ready.
+    expect(mod.isConnected('guild-A')).toBe(true);
+    expect(mod.isReady('guild-A')).toBe(false);
+  });
+
+  it('is false for an unknown or disconnected guild', async () => {
+    expect(mod.isReady('never-seen')).toBe(false);
+    const { client } = makeClient();
+    await mod.connect(client as never, 'guild-A', 'chan-1');
+    mod.disconnect('guild-A');
+    expect(mod.isReady('guild-A')).toBe(false);
   });
 });
 
@@ -672,5 +699,72 @@ describe('per-guild audio player', () => {
     expect(mod.isPlaying('guild-B')).toBe(false);
     expect(players[0]!.play).toHaveBeenCalledTimes(1);
     expect(players[1]!.play).not.toHaveBeenCalled();
+  });
+
+  describe('playback-start log', () => {
+    /** Connects guild-A at `connectedAt`, starts a sound at `playAt` and returns the player's Playing handler. */
+    async function startSound(connectedAt: number, playAt: number) {
+      const { client } = makeClient();
+      const voice = await import('@discordjs/voice');
+      const fakePlayer = { on: vi.fn(), stop: vi.fn(), play: vi.fn() };
+      vi.mocked(voice.createAudioPlayer).mockReturnValue(fakePlayer as never);
+      const now = vi.spyOn(Date, 'now').mockReturnValue(connectedAt);
+      await mod.connect(client as never, 'guild-A', 'chan-1');
+      now.mockReturnValue(playAt);
+      mod.startPlayback({} as never, 'guild-A');
+      const playing = fakePlayer.on.mock.calls.find(([e]) => e === 'playing')?.[1] as () => void;
+      return { playing, now };
+    }
+
+    it('logs the startup time, connection age and voice ping at debug level for a quick start', async () => {
+      const { playing, now } = await startSound(0, 90 * 60_000);
+      now.mockReturnValue(90 * 60_000 + 120);
+
+      playing();
+      now.mockRestore();
+
+      expect(log.debug).toHaveBeenCalledWith(
+        'Playback started in guild guild-A after 120ms (voice connected 90min, ping ws 42ms / udp 17ms)',
+      );
+      expect(log.warn).not.toHaveBeenCalled();
+    });
+
+    it('keeps the connection age when connect() reuses the live connection', async () => {
+      const voice = await import('@discordjs/voice');
+      const conn = makeConnection();
+      vi.mocked(voice.joinVoiceChannel).mockReturnValue(conn as never);
+      const { playing, now } = await startSound(0, 60 * 60_000);
+      // Rejoin an hour in: @discordjs/voice hands back the same connection.
+      await mod.connect(makeClient().client as never, 'guild-A', 'chan-1');
+      now.mockReturnValue(60 * 60_000 + 100);
+
+      playing();
+      now.mockRestore();
+
+      expect(log.debug).toHaveBeenCalledWith(expect.stringContaining('voice connected 60min'));
+    });
+
+    it('logs a warning when the sound took longer than 500ms to start', async () => {
+      const { playing, now } = await startSound(0, 1_000);
+      now.mockReturnValue(3_500);
+
+      playing();
+      now.mockRestore();
+
+      expect(log.warn).toHaveBeenCalledWith(expect.stringContaining('after 2500ms'));
+    });
+
+    it('logs nothing when the player resumes playing with no start pending', async () => {
+      const { playing, now } = await startSound(0, 1_000);
+      now.mockReturnValue(1_100);
+      playing();
+      vi.clearAllMocks();
+
+      playing();
+      now.mockRestore();
+
+      expect(log.debug).not.toHaveBeenCalled();
+      expect(log.warn).not.toHaveBeenCalled();
+    });
   });
 });

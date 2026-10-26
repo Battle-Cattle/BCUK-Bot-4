@@ -6,12 +6,8 @@ import type { TwitchSendRuntime } from './twitchRuntime';
 
 const log = createLogger('Points');
 
-/** The `!points` command token. Exported so `twitchBot.ts` can skip the passive chat-earn award
- *  for a `!points` message itself — `!points` has no cooldown of its own, but chat-earn and
- *  `!gamble` share one cooldown, so without this exemption checking your balance would silently
- *  claim that shared cooldown and block an immediately-following `!gamble` for up to its full
- *  duration, with no feedback. */
-export const POINTS_COMMAND = '!points';
+/** The `!points` command token. */
+const POINTS_COMMAND = '!points';
 const LEADERBOARD_SIZE = 5;
 const LEADERBOARD_SUBCOMMANDS = new Set(['leaderboard', 'top']);
 
@@ -22,14 +18,21 @@ const LEADERBOARD_SUBCOMMANDS = new Set(['leaderboard', 'top']);
 
 const pointsRuntime = createRuntimeRegistry<TwitchSendRuntime>();
 
-/** Stores the Twitch chat runtime used to send points responses. Call once from index.ts after the Twitch bot is ready. */
+/**
+ * Stores the Twitch chat runtime used to send points responses. Call once from index.ts after the Twitch bot is ready.
+ * @param runtime - Twitch runtime whose `send` posts chat messages.
+ */
 export function registerPointsTwitchRuntime(runtime: TwitchSendRuntime): void {
   pointsRuntime.register(runtime);
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/** Formats the leaderboard as a single-line, rank-numbered chat message. */
+/**
+ * Formats the leaderboard as a single-line, rank-numbered chat message.
+ * @param entries - Leaderboard rows in rank order, each a viewer login and balance.
+ * @returns Comma-separated `N. login (balance)` entries, or a "no one has earned" message when empty.
+ */
 function formatLeaderboard(entries: { twitchUsername: string; balance: number }[]): string {
   if (entries.length === 0) return 'No one has earned any points yet.';
   return entries.map((entry, index) => `${index + 1}. ${entry.twitchUsername} (${entry.balance})`).join(', ');

@@ -5,7 +5,10 @@
   var collapse = document.getElementById('navbar-collapse');
   var mql = window.matchMedia('(max-width: 640px)');
 
-  /* Unconditionally sync ARIA + open state to the current viewport. */
+  /**
+   * Unconditionally sync ARIA + open state to the current viewport.
+   * @param mobile - True when the viewport matches the mobile (max-width: 640px) breakpoint.
+   */
   function syncToViewport(mobile) {
     nav.classList.remove('nav-open');
     toggle.setAttribute('aria-expanded', 'false');
@@ -50,6 +53,10 @@
   /* ── Nav group dropdowns ────────────────────────────────── */
   var groups = Array.prototype.slice.call(document.querySelectorAll('.nav-group'));
 
+  /**
+   * Collapses every nav dropdown group except `except`.
+   * @param except - The `.nav-group` element to leave open, or undefined to close them all.
+   */
   function closeAllGroups(except) {
     groups.forEach(function (g) {
       if (g !== except) {

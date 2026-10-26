@@ -174,6 +174,7 @@ async function ensurePruned(streamerId: number): Promise<void> {
  *
  * @param streamerId - Primary key of the `streamer` row.
  * @param limit - Maximum number of events to return.
+ * @returns Up to `limit` events, newest first.
  */
 export async function getRecentStreamerEvents(streamerId: number, limit: number): Promise<StreamerEvent[]> {
   // mysql2's prepared statements (execute()) can't bind LIMIT as a placeholder, so the

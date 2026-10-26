@@ -4,7 +4,10 @@ var expandedLiveRows = Object.create(null);
 
 var liveTableColumnsCache = null;
 
-/** Returns (and caches) the live table's column count, used for full-width colspans. */
+/**
+ * Returns (and caches) the live table's column count, used for full-width colspans.
+ * @returns The number of columns in the live table's header row, or 1 when there is no header.
+ */
 function getLiveTableColumns() {
   if (liveTableColumnsCache !== null) return liveTableColumnsCache;
 
@@ -15,12 +18,22 @@ function getLiveTableColumns() {
   return liveTableColumnsCache;
 }
 
-/** Builds the stable key identifying a live stream row (streamer + group). */
+/**
+ * Builds the stable key identifying a live stream row (streamer + group).
+ * @param item - One stream from GET /admin/streams/live.
+ * @returns The key, as "streamerId:groupId".
+ */
 function getLiveRowKey(item) {
   return String(item.streamerId || '') + ':' + String(item.groupId || '');
 }
 
-/** Builds a "label: link" row for a live detail section; `text` is the link's visible label. */
+/**
+ * Builds a "label: link" row for a live detail section; `text` is the link's visible label.
+ * @param label - The row's label text.
+ * @param url - The link target; an unsafe or missing URL renders a "—" placeholder.
+ * @param text - The link text, or falsy to show the URL itself.
+ * @returns The `.live-link-row` element.
+ */
 function createLinkRow(label, url, text) {
   var row = document.createElement('div');
   row.className = 'live-link-row';
@@ -35,7 +48,12 @@ function createLinkRow(label, url, text) {
   return row;
 }
 
-/** Builds a titled live detail section containing a grid of the given metadata items. */
+/**
+ * Builds a titled live detail section containing a grid of the given metadata items.
+ * @param titleText - The section heading.
+ * @param metaItems - Elements (from createMetadataItem) to place in the grid, in order.
+ * @returns The `.live-detail-section` element.
+ */
 function createDetailSection(titleText, metaItems) {
   var section = document.createElement('section');
   section.className = 'live-detail-section';
@@ -52,7 +70,11 @@ function createDetailSection(titleText, metaItems) {
   return section;
 }
 
-/** Builds the Multi-Twitch section of a live row's details. */
+/**
+ * Builds the Multi-Twitch section of a live row's details.
+ * @param multiTwitch - The stream's Multi-Twitch info (`enabled`, `applicable`, `participants`, `url`), or null when absent.
+ * @returns The Multi-Twitch `.live-detail-section` element.
+ */
 function createMultiTwitchSection(multiTwitch) {
   var participants = multiTwitch && multiTwitch.participants && multiTwitch.participants.length
     ? multiTwitch.participants.join(', ')

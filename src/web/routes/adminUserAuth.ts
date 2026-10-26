@@ -45,6 +45,7 @@ export class ManagerEditAuthError extends Error {
  * @param targetDiscordId The user being edited.
  * @param targetLevel The access level being assigned.
  * @param guildId The guild the edit applies to.
+ * @returns The error code (`self_edit_forbidden`, `access_level_too_high` or `target_above_level`), or null when the edit is allowed.
  */
 export async function checkManagerEditAuth(
   sessionUser: { discordId: string },
@@ -86,6 +87,7 @@ export async function checkManagerEditAuth(
  * @param sessionUser The acting user's identity (only `discordId` is used — their access level is
  *   re-resolved from the DB, not read off this object or the session).
  * @param guildId The guild to check the actor's current access level in.
+ * @returns `target_above_level` when the actor is no longer an Admin in `guildId`, or null when the removal is allowed.
  */
 export async function checkRemoveAuth(
   sessionUser: { discordId: string },
@@ -172,6 +174,7 @@ export async function canEditGlobalUserFields(
  *   and owner flag are re-resolved from the DB, not read off this object).
  * @param guildId The guild to verify membership in.
  * @param targetDiscordId The user whose Twitch state is being toggled.
+ * @returns `target_above_level` when the toggle isn't allowed (target not a member, an owner, or not outranked), or null when it is.
  */
 export async function checkToggleTwitchAuth(
   sessionUser: { discordId: string },

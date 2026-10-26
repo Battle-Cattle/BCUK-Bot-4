@@ -4,6 +4,7 @@
 import { createLogger } from '../shared/logger';
 import { TWITCH_CLIENT_ID, TWITCH_CLIENT_SECRET } from '../shared/config';
 import { twitchFetch } from './twitchApi';
+import { assertHelixOk } from './helixErrors';
 import type { DbStreamerEventSub } from '../db';
 import { saveStreamerToken, clearStreamerToken } from '../db';
 
@@ -106,7 +107,7 @@ async function postTokenRequest(grantParams: Record<string, string>, label: stri
     body: body.toString(),
   });
   if (res.status === 400 || res.status === 401) throw new TwitchAuthError(`[TwitchAPI] ${label}: invalid/expired credentials (${res.status})`);
-  if (!res.ok) throw new Error(`[TwitchAPI] ${label} failed: ${res.status}`);
+  assertHelixOk(res, label);
   return res.json() as Promise<OAuthTokens>;
 }
 
@@ -133,13 +134,18 @@ export async function refreshUserToken(refreshToken: string): Promise<OAuthToken
   return postTokenRequest({ grant_type: 'refresh_token', refresh_token: refreshToken }, 'refreshUserToken');
 }
 
-/** Validates a user access token and returns the owning user's ID and login, or null if invalid. */
+/**
+ * Validates a user access token and returns the owning user's ID and login, or null if invalid.
+ * @param accessToken - Twitch user OAuth access token to validate.
+ * @returns The token owner's Twitch user ID and login, or null if Twitch rejects it (400/401).
+ * @throws If Twitch returns any other non-OK status.
+ */
 export async function getUserFromToken(accessToken: string): Promise<{ id: string; login: string } | null> {
   const res = await twitchFetch('https://id.twitch.tv/oauth2/validate', {
     headers: { Authorization: `OAuth ${accessToken}` },
   });
   if (res.status === 401 || res.status === 400) return null;
-  if (!res.ok) throw new Error(`[TwitchAPI] getUserFromToken failed: ${res.status}`);
+  assertHelixOk(res, 'getUserFromToken');
   const data = await res.json() as { user_id: string; login: string };
   return { id: data.user_id, login: data.login };
 }

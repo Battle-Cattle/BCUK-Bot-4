@@ -2,7 +2,7 @@ import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import { requireCompanionKey } from '../middleware';
 import { getStreamerByDiscordId, getRedemptionAckStreamerId, listCompanionConfirmationRewardIds } from '../../db';
-import { getCustomRewards, TwitchCustomReward } from '../../twitch/twitchApi';
+import { getCustomRewards, TwitchCustomReward } from '../../twitch/twitchRewardsApi';
 import { getValidToken } from '../../twitch/twitchUserTokens';
 import { acknowledgeRedemption, extendRedemptionAck } from '../../twitch/eventsub/twitchEventSubRedemptionAcks';
 import { handleCompanionAck, handleCompanionProgress } from './companionAck';
@@ -11,7 +11,7 @@ const log = createLogger('CompanionRewards');
 const router = Router();
 
 /** A channel-point reward as surfaced to the companion app, so it knows what redemption events to expect. */
-export interface CompanionKnownReward {
+interface CompanionKnownReward {
   id: string;
   title: string;
   prompt: string;

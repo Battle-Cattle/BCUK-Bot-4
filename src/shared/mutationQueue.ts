@@ -183,6 +183,8 @@ function runWithHeldKeys<T>(
  * Operations sharing the same key run sequentially; operations on different
  * keys are independent. A failure in one queued operation does not prevent
  * later operations on the same key from running.
+ * @returns A new queue with its own private per-key chains: `run` (one key), `runMany` (several
+ *   keys held at once) and `size` (keys with queued work).
  */
 export function createMutationQueue<K extends string = string>(): {
   /**

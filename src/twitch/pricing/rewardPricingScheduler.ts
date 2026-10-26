@@ -1,6 +1,6 @@
 import { createLogger } from '../../shared/logger';
 import { getAllEnabledPricingRows, getPricingSettingsForStreamers, type StreamerPricingSettings } from '../../db';
-import { applyDecayTick } from './rewardPricingService';
+import { applyDecayTick, cancelPendingRedemptionPushes } from './rewardPricingService';
 import { recordSchedulerRun, normalizeError } from '../../shared/healthStore';
 
 const log = createLogger('RewardPricingScheduler');
@@ -20,7 +20,11 @@ let currentTickPromise: Promise<void> = Promise.resolve();
  */
 let schedulerStopped = false;
 
-/** True if `error` is MySQL's `ER_SERVER_SHUTDOWN` (errno 1053) — the DB server itself is restarting/shutting down. */
+/**
+ * True if `error` is MySQL's `ER_SERVER_SHUTDOWN` (errno 1053) — the DB server itself is restarting/shutting down.
+ * @param error - Whatever a failed DB call threw.
+ * @returns True if its `code` or `errno` identifies a server shutdown.
+ */
 function isServerShutdownError(error: unknown): boolean {
   const err = error as { code?: string; errno?: number } | null | undefined;
   return err?.code === 'ER_SERVER_SHUTDOWN' || err?.errno === 1053;
@@ -80,6 +84,7 @@ function resumeAfterDbRecovery(): void {
  * `applyDecayTick` re-reads fresh, so a tick-old value is harmless. No-ops (re-uses the
  * in-flight promise) if a tick is already running, so a slow tick can't overlap with the next
  * interval firing.
+ * @returns A promise that settles when the tick (or the already-running one) finishes.
  */
 export async function runDecayTick(): Promise<void> {
   if (tickRunning) return currentTickPromise;
@@ -142,13 +147,14 @@ export function startRewardPricingScheduler(): void {
 }
 
 /**
- * Stops the periodic decay-tick interval (and any pending DB-shutdown recovery probe) and
- * awaits any in-flight tick before returning. Marks the scheduler stopped first, so that in-flight
+ * Stops the periodic decay-tick interval (and any pending DB-shutdown recovery probe or
+ * post-redemption price push) and awaits any in-flight tick before returning. Marks the scheduler stopped first, so that in-flight
  * tick can't restart polling (via DB-recovery resume) or schedule a new probe once it settles.
  */
 export async function stopRewardPricingScheduler(): Promise<void> {
   schedulerStopped = true;
   if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
+  cancelPendingRedemptionPushes();
   await currentTickPromise;
   if (dbShutdownRetryTimer) { clearTimeout(dbShutdownRetryTimer); dbShutdownRetryTimer = null; }
   awaitingDbRecovery = false;

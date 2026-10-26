@@ -14,14 +14,23 @@ type ShoutoutRuntime = TwitchSendRuntime;
 
 const shoutoutRuntime = createRuntimeRegistry<ShoutoutRuntime>();
 
-/** Stores the Twitch chat runtime used to send `!so` shoutouts. Call once from index.ts after the Twitch bot is ready. */
+/**
+ * Stores the Twitch chat runtime used to send `!so` shoutouts. Call once from index.ts after the Twitch bot is ready.
+ * @param runtime - Twitch runtime whose `send` posts chat messages.
+ */
 export function registerShoutoutRuntime(runtime: ShoutoutRuntime): void {
   shoutoutRuntime.register(runtime);
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/** Builds the `!so` shoutout message text for `login`, tailored to whether they're currently live and/or have a known last-played game. */
+/**
+ * Builds the `!so` shoutout message text for `login`, tailored to whether they're currently live and/or have a known last-played game.
+ * @param login - Twitch login being shouted out.
+ * @param gameName - Current or last-played game, or null if unknown.
+ * @param isLive - Whether the channel is live right now.
+ * @returns The shoutout text, including a `twitch.tv/<login>` link.
+ */
 function formatShoutoutMessage(login: string, gameName: string | null, isLive: boolean): string {
   const url = `twitch.tv/${login}`;
   if (isLive && gameName) return `Go check out @${login}, they're live playing ${gameName}! ${url}`;

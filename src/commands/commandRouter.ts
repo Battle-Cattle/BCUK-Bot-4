@@ -3,9 +3,8 @@ import { findCachedSfxTrigger, type SfxLookupResult } from '../db';
 import { pickWeightedRandom } from '../audio/soundSelector';
 import { isPlaying } from '../audio/audioPlayer';
 import { playFile, VoiceNotConnectedError } from '../audio/sfxPlayer';
-import { SFX_FOLDER, GLOBAL_COOLDOWN_MS } from '../shared/config';
+import { GLOBAL_COOLDOWN_MS } from '../shared/config';
 import { setVoicePlaying } from '../shared/statusStore';
-import { safeResolve } from '../shared/pathUtils';
 import { getOrCreate } from '../shared/mapUtils';
 import { resolveCommand } from './commandUtils';
 
@@ -18,7 +17,11 @@ interface GuildCommandState {
 
 const guildStates = new Map<string, GuildCommandState>();
 
-/** Returns the cooldown/in-flight state for a guild, creating a fresh record on first use. */
+/**
+ * Returns the cooldown/in-flight state for a guild, creating a fresh record on first use.
+ * @param guildId - Discord snowflake of the guild.
+ * @returns The guild's existing or newly created command state.
+ */
 function getGuildCommandState(guildId: string): GuildCommandState {
   return getOrCreate(guildStates, guildId, () => ({ lastPlayedAt: 0, inFlight: false }));
 }
@@ -59,23 +62,20 @@ async function playTrigger(
   }
 
   const filename = pickWeightedRandom(files);
-  const fullPath = safeResolve(SFX_FOLDER, filename);
-  if (!fullPath) {
-    log.error(`[${source}] Invalid file path for trigger '${command}'`);
-    return;
-  }
+  // playFile resolves the name against the SFX folder and blocks anything outside it.
+  const logName = filename.replace(/[\r\n]/g, '');
 
-  log.info(`[${source}] Playing '${filename}' for trigger '${command}' in guild ${guildId}`);
+  log.info(`[${source}] Playing '${logName}' for trigger '${command}' in guild ${guildId}`);
 
   try {
-    await playFile(fullPath, guildId);
+    await playFile(filename, guildId);
     state.lastPlayedAt = Date.now();
     setVoicePlaying(guildId, filename, command, source);
   } catch (err) {
     if (err instanceof VoiceNotConnectedError) {
       log.info(`[${source}] Skipping '${command}' — not connected to voice channel`);
     } else {
-      log.error(`[${source}] Failed to play ${fullPath}:`, err);
+      log.error(`[${source}] Failed to play '${logName}':`, err);
     }
   }
 }
@@ -117,10 +117,11 @@ function tryClaimGuildSlot(
 
 /**
  * Handle a raw chat message from Twitch or Discord.
- * Looks the first word up as an SFX trigger first and returns quietly if it isn't one,
- * so ordinary chat never claims the guild's in-flight slot (which would silently drop a
- * concurrent real trigger) or logs cooldown noise. Only then checks cooldown/playing state
- * and claims the slot before playing.
+ * Returns straight away for a message with no command token (ordinary chat without a `!`/`#`
+ * prefix). A prefixed one is looked up as an SFX trigger first, returning quietly if it isn't
+ * one, so a non-trigger like `!hello` never claims the guild's in-flight slot (which would
+ * silently drop a concurrent real trigger) or logs cooldown noise. Only then checks
+ * cooldown/playing state and claims the slot before playing.
  * Cooldown and in-flight state are tracked per guild so a trigger in one guild
  * never blocks or cools down a trigger in another.
  *
@@ -129,8 +130,8 @@ function tryClaimGuildSlot(
  * @param guildId    The guild to target; null when no active guild could be
  *   resolved (e.g. a Twitch command fired while the streamer isn't
  *   connected to voice anywhere) — the command is skipped, with a warning
- *   logged only if the message actually matches a known trigger (most chat
- *   messages don't, and would otherwise spam this warning on every message).
+ *   logged only if the message actually matches a known trigger (a prefixed
+ *   non-trigger would otherwise log this warning too).
  * @param precomputedCommand - Already-parsed command token from the caller's single
  *   `extractCommand` call for this message, or omit to parse `rawMessage` here.
  */
@@ -140,8 +141,8 @@ export async function handleCommand(
   guildId: string | null,
   precomputedCommand?: string | null,
 ): Promise<void> {
-  // Extract the first word of the message — this is matched directly against
-  // trigger_command in the DB, which already includes whatever prefix is used
+  // The message's first word (null without a !/# prefix) — matched directly against
+  // trigger_command in the DB, which already includes the prefix
   const command = resolveCommand(rawMessage, precomputedCommand);
   if (!command) return;
 

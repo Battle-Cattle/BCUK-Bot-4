@@ -1,10 +1,16 @@
 /* global confirmSubmit, registerUploadFormHandler */
-/** Returns the confirmation message for deleting an overlay video. */
+/**
+ * Returns the confirmation message for deleting an overlay video.
+ * @returns {string} The text shown in the delete-video confirm() prompt.
+ */
 function getDeleteVideoConfirmationMessage() {
   return 'Delete this video? Any reward assignments using it will be removed.';
 }
 
-/** Returns the confirmation message for removing a reward assignment. */
+/**
+ * Returns the confirmation message for removing a reward assignment.
+ * @returns {string} The text shown in the remove-reward-assignment confirm() prompt.
+ */
 function getDeleteRewardConfirmationMessage() {
   return 'Remove this reward assignment?';
 }

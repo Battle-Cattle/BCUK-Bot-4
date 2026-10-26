@@ -61,6 +61,7 @@ interface CommandPageData {
  * Loads what the commands page shows. Mod+ get the whole catalog and every Twitch-linked member of
  * the current guild to assign; a streamer below Mod gets only the commands on their own channel, and no user list.
  * @param req - Express request; reads the session user.
+ * @returns The commands to list, the members offered for assignment (empty below Mod), and whether the user has a linked Twitch account.
  */
 async function loadCommandPageData(req: Request): Promise<CommandPageData> {
   if (canManageCatalog(req)) {

@@ -48,7 +48,7 @@ declare module 'express-session' {
      */
     botOAuthState?: { value: string; expiresAt: number; attemptStartedAt: number };
     /** Pending companion-app loopback OAuth login, set by /companion/login. */
-    companionOAuth?: { redirectUri: string; appState: string; expiresAt: number };
+    companionOAuth?: { redirectUri: string; appState: string; expiresAt: number; codeChallenge?: string };
     /** Pending WebAuthn (passkey) challenge, set by the /auth/passkey options routes and consumed by verify. */
     webauthnChallenge?: {
       purpose: 'register' | 'login';

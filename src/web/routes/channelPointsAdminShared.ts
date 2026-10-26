@@ -2,7 +2,7 @@ import type { Request, Response } from 'express';
 import type { Logger } from 'winston';
 import { DEFAULT_PRICING_COOLDOWN_SECONDS } from '../../db';
 import type { DbStreamerEventSub } from '../../db';
-import type { CustomRewardInput, TwitchCustomReward } from '../../twitch/twitchApi';
+import type { CustomRewardInput, TwitchCustomReward } from '../../twitch/twitchRewardsApi';
 import { trimField, parsePositiveIntId, parseRewardIdParam, parseCheckboxField } from './validation';
 import { requireStreamer } from './viewHelpers';
 import { logAndRedirectError } from './errorHandling';
@@ -16,6 +16,11 @@ export const NOT_A_STREAMER_REDIRECT = '/channel-points?error=not_a_streamer';
  * route param, runs `action`, then redirects to `/channel-points` with `success=<successCode>`
  * or (on a thrown error) `error=<errorCode>` via `logAndRedirectError`. Shared between
  * `channelPointsAdminMutations.ts` and `channelPointsAdminPricingMutations.ts`.
+ * @param req - Request carrying the session user and the `:twitchRewardId` route param.
+ * @param res - Response used for the success, validation or error redirect.
+ * @param action - The delete to run with the resolved streamer and Twitch reward ID.
+ * @param opts - Logger, success code, error log label and error code for the redirects.
+ * @returns Resolves once a redirect has been sent (or after `requireStreamer` has redirected).
  */
 export async function handleRewardDeleteAction(
   req: Request,
@@ -43,6 +48,8 @@ export async function handleRewardDeleteAction(
  * "no preference" (`undefined`, so the field is omitted from the Twitch API call). An array
  * (repeated field) or a non-blank value that doesn't match the hex format is a validation
  * error (`null`) — distinct from "not provided" so the caller can reject the whole form.
+ * @param value - Raw `background_color` form value (an array when repeated).
+ * @returns The trimmed `#rrggbb` color, undefined when blank or missing, or null when malformed or repeated.
  */
 export function parseHexColorField(value: string | string[] | undefined): string | null | undefined {
   if (Array.isArray(value)) return null;
@@ -54,6 +61,8 @@ export function parseHexColorField(value: string | string[] | undefined): string
 /**
  * Parses a required non-negative decimal form field (e.g. max_multiplier).
  * Rejects arrays (repeated fields), empty/whitespace input, non-numeric input, and negative values.
+ * @param value - Raw form value (an array when repeated).
+ * @returns The parsed number (0 or more), or null when invalid.
  */
 export function parseNonNegativeNumberField(value: string | string[] | undefined): number | null {
   if (Array.isArray(value)) return null;
@@ -65,6 +74,8 @@ export function parseNonNegativeNumberField(value: string | string[] | undefined
 /**
  * Parses a required strictly-positive decimal form field (e.g. curve, half_life_minutes).
  * Rejects arrays (repeated fields), empty/whitespace input, non-numeric input, and non-positive values.
+ * @param value - Raw form value (an array when repeated).
+ * @returns The parsed number (greater than 0), or null when invalid.
  */
 export function parsePositiveNumberField(value: string | string[] | undefined): number | null {
   if (Array.isArray(value)) return null;
@@ -79,6 +90,8 @@ const VALID_ROUND_TO_NEAREST = new Set([0, 5, 10]);
  * Parses the optional "round to nearest" pricing field (0/5/10 points). Missing or blank
  * input defaults to `0` (rounding off) rather than being rejected, since the setting is
  * optional. An array (repeated field) or any value outside `{0, 5, 10}` is a validation error.
+ * @param value - Raw `round_to_nearest` form value (an array when repeated).
+ * @returns 0, 5 or 10 (0 when blank or missing), or null when invalid.
  */
 export function parseRoundToNearestField(value: string | string[] | undefined): number | null {
   if (Array.isArray(value)) return null;
@@ -91,6 +104,8 @@ export function parseRoundToNearestField(value: string | string[] | undefined): 
  * The cooldown (seconds) dynamic pricing should use for a reward: its own Twitch global
  * cooldown when enabled, otherwise a fallback default — keeps pricing's `cooldown_seconds`
  * mirroring the reward's real Twitch cooldown instead of a separately-edited value.
+ * @param reward - The Twitch custom reward, of which only its global cooldown setting is read.
+ * @returns The reward's global cooldown in seconds, or `DEFAULT_PRICING_COOLDOWN_SECONDS` when its cooldown is off.
  */
 export function effectiveCooldownSeconds(reward: Pick<TwitchCustomReward, 'global_cooldown_setting'>): number {
   return reward.global_cooldown_setting.is_enabled
@@ -101,7 +116,12 @@ export function effectiveCooldownSeconds(reward: Pick<TwitchCustomReward, 'globa
 const TITLE_MAX_LENGTH = 45; // Twitch's own limit for a custom reward's title
 const PROMPT_MAX_LENGTH = 200; // Twitch's own limit for a custom reward's prompt
 
-/** True unless `condition` holds without `requirement` also holding — e.g. a limit's checkbox is checked but its numeric field is missing. */
+/**
+ * True unless `condition` holds without `requirement` also holding — e.g. a limit's checkbox is checked but its numeric field is missing.
+ * @param condition - Whether the triggering option is set (e.g. a limit's checkbox is checked).
+ * @param requirement - Whether the dependent value is present and valid.
+ * @returns False only when `condition` is true and `requirement` is false.
+ */
 function impliesTruth(condition: boolean, requirement: boolean): boolean {
   return !condition || requirement;
 }
@@ -111,6 +131,8 @@ function impliesTruth(condition: boolean, requirement: boolean): boolean {
  * edit forms. Returns `null` if any field is invalid — including cross-field rules Twitch
  * itself enforces (a prompt is required when user input is required; a limit's numeric value
  * is required when that limit's "enabled" checkbox is checked).
+ * @param body - Parsed create/edit reward form body.
+ * @returns The validated reward input for the Twitch API, or null when any field is invalid.
  */
 export function parseRewardFields(body: Record<string, string | string[] | undefined>): CustomRewardInput | null {
   const title = trimField(body.title);

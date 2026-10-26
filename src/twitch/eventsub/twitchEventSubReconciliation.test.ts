@@ -15,13 +15,13 @@ vi.mock('../../db', () => ({
 }));
 vi.mock('./twitchEventSubDispatch', () => ({ getAllStreamerInfo: vi.fn() }));
 vi.mock('../twitchUserTokens', () => ({ getValidToken: vi.fn() }));
-vi.mock('../twitchApi', () => ({ getCustomRewards: vi.fn(), getRewardRedemptions: vi.fn() }));
+vi.mock('../twitchRewardsApi', () => ({ getCustomRewards: vi.fn(), getRewardRedemptions: vi.fn() }));
 vi.mock('./twitchEventSubRedemption', () => ({ handleRedemption: vi.fn() }));
 
 import { getStreamerById, pruneRedemptionLedger, pruneResolvedRedemptionAcks } from '../../db';
 import { getAllStreamerInfo } from './twitchEventSubDispatch';
 import { getValidToken } from '../twitchUserTokens';
-import { getCustomRewards, getRewardRedemptions } from '../twitchApi';
+import { getCustomRewards, getRewardRedemptions } from '../twitchRewardsApi';
 import { handleRedemption } from './twitchEventSubRedemption';
 import {
   runReconciliationTick, startEventSubReconciliation, stopEventSubReconciliation,
@@ -86,6 +86,7 @@ describe('runReconciliationTick', () => {
       expect.objectContaining({ id: 'r1', reward: { id: 'rwd1', title: 'Cool Reward' } }),
       config,
       1,
+      'reconciliation',
     );
   });
 
@@ -146,6 +147,7 @@ describe('runReconciliationTick', () => {
       expect.objectContaining({ id: 'r1', reward: { id: 'rwd1', title: 'Cool Reward' } }),
       config,
       1,
+      'reconciliation',
     );
   });
 
@@ -169,7 +171,7 @@ describe('runReconciliationTick', () => {
     await runReconciliationTick();
 
     expect(handleRedemption).toHaveBeenCalledTimes(1);
-    expect(handleRedemption).toHaveBeenCalledWith('streamerA', expect.objectContaining({ id: 'f1' }), config, 1);
+    expect(handleRedemption).toHaveBeenCalledWith('streamerA', expect.objectContaining({ id: 'f1' }), config, 1, 'reconciliation');
   });
 
   it('drops a streamer\'s cursors once they have been missing for longer than CURSOR_RETENTION_MS', async () => {
@@ -247,7 +249,7 @@ describe('runReconciliationTick', () => {
     await runReconciliationTick();
 
     expect(handleRedemption).toHaveBeenCalledTimes(1);
-    expect(handleRedemption).toHaveBeenCalledWith('streamerA', expect.objectContaining({ id: 'f1' }), config, 1);
+    expect(handleRedemption).toHaveBeenCalledWith('streamerA', expect.objectContaining({ id: 'f1' }), config, 1, 'reconciliation');
   });
 
   it('prunes a success-only cursor after the broadcaster is missing longer than CURSOR_RETENTION_MS', async () => {
@@ -315,7 +317,7 @@ describe('runReconciliationTick', () => {
     await runReconciliationTick();
 
     expect(handleRedemption).toHaveBeenCalledTimes(1);
-    expect(handleRedemption).toHaveBeenCalledWith('streamerA', expect.objectContaining({ id: 'f1' }), config, 1);
+    expect(handleRedemption).toHaveBeenCalledWith('streamerA', expect.objectContaining({ id: 'f1' }), config, 1, 'reconciliation');
     expect(mockLog.warn).not.toHaveBeenCalledWith(expect.stringContaining('Abandoning'));
   });
 
@@ -332,7 +334,7 @@ describe('runReconciliationTick', () => {
     vi.mocked(handleRedemption).mockReset().mockResolvedValue(true);
     await runReconciliationTick();
 
-    expect(handleRedemption).toHaveBeenCalledWith('streamerA', expect.objectContaining({ id: 'f1' }), config, 1);
+    expect(handleRedemption).toHaveBeenCalledWith('streamerA', expect.objectContaining({ id: 'f1' }), config, 1, 'reconciliation');
     expect(mockLog.warn).not.toHaveBeenCalledWith(expect.stringContaining('Abandoning'));
   });
 
@@ -582,6 +584,16 @@ describe('runReconciliationTick', () => {
     await runReconciliationTick();
 
     expect(mockLog.warn).toHaveBeenCalledWith(expect.stringContaining('Reconciliation caught a redemption missed by EventSub'));
+  });
+
+  it('replays redemptions through handleRedemption as a reconciliation source', async () => {
+    vi.mocked(getAllStreamerInfo).mockReturnValue(new Map([['uid1', info]]));
+    mockFulfilledOnly({ redemptions: [redemption('r1', new Date().toISOString())], cursor: null });
+    vi.mocked(handleRedemption).mockResolvedValue(false);
+
+    await runReconciliationTick();
+
+    expect(handleRedemption).toHaveBeenCalledWith('streamerA', expect.objectContaining({ id: 'r1' }), config, 1, 'reconciliation');
   });
 
   it('does not log a "caught" warning when handleRedemption reports the redemption was already handled live (duplicate)', async () => {

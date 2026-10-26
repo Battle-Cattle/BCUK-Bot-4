@@ -4,6 +4,18 @@ import { mockLogger } from '../../test-utils/loggerMock';
 /** Mocks `../../db` so `exchangeCodeForToken` is stubbed instead of hitting a real Twitch/DB call. */
 vi.mock('../../db', () => ({
   exchangeCodeForToken: vi.fn(),
+  revokeTokenByHash: vi.fn(),
+}));
+vi.mock('../middleware', () => ({
+  requireCompanionKey: (req: any, res: any, next: any) => {
+    if (req.headers.authorization !== 'Bearer good-token') {
+      res.status(401).json({ ok: false, error: 'Unauthorized' });
+      return;
+    }
+    req.companionDiscordId = 'user1';
+    req.companionTokenHash = 'hash1';
+    next();
+  },
 }));
 /** Mocks the shared logger so route handlers don't write real log output during tests. */
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
@@ -18,7 +30,7 @@ vi.mock('./companionEvents', () => ({ disconnectCompanionConnections: vi.fn() })
 import express from 'express';
 import supertest from 'supertest';
 import router from './companionAuth';
-import { exchangeCodeForToken } from '../../db';
+import { exchangeCodeForToken, revokeTokenByHash } from '../../db';
 import { disconnectCompanionConnections } from './companionEvents';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
@@ -114,7 +126,7 @@ describe('POST /api/companion/oauth/token', () => {
     const res = await supertest(buildApp()).post('/api/companion/oauth/token').send({ code: 'good' });
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ token: 'plain-token-value' });
-    expect(exchangeCodeForToken).toHaveBeenCalledWith('good');
+    expect(exchangeCodeForToken).toHaveBeenCalledWith('good', null);
   });
 
   it('ends any open companion SSE connections for the user after issuing a new token', async () => {
@@ -135,5 +147,88 @@ describe('POST /api/companion/oauth/token', () => {
     vi.mocked(exchangeCodeForToken).mockRejectedValue(new Error('DB error'));
     const res = await supertest(buildApp()).post('/api/companion/oauth/token').send({ code: 'good' });
     expect(res.status).toBe(500);
+  });
+});
+
+// ─── PKCE ─────────────────────────────────────────────────────────────────────
+
+const CHALLENGE = 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM';
+const VERIFIER = 'dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk';
+
+describe('PKCE on the companion login', () => {
+  it('stashes an S256 code_challenge with the pending login', async () => {
+    let capturedSession: any;
+    const app = express();
+    app.use((req: any, _res: any, next: any) => {
+      req.session = {};
+      capturedSession = req.session;
+      next();
+    });
+    app.use(router);
+    const res = await supertest(app).get(
+      `/companion/login?redirect_uri=http://127.0.0.1:9999/callback&state=s&code_challenge=${CHALLENGE}&code_challenge_method=S256`,
+    );
+    expect(res.status).toBe(302);
+    expect(capturedSession.companionOAuth.codeChallenge).toBe(CHALLENGE);
+  });
+
+  it.each([
+    [`code_challenge=${CHALLENGE}&code_challenge_method=plain`],
+    [`code_challenge=${CHALLENGE}`],
+    ['code_challenge=too-short&code_challenge_method=S256'],
+    ['code_challenge_method=S256'],
+  ])('rejects invalid PKCE parameters (%s)', async (pkce) => {
+    const res = await supertest(buildApp()).get(`/companion/login?redirect_uri=http://127.0.0.1:9999/callback&state=s&${pkce}`);
+    expect(res.status).toBe(400);
+  });
+
+  it('passes the code_verifier through to the exchange', async () => {
+    vi.mocked(exchangeCodeForToken).mockResolvedValue({ token: 't', discordId: 'user1' });
+    const res = await supertest(buildApp()).post('/api/companion/oauth/token').send({ code: 'good', code_verifier: VERIFIER });
+    expect(res.status).toBe(200);
+    expect(exchangeCodeForToken).toHaveBeenCalledWith('good', VERIFIER);
+  });
+
+  it.each([['short'], [42], ['x'.repeat(129)], ['has spaces in it that are not allowed by the pkce spec at all']])(
+    'rejects a malformed code_verifier (%s)',
+    async (codeVerifier) => {
+      const res = await supertest(buildApp()).post('/api/companion/oauth/token').send({ code: 'good', code_verifier: codeVerifier });
+      expect(res.status).toBe(400);
+      expect(exchangeCodeForToken).not.toHaveBeenCalled();
+    },
+  );
+});
+
+// ─── POST /api/companion/token/revoke ─────────────────────────────────────────
+
+describe('POST /api/companion/token/revoke', () => {
+  it('revokes the exact token the caller presented and ends its open SSE connections', async () => {
+    vi.mocked(revokeTokenByHash).mockResolvedValueOnce(true);
+    const res = await supertest(buildApp()).post('/api/companion/token/revoke').set('Authorization', 'Bearer good-token');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ok: true });
+    expect(revokeTokenByHash).toHaveBeenCalledWith('user1', 'hash1');
+    expect(disconnectCompanionConnections).toHaveBeenCalledWith('user1');
+  });
+
+  it('leaves the connections alone when the token was replaced or revoked after authenticating', async () => {
+    vi.mocked(revokeTokenByHash).mockResolvedValueOnce(false);
+    const res = await supertest(buildApp()).post('/api/companion/token/revoke').set('Authorization', 'Bearer good-token');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ok: true });
+    expect(disconnectCompanionConnections).not.toHaveBeenCalled();
+  });
+
+  it('refuses an unknown or already-revoked token', async () => {
+    const res = await supertest(buildApp()).post('/api/companion/token/revoke').set('Authorization', 'Bearer stale');
+    expect(res.status).toBe(401);
+    expect(revokeTokenByHash).not.toHaveBeenCalled();
+  });
+
+  it('returns 500 when revoking fails', async () => {
+    vi.mocked(revokeTokenByHash).mockRejectedValueOnce(new Error('DB down'));
+    const res = await supertest(buildApp()).post('/api/companion/token/revoke').set('Authorization', 'Bearer good-token');
+    expect(res.status).toBe(500);
+    expect(disconnectCompanionConnections).not.toHaveBeenCalled();
   });
 });

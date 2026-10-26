@@ -7,7 +7,7 @@ vi.mock('../shared/logger', () => ({
   createLogger: () => (log.current ??= mockLogger()),
 }));
 
-import { WebSocketShardEvents } from 'discord.js';
+import { WebSocketShardEvents } from '@discordjs/ws';
 import { createVoiceAdapterFactory } from './voiceAdapter';
 
 type FakeClient = { ws: { on: ReturnType<typeof vi.fn>; send: ReturnType<typeof vi.fn> } };

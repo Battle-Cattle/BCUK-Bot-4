@@ -19,7 +19,7 @@ vi.mock('../middleware', () => ({
   requireAuth: (_req: any, _res: any, next: any) => next(),
 }));
 
-vi.mock('../../twitch/twitchApi', () => ({
+vi.mock('../../twitch/twitchRewardsApi', () => ({
   getCustomRewards: vi.fn(),
 }));
 
@@ -51,7 +51,7 @@ import supertest from 'supertest';
 import router, { statusConnections } from './overlayAdmin';
 import { getStreamerByDiscordId, getVideosForStreamer, getRewardsForStreamer } from '../../db';
 import { getValidToken } from '../../twitch/twitchUserTokens';
-import { getCustomRewards } from '../../twitch/twitchApi';
+import { getCustomRewards } from '../../twitch/twitchRewardsApi';
 import { AccessLevel } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 import { makeSessionUser, type SessionUserFixture } from '../../test-utils/fixtures';

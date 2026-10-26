@@ -64,7 +64,11 @@ const COMMAND_COLUMNS = `ac.id, ac.streamer_id, ac.name, ac.trigger_string, ac.i
 
 // ─── Row mapping ──────────────────────────────────────────────────────────────
 
-/** Maps a raw `advanced_command` row to a {@link DbAdvancedCommand} with empty effects. */
+/**
+ * Maps a raw `advanced_command` row to a {@link DbAdvancedCommand} with empty effects.
+ * @param row - Row selected from `advanced_command`.
+ * @returns The mapped command, with `effects` left empty for the caller to fill.
+ */
 function mapCommand(row: mysql.RowDataPacket): DbAdvancedCommand {
   return {
     id: row.id,
@@ -89,7 +93,11 @@ function mapCommand(row: mysql.RowDataPacket): DbAdvancedCommand {
   };
 }
 
-/** Maps a raw `advanced_command_alert` row to an {@link AdvancedCommandAlert}. */
+/**
+ * Maps a raw `advanced_command_alert` row to an {@link AdvancedCommandAlert}.
+ * @param row - Row selected from `advanced_command_alert`.
+ * @returns The mapped alert config.
+ */
 function mapAlert(row: mysql.RowDataPacket): AdvancedCommandAlert {
   return {
     messageTemplate: row.message_template,
@@ -215,7 +223,11 @@ async function runGuardedWrite<T>(trigger: string | null, write: (conn: PoolConn
   }
 }
 
-/** The `advanced_command` column values for `settings`, in {@link SETTINGS_COLUMNS} order. */
+/**
+ * The `advanced_command` column values for `settings`, in {@link SETTINGS_COLUMNS} order.
+ * @param s - The command settings to persist.
+ * @returns The column values, with booleans coerced to 0/1 for the BIT columns.
+ */
 function settingsParams(s: AdvancedCommandSettings): Array<string | number | null> {
   return [
     s.name, s.triggerString, s.isEnabled ? 1 : 0, s.response, s.pointCost, s.priceStep, s.maxCost,
@@ -391,7 +403,11 @@ async function replaceAlert(conn: PoolConnection, commandId: number, alert: Adva
   return [];
 }
 
-/** Collects the non-null `image_filename`/`sound_filename` values from alert rows. */
+/**
+ * Collects the non-null `image_filename`/`sound_filename` values from alert rows.
+ * @param rows - Rows from `advanced_command_alert` with `image_filename`/`sound_filename` columns.
+ * @returns The non-empty filenames, image then sound per row.
+ */
 function assetFilenames(rows: mysql.RowDataPacket[]): string[] {
   return rows.flatMap((r) => [r.image_filename, r.sound_filename]).filter((f): f is string => typeof f === 'string' && f !== '');
 }

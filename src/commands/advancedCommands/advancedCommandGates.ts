@@ -76,7 +76,13 @@ type CooldownCommand = Pick<DbAdvancedCommand, 'id' | 'globalCooldownSeconds' | 
 export function createAdvancedCommandCooldowns(): AdvancedCommandCooldowns {
   const lastUse = new Map<string, number>();
 
-  /** Seconds left on one cooldown, given its length and the key's last use. */
+  /**
+   * Seconds left on one cooldown, given its length and the key's last use.
+   * @param key - Cooldown key: the command id (global) or `id:login` (per-user).
+   * @param seconds - Configured cooldown length in seconds; 0 or less means no cooldown.
+   * @param now - Current time in epoch milliseconds.
+   * @returns Whole seconds remaining (rounded up), or 0 if off cooldown or never used.
+   */
   const left = (key: string, seconds: number, now: number): number => {
     const last = lastUse.get(key);
     if (last === undefined || seconds <= 0) return 0;

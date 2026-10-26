@@ -1,6 +1,11 @@
 /* global clearChildren, relativeTime, setClass, setText */
 /* ── Status rendering & polling ──────────────────────────── */
 
+/**
+ * Lists each monitored channel with its live/offline dot, or "None configured." when there are none.
+ * @param container - The element the channel list is rendered into.
+ * @param channelMap - Map of Twitch channel name to its live state from /api/status.
+ */
 function renderChannels(container, channelMap) {
   clearChildren(container);
   const entries = Object.entries(channelMap);
@@ -56,6 +61,10 @@ function renderChannels(container, channelMap) {
   }
 }
 
+/**
+ * Updates the dashboard (Discord bot, voice connection, last played sound, channels) from an /api/status response.
+ * @param status - The parsed /api/status JSON (`discord`, `voice`, `twitch` sections, plus the last played sound).
+ */
 function applyStatus(status) {
   // Discord bot
   const discordOn = status.discord.ready;
@@ -103,6 +112,7 @@ function applyStatus(status) {
 let consecutiveFailures = 0;
 const STALE_THRESHOLD = 3;
 
+/** Polls /api/status and applies it, showing "(status unavailable)" after STALE_THRESHOLD failures in a row. */
 async function fetchStatus() {
   try {
     const res = await fetch('/api/status');

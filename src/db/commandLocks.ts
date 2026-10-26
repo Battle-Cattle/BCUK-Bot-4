@@ -12,7 +12,11 @@ const COMMAND_WRITE_LOCK_TIMEOUT_SECONDS = 10;
 
 export const MAX_DEADLOCK_RETRIES = 3;
 
-/** Returns true if `error` is a MySQL deadlock error (`ER_LOCK_DEADLOCK` / errno 1213). */
+/**
+ * Returns true if `error` is a MySQL deadlock error (`ER_LOCK_DEADLOCK` / errno 1213).
+ * @param error - The caught error, of any shape.
+ * @returns True for a deadlock, false otherwise.
+ */
 export function isDeadlockError(error: unknown): boolean {
   const err = error as { code?: string; errno?: number };
   return err.code === 'ER_LOCK_DEADLOCK' || err.errno === 1213;
@@ -20,12 +24,20 @@ export function isDeadlockError(error: unknown): boolean {
 
 // ─── Named locks ─────────────────────────────────────────────────────────────
 
-/** Derives a stable, length-bounded MySQL named-lock name for a command string, via a truncated SHA-256 hash. */
+/**
+ * Derives a stable, length-bounded MySQL named-lock name for a command string, via a truncated SHA-256 hash.
+ * @param command - Normalized command string to lock on.
+ * @returns `bcuk_cmd_` followed by the first 48 hex characters of the hash.
+ */
 export function getCommandWriteLockName(command: string): string {
   return `bcuk_cmd_${createHash('sha256').update(command).digest('hex').slice(0, 48)}`;
 }
 
-/** Maps `commands` to their lock names, sorted so callers always acquire multiple locks in a consistent order (avoids lock-order deadlocks). */
+/**
+ * Maps `commands` to their lock names, sorted so callers always acquire multiple locks in a consistent order (avoids lock-order deadlocks).
+ * @param commands - Normalized command strings to lock on.
+ * @returns The lock names, in the sorted order of their source commands.
+ */
 export function getSortedCommandLockNames(commands: string[]): string[] {
   // The default sort compares by UTF-16 code units, the same order as `<` on strings.
   return [...commands].sort().map((command) => getCommandWriteLockName(command));

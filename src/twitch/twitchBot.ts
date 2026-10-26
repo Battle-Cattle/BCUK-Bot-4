@@ -10,8 +10,9 @@ import { executeShoutoutForTwitch } from '../commands/shoutoutHandler';
 import { executeCountdownForTwitch } from '../commands/countdownHandler';
 import { executeFollowageForTwitch } from '../commands/followageHandler';
 import { awardPointsForChatMessage } from '../commands/pointsEarnHandler';
-import { executePointsCommandForTwitch, POINTS_COMMAND } from '../commands/pointsHandler';
+import { executePointsCommandForTwitch } from '../commands/pointsHandler';
 import { executeGambleCommandForTwitch, GAMBLE_COMMAND } from '../commands/gambleHandler';
+import { executeRaffleCommandForTwitch } from '../commands/raffle/raffleHandler';
 import { executeAdvancedCommandForTwitch } from '../commands/advancedCommands/advancedCommandHandler';
 import { fireAndForget, extractCommand } from '../commands/commandUtils';
 import { recordChatMessage } from './twitchChatActivity';
@@ -20,17 +21,9 @@ import { recordTwitchChatConnected } from '../shared/healthStore';
 import { normalizeTwitchChannelName } from './twitchChannelName';
 import { throttledTwitchSend, withTimeout } from './twitchSendQueue';
 import { createLogger } from '../shared/logger';
-import {
-  createManagedLookupCache,
-  DEFAULT_REFRESH_FAILURE_BACKOFF_MS,
-  DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS,
-  getAllTwitchLinkedUsers,
-  findUserByTwitchName,
-  getBotChatToken,
-  getStreamerByDiscordId,
-  type RefreshingLookupCache,
-} from '../db';
+import { getBotChatToken } from '../db';
 import { resolveGuildIdForDiscordId } from './twitchGuildResolutionRuntime';
+import { resolveDiscordIdForTwitchChannel, resolveStreamerIdForDiscordId } from './twitchChannelResolution';
 import {
   setChatClient,
   setConnected,
@@ -92,67 +85,80 @@ export const DISCONNECT_TIMEOUT_MS = 5_000;
  */
 export const CONNECT_TIMEOUT_MS = 30_000;
 
-// Bulk-loads every twitch_name → discord_id mapping in one query (like
-// getTwitchEnabledChannels()) instead of a lazy per-channel lookup, so a
-// chat message never blocks on an individual DB round trip. Bounded by a TTL
-// so a relinked twitch_name is picked up within a few minutes rather than
-// staying stale until the process restarts.
-const CHANNEL_DISCORD_ID_CACHE_TTL_MS = 5 * 60 * 1000;
-
-interface TwitchChannelDiscordIdCache extends RefreshingLookupCache {
-  discordIdByChannel: Map<string, string>;
+/**
+ * Dispatches the two handlers that need the target guild (counters and the shared SFX command
+ * router), sharing one guild resolution between them. Both no-op on a message with no command
+ * token (ordinary chat without a `!`/`#` prefix), so that case skips them and the guild
+ * resolution entirely.
+ * @param normalizedChannel - Normalized (lowercase, no `#`) Twitch channel name.
+ * @param message - Raw chat message text.
+ * @param displayName - Sender's display name, or null.
+ * @param command - The message's parsed command token, or null if it isn't a command.
+ * @param discordIdPromise - This message's single Twitch-channel → Discord ID resolution.
+ */
+function dispatchGuildScopedCommands(
+  normalizedChannel: string,
+  message: string,
+  displayName: string | null,
+  command: string | null,
+  discordIdPromise: Promise<string | null>,
+): void {
+  if (command === null) return;
+  const guildIdPromise = discordIdPromise.then(resolveGuildIdForDiscordId);
+  fireAndForget(
+    guildIdPromise.then((guildId) =>
+      executeCounterCommandForTwitch(normalizedChannel, message, displayName, guildId, command)),
+    'Counter command error',
+    log,
+  );
+  fireAndForget(
+    guildIdPromise.then((guildId) => handleCommand(message, 'twitch', guildId, command)),
+    'Command handler error',
+    log,
+  );
 }
-
-/** Returns a fresh, empty Twitch-channel → discord_id cache. */
-function createEmptyTwitchChannelDiscordIdCache(): TwitchChannelDiscordIdCache {
-  return { loadedAt: 0, discordIdByChannel: new Map() };
-}
-
-const twitchChannelDiscordIdLookupCache = createManagedLookupCache<TwitchChannelDiscordIdCache>({
-  cacheName: 'twitch channel discord id cache',
-  ttlMs: CHANNEL_DISCORD_ID_CACHE_TTL_MS,
-  refreshFailureBackoffMs: DEFAULT_REFRESH_FAILURE_BACKOFF_MS,
-  refreshFailureMaxBackoffMs: DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS,
-  createEmptyCache: createEmptyTwitchChannelDiscordIdCache,
-  loadCache: async () => {
-    const linkedUsers = await getAllTwitchLinkedUsers();
-    const discordIdByChannel = new Map(linkedUsers.map((u) => [u.twitchName, u.discordId]));
-    return { loadedAt: Date.now(), discordIdByChannel };
-  },
-});
 
 /**
- * Resolves the Discord ID linked to a Twitch channel's `twitch_name`, or null if unlinked.
- * A channel absent from the bulk cache falls back to a live lookup — the cache has no
- * per-key invalidation, so a channel linked since the last bulk refresh would otherwise
- * stay unresolved for up to the cache's TTL instead of working on the very next message.
+ * Dispatches chat-earn, `!points` and `!gamble`, which all need the channel's `streamer.id`.
+ * @param normalizedChannel - Normalized (lowercase, no `#`) Twitch channel name.
+ * @param user - Login name of the message's sender.
+ * @param message - Raw chat message text.
+ * @param command - The message's parsed command token, or null if it isn't a command.
+ * @param streamerIdPromise - This message's single streamer-ID resolution, shared by all three.
  */
-async function resolveDiscordIdForTwitchChannel(normalizedChannel: string): Promise<string | null> {
-  const cache = await twitchChannelDiscordIdLookupCache.getCache();
-  const cachedDiscordId = cache.discordIdByChannel.get(normalizedChannel);
-  if (cachedDiscordId) return cachedDiscordId;
-  const user = await findUserByTwitchName(normalizedChannel);
-  return user?.discord_id ?? null;
-}
-
-/** Test-only: clears the Twitch-channel → discord_id cache so each test starts from a clean slate. */
-export function __resetTwitchChannelDiscordIdCacheForTests(): void {
-  twitchChannelDiscordIdLookupCache.invalidate();
-}
-
-/** Resolves which guild a Twitch chat command should target: the linked streamer's active voice guild. */
-async function resolveGuildIdForTwitchCommand(normalizedChannel: string): Promise<string | null> {
-  const discordId = await resolveDiscordIdForTwitchChannel(normalizedChannel);
-  if (!discordId) return null;
-  return resolveGuildIdForDiscordId(discordId);
-}
-
-/** Resolves a Twitch channel's `streamer.id`, or null if it isn't linked to a streamer row. */
-async function resolveStreamerIdForTwitchChannel(normalizedChannel: string): Promise<number | null> {
-  const discordId = await resolveDiscordIdForTwitchChannel(normalizedChannel);
-  if (!discordId) return null;
-  const streamer = await getStreamerByDiscordId(discordId);
-  return streamer?.id ?? null;
+function dispatchPointsHandlers(
+  normalizedChannel: string,
+  user: string,
+  message: string,
+  command: string | null,
+  streamerIdPromise: Promise<number | null>,
+): void {
+  const earnPromise = streamerIdPromise.then((streamerId) => {
+    // Skip chat-earn for a !gamble message itself — spending points isn't chatting. !points
+    // does earn (it's a chat message like any other), and chat-earn's cooldown is independent
+    // of !gamble's, so no message here can put !gamble on cooldown either way.
+    if (streamerId !== null && command !== GAMBLE_COMMAND) {
+      return awardPointsForChatMessage(streamerId, user);
+    }
+  });
+  fireAndForget(earnPromise, 'Points earn error', log);
+  // !points waits for this message's own chat-earn award to settle (success or failure —
+  // a failed award is already logged above and must not suppress the reply), so the balance
+  // it reports already includes the points that message earned.
+  fireAndForget(
+    earnPromise
+      .catch(() => undefined)
+      .then(() => streamerIdPromise)
+      .then((streamerId) => executePointsCommandForTwitch(normalizedChannel, streamerId, message, user, command)),
+    'Points command error',
+    log,
+  );
+  fireAndForget(
+    streamerIdPromise.then((streamerId) =>
+      executeGambleCommandForTwitch(normalizedChannel, streamerId, message, user, command)),
+    'Gamble command error',
+    log,
+  );
 }
 
 /**
@@ -195,20 +201,15 @@ function handleTwitchMessage(channel: string, user: string, message: string, msg
     // the same message independently.
     const command = extractCommand(message);
 
+    // The channel's Discord ID is resolved once per message and shared by everything that
+    // needs it (guild-scoped commands and the streamer-ID lookup), rather than each consumer
+    // repeating the lookup — on an unlinked channel that lookup is a live DB query.
+    const discordIdPromise = resolveDiscordIdForTwitchChannel(normalizedChannel);
+
     fireAndForget(executeCustomCommandForTwitch(normalizedChannel, message, displayName, command), 'Custom command error', log);
-    fireAndForget(
-      resolveGuildIdForTwitchCommand(normalizedChannel).then((guildId) =>
-        executeCounterCommandForTwitch(normalizedChannel, message, displayName, guildId, command)),
-      'Counter command error',
-      log,
-    );
+    dispatchGuildScopedCommands(normalizedChannel, message, displayName, command, discordIdPromise);
     fireAndForget(executeMultiCommandForTwitch(normalizedChannel, message, displayName, command), 'Multi command error', log);
     fireAndForget(executeShoutoutForTwitch(normalizedChannel, message, displayName, isMod, command), 'Shoutout error', log);
-    fireAndForget(
-      resolveGuildIdForTwitchCommand(normalizedChannel).then((guildId) => handleCommand(message, 'twitch', guildId, command)),
-      'Command handler error',
-      log,
-    );
     fireAndForget(executeCountdownForTwitch(normalizedChannel, message, command), 'Countdown error', log);
     fireAndForget(
       executeAdvancedCommandForTwitch({
@@ -232,36 +233,16 @@ function handleTwitchMessage(channel: string, user: string, message: string, msg
       'Followage error',
       log,
     );
-    // Resolved once and shared by the three points/gamble handlers below, rather than each
-    // calling resolveStreamerIdForTwitchChannel (an uncached DB lookup) independently — that
-    // would otherwise run the same query three times per chat message.
-    const streamerIdPromise = resolveStreamerIdForTwitchChannel(normalizedChannel);
-    fireAndForget(
-      streamerIdPromise.then((streamerId) => {
-        // Skip chat-earn for a !gamble message itself — it would otherwise race
-        // executeGambleCommandForTwitch below for the same shared points cooldown and almost
-        // always win it first, silently dropping the bet (see GAMBLE_COMMAND's doc comment).
-        // Also skip it for !points — that command has no cooldown of its own, but without this
-        // exemption it would still claim the shared cooldown as an ordinary chat message,
-        // silently blocking an immediately-following !gamble for up to the full cooldown
-        // duration (see POINTS_COMMAND's doc comment).
-        if (streamerId !== null && command !== GAMBLE_COMMAND && command !== POINTS_COMMAND) {
-          return awardPointsForChatMessage(streamerId, user);
-        }
-      }),
-      'Points earn error',
-      log,
-    );
+    // Chat-earn needs the streamer ID on every message (not just commands); it comes from a
+    // cache, so this is no per-message DB query.
+    const streamerIdPromise = discordIdPromise.then(resolveStreamerIdForDiscordId);
+    dispatchPointsHandlers(normalizedChannel, user, message, command, streamerIdPromise);
     fireAndForget(
       streamerIdPromise.then((streamerId) =>
-        executePointsCommandForTwitch(normalizedChannel, streamerId, message, user, command)),
-      'Points command error',
-      log,
-    );
-    fireAndForget(
-      streamerIdPromise.then((streamerId) =>
-        executeGambleCommandForTwitch(normalizedChannel, streamerId, message, user, command)),
-      'Gamble command error',
+        executeRaffleCommandForTwitch({
+          channel: normalizedChannel, streamerId, message, userLogin: user, command, isBroadcaster: msg.userInfo.isBroadcaster,
+        })),
+      'Raffle command error',
       log,
     );
   } catch (err) {

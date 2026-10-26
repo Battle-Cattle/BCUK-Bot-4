@@ -1,9 +1,17 @@
-/** Removes every child node of an element. */
+/**
+ * Removes every child node of an element.
+ * @param el - The element to empty.
+ */
 function clearChildren(el) {
   while (el.firstChild) el.removeChild(el.firstChild);
 }
 
-/** Creates a `<td>` with the given text and optional class. */
+/**
+ * Creates a `<td>` with the given text and optional class.
+ * @param text - The cell's text content.
+ * @param className - Class to give the cell, or falsy for none.
+ * @returns The new `<td>` element.
+ */
 function makeCell(text, className) {
   var td = document.createElement('td');
   if (className) td.className = className;
@@ -11,7 +19,12 @@ function makeCell(text, className) {
   return td;
 }
 
-/** Stringifies a value for display, using `fallback` (default '—') for null/undefined/empty. */
+/**
+ * Stringifies a value for display, using `fallback` (default '—') for null/undefined/empty.
+ * @param value - The value to show.
+ * @param fallback - Text for a null/undefined/empty value; null or undefined means '—'.
+ * @returns The display string.
+ */
 function formatValue(value, fallback) {
   if (value === null || value === undefined || value === '') {
     return fallback === undefined || fallback === null
@@ -21,7 +34,13 @@ function formatValue(value, fallback) {
   return String(value);
 }
 
-/** Builds a label/value pair for a live detail metadata grid. */
+/**
+ * Builds a label/value pair for a live detail metadata grid.
+ * @param label - The item's label text.
+ * @param value - The value, formatted with formatValue ('—' when empty).
+ * @param extraClass - Extra class for the value span (e.g. 'mono'), or falsy for none.
+ * @returns The `.live-meta-item` element.
+ */
 function createMetadataItem(label, value, extraClass) {
   var item = document.createElement('div');
   item.className = 'live-meta-item';
@@ -66,7 +85,12 @@ function sanitizeUrl(url, options) {
   return allowed ? parsed.href : null;
 }
 
-/** Builds a new-tab link for a safe URL, or a muted '—' placeholder when the URL is unsafe/missing. */
+/**
+ * Builds a new-tab link for a safe URL, or a muted '—' placeholder when the URL is unsafe/missing.
+ * @param url - The candidate URL, checked with sanitizeUrl.
+ * @param label - The link text, or falsy to show the URL itself.
+ * @returns The `<a>` element, or a muted `<span>` placeholder.
+ */
 function createLink(url, label) {
   var safeUrl = sanitizeUrl(url);
   if (!safeUrl) {

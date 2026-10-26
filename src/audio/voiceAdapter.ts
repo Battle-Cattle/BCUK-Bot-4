@@ -3,7 +3,8 @@ import type {
   DiscordGatewayAdapterImplementerMethods,
   DiscordGatewayAdapterLibraryMethods,
 } from '@discordjs/voice';
-import { WebSocketShardEvents, type Client, type GatewayDispatchPayload, type GatewaySendPayload, type VoiceBasedChannel } from 'discord.js';
+import { WebSocketShardEvents } from '@discordjs/ws';
+import type { Client, GatewayDispatchPayload, GatewaySendPayload, VoiceBasedChannel } from 'discord.js';
 import { createLogger } from '../shared/logger';
 
 const log = createLogger('VoiceAdapter');
@@ -36,7 +37,11 @@ interface ClientDispatcher {
 // WeakMap so a client that's discarded (e.g. in tests) doesn't keep its dispatcher alive.
 const dispatchers = new WeakMap<Client, ClientDispatcher>();
 
-/** Routes one gateway dispatch to its guild's registered methods, if any. No-ops for non-voice packets or unregistered guilds. */
+/**
+ * Routes one gateway dispatch to its guild's registered methods, if any. No-ops for non-voice packets or unregistered guilds.
+ * @param dispatcher - The client's dispatcher holding per-guild adapter methods.
+ * @param packet - Gateway dispatch payload (`t` event name, `d` payload) received on `client.ws`.
+ */
 function dispatchGatewayPacket(dispatcher: ClientDispatcher, packet: GatewayDispatchPayload): void {
   if (packet.t !== 'VOICE_STATE_UPDATE' && packet.t !== 'VOICE_SERVER_UPDATE') return;
 
@@ -53,7 +58,11 @@ function dispatchGatewayPacket(dispatcher: ClientDispatcher, packet: GatewayDisp
   }
 }
 
-/** Returns `client`'s shared dispatcher, registering its single gateway dispatch listener on first use. */
+/**
+ * Returns `client`'s shared dispatcher, registering its single gateway dispatch listener on first use.
+ * @param client - Discord client whose gateway dispatches to route.
+ * @returns The client's existing or newly registered dispatcher.
+ */
 function getOrCreateDispatcher(client: Client): ClientDispatcher {
   const existing = dispatchers.get(client);
   if (existing) return existing;
@@ -69,6 +78,8 @@ function getOrCreateDispatcher(client: Client): ClientDispatcher {
  * Creates the gateway payload sender that routes voice data through the channel's guild shard.
  * discord.js v15 sends via `client.ws.send(shardId, …)`, which may be async: a synchronous throw
  * reports failure, and a later rejection is logged rather than left unhandled.
+ * @param channel - Voice channel whose guild shard the payloads are sent through.
+ * @returns A sender returning true if the payload was handed to the shard, false if the send threw.
  */
 function makeSendPayload(channel: VoiceBasedChannel): (payload: unknown) => boolean {
   return function sendPayload(payload: unknown): boolean {
@@ -87,6 +98,10 @@ function makeSendPayload(channel: VoiceBasedChannel): (payload: unknown) => bool
 /**
  * Registers a gateway-dispatch adapter for one connection, tearing down the guild's
  * previous adapter first so registrations do not accumulate across reconnects.
+ * @param channel - Voice channel the connection is joining.
+ * @param methods - Library methods from @discordjs/voice that receive voice state and server updates.
+ * @param state - The guild's adapter cleanup state, holding the previous registration's cleanup.
+ * @returns Implementer methods for @discordjs/voice: a payload sender and an idempotent destroy.
  */
 function registerAdapter(
   channel: VoiceBasedChannel,

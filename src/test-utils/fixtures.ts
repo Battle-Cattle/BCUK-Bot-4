@@ -14,6 +14,8 @@ export interface SessionUserFixture {
  * Builds a fake session user matching the shape hand-rolled across `src/web/routes/*.test.ts`
  * (`{ discordId, discordName, discordAvatar, accessLevel, ... }`). Pass `overrides` to customize
  * any field, e.g. `makeSessionUser({ accessLevel: AccessLevel.ADMIN, currentGuildId: GUILD_ID })`.
+ * @param overrides - Fields to replace on the default USER-level session user.
+ * @returns A new session user object.
  */
 export function makeSessionUser(overrides: Partial<SessionUserFixture> = {}): SessionUserFixture {
   return {
@@ -35,6 +37,8 @@ export interface DbGuildFixture {
 /**
  * Builds a fake `guild` row matching the shape returned by `src/db/guilds.ts` query functions
  * (e.g. `getGuildById`, `getAllGuilds`). Pass `overrides` to customize any field.
+ * @param overrides - Fields to replace on the default guild row.
+ * @returns A new guild row object.
  */
 export function makeDbGuild(overrides: Partial<DbGuildFixture> = {}): DbGuildFixture {
   return {

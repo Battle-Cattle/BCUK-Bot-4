@@ -1,9 +1,9 @@
 import mysql, { type PoolConnection } from 'mysql2/promise';
 import { getPool, withTransaction } from './pool';
 
-// `loyalty_points.balance` is a plain INT column (see DATABASE-SCHEMA.md) — every
-// write that can increase it clamps to this rather than allowed to overflow it.
-const MAX_BALANCE = 2_147_483_647;
+/** `loyalty_points.balance` is a plain INT column (see DATABASE-SCHEMA.md) — every
+ *  write that can increase it clamps to this rather than allowed to overflow it. */
+export const MAX_BALANCE = 2_147_483_647;
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -26,7 +26,11 @@ export interface LoyaltyPointsConfig {
   pointsPerGiftSub: number;
 }
 
-/** Maps a raw `loyalty_points_config` table row to a {@link LoyaltyPointsConfig}. */
+/**
+ * Maps a raw `loyalty_points_config` table row to a {@link LoyaltyPointsConfig}.
+ * @param row - Row selected from `loyalty_points_config`.
+ * @returns The mapped loyalty points config.
+ */
 function mapLoyaltyPointsConfig(row: mysql.RowDataPacket): LoyaltyPointsConfig {
   return {
     enabled: !!row.enabled,

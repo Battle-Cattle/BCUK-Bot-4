@@ -120,7 +120,7 @@ async function tryCompleteCompanionLogin(req: Request, res: Response, discordId:
     renderError(res, 400, 'Invalid companion redirect URI.', undefined);
     return true;
   }
-  const authCode = await createCode(discordId);
+  const authCode = await createCode(discordId, companionOAuth.codeChallenge ?? null);
   const redirectUrl = new URL(companionOAuth.redirectUri);
   redirectUrl.searchParams.set('code', authCode);
   redirectUrl.searchParams.set('state', companionOAuth.appState);

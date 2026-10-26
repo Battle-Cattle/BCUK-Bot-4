@@ -92,6 +92,7 @@ export function decayDemand(
  * @param halfLifeSeconds - Streamer's configured half-life, in seconds.
  * @param timeToMaxMultiplier - Streamer's configured "time to 100% demand", expressed as a
  *   multiple of the half-life.
+ * @returns The demand added per redemption (a fraction of the 0–1 demand range).
  */
 export function computeRedemptionIncrement(
   cooldownSeconds: number,

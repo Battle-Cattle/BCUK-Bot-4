@@ -17,7 +17,11 @@ export const connections = new Map<string, Set<import('express').Response>>();
 
 export const MAX_SSE_CONNECTIONS_PER_TOKEN = COMPANION_MAX_SSE_PER_TOKEN;
 
-/** Push a companion event to all of a Discord user's connected companion app instances. */
+/**
+ * Push a companion event to all of a Discord user's connected companion app instances.
+ * @param discordId - Discord snowflake of the companion app's owner.
+ * @param event - Companion event sent as the SSE `data:` frame.
+ */
 export function pushCompanionEvent(discordId: string, event: CompanionEvent): void {
   const remaining = broadcastToChannel(connections, discordId, event);
   if (remaining !== null) log.info(`Pushed companion event to ${remaining} client(s) for discord ${discordId}`);

@@ -19,6 +19,7 @@ import { registerTwitchChatRuntime } from './commands/customCommandHandler';
 import { registerCounterTwitchRuntime } from './commands/counterHandler';
 import { registerPointsTwitchRuntime } from './commands/pointsHandler';
 import { registerGambleTwitchRuntime } from './commands/gambleHandler';
+import { registerRaffleTwitchRuntime, stopAllRaffles } from './commands/raffle/raffleHandler';
 import { registerMultiTwitchRuntime } from './commands/multiCommandHandler';
 import { registerShoutoutRuntime } from './commands/shoutoutHandler';
 import { registerCountdownTwitchRuntime } from './commands/countdownHandler';
@@ -41,6 +42,7 @@ import { registerRewardPricingRuntime } from './twitch/pricing/rewardPricingServ
 import { startTimerCommandScheduler, stopTimerCommandScheduler, registerTimerCommandsRuntime } from './twitch/timers/timerCommandScheduler';
 import { createLogger } from './shared/logger';
 import { withTimeout } from './shared/withTimeout';
+import { startEventLoopMonitor, stopEventLoopMonitor } from './shared/eventLoopMonitor';
 
 const log = createLogger('Bot');
 
@@ -146,7 +148,9 @@ async function shutdown(signal: string): Promise<void> {
   // Stop taking web requests before the components they'd act on start disconnecting.
   await safeStop('web panel', stopWebPanel);
   stopDbHealthCheck();
+  stopEventLoopMonitor();
   stopCounterScheduler();
+  stopAllRaffles();
   stopChannelReconciliationPoll();
   await safeStop('reward pricing scheduler', stopRewardPricingScheduler);
   await safeStop('timer command scheduler', stopTimerCommandScheduler);
@@ -218,6 +222,7 @@ function registerTwitchRuntimes(): void {
   registerCounterTwitchRuntime({ send: sayInChannel });
   registerPointsTwitchRuntime({ send: sayInChannel });
   registerGambleTwitchRuntime({ send: sayInChannel });
+  registerRaffleTwitchRuntime({ send: sayInChannel, getLoginUserIds: getActiveChannelUserIds });
   registerMultiTwitchRuntime({ send: sayInChannel, getActiveChannels, getLoginUserIds: getActiveChannelUserIds });
   registerShoutoutRuntime({ send: sayInChannel });
   registerCountdownTwitchRuntime({ send: sayInChannel });
@@ -340,6 +345,7 @@ async function main(): Promise<void> {
   startRewardPricingScheduler();
   startTimerCommandScheduler();
   startDbHealthCheck();
+  startEventLoopMonitor();
 
   startTwitchMonitor().catch((err: unknown) => log.error('TwitchMonitor startup error:', err));
   startEventSub();

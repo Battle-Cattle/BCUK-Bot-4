@@ -56,6 +56,8 @@ describe('normalizeAdvancedCommandSettings', () => {
     [{ name: '' }, 'invalid_name'],
     [{ name: 'x'.repeat(65) }, 'invalid_name'],
     [{ triggerString: '!two words' }, 'invalid_trigger'],
+    [{ triggerString: 'pingpong' }, 'invalid_trigger'],
+    [{ triggerString: '?pingpong' }, 'invalid_trigger'],
     [{ response: 'x'.repeat(2001) }, 'invalid_response'],
     [{ pointCost: -1 }, 'invalid_point_cost'],
     [{ pointCost: 1.5 }, 'invalid_point_cost'],
@@ -78,6 +80,10 @@ describe('normalizeAdvancedCommandSettings', () => {
 describe('normalizeAdvancedTrigger', () => {
   it('rejects a built-in command', () => {
     expect(() => normalizeAdvancedTrigger('!Points')).toThrow(ReservedCommandError);
+  });
+
+  it.each([['!PingPong', '!pingpong'], ['#Hydrate', '#hydrate']])('accepts %s, a prefixed trigger', (trigger, expected) => {
+    expect(normalizeAdvancedTrigger(trigger)).toBe(expected);
   });
 });
 

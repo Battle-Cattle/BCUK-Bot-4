@@ -22,13 +22,16 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Node.js
         id: setup-node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '24.x'
+          # The runner image's cached 24.x can lag behind the `engines` floor, which engine-strict
+          # (.npmrc) then rejects; always resolve the latest 24.x release instead.
+          check-latest: true
           cache: 'npm'
 
       # Restores node_modules itself, keyed on the exact OS + Node version + package.json +
@@ -39,7 +42,7 @@ jobs:
       # A miss falls through to the `npm ci` below, and the resulting tree is saved for next time.
       - name: Restore node_modules
         id: node-modules-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: node_modules
           key: node-modules-${{ runner.os }}-node${{ steps.setup-node.outputs.node-version }}-${{ hashFiles('package.json', 'package-lock.json') }}
@@ -62,7 +65,7 @@ jobs:
       # Vitest's on-disk transform cache (see vitest.config.mts). Keyed per commit so every run
       # saves a fresh copy, restoring the newest one for the same OS + lockfile + Vitest config.
       - name: Restore Vitest transform cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .vitest-cache
           key: vitest-${{ runner.os }}-${{ hashFiles('package-lock.json', 'vitest.config.mts') }}-${{ github.sha }}
@@ -71,14 +74,15 @@ jobs:
 
       # The tests run straight from src/ (Vitest transforms on the fly), so nothing here depends on
       # the build's output: the build, lint (type-aware ESLint, about as long as the tests and mostly
-      # single-threaded), the circular-dependency check and the ts-node toolchain check all run in
-      # the background while the tests stream in the foreground (scripts/ci-parallel.sh).
+      # single-threaded), the circular-dependency and unused-code (knip) checks and the ts-node
+      # toolchain check all run in the background while the tests stream in the foreground
+      # (scripts/ci-parallel.sh).
       # Coverage is only uploaded from Ubuntu, so Windows runs plain `npm test`; lint and the
-      # circular check are platform-independent, so they run on Ubuntu only.
-      - name: Build, lint, circular-dependency check, toolchain check and tests with coverage
+      # circular and unused-code checks are platform-independent, so they run on Ubuntu only.
+      - name: Build, lint, circular-dependency and unused-code checks, toolchain check and tests with coverage
         if: matrix.os == 'ubuntu-latest'
         shell: bash
-        run: bash scripts/ci-parallel.sh test:coverage build lint check:circular test:toolchain
+        run: bash scripts/ci-parallel.sh test:coverage build lint check:circular check:unused test:toolchain
 
       - name: Build, toolchain check and tests
         if: matrix.os == 'windows-latest'
@@ -87,7 +91,7 @@ jobs:
 
       - name: Upload coverage report
         if: always() && matrix.os == 'ubuntu-latest'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-report
           path: coverage/coverage-report.txt

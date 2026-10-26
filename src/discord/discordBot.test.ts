@@ -503,18 +503,18 @@ describe('startDiscordBot — gateway watchdog', () => {
     expect(vi.mocked(healthStore.recordDiscordConnected)).toHaveBeenCalledWith(false);
   });
 
-  it('logs an error with the shard id and error the first time a shard reports a gateway connection error, and DMs the owner, without throwing', async () => {
+  it('logs an error with the shard id and error the first time a shard reports a gateway connection error, without throwing or DMing the owner', async () => {
     const ownerAlerts = await import('./ownerAlerts.js');
     mod.startDiscordBot();
     const handler = findHandler('socketError');
     const gatewayError = new Error('gateway socket error');
     expect(() => handler(gatewayError, 0)).not.toThrow();
     expect(mockLog.error).toHaveBeenCalledWith(expect.stringContaining('0'), gatewayError);
-    expect(vi.mocked(ownerAlerts.sendOwnerAlert)).toHaveBeenCalledWith(expect.stringContaining('Shard 0'));
+    // Owner DMs for a gateway outage come from the health watcher, after its grace period.
+    expect(vi.mocked(ownerAlerts.sendOwnerAlert)).not.toHaveBeenCalled();
   });
 
-  it('throttles repeated shard socket error logs/owner DMs for the same shard to one per interval, folding in a suppressed count', async () => {
-    const ownerAlerts = await import('./ownerAlerts.js');
+  it('throttles repeated shard socket error logs for the same shard to one per interval, folding in a suppressed count', () => {
     vi.useFakeTimers();
     try {
       mod.startDiscordBot();
@@ -525,14 +525,11 @@ describe('startDiscordBot — gateway watchdog', () => {
       handler(gatewayError, 0);
       handler(gatewayError, 0);
       expect(mockLog.error).toHaveBeenCalledTimes(1);
-      expect(vi.mocked(ownerAlerts.sendOwnerAlert)).toHaveBeenCalledTimes(1);
 
       vi.advanceTimersByTime(60_000);
       handler(gatewayError, 0);
       expect(mockLog.error).toHaveBeenCalledTimes(2);
       expect(mockLog.error).toHaveBeenLastCalledWith(expect.stringContaining('2 more suppressed'), gatewayError);
-      expect(vi.mocked(ownerAlerts.sendOwnerAlert)).toHaveBeenCalledTimes(2);
-      expect(vi.mocked(ownerAlerts.sendOwnerAlert)).toHaveBeenLastCalledWith(expect.stringContaining('2 more suppressed'));
     } finally {
       vi.useRealTimers();
     }
@@ -614,6 +611,12 @@ describe('startDiscordBot — gateway watchdog', () => {
     const handler = findHandler('resumed');
     handler(0);
     expect(vi.mocked(healthStore.recordDiscordConnected)).toHaveBeenCalledWith(true);
+  });
+
+  it('logs when a shard resumes its gateway session', () => {
+    mod.startDiscordBot();
+    findHandler('resumed')(0);
+    expect(mockLog.info).toHaveBeenCalledWith(expect.stringContaining('Shard 0 resumed'));
   });
 
   it('forces a fresh login when a shard disconnects permanently', () => {

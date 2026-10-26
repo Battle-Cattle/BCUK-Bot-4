@@ -27,7 +27,11 @@ export interface DbStreamerEventSub {
   config: EventSubConfig | null;
 }
 
-/** Maps a raw `streamer_event_config` row to an {@link EventSubConfig}. */
+/**
+ * Maps a raw `streamer_event_config` row to an {@link EventSubConfig}.
+ * @param r - Row selected from `streamer_event_config`.
+ * @returns The mapped event config.
+ */
 function mapConfig(r: mysql.RowDataPacket): EventSubConfig {
   return {
     follow_enabled: fromBit(r.follow_enabled),
@@ -58,7 +62,11 @@ function maybeDecrypt(value: string | null): string | null {
   }
 }
 
-/** Maps a joined streamer/user/event-config row to a {@link DbStreamerEventSub}, decrypting tokens. */
+/**
+ * Maps a joined streamer/user/event-config row to a {@link DbStreamerEventSub}, decrypting tokens.
+ * @param r - Joined row of `streamer`, `user` and `streamer_event_config` columns.
+ * @returns The mapped streamer, with its OAuth tokens decrypted.
+ */
 function mapStreamerEventSub(r: mysql.RowDataPacket): DbStreamerEventSub {
   return {
     id: r.id,
@@ -80,7 +88,10 @@ const EVENT_SUB_SELECT = `
   c.sub_enabled, c.sub_message, c.resub_message, c.giftsub_message,
   c.raid_enabled, c.raid_message, c.raid_shoutout_enabled`;
 
-/** Return all Twitch-bot-enabled streamers with their EventSub OAuth tokens and event config. */
+/**
+ * Return all Twitch-bot-enabled streamers with their EventSub OAuth tokens and event config.
+ * @returns Every Twitch-bot-enabled streamer with tokens and event config.
+ */
 export async function getAllEventSubStreamers(): Promise<DbStreamerEventSub[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
     `SELECT ${EVENT_SUB_SELECT}
@@ -97,6 +108,7 @@ export async function getAllEventSubStreamers(): Promise<DbStreamerEventSub[]> {
  * Look up a streamer by their Discord snowflake ID. Returns null if not found.
  *
  * @param discordId - Discord user snowflake to search for.
+ * @returns The streamer, or null when no streamer has that Discord ID.
  */
 export async function getStreamerByDiscordId(discordId: string): Promise<DbStreamerEventSub | null> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
@@ -114,6 +126,7 @@ export async function getStreamerByDiscordId(discordId: string): Promise<DbStrea
  * Look up a streamer by their DB row ID. Returns null if not found.
  *
  * @param id - Primary key of the `streamer` row.
+ * @returns The streamer, or null when no row has that ID.
  */
 export async function getStreamerById(id: number): Promise<DbStreamerEventSub | null> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
@@ -132,6 +145,7 @@ export async function getStreamerById(id: number): Promise<DbStreamerEventSub | 
  * Returns null if not found.
  *
  * @param twitchUserId - Twitch user ID to search for.
+ * @returns The streamer, or null when no streamer has that Twitch user ID.
  */
 export async function getStreamerByTwitchUserId(twitchUserId: string): Promise<DbStreamerEventSub | null> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
@@ -210,7 +224,11 @@ export async function clearStreamerToken(streamerId: number, guildId?: string): 
   return result.affectedRows > 0;
 }
 
-/** Extracts the 9 event-config column values (everything but `streamer_id`) from a config, in SQL parameter order, coercing booleans to 0/1 for BIT(1) columns. */
+/**
+ * Extracts the 9 event-config column values (everything but `streamer_id`) from a config, in SQL parameter order, coercing booleans to 0/1 for BIT(1) columns.
+ * @param config - The streamer's event config.
+ * @returns The 9 column values in SQL parameter order.
+ */
 function eventConfigParams(config: EventSubConfig): Array<string | number> {
   return [
     config.follow_enabled ? 1 : 0, config.follow_message,

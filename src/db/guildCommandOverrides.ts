@@ -74,6 +74,7 @@ export async function getAllOverrides(): Promise<DbGuildCommandOverride[]> {
  *
  * @param guildId BIGINT snowflake as a string.
  * @param commandId The catalog command's command_id.
+ * @param override The override's settings.
  * @param override.isDisabled When true, the command does not fire in this guild.
  * @param override.output Replacement Discord output, or null to use the catalog output.
  * @returns Resolves when the upsert is complete.

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mockLogger } from '../../test-utils/loggerMock';
+import { waitFor } from '../../test-utils/waitFor';
 
 const { middlewareCallOrder } = vi.hoisted(() => ({ middlewareCallOrder: [] as string[] }));
 vi.mock('../../db', () => ({
@@ -272,16 +273,24 @@ describe('runDiscordNameRefresh outcomes', () => {
     vi.mocked(getGuildMemberUsers).mockResolvedValue(users as any);
     let inFlight = 0;
     let maxInFlight = 0;
+    // Each lookup stays in flight until the test releases it.
+    const pending: Array<() => void> = [];
     vi.mocked(fetchMemberDisplayName).mockImplementation(async () => {
       inFlight++;
       maxInFlight = Math.max(maxInFlight, inFlight);
-      await new Promise((resolve) => setTimeout(resolve, 5));
+      await new Promise<void>((resolve) => pending.push(resolve));
       inFlight--;
       return 'New';
     });
     vi.mocked(updateDiscordName).mockResolvedValue(undefined);
 
     await buildApp().post('/users/refresh-names');
+    // The first batch fills every slot; releasing one lookup at a time then lets exactly one more start.
+    await waitFor(() => expect(pending).toHaveLength(REFRESH_CONCURRENCY));
+    for (const _user of users) {
+      await waitFor(() => expect(pending.length).toBeGreaterThan(0));
+      pending.shift()?.();
+    }
     await waitForRefreshComplete();
     expect(maxInFlight).toBe(REFRESH_CONCURRENCY);
     expect(fetchMemberDisplayName).toHaveBeenCalledTimes(users.length);

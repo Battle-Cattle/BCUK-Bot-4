@@ -1,8 +1,11 @@
 import { Request, Response } from 'express';
-import { Client } from 'discord.js';
+import type { Client } from 'discord.js';
 import { isKeyApprovedForGuild } from '../../db';
 import { getActiveGuildForUser } from '../../discord/voicePresence';
 import { getDiscordClient } from '../../discord/discordClientStore';
+import { createLogger } from '../../shared/logger';
+
+const log = createLogger('Streamdeck');
 
 /**
  * Returns the ready Discord client, or sends a 503 JSON error response and returns
@@ -23,6 +26,9 @@ export function getReadyDiscordClientOrRespond(res: Response): Client | null {
 /**
  * Resolves which guild a voice-channel ID belongs to, or null if the channel
  * doesn't exist / isn't a guild channel.
+ * @param client - The bot's Discord client, used to fetch the channel.
+ * @param channelId - Discord snowflake of the voice channel.
+ * @returns Discord snowflake of the channel's guild, or null when the fetch fails or it isn't a guild channel.
  */
 export async function resolveGuildIdFromChannelId(client: Client, channelId: string): Promise<string | null> {
   try {
@@ -37,10 +43,24 @@ export async function resolveGuildIdFromChannelId(client: Client, channelId: str
 /**
  * Confirms the request's API key is approved for `guildId`, sending a generic
  * 403 and returning false if not. Shared by every Streamdeck route so
- * approval denial always produces the same response.
+ * approval denial always produces the same response. A failed approval lookup
+ * sends a JSON 500 rather than rejecting, which Express would turn into the
+ * panel's HTML error page.
+ * @param req - Request whose `apiKeyOwner` was set by `requireApiKey`.
+ * @param res - Response used to send the 403 or 500.
+ * @param guildId - Discord snowflake of the guild the action targets.
+ * @returns True when the key is approved for the guild, false after sending a 403 or 500.
  */
 export async function ensureGuildApproved(req: Request, res: Response, guildId: string): Promise<boolean> {
-  if (!(await isKeyApprovedForGuild(req.apiKeyOwner!, guildId))) {
+  let approved: boolean;
+  try {
+    approved = await isKeyApprovedForGuild(req.apiKeyOwner!, guildId);
+  } catch (err) {
+    log.error(`Failed to check key approval for guild ${guildId}:`, err);
+    res.status(500).json({ ok: false, error: 'Database error' });
+    return false;
+  }
+  if (!approved) {
     res.status(403).json({ ok: false, error: 'Key not approved for this guild' });
     return false;
   }
@@ -52,6 +72,11 @@ export async function ensureGuildApproved(req: Request, res: Response, guildId: 
  * target from the request's own `channelId`, and confirms the key is approved
  * for that guild. Sends the appropriate error response and returns null on
  * any failure.
+ * @param req - Request whose `apiKeyOwner` was set by `requireApiKey`.
+ * @param res - Response used to send the 400, 403 or 500.
+ * @param client - The bot's Discord client, used to fetch the channel.
+ * @param channelId - Discord snowflake of the voice channel from the request.
+ * @returns Discord snowflake of the approved guild, or null after an error response was sent.
  */
 export async function resolveChannelGuildOrRespond(req: Request, res: Response, client: Client, channelId: string): Promise<string | null> {
   const guildId = await resolveGuildIdFromChannelId(client, channelId);
@@ -68,6 +93,10 @@ export async function resolveChannelGuildOrRespond(req: Request, res: Response, 
  * connection, since a Discord account can only be in one voice channel across
  * every server at a time. Sends the appropriate error response and returns
  * null on any failure.
+ * @param req - Request whose `apiKeyOwner` was set by `requireApiKey`.
+ * @param res - Response used to send the 503, 403 or 500.
+ * @param client - The bot's Discord client, used to find the owner's voice connection.
+ * @returns Discord snowflake of the approved guild, or null after an error response was sent.
  */
 export async function resolvePresenceGuildOrRespond(req: Request, res: Response, client: Client): Promise<string | null> {
   const guildId = getActiveGuildForUser(client, req.apiKeyOwner!);

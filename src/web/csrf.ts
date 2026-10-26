@@ -12,6 +12,8 @@ const CSRF_TOKEN_HEX_PATTERN = /^[0-9a-f]{64}$/i;
  * the length here doesn't leak anything security-relevant — a CSRF token's expected length is
  * public knowledge, not part of the secret — so this is just a cheap pre-check to guarantee both
  * buffers passed to `timingSafeEqual` are always the same length, without hashing either token.
+ * @param token - The token to convert, either the session's or one submitted with the request.
+ * @returns The decoded 32 bytes, or null when the token isn't 64 hex characters.
  */
 function csrfTokenBuffer(token: string): Buffer | null {
   return CSRF_TOKEN_HEX_PATTERN.test(token) ? Buffer.from(token, 'hex') : null;
@@ -27,6 +29,9 @@ function csrfTokenBuffer(token: string): Buffer | null {
  *
  * Shared by the OAuth callback routes (`auth.ts`, `eventsubCallback.ts`) — import this rather
  * than duplicating it.
+ * @param submitted - The `state` value from the OAuth callback query string.
+ * @param stored - The `state` value saved in the session when the flow started.
+ * @returns True only when both values are byte-for-byte identical.
  */
 export function oauthStateMatches(submitted: string, stored: string): boolean {
   const submittedBuf = Buffer.from(submitted, 'utf8');
@@ -88,6 +93,9 @@ function getSubmittedCsrfToken(req: Parameters<RequestHandler>[0]): string | nul
  *
  * The submitted token must match the session's `csrfToken` via constant-time
  * comparison. Mismatches call `next` with an error bearing `code: 'EBADCSRFTOKEN'`.
+ * @param req - The incoming request; its session's token is created if missing and `req.csrfToken` is set.
+ * @param _res - Unused response.
+ * @param next - Called with no argument to continue, or with an `EBADCSRFTOKEN` error on a mismatch.
  */
 export const csrfProtection: RequestHandler = (req, _res, next) => {
   const sessionToken = ensureSessionCsrfToken(req);

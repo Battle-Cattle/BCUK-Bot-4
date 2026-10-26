@@ -1,5 +1,17 @@
 import { describe, it, expect, vi } from 'vitest';
 
+vi.mock('@discordjs/builders', () => ({
+  EmbedBuilder: class MockEmbedBuilder {
+    private _data: Record<string, unknown> = {};
+    setTitle(t: string) { this._data.title = t; return this; }
+    setURL(u: string) { this._data.url = u; return this; }
+    setColor(c: number) { this._data.color = c; return this; }
+    addFields(...fields: unknown[]) { this._data.fields = fields; return this; }
+    setImage(u: string) { this._data.image = u; return this; }
+    getData() { return this._data; }
+  },
+}));
+
 vi.mock('../twitchApi', () => ({}));
 vi.mock('./twitchMonitorTypes', () => ({}));
 
@@ -130,13 +142,15 @@ describe('templateVars', () => {
 describe('buildEmbed', () => {
   it('returns an EmbedBuilder with title and URL set', () => {
     const stream = makeStream();
-    const data = buildEmbed(stream).toJSON();
+    const embed = buildEmbed(stream) as unknown as { getData(): Record<string, unknown> };
+    const data = embed.getData();
     expect(data.title).toBe('Playing Minecraft');
     expect(data.url).toBe('https://www.twitch.tv/streamer1');
   });
 
   it('sets the Twitch purple color', () => {
-    expect(buildEmbed(makeStream()).toJSON().color).toBe(0x9146ff);
+    const embed = buildEmbed(makeStream()) as unknown as { getData(): Record<string, unknown> };
+    expect(embed.getData().color).toBe(0x9146ff);
   });
 });
 

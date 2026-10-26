@@ -42,19 +42,32 @@ export function onConnectionCountChange<K>(
   return () => { listeners.delete(wrapped); };
 }
 
-/** Number of {@link onConnectionCountChange} listeners currently subscribed to `connections`. Exported for tests. */
+/**
+ * Number of {@link onConnectionCountChange} listeners currently subscribed to `connections`. Exported for tests.
+ * @param connections - The SSE channel map whose listeners are counted.
+ * @returns The number of subscribed listeners (0 when none were ever added).
+ */
 export function getConnectionCountListenerCount<K>(connections: Map<K, Set<Response>>): number {
   return countChangeListeners.get(connections as Map<unknown, Set<Response>>)?.size ?? 0;
 }
 
-/** Notifies every {@link onConnectionCountChange} listener on `connections` that `key`'s count changed. */
+/**
+ * Notifies every {@link onConnectionCountChange} listener on `connections` that `key`'s count changed.
+ * @param connections - The SSE channel map whose listeners are notified.
+ * @param key - Channel key whose client count changed.
+ */
 function notifyCountChange<K>(connections: Map<K, Set<Response>>, key: K): void {
   const listeners = countChangeListeners.get(connections as Map<unknown, Set<Response>>);
   if (!listeners) return;
   for (const listener of listeners) listener(key);
 }
 
-/** Removes `res` from the channel's client Set, deleting the map entry once it's empty. */
+/**
+ * Removes `res` from the channel's client Set, deleting the map entry once it's empty.
+ * @param connections - The SSE channel map holding the client.
+ * @param key - Channel key the client is connected under.
+ * @param res - The client's response to remove.
+ */
 function removeClient<K>(connections: Map<K, Set<Response>>, key: K, res: Response): void {
   const clients = connections.get(key);
   if (!clients?.delete(res)) return;
@@ -105,7 +118,10 @@ export function broadcastToChannel<K>(
   return clients.size;
 }
 
-/** Writes the SSE handshake headers and the initial `: connected` comment. */
+/**
+ * Writes the SSE handshake headers and the initial `: connected` comment.
+ * @param res - Response of the SSE connection being opened.
+ */
 function sendSseHandshake(res: Response): void {
   res.setHeader('Content-Type', 'text/event-stream');
   // no-store (not the weaker no-cache) so no intermediary ever stores or replays a stream —

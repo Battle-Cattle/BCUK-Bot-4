@@ -34,7 +34,10 @@ function mapGuild(row: mysql.RowDataPacket): DbGuild {
 
 // ─── Queries ─────────────────────────────────────────────────────────────────
 
-/** Returns every registered guild, ordered by name. */
+/**
+ * Returns every registered guild, ordered by name.
+ * @returns Every `guild` row, ordered by name.
+ */
 export async function getAllGuilds(): Promise<DbGuild[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
     'SELECT guild_id, name, voice_channel_id FROM guild ORDER BY name',

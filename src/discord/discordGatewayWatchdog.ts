@@ -72,7 +72,10 @@ let watchdogRecoveryPendingSince: number | null = null;
  */
 const WATCHDOG_RECOVERY_TIMEOUT_MS = 5 * 60_000;
 
-/** Whether a watchdog-triggered recovery is still within its bounded pending window (see {@link watchdogRecoveryPendingSince}). */
+/**
+ * Whether a watchdog-triggered recovery is still within its bounded pending window (see {@link watchdogRecoveryPendingSince}).
+ * @returns True if a recovery started less than `WATCHDOG_RECOVERY_TIMEOUT_MS` ago and hasn't settled.
+ */
 function isWatchdogRecoveryPending(): boolean {
   return watchdogRecoveryPendingSince !== null && Date.now() - watchdogRecoveryPendingSince < WATCHDOG_RECOVERY_TIMEOUT_MS;
 }

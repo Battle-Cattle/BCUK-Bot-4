@@ -8,7 +8,7 @@ import {
   getPricingConfigsForStreamer, getPricingSettingsForStreamer, getPricingHistoryForRewards, listCompanionConfirmationRewardIds,
 } from '../../db';
 import type { RewardPricingRow, StreamerPricingSettings } from '../../db';
-import type { TwitchCustomReward } from '../../twitch/twitchApi';
+import type { TwitchCustomReward } from '../../twitch/twitchRewardsApi';
 import { fetchStreamerRewards } from './streamerRewards';
 import { hasAuthFailedSubs } from '../../twitch/eventsub/twitchEventSubCreate';
 import { computePrice } from '../../twitch/pricing/rewardPricingMath';
@@ -60,7 +60,11 @@ interface ChannelPointRewardRow {
   simulationSummary: string | null;
 }
 
-/** Formats a duration in ms as e.g. "1h 24m" or "12m", for the simulation summary sentence. */
+/**
+ * Formats a duration in ms as e.g. "1h 24m" or "12m", for the simulation summary sentence.
+ * @param ms - Duration in milliseconds; rounded to whole minutes.
+ * @returns The short label, e.g. `"1h 24m"`, `"2h"` or `"12m"`.
+ */
 function formatDurationShort(ms: number): string {
   const totalMinutes = Math.round(ms / 60_000);
   const hours = Math.floor(totalMinutes / 60);
@@ -74,6 +78,9 @@ function formatDurationShort(ms: number): string {
  * as an SVG chart alongside a one-line summary of the peak reached and how long each phase takes —
  * this is illustrative (not real usage data), so admins can see how their base cost/multiplier/
  * curve/cooldown and the streamer's half-life/time-to-max settings shape the pricing curve.
+ * @param config - The reward's saved pricing config (base cost, multiplier, curve, rounding, cooldown).
+ * @param settings - The streamer's decay half-life and time-to-max-multiplier settings.
+ * @returns The chart's SVG markup and the one-line summary sentence.
  */
 function buildSimulationChart(config: RewardPricingRow, settings: StreamerPricingSettings): { chart: string; summary: string } {
   const result = simulateConstantUsageCycle({
@@ -98,13 +105,21 @@ function buildSimulationChart(config: RewardPricingRow, settings: StreamerPricin
   return { chart, summary };
 }
 
-/** Parses the `hours` query param against the allowed range options, defaulting when missing/invalid. */
+/**
+ * Parses the `hours` query param against the allowed range options, defaulting when missing/invalid.
+ * @param value - Raw `hours` query param.
+ * @returns One of `HISTORY_HOUR_OPTIONS`, or `DEFAULT_HISTORY_HOURS` when missing or not an allowed option.
+ */
 function parseHistoryHours(value: unknown): number {
   const n = Number(value);
   return (HISTORY_HOUR_OPTIONS as readonly number[]).includes(n) ? n : DEFAULT_HISTORY_HOURS;
 }
 
-/** Computes the live preview price for a reward's current demand, from its pricing config. */
+/**
+ * Computes the live preview price for a reward's current demand, from its pricing config.
+ * @param config - The reward's pricing config, including its current `demand`.
+ * @returns The price in channel points at the current demand.
+ */
 function previewPriceFor(config: RewardPricingRow): number {
   return computePrice(config.demand, {
     baseCost: config.base_cost,

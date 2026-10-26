@@ -1,5 +1,5 @@
 import { createLogger } from '../../shared/logger';
-import { Router } from 'express';
+import { Router, type Request, type Response, type NextFunction } from 'express';
 import { findCachedSfxTrigger, getAllSfxTriggers, getApprovedGuildIdsForKey } from '../../db';
 import { pickWeightedRandom } from '../../audio/soundSelector';
 import { playFile, VoiceNotConnectedError } from '../../audio/sfxPlayer';
@@ -11,8 +11,61 @@ const log = createLogger('Streamdeck');
 const router = Router();
 
 /**
- * Lists all SFX triggers available to play via Streamdeck, hidden ones included (hidden only
- * keeps a trigger off the public list; it still plays). The SFX catalog itself is global (not
+ * A Play SFX request that takes longer than this to handle (auth, guild resolution, trigger
+ * lookup and handing the sound to the player) is logged as a warning, so a slow bot-side
+ * response is told apart from a slow audio start (logged by the audio player itself).
+ */
+const SLOW_SFX_REQUEST_MS = 250;
+
+/**
+ * Stamps the request's arrival time in `res.locals.sfxStartedAt`, ahead of `requireApiKey`, so
+ * the Play SFX log line can include the key lookup's time too.
+ * @param _req - Express request (unused).
+ * @param res - Express response; its locals get the timestamp.
+ * @param next - Continues to the next middleware.
+ */
+function stampRequestStart(_req: Request, res: Response, next: NextFunction): void {
+  res.locals.sfxStartedAt = performance.now();
+  next();
+}
+
+/**
+ * Milliseconds since {@link stampRequestStart} ran for this response, rounded.
+ * @param res - Express response whose locals hold the start time.
+ * @returns Elapsed whole milliseconds, or 0 if the request was never stamped.
+ */
+function elapsedMs(res: Response): number {
+  const startedAt = res.locals.sfxStartedAt as number | undefined;
+  return startedAt === undefined ? 0 : Math.round(performance.now() - startedAt);
+}
+
+/** One SFX trigger as listed by `getAllSfxTriggers`. */
+type SfxTriggerListing = Awaited<ReturnType<typeof getAllSfxTriggers>>[number];
+
+/**
+ * Narrows the full trigger listing to the triggers a Play SFX press can actually play, matching
+ * the playback lookup cache: commands are matched trimmed and case-insensitively, and when two
+ * triggers share a command the lower-id one wins. A command whose winning trigger has no sound
+ * files is left out, since pressing it would only return "No sound files".
+ * @param triggers - Every SFX trigger with its sound files, in display order.
+ * @returns The playable triggers, still in display order.
+ */
+function toPlayableTriggers(triggers: SfxTriggerListing[]): SfxTriggerListing[] {
+  const winners = new Map<string, SfxTriggerListing>();
+  for (const trigger of triggers) {
+    const command = trigger.triggerCommand.trim().toLowerCase();
+    if (!command) continue;
+    const existing = winners.get(command);
+    if (!existing || BigInt(trigger.triggerId) < BigInt(existing.triggerId)) winners.set(command, trigger);
+  }
+  const playable = new Set([...winners.values()].filter((trigger) => trigger.files.length > 0));
+  return triggers.filter((trigger) => playable.has(trigger));
+}
+
+/**
+ * Lists the SFX triggers a Streamdeck key can play, hidden ones included (hidden only keeps a
+ * trigger off the public list; it still plays), leaving out any a press couldn't play (see
+ * {@link toPlayableTriggers}). The SFX catalog itself is global (not
  * guild-scoped), so this only requires the key be approved for at least one guild — matching
  * the old `requireApiKey` semantics before per-guild approval moved out of the identity lookup.
  * Each trigger carries only what the plugin's dropdown uses, not its sound files, weights or
@@ -25,7 +78,7 @@ router.get('/sfx', requireApiKey, async (req, res) => {
       res.status(403).json({ ok: false, error: 'Key not approved for any guild' });
       return;
     }
-    const triggers = (await getAllSfxTriggers()).map(({ triggerCommand, categoryName, description }) => ({
+    const triggers = toPlayableTriggers(await getAllSfxTriggers()).map(({ triggerCommand, categoryName, description }) => ({
       triggerCommand,
       categoryName,
       description,
@@ -40,8 +93,11 @@ router.get('/sfx', requireApiKey, async (req, res) => {
 /**
  * Plays a random weighted sound file for the SFX trigger named in the request
  * body, in whichever guild the key owner is currently connected to voice in.
+ * The sound goes to the bot's own voice channel in that guild, which may differ
+ * from the owner's (e.g. a bot parked in a dedicated stream channel); that's
+ * intended (see #830).
  */
-router.post('/sfx', requireApiKey, async (req, res) => {
+router.post('/sfx', stampRequestStart, requireApiKey, async (req, res) => {
   const { command } = (req.body ?? {}) as { command?: unknown };
   if (typeof command !== 'string' || !command.trim()) {
     res.status(400).json({ ok: false, error: 'Missing or invalid "command" field' });
@@ -78,7 +134,10 @@ router.post('/sfx', requireApiKey, async (req, res) => {
   try {
     await playFile(filename, guildId);
     setVoicePlaying(guildId, filename, normalizedCommand, 'streamdeck');
-    log.info(`Playing '${filename.replace(/[\r\n]/g, '')}' for trigger '${normalizedCommand.replace(/[\r\n]/g, '')}' in guild ${guildId}`);
+    const handledMs = elapsedMs(res);
+    const message = `Playing '${filename.replace(/[\r\n]/g, '')}' for trigger '${normalizedCommand.replace(/[\r\n]/g, '')}' in guild ${guildId} (request handled in ${handledMs}ms)`;
+    if (handledMs > SLOW_SFX_REQUEST_MS) log.warn(message);
+    else log.info(message);
     res.json({ ok: true, file: filename });
   } catch (err: unknown) {
     if (err instanceof VoiceNotConnectedError) {

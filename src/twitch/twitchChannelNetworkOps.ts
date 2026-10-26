@@ -28,6 +28,8 @@ let joinGate: Promise<void> = Promise.resolve();
  * shared with `join()`. In practice it always settles on the same tick, so a stalled `part()` and
  * the "stale part landing late" compensation branch cannot occur — only a synchronous throw
  * (converted here into a rejection) is possible.
+ * @param client - The connected Twurple chat client.
+ * @param channel - Normalized Twitch channel name to leave.
  */
 export function partAsync(client: ChatClient, channel: string): Promise<void> {
   // A throw inside the executor becomes a rejection, like the previous `async` body.

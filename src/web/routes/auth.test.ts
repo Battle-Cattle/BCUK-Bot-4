@@ -441,7 +441,7 @@ describe('GET /discord/callback', () => {
 
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('http://127.0.0.1:9999/callback?code=plain-auth-code&state=appstate1');
-    expect(createCode).toHaveBeenCalledWith('111');
+    expect(createCode).toHaveBeenCalledWith('111', null);
     expect(capturedSession.user).toBeUndefined();
     expect(capturedSession.companionOAuth).toBeUndefined();
   });

@@ -6,7 +6,7 @@ import { csrfProtection } from '../csrf';
 import { requireGuildContext } from '../middleware';
 import { resolveNewAssignees } from './selfServiceAccess';
 import { normalizeRequiredText, parseCheckboxField, parsePositiveIntId } from './validation';
-import { logAndRedirectError } from './errorHandling';
+import { logAndRedirectError, redirectWithError } from './errorHandling';
 import {
   discardNewTimerAsSessionUser,
   removeTimerAsSessionUser,
@@ -28,6 +28,10 @@ const MAX_INT_COLUMN_VALUE = 2147483647;
  * {@link MIN_INTERVAL_SECONDS}) and `min_messages` (matching `chk_timer_command_min_messages`,
  * `min` = 0, since "no minimum" is valid) — validated here so a bad value redirects with a
  * clear error code instead of surfacing as an opaque DB constraint/range failure.
+ * @param value - Raw form value (an array when repeated).
+ * @param min - Smallest allowed value, inclusive.
+ * @param max - Largest allowed value, inclusive.
+ * @returns The parsed integer, or null when missing, not a whole number, repeated, or out of range.
  */
 function parseIntFieldInRange(value: string | string[] | undefined, min: number, max: number): number | null {
   if (Array.isArray(value)) return null;
@@ -41,7 +45,11 @@ type TimerFieldsResult =
   | { ok: true; input: TimerCommandInput }
   | { ok: false; errorCode: 'missing_fields' | 'invalid_interval' | 'invalid_min_messages' };
 
-/** Parses and validates the timer fields shared by the add and update forms, reporting which field failed. */
+/**
+ * Parses and validates the timer fields shared by the add and update forms, reporting which field failed.
+ * @param body - Parsed add/update timer form body.
+ * @returns `{ ok: true, input }` with the validated timer input, or `{ ok: false, errorCode }` naming the failed field.
+ */
 function parseTimerCommandFields(body: Record<string, string | string[] | undefined>): TimerFieldsResult {
   const name = normalizeRequiredText(body.name as string | undefined);
   const message = normalizeRequiredText(body.message as string | undefined);
@@ -114,13 +122,13 @@ async function assignUsersToNewTimer(
 router.post('/timers/add', requireGuildContext, csrfProtection, async (req, res) => {
   const body = req.body as Record<string, string | string[] | undefined>;
   const result = parseTimerCommandFields(body);
-  if (!result.ok) return res.redirect(`/timers?error=${result.errorCode}`);
+  if (!result.ok) return redirectWithError(res, '/timers', result.errorCode);
 
   let timerId: number;
   let discordIds: string[];
   try {
     const assignees = await resolveNewAssignees(req);
-    if ('error' in assignees) return res.redirect(`/timers?error=${assignees.error}`);
+    if ('error' in assignees) return redirectWithError(res, '/timers', assignees.error);
     discordIds = assignees.discordIds;
     timerId = await addTimerCommand(result.input);
   } catch (err) {
@@ -128,7 +136,7 @@ router.post('/timers/add', requireGuildContext, csrfProtection, async (req, res)
   }
 
   const assignError = await assignUsersToNewTimer(timerId, discordIds, (id) => discardNewTimerAsSessionUser(req, id));
-  if (assignError) return res.redirect(`/timers?error=${assignError}`);
+  if (assignError) return redirectWithError(res, '/timers', assignError);
 
   res.redirect('/timers');
 });
@@ -146,16 +154,16 @@ router.post('/timers/add', requireGuildContext, csrfProtection, async (req, res)
 router.post('/timers/update', requireGuildContext, csrfProtection, async (req, res) => {
   const body = req.body as Record<string, string | string[] | undefined>;
   const id = parsePositiveIntId(body.id);
-  if (id === null) return res.redirect('/timers?error=invalid_id');
+  if (id === null) return redirectWithError(res, '/timers', 'invalid_id');
 
   const result = parseTimerCommandFields(body);
-  if (!result.ok) return res.redirect(`/timers?error=${result.errorCode}`);
+  if (!result.ok) return redirectWithError(res, '/timers', result.errorCode);
 
   try {
     await updateTimerAsSessionUser(req, id, result.input);
   } catch (err) {
     const accessErrorCode = timerAccessErrorCode(err);
-    if (accessErrorCode) return res.redirect(`/timers?error=${accessErrorCode}`);
+    if (accessErrorCode) return redirectWithError(res, '/timers', accessErrorCode);
     return logAndRedirectError({ res, log, logLabel: 'Update timer command error:', err, basePath: '/timers', errorCode: 'update_failed' });
   }
 
@@ -174,13 +182,13 @@ router.post('/timers/update', requireGuildContext, csrfProtection, async (req, r
  */
 router.post('/timers/remove', requireGuildContext, csrfProtection, async (req, res) => {
   const id = parsePositiveIntId((req.body as Record<string, string | string[] | undefined>).id);
-  if (id === null) return res.redirect('/timers?error=invalid_id');
+  if (id === null) return redirectWithError(res, '/timers', 'invalid_id');
 
   try {
     await removeTimerAsSessionUser(req, id);
   } catch (err) {
     const accessErrorCode = timerAccessErrorCode(err);
-    if (accessErrorCode) return res.redirect(`/timers?error=${accessErrorCode}`);
+    if (accessErrorCode) return redirectWithError(res, '/timers', accessErrorCode);
     return logAndRedirectError({ res, log, logLabel: 'Remove timer command error:', err, basePath: '/timers', errorCode: 'remove_failed' });
   }
 
@@ -199,13 +207,13 @@ router.post('/timers/remove', requireGuildContext, csrfProtection, async (req, r
 router.post('/timers/toggle', requireGuildContext, csrfProtection, async (req, res) => {
   const body = req.body as Record<string, string | string[] | undefined>;
   const id = parsePositiveIntId(body.id);
-  if (id === null) return res.redirect('/timers?error=invalid_id');
+  if (id === null) return redirectWithError(res, '/timers', 'invalid_id');
 
   try {
     await setTimerEnabledAsSessionUser(req, id, body.enabled === 'true');
   } catch (err) {
     const accessErrorCode = timerAccessErrorCode(err);
-    if (accessErrorCode) return res.redirect(`/timers?error=${accessErrorCode}`);
+    if (accessErrorCode) return redirectWithError(res, '/timers', accessErrorCode);
     return logAndRedirectError({ res, log, logLabel: 'Toggle timer command error:', err, basePath: '/timers', errorCode: 'toggle_failed' });
   }
 

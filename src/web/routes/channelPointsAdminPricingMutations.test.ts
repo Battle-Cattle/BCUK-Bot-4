@@ -22,7 +22,7 @@ vi.mock('../middleware', () => ({
   requireAuth: (_req: any, _res: any, next: any) => next(),
 }));
 
-vi.mock('../../twitch/twitchApi', () => ({
+vi.mock('../../twitch/twitchRewardsApi', () => ({
   getCustomRewards: vi.fn(),
 }));
 
@@ -38,7 +38,7 @@ vi.mock('../../twitch/pricing/rewardPricingService', () => ({
 import supertest from 'supertest';
 import { router } from './channelPointsAdminPricingMutations';
 import { getStreamerByDiscordId, upsertPricingConfig, getPricingForReward, savePricingSettingsForStreamer } from '../../db';
-import { getCustomRewards } from '../../twitch/twitchApi';
+import { getCustomRewards } from '../../twitch/twitchRewardsApi';
 import { getValidToken } from '../../twitch/twitchUserTokens';
 import { applyDecayTick, resetAndDeletePricing } from '../../twitch/pricing/rewardPricingService';
 import { buildTestApp } from '../../test-utils/expressTestApp';

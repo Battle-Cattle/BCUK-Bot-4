@@ -22,7 +22,11 @@ export const connections = new Map<string, Set<import('express').Response>>();
 
 export const MAX_SSE_CONNECTIONS_PER_CHANNEL = OVERLAY_MAX_SSE_PER_CHANNEL;
 
-/** Push a video URL to all browser sources connected for this channel. */
+/**
+ * Push a video URL to all browser sources connected for this channel.
+ * @param login - Twitch channel login the overlay is keyed by (matched case-insensitively).
+ * @param videoPath - URL path of the video for the browser source to play.
+ */
 export function pushOverlayEvent(login: string, videoPath: string): void {
   const key = login.toLowerCase();
   const remaining = broadcastToChannel(connections, key, { video: videoPath });

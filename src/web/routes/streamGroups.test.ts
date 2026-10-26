@@ -38,7 +38,9 @@ import { AccessLevel } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 import { makeSessionUser, type SessionUserFixture } from '../../test-utils/fixtures';
 import { getDiscordClient } from '../../discord/discordClientStore';
-import { ChannelType, DiscordAPIError, RESTJSONErrorCodes, type Client } from 'discord.js';
+import { DiscordAPIError } from '@discordjs/rest';
+import { ChannelType, RESTJSONErrorCodes } from 'discord-api-types/v10';
+import type { Client } from 'discord.js';
 
 const GUILD_ID = '900000000000000001';
 type SessionUser = SessionUserFixture;

@@ -15,12 +15,19 @@ const log = createLogger('EventSub');
 export interface StreamerInfo { login: string; streamerId: number; config: EventSubConfig | null }
 const streamerMap = new Map<string, StreamerInfo>();
 
-/** Records or updates a streamer's dispatch info, keyed by their broadcaster user ID. */
+/**
+ * Records or updates a streamer's dispatch info, keyed by their broadcaster user ID.
+ * @param uid - Streamer's Twitch broadcaster user ID.
+ * @param info - Login, DB streamer id and event config to dispatch that broadcaster's notifications with.
+ */
 export function setStreamerInfo(uid: string, info: StreamerInfo): void {
   streamerMap.set(uid, info);
 }
 
-/** Removes a streamer from the in-memory map (called when their connection is stopped). */
+/**
+ * Removes a streamer from the in-memory map (called when their connection is stopped).
+ * @param uid - Streamer's Twitch broadcaster user ID.
+ */
 export function removeStreamerFromMap(uid: string): void {
   streamerMap.delete(uid);
 }
@@ -29,6 +36,7 @@ export function removeStreamerFromMap(uid: string): void {
  * Returns the live streamer-dispatch map, keyed by broadcaster Twitch user ID. Read-only view
  * used by the EventSub reconciliation poll to enumerate every streamer currently connected via
  * EventSub, without duplicating this module's connection-tracking state.
+ * @returns The module's own map (not a copy), so it reflects later changes.
  */
 export function getAllStreamerInfo(): ReadonlyMap<string, StreamerInfo> {
   return streamerMap;
@@ -59,6 +67,9 @@ const notificationHandlers = new Map<string, NotificationHandler>([
  * missing config, so their alert-only subscriptions aren't silently discarded here. Without
  * this fallback, `isGroupEnabled`'s alert-driven subscription creation and this dispatch gate
  * would disagree: the subscription would exist but every notification for it would be dropped.
+ * @param type - EventSub subscription type of the notification, e.g. `channel.follow`.
+ * @param event - The notification's `event` payload, cast to the handler's event type.
+ * @param condition - The subscription's condition; `broadcaster_user_id` (or `to_broadcaster_user_id` for raids) picks the streamer.
  */
 export function dispatchNotification(type: string, event: Record<string, unknown>, condition: Record<string, string>): void {
   const broadcasterId = condition.broadcaster_user_id ?? condition.to_broadcaster_user_id;
@@ -102,6 +113,7 @@ export function dispatchNotification(type: string, event: Record<string, unknown
  * re-derives desired subscriptions from Twitch's live listing and recreates the now-missing one,
  * which is a cheap no-op if nothing changed. Without this, a non-auth revocation would silently stop
  * delivering that subscription's notifications until some unrelated reload happened to fire.
+ * @param sub - The revoked subscription from the `revocation` message: its type, revocation status and condition.
  */
 export function handleRevocation(sub: { type: string; status: string; condition: Record<string, string> }): void {
   log.warn(`Subscription revoked: type=${sub.type} status=${sub.status}`);

@@ -5,11 +5,11 @@
 [![Code Coverage](https://qlty.sh/gh/Battle-Cattle/projects/BCUK-Bot-4/coverage.svg)](https://qlty.sh/gh/Battle-Cattle/projects/BCUK-Bot-4)
 ![CodeRabbit Pull Request Reviews](https://img.shields.io/coderabbit/prs/github/Battle-Cattle/BCUK-Bot-4?utm_source=oss&utm_medium=github&utm_campaign=Battle-Cattle%2FBCUK-Bot-4&labelColor=171717&color=FF570A&link=https%3A%2F%2Fcoderabbit.ai&label=CodeRabbit+Reviews)
 
-A multi-platform community bot connecting Twitch and Discord. Features custom commands, soundboard effects, counters, viewer loyalty points (chat-earn, sub bonuses, `!gamble`), and a web control panel.
+A multi-platform community bot connecting Twitch and Discord. Features custom commands, soundboard effects, counters, viewer loyalty points (chat-earn, sub bonuses, `!gamble`, `!raffle`), and a web control panel.
 
 ## Requirements
 
-- **Node.js 24 or later**, matching `engines` in `package.json` and CI. Use the npm 11 that Node 24 ships with: npm 10 has failed `npm ci` on this lockfile with a spurious `Missing: <pkg> from lock file` error (it handles the `overrides` entries differently), so check `npm -v` if you installed npm separately.
+- **Node.js 24.22.1 or later**, matching `engines` in `package.json` and CI. `.npmrc` sets `engine-strict=true`, so `npm install`/`npm ci` (and so `deploy.sh`) stop on an older Node. Use the npm 11 that Node 24 ships with: npm 10 has failed `npm ci` on this lockfile with a spurious `Missing: <pkg> from lock file` error (it handles the `overrides` entries differently), so check `npm -v` if you installed npm separately.
 - **MySQL 8.0.19 or later.** Upserts use the `INSERT … VALUES (…) AS new_row` row-alias form, which older versions reject. For a fresh install, create an empty `utf8mb4` database: the bot creates the tables on first start (see [Database migrations](#database-migrations)). `DATABASE-SCHEMA.md` documents each table.
 - A `.env` file with credentials for each platform. Copy `.env.example` and fill it in; it lists every setting the bot reads.
 
@@ -35,6 +35,8 @@ bash scripts/install-systemd-service.sh
 ```
 
 This installs and enables the unit from `deploy/bcuk-bot.service`, filled in with your user, this checkout's path and your `node`. It also adds a sudoers rule allowing that user to run `systemctl restart bcuk-bot` and nothing else. It doesn't start the service: stop any copy still running elsewhere first (for example in an old `screen` session), then run `sudo systemctl start bcuk-bot`.
+
+The unit keeps running the `node` it was installed with, so after upgrading Node, re-run `bash scripts/install-systemd-service.sh` (it rewrites the unit with the `node` now on your `PATH`) and then deploy. `deploy.sh` checks that the service's `node` meets `engines` in `package.json` and stops before installing anything if it doesn't.
 
 `bash deploy.sh` (or `npm run deploy`) then:
 
@@ -85,3 +87,13 @@ The web panel serves uploaded files straight from disk: overlay videos from `OVE
 - Make these folders owned and writable **only** by the user the bot runs as (e.g. `chown -R bot:bot <folder> && chmod -R go-w <folder>`). Anyone else who can write there could plant a symlink to a file outside the folder and race the check.
 - Don't point them at a shared or world-writable location (e.g. `/tmp`), and don't nest one inside a directory other users can write to.
 - Keep them outside the repo checkout and away from `.env` and other secrets.
+
+### SFX file format
+
+Any format ffmpeg reads will play, but each play of most formats starts an ffmpeg process to decode and re-encode it, which adds a short delay before the sound is heard. A file that's already **48kHz stereo Opus in an `.ogg`, `.opus` or `.webm` file** goes to Discord as it is, with no ffmpeg step, so it starts fastest. To convert one (any other kind of `.ogg`, such as Vorbis or mono Opus, still plays through ffmpeg):
+
+```bash
+ffmpeg -i airhorn.mp3 -c:a libopus -b:a 96k -ar 48000 -ac 2 airhorn.ogg
+```
+
+A converted file is a new filename, so re-upload it on the SFX page (or update the `sfx.file` row) and remove the old one.

@@ -39,7 +39,11 @@ const DEFAULT_MESSAGE_TEMPLATES: Record<AlertEventType, string> = {
   raid: 'Welcome raiders from {from_display}! Thank you for the {viewers} person raid!',
 };
 
-/** Maps a raw `alert_config` row to an {@link AlertConfig}. */
+/**
+ * Maps a raw `alert_config` row to an {@link AlertConfig}.
+ * @param r - Row selected from `alert_config`.
+ * @returns The mapped alert config.
+ */
 function mapRow(r: mysql.RowDataPacket): AlertConfig {
   return {
     id: r.id,

@@ -36,7 +36,11 @@ function mapStatusRow(r: mysql.RowDataPacket): StreamdeckKeyGuildStatusRow {
   };
 }
 
-/** Computes the auto-approval status for a fresh guild-access request. */
+/**
+ * Computes the auto-approval status for a fresh guild-access request.
+ * @param accessLevel The requester's access level in the guild.
+ * @returns `approved` for Manager or above, otherwise `pending`.
+ */
 function initialStatus(accessLevel: number): 'pending' | 'approved' {
   return accessLevel >= AccessLevel.MANAGER ? 'approved' : 'pending';
 }
@@ -46,6 +50,7 @@ function initialStatus(accessLevel: number): 'pending' | 'approved' {
  * (a `streamdeck_api_keys` row), regardless of its per-guild approval state.
  *
  * @param discordId User's Discord snowflake.
+ * @returns True if a key row exists for the user.
  */
 export async function hasApiKey(discordId: string): Promise<boolean> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
@@ -168,6 +173,7 @@ export function keyVersionFromHash(keyHash: string): string {
  * The {@link keyVersionFromHash} marker for a plaintext key, e.g. one just generated, without
  * reading it back from the database.
  * @param plain The plaintext key.
+ * @returns A 32-character hex marker.
  */
 export function keyVersionFromPlaintext(plain: string): string {
   return keyVersionFromHash(createHash('sha256').update(plain).digest('hex'));
@@ -227,6 +233,7 @@ const KEY_OWNER_HAS_GUILD_ACCESS_SQL = `(
  * needing to guess which single guild the key targets.
  *
  * @param discordId Key owner's Discord snowflake.
+ * @returns Discord snowflakes of the approved, still-accessible guilds (empty when none).
  */
 export async function getApprovedGuildIdsForKey(discordId: string): Promise<string[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
@@ -245,6 +252,7 @@ export async function getApprovedGuildIdsForKey(discordId: string): Promise<stri
  *
  * @param discordId Key owner's Discord snowflake.
  * @param guildId Guild to check approval for.
+ * @returns True if approved and the user still has access to the guild.
  */
 export async function isKeyApprovedForGuild(discordId: string, guildId: string): Promise<boolean> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(

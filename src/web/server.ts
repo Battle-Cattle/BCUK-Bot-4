@@ -12,53 +12,12 @@ import { WEB_PORT, SESSION_SECRET, DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NA
 const log = createLogger('Web');
 
 const isProduction = process.env.NODE_ENV === 'production';
-import authRouter from './routes/auth';
-import passkeysRouter from './routes/passkeys';
-import guildRouter from './routes/guild';
-import eventsubCallbackRouter from './routes/eventsubCallback';
-import eventsubAdminRouter from './routes/eventsubAdmin';
-import botAuthRouter from './routes/botAuth';
-import botAuthCallbackRouter from './routes/botAuthCallback';
-import dashboardRouter from './routes/dashboard';
-import dashboardEventsRouter from './routes/dashboardEvents';
-import dashboardStatusEventsRouter from './routes/dashboardStatusEvents';
-import adminRouter from './routes/admin';
-import apiRouter from './routes/api';
-import sfxRouter from './routes/sfx';
-import sfxMutationsRouter from './routes/sfxMutations';
-import sfxPublicRouter from './routes/sfxPublic';
-import streamsRouter from './routes/streams';
-import commandsRouter from './routes/commands';
-import countersRouter from './routes/counters';
-import counterHistoryRouter from './routes/counterHistory';
-import loyaltyPointsRouter from './routes/loyaltyPoints';
-import advancedCommandsRouter from './routes/advancedCommands';
-import streamdeckRouter from './routes/streamdeck';
-import streamdeckKeysRouter from './routes/streamdeckKeys';
-import companionAuthRouter from './routes/companionAuth';
-import companionEventsRouter from './routes/companionEvents';
-import companionRewardsRouter from './routes/companionRewards';
-import companionCommandsRouter from './routes/companionCommands';
-import companionKeysRouter from './routes/companionKeys';
-import userSettingsRouter from './routes/userSettings';
-import overlaySourceRouter from './routes/overlaySource';
-import overlayAdminRouter from './routes/overlayAdmin';
-import alertsOverlaySourceRouter from './routes/alertsOverlaySource';
-import alertsAdminRouter from './routes/alertsAdmin';
-import channelPointsAdminRouter from './routes/channelPointsAdmin';
-import timersRouter from './routes/timers';
-import privacyRouter from './routes/privacy';
-import tosRouter from './routes/tos';
 import serviceWorkerRouter from './routes/serviceWorker';
 import streamdeckPluginDownloadRouter from './routes/streamdeckPluginDownload';
-import healthRouter from './routes/health';
-import healthStatusEventsRouter from './routes/healthStatusEvents';
-import { requireAuth, requireGuildContext } from './middleware';
+import { mountRoutes } from './routes/index';
 import { ensureSessionCsrfToken } from './csrf';
 import { renderView } from './routes/viewHelpers';
 import {
-  authLimiter,
-  streamdeckAuthFailureLimiter,
   ipKey,
   generalLimiterSkip,
   sessionLimiterKey,
@@ -124,7 +83,10 @@ app.use(streamdeckPluginDownloadRouter);
 app.use(
   '/vendor/simplewebauthn',
   express.static(path.join(__dirname, '../../node_modules/@simplewebauthn/browser/dist/bundle'), {
-    /** Forces revalidation on every response, matching the public/ static assets below. */
+    /**
+     * Forces revalidation on every response, matching the public/ static assets below.
+     * @param res - The response for the vendored SimpleWebAuthn file being served.
+     */
     setHeaders: (res) => {
       res.setHeader('Cache-Control', 'no-cache');
     },
@@ -138,7 +100,10 @@ app.use(
 // serviceWorker.ts), since those fetches would otherwise also read from the stale HTTP cache.
 app.use(
   express.static(path.join(__dirname, '../../public'), {
-    /** Forces revalidation on every static asset response instead of allowing heuristic HTTP caching. */
+    /**
+     * Forces revalidation on every static asset response instead of allowing heuristic HTTP caching.
+     * @param res - The response for the public/ static file being served.
+     */
     setHeaders: (res) => {
       res.setHeader('Cache-Control', 'no-cache');
     },
@@ -214,91 +179,8 @@ app.use((req, res, next) => {
   next();
 });
 
-// Routes
-// authLimiter is applied exactly once for the whole '/auth' prefix (which also covers
-// '/auth/passkey'), rather than on each '/auth'-mounted router: the routers below share
-// a prefix and fall through via next(), so a per-mount limiter counted a single request
-// once per layer it passed through (express-rate-limit's ERR_ERL_DOUBLE_COUNT).
-app.use('/auth', authLimiter);
-app.use('/auth/passkey', passkeysRouter);
-app.use('/auth', authRouter);
-// EventSub OAuth callback — must be outside requireAuth (Twitch redirects here without session)
-app.use('/auth', eventsubCallbackRouter);
-// Bot chat OAuth callback — same reasoning, Twitch redirects here without session (see #550).
-app.use('/auth', botAuthCallbackRouter);
-// streamdeckAuthFailureLimiter (IP-keyed, counts only 401s) runs first: the token-keyed
-// streamdeckLimiter alone gives every random unverified token its own fresh bucket.
-app.use('/api/streamdeck', streamdeckAuthFailureLimiter, streamdeckLimiter, streamdeckRouter);
-app.use('/', sfxPublicRouter);
-app.use('/', privacyRouter);
-app.use('/', tosRouter);
-app.use('/overlay', overlaySourceRouter);
-app.use('/alerts', alertsOverlaySourceRouter);
-// authLimiter is applied per-route inside companionAuthRouter, not here — this
-// router is mounted at '/', so a blanket limiter here would rate-limit every
-// request on the site, not just the companion app's OAuth routes.
-app.use('/', companionAuthRouter);
-app.use('/api/companion', companionEventsRouter);
-app.use('/api/companion', companionRewardsRouter);
-app.use('/api/companion', companionCommandsRouter);
-app.use('/guild', requireAuth, guildRouter);
-app.use('/api', requireAuth, apiRouter);
-
-// Health isn't guild-scoped (unlike the '/admin'-mounted routers below), so it's mounted here,
-// ahead of the '/'-mounted routers' requireGuildContext gate — matching '/guild'/'/api' above —
-// rather than falling through the '/admin' prefix's adminGuildRouter, which would otherwise run
-// requireGuildContext for every '/admin/*' path regardless of which route actually matches.
-// requireOwner is applied per-route inside healthRouter/healthStatusEventsRouter (matching
-// admin.ts's per-route convention) rather than router-level here.
-app.use('/admin/health', requireAuth, healthRouter);
-app.use('/admin/health', requireAuth, healthStatusEventsRouter);
-// Bot chat account connect page (see #550) — same not-guild-scoped, owner-gated pattern as health above.
-app.use('/admin/bot-auth', requireAuth, botAuthRouter);
-
-// All of the routers below share the same '/' mount point, so registering each one
-// behind its own app.use(path, ...middleware, router) call made requireAuth (and, for
-// some, requireGuildContext) run once per sibling mount per request — not once per
-// request — since every '/'-mounted layer matches every path and falls through via
-// next() until a route inside actually matches. Nesting them under shared Router()
-// instances collapses that to one middleware pass per group.
-//
-// requireGuildContext refreshes req.session.user.accessLevel for the current guild;
-// sfxMutationsRouter gates on requireMod, which reads that level, so it must run
-// behind requireGuildContext (not just requireAuth) or a stale/missing level could
-// bypass the Mod check.
-const rootGuildRouter = express.Router();
-rootGuildRouter.use(requireGuildContext);
-rootGuildRouter.use(streamdeckKeysRouter);
-rootGuildRouter.use(companionKeysRouter);
-rootGuildRouter.use(dashboardRouter);
-rootGuildRouter.use(sfxMutationsRouter);
-
-const rootAuthedRouter = express.Router();
-rootAuthedRouter.use(requireAuth);
-rootAuthedRouter.use(sfxRouter);
-rootAuthedRouter.use(commandsRouter);
-rootAuthedRouter.use(countersRouter);
-rootAuthedRouter.use(counterHistoryRouter);
-rootAuthedRouter.use(loyaltyPointsRouter);
-rootAuthedRouter.use(advancedCommandsRouter);
-rootAuthedRouter.use(timersRouter);
-rootAuthedRouter.use(rootGuildRouter);
-app.use('/', rootAuthedRouter);
-
-// Same redundancy as above for the '/admin'-mounted routers.
-const adminGuildRouter = express.Router();
-adminGuildRouter.use(requireAuth, requireGuildContext);
-adminGuildRouter.use(adminRouter);
-adminGuildRouter.use(streamsRouter);
-adminGuildRouter.use(eventsubAdminRouter);
-app.use('/admin', adminGuildRouter);
-
-app.use('/user/settings', requireAuth, userSettingsRouter);
-app.use('/overlay', requireAuth, overlayAdminRouter);
-app.use('/alerts', requireAuth, alertsAdminRouter);
-app.use('/channel-points', requireAuth, channelPointsAdminRouter);
-app.use('/dashboard', requireAuth, dashboardEventsRouter);
-app.use('/dashboard', requireAuth, dashboardStatusEventsRouter);
+// Feature routes, in their mount order (see routes/index.ts).
+mountRoutes(app, { streamdeckLimiter });
 
 /**
  * Renders the `error` view with the given status and message, including a real CSRF

@@ -2,9 +2,17 @@
 // `twitch/twitchUserTokens.ts`.
 import { twitchFetch, authHeaders } from '../twitchApi';
 import { TwitchAuthError } from '../twitchUserTokens';
+import { assertHelixOk } from '../helixErrors';
 
 /** Creates an EventSub subscription via WebSocket transport. Returns the subscription ID,
- *  or null if the subscription already exists (409). Throws on other failures. */
+ *  or null if the subscription already exists (409). Throws on other failures.
+ *  @param type - EventSub subscription type, e.g. `channel.channel_points_custom_reward_redemption.add`.
+ *  @param version - Version of the subscription type, e.g. `1`.
+ *  @param condition - Twitch condition object for the subscription (e.g. `{ broadcaster_user_id }`).
+ *  @param sessionId - ID of the EventSub WebSocket session to bind the subscription to.
+ *  @param token - User access token authorised for the subscription's scopes.
+ *  @returns The new subscription's ID, or null on 409 (already exists).
+ *  @throws TwitchAuthError on 401/403; Error on any other non-OK status or an empty response. */
 export async function createEventSubSubscription(
   type: string,
   version: string,
@@ -50,7 +58,10 @@ export async function createEventSubSubscription(
  *  left over from a prior (possibly dead) session. `status` is Twitch's own subscription state
  *  (e.g. `enabled`, `authorization_revoked`, `notification_failures_exceeded`) — a subscription
  *  bound to the live session isn't necessarily receiving notifications; callers must check
- *  `status === 'enabled'` before treating it as such. */
+ *  `status === 'enabled'` before treating it as such.
+ *  @param token - User or app access token to list subscriptions with.
+ *  @param userId - Twitch user ID to filter by (`user_id` query param); omit for no filter.
+ *  @returns Every matching subscription across all pages. */
 export async function listEventSubSubscriptions(
   token: string,
   userId?: string,
@@ -62,7 +73,7 @@ export async function listEventSubSubscriptions(
   do {
     if (cursor) url.searchParams.set('after', cursor);
     const res = await twitchFetch(url.toString(), { headers: authHeaders(token) });
-    if (!res.ok) throw new Error(`[TwitchAPI] listEventSubSubscriptions failed: ${res.status}`);
+    assertHelixOk(res, 'listEventSubSubscriptions');
     const data = await res.json() as {
       data: Array<{ id: string; type: string; condition: Record<string, string>; transport?: { session_id?: string }; status?: string }>;
       pagination?: { cursor?: string };
@@ -87,6 +98,6 @@ export async function deleteEventSubSubscription(id: string, token: string): Pro
     `https://api.twitch.tv/helix/eventsub/subscriptions?id=${encodeURIComponent(id)}`,
     { method: 'DELETE', headers: authHeaders(token) },
   );
-  if (res.ok || res.status === 404) return;
-  throw new Error(`[TwitchAPI] deleteEventSubSubscription failed: ${res.status}`);
+  if (res.status === 404) return;
+  assertHelixOk(res, 'deleteEventSubSubscription');
 }

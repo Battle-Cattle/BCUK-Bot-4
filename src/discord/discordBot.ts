@@ -45,7 +45,10 @@ function clearReconnectTimer(): void {
   }
 }
 
-/** Schedules an exponential-backoff retry of {@link startDiscordBot}, skipping if one is already pending. */
+/**
+ * Schedules an exponential-backoff retry of {@link startDiscordBot}, skipping if one is already pending.
+ * @param reason - Why the reconnect is needed, included in the warning log.
+ */
 function scheduleReconnect(reason: string): void {
   if (reconnectTimer) return;
   const delay = Math.min(RECONNECT_BASE_DELAY_MS * 2 ** reconnectAttempts, RECONNECT_MAX_DELAY_MS);
@@ -97,7 +100,10 @@ export function waitForDiscordReady(timeoutMs: number): Promise<void> {
   });
 }
 
-/** Test-only: how many {@link waitForDiscordReady} callers are still waiting on `clientReady`. */
+/**
+ * Test-only: how many {@link waitForDiscordReady} callers are still waiting on `clientReady`.
+ * @returns The number of pending ready waiters.
+ */
 export function __getReadyWaiterCountForTests(): number {
   return readyWaiters.length;
 }
@@ -316,6 +322,16 @@ function onShardConnected(): void {
 }
 
 /**
+ * Marks the gateway as connected again after a resume, and logs it so a reconnect cycle has a
+ * visible end in the log.
+ * @param shardId - The shard that resumed its gateway session.
+ */
+function onShardResumed(shardId: number): void {
+  onShardConnected();
+  log.info(`Shard ${shardId} resumed its gateway session.`);
+}
+
+/**
  * Registers gateway-connection visibility/self-healing handlers.
  *
  * Since discord.js v15 the Client no longer re-emits shard lifecycle events
@@ -327,8 +343,10 @@ function onShardConnected(): void {
  * reconnect cycle produces zero log output, making post-incident diagnosis impossible.
  * `SocketError` is a connection-level error on the gateway socket itself and `Error` a fatal
  * shard error (distinct from the client's generic 'error' handler); both are logged at error
- * level with an owner DM, throttled (see {@link logShardError}) so a burst of retries during an
- * outage doesn't flood either.
+ * level, throttled (see {@link logShardError}) so a burst of retries during an outage doesn't
+ * flood it. The owner hears about an outage from the health watcher instead (via
+ * `recordDiscordConnected`), which skips blips shorter than its grace period and pairs a "down"
+ * DM with a "recovered" one.
  *
  * A `Closed` with one of {@link UNRECOVERABLE_CLOSE_CODES} is the one case where the manager
  * gives up and will *not* reconnect that shard on its own. With this bot running a single
@@ -344,6 +362,7 @@ function onShardConnected(): void {
  * while the web panel's health dashboard kept reading the last-known `true` forever.
  * `Ready`/`Resumed` flip it back to `true` once the shard actually recovers, since a full client
  * replacement (via `clientReady`) isn't guaranteed to happen for every recovery path.
+ * `Resumed` also logs the resume, so a reconnect cycle has a visible end in the log.
  *
  * `stopDiscordBot()`/`startDiscordBot()` destroy the old `Client` and construct a brand-new one —
  * `audioPlayer.ts`'s custom (non-`voiceAdapterCreator`) voice adapter isn't registered with
@@ -377,7 +396,7 @@ function registerConnectionHandlers(client: Client): void {
   client.ws.on(WebSocketShardEvents.SocketError, (err, shardId) => { if (isCurrent()) onShardError(err, shardId); });
   client.ws.on(WebSocketShardEvents.Error, (err, shardId) => { if (isCurrent()) onShardError(err, shardId); });
   client.ws.on(WebSocketShardEvents.Ready, () => { if (isCurrent()) onShardConnected(); });
-  client.ws.on(WebSocketShardEvents.Resumed, () => { if (isCurrent()) onShardConnected(); });
+  client.ws.on(WebSocketShardEvents.Resumed, (shardId) => { if (isCurrent()) onShardResumed(shardId); });
 }
 
 /**

@@ -23,6 +23,8 @@ export function parseEnumField<T extends string>(value: unknown, allowed: readon
 /**
  * Validates an `:eventType` route param against the fixed set of alert event types.
  * Rejects a repeated field (arriving as an array), consistent with `parsePositiveIntId`.
+ * @param value - Raw `:eventType` route param (an array when repeated, undefined when absent).
+ * @returns The matching alert event type, or null when missing, repeated, or unknown.
  */
 export function parseEventType(value: string | string[] | undefined): AlertEventType | null {
   if (value === undefined || Array.isArray(value)) return null;

@@ -253,6 +253,38 @@ module.exports = tseslint.config(
     },
   },
   {
+    // The same Docstrings rule for the panel's browser scripts (no TypeScript, so JSDoc may carry types).
+    files: ['public/**/*.js'],
+    ignores: ['public/vendor/**'],
+    plugins: { jsdoc },
+    rules: {
+      'jsdoc/require-jsdoc': ['error', {
+        publicOnly: false,
+        require: { FunctionDeclaration: true, MethodDefinition: true },
+        contexts: [
+          'Program > VariableDeclaration > VariableDeclarator > ArrowFunctionExpression',
+          'Program > VariableDeclaration > VariableDeclarator > FunctionExpression',
+        ],
+      }],
+      'jsdoc/check-param-names': ['error', { checkDestructured: false }],
+      'jsdoc/check-tag-names': 'error',
+    },
+  },
+  {
+    // CLAUDE.md "Docstrings": the JSDoc also says what each parameter is and what the function
+    // returns, in src/ and the public/ browser scripts alike. A destructured parameter needs only its
+    // root `@param`.
+    files: ['public/**/*.js', 'src/**/*.ts'],
+    ignores: ['public/vendor/**', 'src/**/*.test.ts'],
+    plugins: { jsdoc },
+    rules: {
+      'jsdoc/require-param': ['error', { checkDestructured: false }],
+      'jsdoc/require-param-description': 'error',
+      'jsdoc/require-returns': 'error',
+      'jsdoc/require-returns-description': 'error',
+    },
+  },
+  {
     // A stray `.only`/`.skip` or an assertion-free test silently weakens CI.
     files: ['src/**/*.test.ts'],
     plugins: { vitest },

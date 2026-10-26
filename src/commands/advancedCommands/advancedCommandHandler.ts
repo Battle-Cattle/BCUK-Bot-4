@@ -52,7 +52,7 @@ export interface AdvancedCommandChatMessage {
   userName: string;
   /** Raw message text. */
   message: string;
-  /** The message's first word, lowercased (from the caller's single `extractCommand`). */
+  /** The message's first word, lowercased, or null without a `!`/`#` prefix (from the caller's single `extractCommand`). */
   command: string | null;
   roles: ChatRoleInfo;
 }

@@ -2,7 +2,7 @@
 
 ## Node/npm version
 
-`package.json` pins `"engines": { "node": ">=24" }`, and CI (`.github/workflows/ci.yml`) installs Node `24.x` via `actions/setup-node@v4`, which brings npm 11+. **Always match that before running any `npm` command** — a sandbox's default Node (e.g. the `/opt/node22` on PATH in some environments) ships an older npm whose `npm ci` is stricter about `overrides` bookkeeping than npm 11's and can fail with a spurious `Missing: <pkg>@<version> from lock file` even against a perfectly valid, CI-green lockfile (see the `filing-cabinet`/`typescript` override in `overrides` — this bit us once). If Node 24 isn't already active:
+`package.json` pins `"engines": { "node": ">=24.22.1" }`, and CI (`.github/workflows/ci.yml`) installs Node `24.x` via `actions/setup-node@v4`, which brings npm 11+. **Always match that before running any `npm` command** — a sandbox's default Node (e.g. the `/opt/node22` on PATH in some environments) ships an older npm whose `npm ci` is stricter about `overrides` bookkeeping than npm 11's and can fail with a spurious `Missing: <pkg>@<version> from lock file` even against a perfectly valid, CI-green lockfile (see the `filing-cabinet`/`typescript` override in `overrides` — this bit us once). If Node 24 isn't already active:
 
 ```bash
 export NVM_DIR="${NVM_DIR:-/opt/nvm}" && source "$NVM_DIR/nvm.sh"
@@ -11,7 +11,7 @@ node -v   # expect 24.x
 npm -v    # expect 11.x
 ```
 
-(If `$NVM_DIR/nvm.sh` doesn't exist in a given sandbox, find whatever installs/switches Node there instead — the point is Node 24 / npm 11+, not this exact path.)
+(If `$NVM_DIR/nvm.sh` doesn't exist in a given sandbox, find whatever installs/switches Node there instead — the point is Node 24.22.1+ / npm 11+, not this exact path.) `.npmrc` sets `engine-strict=true`, so npm refuses to install on an older Node.
 
 Do this once per session before `npm install`/`npm ci`/`npm test`/etc. — don't debug an `npm ci` failure by fighting the lockfile before first checking `node -v`/`npm -v`.
 
@@ -53,10 +53,10 @@ Tests run in Vitest's `vmThreads` pool (each file gets a fresh VM context on a r
 
 ## Tech Stack
 
-- **Runtime:** discord.js v15 (pre-release dev build, pinned exactly; builders/formatters come from `@discordjs/builders`/`@discordjs/formatters`), `@twurple/chat` + `@twurple/auth` (Twitch chat), `mediaplex` (Opus), express v5 + `express-session`/`express-mysql-session`, `mysql2`, `helmet`, `winston`.
-- **TypeScript:** `strict: true` plus `noUncheckedIndexedAccess` (so `rows[0]` is `T | undefined` — guard it, or use `!` only where a nearby check guarantees it, with a comment saying which), target ES2024, `moduleResolution: NodeNext`. `package.json` pins `"engines": { "node": ">=24" }` — see Node/npm version above.
-- **ESLint** (flat config, type-aware): `no-floating-promises`, `no-misused-promises`, and `no-console` are all **errors**, not warnings — these affect how code must be written (await/void everything, use `logger` not `console.*`). `no-explicit-any` is a warning; relaxed for `*.test.ts`. `eslint-plugin-jsdoc` enforces the Docstrings rule below (`require-jsdoc` on function declarations, methods and module-level arrow functions; `check-param-names` catches stale `@param`s), `eslint-plugin-sonarjs` adds complexity checks on source files (`sonarjs/cognitive-complexity` ≤ 15, the same metric as Qlty's function-complexity smell, plus cyclomatic `complexity` ≤ 12, `max-params` 5, `max-depth` 3, `max-nested-callbacks` 3, all errors), and `@vitest/eslint-plugin` guards tests (no `.only`/`.skip`, no assertion-free tests). The browser scripts in `public/` (classic `<script>`s, no bundler) are linted too, with browser globals: a name a script uses from another script on the same page goes in a `/* global name */` header at its top (`name:writable` if it assigns to it).
-- **Test/build scripts:** `npm run build` (`tsc -p tsconfig.build.json`), `npm run lint`, `npm run check:circular` (madge).
+- **Runtime:** discord.js v15 (pre-release dev build, pinned exactly, with the `@discordjs/*` packages below on the same dev build), `@twurple/chat` + `@twurple/auth` (Twitch chat), `mediaplex` (Opus), express v5 + `express-session`/`express-mysql-session`, `mysql2`, `helmet`, `winston`.
+- **TypeScript:** `strict: true` plus `noUncheckedIndexedAccess` (so `rows[0]` is `T | undefined` — guard it, or use `!` only where a nearby check guarantees it, with a comment saying which), target ES2024, `moduleResolution: NodeNext`. `package.json` pins `"engines": { "node": ">=24.22.1" }` — see Node/npm version above.
+- **ESLint** (flat config, type-aware): `no-floating-promises`, `no-misused-promises`, and `no-console` are all **errors**, not warnings — these affect how code must be written (await/void everything, use `logger` not `console.*`). `no-explicit-any` is a warning; relaxed for `*.test.ts`. `eslint-plugin-jsdoc` enforces the Docstrings rule below (`require-jsdoc` on function declarations, methods and module-level arrow functions, in `src/` and the `public/` browser scripts alike; `require-param`/`require-returns`, with descriptions, for what each documented function takes and returns; `check-param-names` catches stale `@param`s), `eslint-plugin-sonarjs` adds complexity checks on source files (`sonarjs/cognitive-complexity` ≤ 15, the same metric as Qlty's function-complexity smell, plus cyclomatic `complexity` ≤ 12, `max-params` 5, `max-depth` 3, `max-nested-callbacks` 3, all errors), and `@vitest/eslint-plugin` guards tests (no `.only`/`.skip`, no assertion-free tests). The browser scripts in `public/` (classic `<script>`s, no bundler) are linted too, with browser globals: a name a script uses from another script on the same page goes in a `/* global name */` header at its top (`name:writable` if it assigns to it).
+- **Test/build scripts:** `npm run build` (`tsc -p tsconfig.build.json`), `npm run lint`, `npm run check:circular` (madge), `npm run check:unused` (knip: unused files, exports and dependencies; `knip.json`). An export used only in its own file is fine; an alias of another export needs an `@alias` JSDoc tag.
 
 ---
 
@@ -73,7 +73,7 @@ Boot order in `main()`: verify DB connectivity (ping, exit 1 on failure) → app
 
 ## Web Server (`src/web/server.ts`)
 
-Middleware order: `helmet` (custom CSP) → `GET /healthz` → EJS views → static → body parsers → `trust proxy: 1` → session (`express-mysql-session`, backed by the `sessions` MySQL table) → rate limiters (general/session; `streamdeckLimiter` is applied per-route instead) → `res.locals.user`/csrfToken. The general/session rate limiters run after session middleware deliberately — `sessionLimiter`'s key generator needs `req.session` populated.
+Middleware order: `helmet` (custom CSP) → `GET /healthz` → EJS views → static → body parsers → `trust proxy: 1` → session (`express-mysql-session`, backed by the `sessions` MySQL table) → rate limiters (general/session; `streamdeckLimiter` is applied per-route instead) → `res.locals.user`/csrfToken → feature routes (`mountRoutes` in `src/web/routes/index.ts`, which keeps their mount order) → 404 and error handlers. The general/session rate limiters run after session middleware deliberately — `sessionLimiter`'s key generator needs `req.session` populated.
 
 Auth middleware (`src/web/middleware.ts`), applied in this order:
 1. **`requireAuth`** — session check.
@@ -112,6 +112,8 @@ Auth middleware (`src/web/middleware.ts`), applied in this order:
 
 **Command matching:** `trigger_string` stores the full prefixed string (e.g. `!clap`). First word is lowercased and queried directly — **no prefix stripping**.
 
+**Lightweight Discord imports:** loading `discord.js` costs ~300ms per test file, so modules that only need a few runtime values take them from the packages discord.js re-exports instead (direct dependencies, kept at the versions discord.js uses): `discord-api-types/v10` (`ChannelType`, `Routes`, `RESTJSONErrorCodes`), `@discordjs/rest` (`DiscordAPIError`, `HTTPError`, `makeURLSearchParams`), `@discordjs/ws` (`WebSocketShardEvents`), `@discordjs/builders` (`EmbedBuilder`), `@discordjs/formatters` (`escapeMarkdown`; discord.js v15 no longer re-exports builders or formatters at all). Types-only uses are `import type { … } from 'discord.js'`. Only code that constructs the client itself (`discordBot.ts`) imports `discord.js` at runtime; `audioPlayer.ts` is handed the client and only needs its types.
+
 **Voice adapter:** `audioPlayer.ts` uses a custom `DiscordGatewayAdapterCreator` (`voiceAdapter.ts`) that listens for gateway dispatches on `client.ws` (`WebSocketShardEvents.Dispatch`; discord.js v15 no longer emits `raw`) and sends via `client.ws.send(guild.shardId, …)`. `guild.voiceAdapterCreator` is unused — originally a discord.js v14 incompatibility. Shard lifecycle events likewise come from `client.ws` (`Closed`/`Error`/`SocketError`/`Ready`/`Resumed`), not the removed `shard*` Client events.
 
 **`customCommands.ts` does not own its cache:** it's a pure DB layer with no cache knowledge, to break its import cycle with `customCommandCache.ts`. `customCommandWrites.ts` owns invalidation instead (re-exported by `db.ts`), via `withInvalidation()`-wrapped write functions that call `invalidateCustomCommandLookupCache()` after the underlying `customCommands.ts` write succeeds (same pattern used for `counters.ts`/`alertConfig.ts`/`sfx.ts` via `counterWrites.ts`/`alertConfigWrites.ts`/`sfxWrites.ts`). Don't add a second invalidation call inside `customCommands.ts` itself.
@@ -136,6 +138,7 @@ Auth middleware (`src/web/middleware.ts`), applied in this order:
 ## Docstrings
 
 - All functions — including exported functions, internal helpers, and anonymous functions (e.g. inline Express route handlers) — **must** have a JSDoc comment describing what they do, their parameters, and return value — one line is enough for simple cases.
+- Each parameter gets an `@param` and a function that returns a value gets an `@returns`, each with a description (e.g. `@param guildId - Discord snowflake of the guild.`). No `{type}` in TypeScript; the signature has it. Say what the value is, not just its name: "Discord snowflake of the guild", not "The guild ID." A destructured parameter needs only its root `@param`.
 - When you change a function's signature or behaviour, update its JSDoc to match — stale docs are worse than no docs.
 - **Test files (`*.test.ts`) are exempt.** Test-local helpers (mock builders like `mockLog`/`mockRes`, response/fixture factories, etc.) and `describe`/`it`/`vi.mock` callbacks don't need JSDoc — a descriptive `it('...')` name documents the behaviour instead. This applies only inside `*.test.ts` files; source files still follow the rule above.
 - **Concise inline callbacks** (e.g. `.map()` row mappers, a `Promise` executor, a `setTimeout` callback, a `catch` handler) don't need a separate JSDoc block. Add a short inline comment only when the behaviour isn't obvious from the code itself.
@@ -147,6 +150,10 @@ Auth middleware (`src/web/middleware.ts`), applied in this order:
 Export `registerXRuntime(runtime)` from the handler file to store the platform client — avoids circular imports with `src/index.ts`. Build the slot with `createRuntimeRegistry()` from `src/shared/runtimeRegistry.ts`. Call it from `index.ts` after the client is ready.
 
 ---
+
+## Related repos
+
+`BCUK-Companion-Core`, `BCUK-Companion-ExpiredMinotaur` and `BCUK-StreamDeck-Plugin` follow the same code standards, adapted to their language: tests with every change, docstrings on every function, Qlty's complexity limits. The plugin's `eslint.config.js` is a port of this repo's; the .NET repos enforce docs with StyleCop's SA1600 rules. Their `CLAUDE.md` files carry the same "PR Reviews (Qlty)" and "PR Reviews (CodeRabbit)" sections, word for word. When you change a shared rule here, make the same change in those three files.
 
 ## PR Reviews (Qlty)
 

@@ -14,7 +14,7 @@ import { requireGuildContext, requireMod, requireManager } from '../middleware';
 import { getCurrentGuildId } from '../session';
 import { normalizeRequiredText, normalizeSingleTokenRequiredText, parsePositiveIntId, parseCheckboxField, filterQueryParam } from './validation';
 import { renderView } from './viewHelpers';
-import { logAndRedirectError, handleReservedOrConflictCommandError, renderOrError } from './errorHandling';
+import { logAndRedirectError, handleReservedOrConflictCommandError, renderOrError, redirectWithError } from './errorHandling';
 
 const log = createLogger('Web');
 const router = Router();
@@ -116,7 +116,7 @@ router.post('/counters/add', requireGuildContext, requireMod, csrfProtection, as
   const guildId = getCurrentGuildId(req);
   const form = validateAndNormalizeCounterForm(req.body as Record<string, string | undefined>);
   if (form.error) {
-    return res.redirect(`/counters?error=${form.error}`);
+    return redirectWithError(res, '/counters', form.error);
   }
 
   try {
@@ -125,7 +125,7 @@ router.post('/counters/add', requireGuildContext, requireMod, csrfProtection, as
       form.checkCommand,
     ]);
     if (hasDuplicateCommand) {
-      return res.redirect('/counters?error=duplicate_command');
+      return redirectWithError(res, '/counters', 'duplicate_command');
     }
 
     await addCounter(guildId, {
@@ -161,11 +161,11 @@ router.post('/counters/update', requireGuildContext, requireMod, csrfProtection,
   const parsedId = parsePositiveIntId(id);
   const form = validateAndNormalizeCounterForm(req.body as Record<string, string | undefined>);
   if (form.error) {
-    return res.redirect(`/counters?error=${form.error}`);
+    return redirectWithError(res, '/counters', form.error);
   }
 
   if (parsedId === null) {
-    return res.redirect('/counters?error=invalid_id');
+    return redirectWithError(res, '/counters', 'invalid_id');
   }
 
   try {
@@ -175,7 +175,7 @@ router.post('/counters/update', requireGuildContext, requireMod, csrfProtection,
       parsedId,
     );
     if (hasDuplicateCommand) {
-      return res.redirect('/counters?error=duplicate_command');
+      return redirectWithError(res, '/counters', 'duplicate_command');
     }
 
     await updateCounter(guildId, {
@@ -188,7 +188,7 @@ router.post('/counters/update', requireGuildContext, requireMod, csrfProtection,
     });
   } catch (err) {
     if (err instanceof CounterNotFoundError) {
-      return res.redirect('/counters?error=counter_not_found');
+      return redirectWithError(res, '/counters', 'counter_not_found');
     }
     if (handleReservedOrConflictCommandError(err, res, COUNTER_WRITE_ERROR_OPTIONS)) return;
     return logAndRedirectError({ res, log, logLabel: 'Update counter error:', err, basePath: '/counters', errorCode: 'update_failed' });
@@ -210,14 +210,14 @@ router.post('/counters/remove', requireGuildContext, requireMod, csrfProtection,
   const parsedId = parsePositiveIntId(id);
 
   if (parsedId === null) {
-    return res.redirect('/counters?error=invalid_id');
+    return redirectWithError(res, '/counters', 'invalid_id');
   }
 
   try {
     await removeCounter(guildId, parsedId);
   } catch (err) {
     if (err instanceof CounterNotFoundError) {
-      return res.redirect('/counters?error=counter_not_found');
+      return redirectWithError(res, '/counters', 'counter_not_found');
     }
 
     return logAndRedirectError({ res, log, logLabel: 'Remove counter error:', err, basePath: '/counters', errorCode: 'remove_failed' });
@@ -239,14 +239,14 @@ router.post('/counters/reset/:id', requireGuildContext, requireManager, csrfProt
   const rawId = req.params.id;
   const parsedId = parsePositiveIntId(typeof rawId === 'string' ? rawId : undefined);
   if (parsedId === null) {
-    return res.redirect('/counters?error=invalid_id');
+    return redirectWithError(res, '/counters', 'invalid_id');
   }
 
   try {
     await resetCounterCurrentValue(guildId, parsedId);
   } catch (err) {
     if (err instanceof CounterNotFoundError) {
-      return res.redirect('/counters?error=counter_not_found');
+      return redirectWithError(res, '/counters', 'counter_not_found');
     }
 
     return logAndRedirectError({ res, log, logLabel: 'Reset counter error:', err, basePath: '/counters', errorCode: 'reset_failed' });

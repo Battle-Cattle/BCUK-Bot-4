@@ -82,6 +82,7 @@ export function invalidateArchiveColumnsCache(): void {
  * created yet, so callers must not assume the full range exists. The current
  * year and any future year are excluded outright, since they can never have
  * valid archived data (see `archiveAndResetYearlyCounters`).
+ * @returns The existing past-year archive column names, e.g. `value2024`.
  */
 async function getExistingArchiveColumns(): Promise<string[]> {
   const cache = await archiveColumnsCacheState.getCache();

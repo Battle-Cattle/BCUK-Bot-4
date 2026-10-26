@@ -1,9 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { waitFor } from '../test-utils/waitFor';
-import path from 'path';
 import type { SfxTrigger, SfxFile, SfxLookupResult } from '../db';
 
-const SFX_ROOT = '/sfx';
 const { log } = vi.hoisted(() => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
@@ -75,11 +73,18 @@ describe('handleCommand', () => {
   it('skips without warning when no guild is resolved and the message is not a known trigger', async () => {
     vi.mocked(findCachedSfxTrigger).mockResolvedValue(null);
 
-    await handleCommand('just chatting about stuff', 'twitch', null);
+    await handleCommand('!just chatting about stuff', 'twitch', null);
 
-    expect(vi.mocked(findCachedSfxTrigger)).toHaveBeenCalledWith('just');
+    expect(vi.mocked(findCachedSfxTrigger)).toHaveBeenCalledWith('!just');
     expect(vi.mocked(playFile)).not.toHaveBeenCalled();
     expect(log.warn).not.toHaveBeenCalled();
+  });
+
+  it('skips the trigger lookup for a message with no command prefix', async () => {
+    await handleCommand('just chatting about stuff', 'twitch', GUILD_A);
+
+    expect(vi.mocked(findCachedSfxTrigger)).not.toHaveBeenCalled();
+    expect(vi.mocked(playFile)).not.toHaveBeenCalled();
   });
 
   it('skips with a warning when a known trigger fires but no guild is resolved', async () => {
@@ -162,7 +167,7 @@ describe('handleCommand', () => {
     await handleCommand('!ding discord', 'discord', GUILD_A);
 
     expect(vi.mocked(findCachedSfxTrigger)).toHaveBeenCalledWith('!ding');
-    expect(vi.mocked(playFile)).toHaveBeenCalledWith(path.posix.join(SFX_ROOT, 'ding.mp3'), GUILD_A);
+    expect(vi.mocked(playFile)).toHaveBeenCalledWith('ding.mp3', GUILD_A);
     expect(vi.mocked(setVoicePlaying)).toHaveBeenCalledWith(GUILD_A, 'ding.mp3', '!ding', 'discord');
   });
 
@@ -196,15 +201,15 @@ describe('handleCommand', () => {
       .mockReturnValueOnce(helloLookup as ReturnType<typeof findCachedSfxTrigger>)
       .mockResolvedValueOnce(LOOKUP);
 
-    const hello = handleCommand('hello', 'twitch', GUILD_A);
+    const hello = handleCommand('!hello', 'twitch', GUILD_A);
     await handleCommand('!ding', 'twitch', GUILD_A);
     expect(vi.mocked(playFile)).toHaveBeenCalledTimes(1);
 
     resolveHello(null);
     await hello;
     expect(vi.mocked(playFile)).toHaveBeenCalledTimes(1);
-    // Ordinary chat never reaches the cooldown/in-flight check, so it logs nothing about it.
-    expect(log.info).not.toHaveBeenCalledWith(expect.stringContaining("ignoring 'hello'"));
+    // A non-trigger never reaches the cooldown/in-flight check, so it logs nothing about it.
+    expect(log.info).not.toHaveBeenCalledWith(expect.stringContaining("ignoring '!hello'"));
   });
 
   it('looks the trigger up only once per message', async () => {
@@ -257,38 +262,31 @@ describe('handleCommand', () => {
     expect(vi.mocked(setVoicePlaying)).not.toHaveBeenCalled();
   });
 
-  describe('path traversal security', () => {
-    it('rejects path traversal with ../ sequences', async () => {
+  describe('sound file paths', () => {
+    it('leaves the SFX-folder containment check to playFile, logging its rejection without updating status', async () => {
       vi.mocked(isPlaying).mockReturnValue(false);
       vi.mocked(findCachedSfxTrigger).mockResolvedValue(LOOKUP);
       vi.mocked(pickWeightedRandom).mockReturnValue('../../../etc/passwd');
+      vi.mocked(playFile).mockRejectedValue(new Error('Path traversal blocked: ../../../etc/passwd resolves outside SFX folder'));
 
       await handleCommand('!exploit', 'twitch', GUILD_A);
 
-      expect(vi.mocked(playFile)).not.toHaveBeenCalled();
+      expect(vi.mocked(playFile)).toHaveBeenCalledWith('../../../etc/passwd', GUILD_A);
       expect(vi.mocked(setVoicePlaying)).not.toHaveBeenCalled();
+      expect(log.error).toHaveBeenCalledWith("[twitch] Failed to play '../../../etc/passwd':", expect.any(Error));
     });
 
-    it('rejects path traversal with encoded ../ sequences', async () => {
+    it('strips line breaks from the filename in log lines', async () => {
       vi.mocked(isPlaying).mockReturnValue(false);
       vi.mocked(findCachedSfxTrigger).mockResolvedValue(LOOKUP);
-      vi.mocked(pickWeightedRandom).mockReturnValue('..%2F..%2Fetc%2Fpasswd');
+      vi.mocked(pickWeightedRandom).mockReturnValue('evil\r\nFAKE LOG LINE.mp3');
+      vi.mocked(playFile).mockRejectedValue(new Error('Sound file not found'));
 
-      await handleCommand('!exploit', 'twitch', GUILD_A);
+      await handleCommand('!ding', 'twitch', GUILD_A);
 
-      expect(vi.mocked(playFile)).not.toHaveBeenCalled();
-      expect(vi.mocked(setVoicePlaying)).not.toHaveBeenCalled();
-    });
-
-    it('rejects absolute paths', async () => {
-      vi.mocked(isPlaying).mockReturnValue(false);
-      vi.mocked(findCachedSfxTrigger).mockResolvedValue(LOOKUP);
-      vi.mocked(pickWeightedRandom).mockReturnValue('/etc/passwd');
-
-      await handleCommand('!exploit', 'twitch', GUILD_A);
-
-      expect(vi.mocked(playFile)).not.toHaveBeenCalled();
-      expect(vi.mocked(setVoicePlaying)).not.toHaveBeenCalled();
+      const lines = [...log.info.mock.calls, ...log.error.mock.calls].map((call) => String(call[0]));
+      expect(lines.some((line) => line.includes('evilFAKE LOG LINE.mp3'))).toBe(true);
+      expect(lines.every((line) => !/[\r\n]/.test(line))).toBe(true);
     });
 
     it('allows valid filenames within the SFX folder', async () => {
@@ -299,7 +297,7 @@ describe('handleCommand', () => {
 
       await handleCommand('!safe', 'twitch', GUILD_A);
 
-      expect(vi.mocked(playFile)).toHaveBeenCalledWith(path.posix.join(SFX_ROOT, 'valid-sound.mp3'), GUILD_A);
+      expect(vi.mocked(playFile)).toHaveBeenCalledWith('valid-sound.mp3', GUILD_A);
       expect(vi.mocked(setVoicePlaying)).toHaveBeenCalledWith(GUILD_A, 'valid-sound.mp3', '!safe', 'twitch');
     });
 
@@ -311,7 +309,7 @@ describe('handleCommand', () => {
 
       await handleCommand('!safe', 'twitch', GUILD_A);
 
-      expect(vi.mocked(playFile)).toHaveBeenCalledWith(path.posix.join(SFX_ROOT, 'category', 'sound.mp3'), GUILD_A);
+      expect(vi.mocked(playFile)).toHaveBeenCalledWith('category/sound.mp3', GUILD_A);
       expect(vi.mocked(setVoicePlaying)).toHaveBeenCalledWith(GUILD_A, 'category/sound.mp3', '!safe', 'twitch');
     });
   });

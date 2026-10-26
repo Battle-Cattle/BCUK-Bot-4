@@ -2,7 +2,7 @@ import { createLogger } from '../../shared/logger';
 import { getStreamerById, DEFAULT_EVENT_CONFIG, pruneRedemptionLedger, pruneResolvedRedemptionAcks } from '../../db';
 import { getAllStreamerInfo, type StreamerInfo } from './twitchEventSubDispatch';
 import { getValidToken } from '../twitchUserTokens';
-import { getCustomRewards, getRewardRedemptions, TwitchRewardRedemption } from '../twitchApi';
+import { getCustomRewards, getRewardRedemptions, TwitchRewardRedemption } from '../twitchRewardsApi';
 import { handleRedemption, RedemptionEvent } from './twitchEventSubRedemption';
 import {
   RECONCILIATION_POLL_INTERVAL_MS,
@@ -32,7 +32,12 @@ let tickTimer: ReturnType<typeof setInterval> | null = null;
 let tickRunning = false;
 let currentTickPromise: Promise<void> = Promise.resolve();
 
-/** Maps a Helix redemption row to the shape `handleRedemption` expects from a live EventSub notification. */
+/**
+ * Maps a Helix redemption row to the shape `handleRedemption` expects from a live EventSub notification.
+ * @param broadcasterLogin - Streamer's Twitch login (Helix rows don't carry it).
+ * @param r - The redemption row from Get Custom Reward Redemption.
+ * @returns The equivalent `channel.channel_points_custom_reward_redemption.add` event payload.
+ */
 function toRedemptionEvent(broadcasterLogin: string, r: TwitchRewardRedemption): RedemptionEvent {
   return {
     id: r.id,
@@ -57,6 +62,7 @@ function toRedemptionEvent(broadcasterLogin: string, r: TwitchRewardRedemption):
  * @param status - Redemption status to query (see {@link getRewardRedemptions}).
  * @param token - Broadcaster's currently-valid OAuth user token.
  * @param cutoff - Epoch ms; only redemptions redeemed strictly after this are returned.
+ * @returns The redemptions newer than `cutoff`, newest first.
  */
 async function fetchRedemptionsNewerThan(
   uid: string, rewardId: string, status: 'UNFULFILLED' | 'FULFILLED', token: string, cutoff: number,
@@ -78,9 +84,9 @@ async function fetchRedemptionsNewerThan(
 }
 
 /**
- * Replays each fetched redemption through {@link handleRedemption} (its own dedup makes an
- * already-delivered redemption a no-op), logging genuine catches and per-redemption failures.
- * Redemptions with an unparseable `redeemed_at` are skipped.
+ * Replays each fetched redemption through {@link handleRedemption} as a `'reconciliation'` source
+ * (its own dedup makes an already-delivered redemption a no-op, logged only at debug), logging
+ * genuine catches and per-redemption failures. Redemptions with an unparseable `redeemed_at` are skipped.
  * @param info - Dispatch info for the redemption's streamer.
  * @param redemptions - Redemptions fetched for one reward this tick.
  * @returns The latest `redeemed_at` (epoch ms) that was handled successfully and the earliest one
@@ -101,7 +107,7 @@ async function replayRedemptions(
       continue;
     }
     try {
-      const processed = await handleRedemption(info.login, toRedemptionEvent(info.login, r), info.config ?? DEFAULT_EVENT_CONFIG, info.streamerId);
+      const processed = await handleRedemption(info.login, toRedemptionEvent(info.login, r), info.config ?? DEFAULT_EVENT_CONFIG, info.streamerId, 'reconciliation');
       // Only log as a genuine catch when handleRedemption actually processed it — its own
       // dedup means most redemptions in this window were already delivered live, and logging
       // those as "missed" would be false (see reconcileReward's doc comment).
@@ -212,6 +218,7 @@ async function reconcileStreamer(uid: string, info: StreamerInfo): Promise<void>
  * decide whether the channel-points redemption subscription itself exists; a streamer without
  * it was never subscribed, so there's nothing for this poll to have missed). Streamers are
  * reconciled concurrently and independently — one streamer's failure can't block another's.
+ * @returns A promise that settles when the pass finishes; a call made while a pass is running gets that pass's promise.
  */
 export async function runReconciliationTick(): Promise<void> {
   if (tickRunning) return currentTickPromise;

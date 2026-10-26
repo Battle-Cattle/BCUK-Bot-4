@@ -60,7 +60,11 @@ interface RawStreamGroupFields {
   delete_old_posts: unknown;
 }
 
-/** Converts raw group field values to a `DbStreamGroup`, converting BIGINT/bit columns to string/boolean. */
+/**
+ * Converts raw group field values to a `DbStreamGroup`, converting BIGINT/bit columns to string/boolean.
+ * @param fields - Raw group column values, already re-keyed to `stream_group` names.
+ * @returns The mapped stream group.
+ */
 function buildStreamGroup(fields: RawStreamGroupFields): DbStreamGroup {
   return {
     id: fields.id,
@@ -74,7 +78,11 @@ function buildStreamGroup(fields: RawStreamGroupFields): DbStreamGroup {
   };
 }
 
-/** Maps a `stream_group` row to a `DbStreamGroup`, converting BIGINT/bit columns to string/boolean. */
+/**
+ * Maps a `stream_group` row to a `DbStreamGroup`, converting BIGINT/bit columns to string/boolean.
+ * @param r - Row selected from `stream_group`.
+ * @returns The mapped stream group.
+ */
 function mapStreamGroup(r: mysql.RowDataPacket): DbStreamGroup {
   return buildStreamGroup({
     id: r.id,
@@ -88,7 +96,11 @@ function mapStreamGroup(r: mysql.RowDataPacket): DbStreamGroup {
   });
 }
 
-/** Extracts the shared column values (everything but `guildId`/`id`) from an add/update input, in SQL parameter order. */
+/**
+ * Extracts the shared column values (everything but `guildId`/`id`) from an add/update input, in SQL parameter order.
+ * @param input - The add/update form values for the stream group.
+ * @returns The column values, with booleans coerced to 0/1 for the BIT columns.
+ */
 function streamGroupParams(input: AddStreamGroupInput): Array<string | number> {
   return [
     input.name,
@@ -234,6 +246,16 @@ export async function getAllStreamersWithGroups(): Promise<DbStreamerFull[]> {
       delete_old_posts: r.delete_old_posts,
     }),
   }));
+}
+
+/**
+ * Returns every streamer row's `id` and `discord_id` — the minimal mapping the streamer-ID
+ * lookup cache (`streamerIdCache.ts`) bulk-loads, instead of a per-message joined lookup.
+ * @returns One entry per `streamer` row, with `discordId` as a string snowflake.
+ */
+export async function getAllStreamerIds(): Promise<{ id: number; discordId: string }[]> {
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>('SELECT id, discord_id FROM streamer');
+  return rows.map((r) => ({ id: r.id, discordId: String(r.discord_id) }));
 }
 
 /**

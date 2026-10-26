@@ -75,7 +75,7 @@ export interface CompanionActivityEvent {
  * An advanced command use forwarded to the streamer's companion app. When `ackRequired` is set,
  * the app must acknowledge it (`POST /api/companion/commands/ack`) or the viewer is refunded.
  */
-export interface CompanionAdvancedCommandEvent {
+interface CompanionAdvancedCommandEvent {
   type: 'advanced_command';
   /** Unique per use (`advanced_command_usage.event_id`); the acknowledgement quotes it back. */
   id: string;

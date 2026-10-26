@@ -4,7 +4,7 @@ vi.mock('./pool', () => ({ getPool: vi.fn() }));
 vi.mock('mysql2/promise', () => ({ default: {} }));
 
 import { getPool } from './pool';
-import { issueToken, findDiscordIdByTokenHash, getTokenStatus, revokeToken } from './companionTokens';
+import { issueToken, findDiscordIdByTokenHash, getTokenStatus, revokeToken, revokeTokenByHash } from './companionTokens';
 import { createHash } from 'crypto';
 import { makeMockPool } from '../test-utils/mockMysqlPool';
 
@@ -112,5 +112,23 @@ describe('revokeToken', () => {
     const [sql, params] = pool.execute.mock.calls[0] as [string, unknown[]];
     expect(sql).toContain('SET revoked_at = NOW()');
     expect(params).toContain('123');
+  });
+});
+
+// ─── revokeTokenByHash ────────────────────────────────────────────────────────
+
+describe('revokeTokenByHash', () => {
+  it('revokes only the active token with that hash, and reports whether it did', async () => {
+    const pool = makePool();
+    pool.execute.mockResolvedValueOnce([{ affectedRows: 1 }]).mockResolvedValueOnce([{ affectedRows: 0 }]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+
+    await expect(revokeTokenByHash('123', 'hash-a')).resolves.toBe(true);
+    const [sql, params] = pool.execute.mock.calls[0] as [string, unknown[]];
+    expect(sql).toContain('SET revoked_at = NOW()');
+    expect(sql).toContain('discord_id = ? AND key_hash = ? AND revoked_at IS NULL');
+    expect(params).toEqual(['123', 'hash-a']);
+
+    await expect(revokeTokenByHash('123', 'replaced')).resolves.toBe(false);
   });
 });

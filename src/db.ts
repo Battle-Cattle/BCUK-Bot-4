@@ -72,9 +72,10 @@ export {
 export {
   getStreamGroupsForGuild, addStreamGroup, updateStreamGroup,
   getStreamersForGuild, getAllStreamersWithGroups,
-  addStreamer, removeStreamer, removeStreamGroupAndStreamers,
   setStreamerLive, clearStreamerLive,
 } from './db/streamMonitor';
+export { addStreamer, removeStreamer, removeStreamGroupAndStreamers } from './db/streamMonitorWrites';
+export { findStreamerIdByDiscordId } from './db/streamerIdCache';
 export type {
   DbStreamGroup, AddStreamGroupInput, UpdateStreamGroupInput,
   DbStreamer, DbStreamerFull,
@@ -166,6 +167,7 @@ export {
   resolveGambleOutcome as resolveLoyaltyPointsGambleOutcome,
   spendBalance as spendLoyaltyPoints,
   getLeaderboard as getLoyaltyPointsLeaderboard,
+  MAX_BALANCE as MAX_LOYALTY_POINTS_BALANCE,
 } from './db/loyaltyPoints';
 export { getCachedConfig as getLoyaltyPointsConfig } from './db/loyaltyPointsCache';
 export { setLoyaltyPointsConfig } from './db/loyaltyPointsWrites';
@@ -247,6 +249,7 @@ export {
   findDiscordIdByTokenHash,
   getTokenStatus,
   revokeToken,
+  revokeTokenByHash,
 } from './db/companionTokens';
 export { createCode, exchangeCodeForToken } from './db/companionOAuthCodes';
 

@@ -9,6 +9,7 @@ const log = createLogger('Web');
  * Remove a list of relative sound-file paths from disk in parallel, resolving each safely
  * within SFX_FOLDER. Logs and swallows individual failures so a missing file never blocks
  * the surrounding DB operation, or the removal of any other file in the list.
+ * @param files - Sound-file paths relative to SFX_FOLDER; any that resolve outside it are skipped.
  */
 export async function removeSfxFiles(files: string[]): Promise<void> {
   const results = await Promise.allSettled(

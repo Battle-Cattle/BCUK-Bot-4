@@ -82,7 +82,10 @@ export class StreamerConnection {
     });
   }
 
-  /** Register a callback invoked when this connection stops itself due to zero subscriptions. */
+  /**
+   * Register a callback invoked when this connection stops itself due to zero subscriptions.
+   * @param cb - Called with this streamer's Twitch user ID after the self-stop; replaces any earlier callback.
+   */
   setSelfStopCallback(cb: (uid: string) => void): void {
     this.onSelfStop = cb;
   }
@@ -123,7 +126,8 @@ export class StreamerConnection {
   }
 
   /** Updates streamer data and re-subscribes on the live session (serialised on the subscribe-pass chain).
-   *  Cancels any pending transient-failure subscribe retry, since this reload subscribes afresh. */
+   *  Cancels any pending transient-failure subscribe retry, since this reload subscribes afresh.
+   *  @param newData - The streamer's latest EventSub data (token, enabled features, IDs) to subscribe with. */
   reload(newData: StreamerEventSubData): void {
     this.currentData = newData;
     this.passes.retry.reset();
@@ -171,6 +175,7 @@ export class StreamerConnection {
    * Opens a new WebSocket to the given URL (defaults to the standard EventSub URL). Bounded by
    * {@link CONNECT_TIMEOUT_MS} — see its doc for why a socket stuck in CONNECTING would otherwise
    * never trigger a reconnect on its own.
+   * @param url - WebSocket URL to connect to, e.g. a `session_reconnect` URL during migration.
    */
   connect(url: string = EVENTSUB_WS_URL): void {
     if (this.stopped) return;
@@ -334,6 +339,7 @@ export class StreamerConnection {
    * only resets once a pass gets something live.
    * A migration welcome resets the reconnect backoff (see {@link onOpen}) and leaves a pending
    * retry in place to run against the new session.
+   * @param msg - The parsed `session_welcome` message; its `payload.session` carries the session id and keepalive timeout.
    */
   private onSessionWelcome(msg: EventSubMessage): void {
     const session = msg.payload.session!;

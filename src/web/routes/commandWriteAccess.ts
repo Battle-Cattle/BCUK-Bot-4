@@ -8,7 +8,7 @@ import {
   updateCustomCommand,
   updateOwnCustomCommand,
 } from '../../db';
-import { canManageCatalog } from './selfServiceAccess';
+import { accessErrorCode, canManageCatalog, dispatchByAccess } from './selfServiceAccess';
 import { normalizeRequiredText, normalizeSingleTokenRequiredText, parseCheckboxField } from './validation';
 
 // Which command write the session user gets: Mod+ use the unrestricted catalog writes; a streamer
@@ -51,9 +51,7 @@ export function readCommandForm(req: Request): CommandForm | null {
  * @returns `command_not_found`, `forbidden`, or null for any other error.
  */
 export function commandAccessErrorCode(err: unknown): string | null {
-  if (err instanceof CommandNotFoundError) return 'command_not_found';
-  if (err instanceof CommandSelfServiceDeniedError) return 'forbidden';
-  return null;
+  return accessErrorCode(err, CommandNotFoundError, 'command_not_found', CommandSelfServiceDeniedError);
 }
 
 /**
@@ -65,11 +63,12 @@ export function commandAccessErrorCode(err: unknown): string | null {
  * @returns Resolves once the update completes; rejects with the DB write's error (see
  *   {@link commandAccessErrorCode}).
  */
-export async function updateCommandAsSessionUser(req: Request, commandId: number, form: CommandForm): Promise<void> {
-  if (canManageCatalog(req)) {
-    return updateCustomCommand(commandId, form.triggerString, form.output, form.isDiscordEnabled, form.isMultiTwitch);
-  }
-  return updateOwnCustomCommand(commandId, form.triggerString, form.output, req.session.user!.discordId);
+export function updateCommandAsSessionUser(req: Request, commandId: number, form: CommandForm): Promise<void> {
+  return dispatchByAccess(
+    req,
+    () => updateCustomCommand(commandId, form.triggerString, form.output, form.isDiscordEnabled, form.isMultiTwitch),
+    (discordId) => updateOwnCustomCommand(commandId, form.triggerString, form.output, discordId),
+  );
 }
 
 /**
@@ -80,9 +79,8 @@ export async function updateCommandAsSessionUser(req: Request, commandId: number
  * @returns Resolves once the delete completes; rejects with the DB write's error (see
  *   {@link commandAccessErrorCode}).
  */
-export async function removeCommandAsSessionUser(req: Request, commandId: number): Promise<void> {
-  if (canManageCatalog(req)) return removeCustomCommand(commandId);
-  return removeOwnCustomCommand(commandId, req.session.user!.discordId);
+export function removeCommandAsSessionUser(req: Request, commandId: number): Promise<void> {
+  return dispatchByAccess(req, () => removeCustomCommand(commandId), (discordId) => removeOwnCustomCommand(commandId, discordId));
 }
 
 /**
@@ -93,7 +91,6 @@ export async function removeCommandAsSessionUser(req: Request, commandId: number
  * @param commandId - ID of the command to discard.
  * @returns Resolves once the cleanup completes; rejects if it fails or is denied.
  */
-export async function discardNewCommandAsSessionUser(req: Request, commandId: number): Promise<void> {
-  if (canManageCatalog(req)) return removeCustomCommand(commandId);
-  return discardOwnNewCustomCommand(commandId, req.session.user!.discordId);
+export function discardNewCommandAsSessionUser(req: Request, commandId: number): Promise<void> {
+  return dispatchByAccess(req, () => removeCustomCommand(commandId), (discordId) => discardOwnNewCustomCommand(commandId, discordId));
 }

@@ -13,7 +13,11 @@ const HTML_ESCAPES: Record<string, string> = {
 };
 const HTML_ESCAPE_PATTERN = /[&<>"']/g;
 
-/** Escapes HTML/XML special characters so a value is safe to embed as SVG text or an attribute value. */
+/**
+ * Escapes HTML/XML special characters so a value is safe to embed as SVG text or an attribute value.
+ * @param value - Text or number to escape.
+ * @returns The value as a string with `&`, `<`, `>`, `"` and `'` replaced by entities.
+ */
 function escapeHtml(value: string | number): string {
   return String(value).replace(HTML_ESCAPE_PATTERN, (char) => HTML_ESCAPES[char] ?? char);
 }
@@ -24,6 +28,9 @@ function escapeHtml(value: string | number): string {
  * render it raw (`<%- %>`) in the view. `renderPriceHistoryChart` is the sole place responsible
  * for escaping attacker-reachable content into that markup; this is a defense-in-depth backstop
  * so a future change to this function that breaks escaping fails loudly instead of shipping XSS.
+ * @param html - The markup produced by `renderPriceHistoryChart`.
+ * @returns `html` unchanged, once it has passed the checks.
+ * @throws If `html` is neither the chart nor the placeholder, or contains a `<script` tag.
  */
 export function assertSafeChartHtml(html: string): string {
   const isSvg = html.startsWith('<svg ');
@@ -51,6 +58,7 @@ export function assertSafeChartHtml(html: string): string {
  * @param points - Price history points, any order (sorted internally by time).
  * @param rangeStartMs - Left edge of the x-axis (epoch ms).
  * @param rangeEndMs - Right edge of the x-axis (epoch ms).
+ * @param options - Optional rendering overrides; omit for the defaults.
  * @param options.ariaLabel - Overrides the default "Price history from ... to ..." aria-label —
  *   needed when `rangeStartMs`/`rangeEndMs` aren't real epoch times (e.g. a simulated timeline
  *   starting at 0), where the default wording would render a nonsensical 1970 date.

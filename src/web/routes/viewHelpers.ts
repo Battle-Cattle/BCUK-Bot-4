@@ -8,7 +8,10 @@ import { getSessionUser } from '../session';
 const VIEWS_DIR = path.join(__dirname, '../../../views');
 let knownViews: Set<string> | undefined;
 
-/** Lazily reads and caches the set of view names from the `.ejs` files under `views/`. */
+/**
+ * Lazily reads and caches the set of view names from the `.ejs` files under `views/`.
+ * @returns The view names (filenames without `.ejs`), read from disk on first call.
+ */
 function getKnownViews(): Set<string> {
   if (!knownViews) {
     knownViews = new Set(

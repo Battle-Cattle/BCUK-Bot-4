@@ -158,6 +158,14 @@ describe('normalizeSingleTokenRequiredText', () => {
     expect(normalizeSingleTokenRequiredText('!')).toBeNull();
   });
 
+  it('accepts a #-prefixed trigger', () => {
+    expect(normalizeSingleTokenRequiredText('#BlameAndy')).toBe('#blameandy');
+  });
+
+  it.each(['hello', '?help', '@cmd', '9b964edf'])('returns null for %o, which has no ! or # prefix', (value) => {
+    expect(normalizeSingleTokenRequiredText(value)).toBeNull();
+  });
+
   it('allows valid triggers with hyphens and underscores', () => {
     expect(normalizeSingleTokenRequiredText('!my-cmd_1')).toBe('!my-cmd_1');
   });
