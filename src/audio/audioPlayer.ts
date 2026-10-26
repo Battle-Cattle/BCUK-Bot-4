@@ -18,6 +18,7 @@ const log = createLogger('AudioPlayer');
 import { isPermanentVoiceMisconfigurationError } from '../discord/discordUtils';
 import { getOrCreate } from '../shared/mapUtils';
 import { createVoiceAdapterFactory, type VoiceAdapterFactory } from './voiceAdapter';
+import { advanceRtpTimestamp } from './rtpClock';
 import {
   type ConnectionHandlerDeps,
   setupConnectionHandlers,
@@ -60,6 +61,9 @@ interface GuildVoiceState {
   connectedAt: number | null;
   // When startPlayback last handed the player a resource, until the player reports Playing.
   playRequestedAt: number | null;
+  // When the player last went idle on the current connection (Date.now()), until the next sound
+  // starts: how long the connection has sent no audio. See advanceRtpTimestamp.
+  silentSince: number | null;
 }
 
 const states = new Map<string, GuildVoiceState>();
@@ -86,6 +90,7 @@ function getState(guildId: string): GuildVoiceState {
     playing: false,
     connectedAt: null,
     playRequestedAt: null,
+    silentSince: null,
   }));
 }
 
@@ -160,12 +165,14 @@ function getPlayer(state: GuildVoiceState): DjsAudioPlayer {
     guildPlayer.on(AudioPlayerStatus.Idle, () => {
       state.playing = false;
       state.playRequestedAt = null;
+      state.silentSince = Date.now();
       setVoiceIdle(state.guildId);
     });
     guildPlayer.on('error', (err) => {
       log.error(`Error: ${err.message}`, err);
       state.playing = false;
       state.playRequestedAt = null;
+      state.silentSince = Date.now();
       setVoiceIdle(state.guildId);
     });
     state.player = guildPlayer;
@@ -298,7 +305,11 @@ export async function connect(client: Client, guildId: string, channelId: string
     state.connection = joinedConnection;
     // @discordjs/voice hands back the live connection when this guild is already joined, so keep
     // its original Ready time for a reused connection; only a new one restarts the age.
-    if (joinedConnection !== previousConnection || state.connectedAt === null) state.connectedAt = Date.now();
+    if (joinedConnection !== previousConnection || state.connectedAt === null) {
+      state.connectedAt = Date.now();
+      // A new connection starts its own RTP clock, so silence from before it doesn't carry over.
+      state.silentSince = null;
+    }
     state.currentChannelId = channel.id;
 
     clearReconnectTimer(state);
@@ -492,14 +503,20 @@ export function forgetGuild(guildId: string): void {
 
 /**
  * Marks playback as active for the given guild and sends the resource to that
- * guild's own audio player.
+ * guild's own audio player. When the guild's connection has been silent since its last
+ * sound, first moves its RTP timestamp past that silence (see {@link advanceRtpTimestamp}).
  *
  * @param resource - The audio resource to play.
  * @param guildId - Guild to play the resource in.
  */
 export function startPlayback(resource: AudioResource, guildId: string): void {
   const state = getState(guildId);
+  const now = Date.now();
+  if (state.silentSince !== null && state.connection) {
+    advanceRtpTimestamp(state.connection, now - state.silentSince);
+  }
+  state.silentSince = null;
   state.playing = true;
-  state.playRequestedAt = Date.now();
+  state.playRequestedAt = now;
   getPlayer(state).play(resource);
 }

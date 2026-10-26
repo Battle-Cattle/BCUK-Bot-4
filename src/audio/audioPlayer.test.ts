@@ -15,6 +15,7 @@ vi.mock('../discord/discordUtils', () => ({
 // One shared logger instance, so tests can assert on the playback-start log lines.
 const log = vi.hoisted(() => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }));
 vi.mock('../shared/logger', () => ({ createLogger: () => log }));
+vi.mock('./rtpClock', () => ({ advanceRtpTimestamp: vi.fn() }));
 // The only runtime value audioPlayer takes from Discord's API types; stubbed so the test doesn't load the package.
 vi.mock('discord-api-types/v10', () => ({ ChannelType: { GuildVoice: 2 } }));
 
@@ -764,5 +765,65 @@ describe('per-guild audio player', () => {
       expect(log.debug).not.toHaveBeenCalled();
       expect(log.warn).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe('RTP timestamp across silence', () => {
+  /** Connects guild-A with a capturable fake player and returns its Idle handler and a Date.now spy. */
+  async function connectWithPlayer(at: number) {
+    const { client } = makeClient();
+    const voice = await import('@discordjs/voice');
+    const fakePlayer = { on: vi.fn(), stop: vi.fn(), play: vi.fn() };
+    vi.mocked(voice.createAudioPlayer).mockReturnValue(fakePlayer as never);
+    const now = vi.spyOn(Date, 'now').mockReturnValue(at);
+    await mod.connect(client as never, 'guild-A', 'chan-1');
+    const { advanceRtpTimestamp } = await import('./rtpClock.js');
+    const goIdle = () => (fakePlayer.on.mock.calls.find(([e]) => e === 'idle')?.[1] as () => void)();
+    return { now, goIdle, advance: vi.mocked(advanceRtpTimestamp), client };
+  }
+
+  it('moves the timestamp past the silence since the last sound before playing the next', async () => {
+    const { now, goIdle, advance } = await connectWithPlayer(0);
+    mod.startPlayback({} as never, 'guild-A');
+    now.mockReturnValue(10_000);
+    goIdle();
+    now.mockReturnValue(10_000 + 5 * 60_000);
+
+    mod.startPlayback({} as never, 'guild-A');
+    now.mockRestore();
+
+    expect(advance).toHaveBeenCalledExactlyOnceWith(createdConnections[0], 5 * 60_000);
+  });
+
+  it('leaves the first sound on a connection alone', async () => {
+    const { now, advance } = await connectWithPlayer(0);
+
+    mod.startPlayback({} as never, 'guild-A');
+    now.mockRestore();
+
+    expect(advance).not.toHaveBeenCalled();
+  });
+
+  it('leaves a sound that replaces one still playing alone', async () => {
+    const { now, advance } = await connectWithPlayer(0);
+    mod.startPlayback({} as never, 'guild-A');
+
+    mod.startPlayback({} as never, 'guild-A');
+    now.mockRestore();
+
+    expect(advance).not.toHaveBeenCalled();
+  });
+
+  it('does not carry silence over to a new connection', async () => {
+    const { now, goIdle, advance, client } = await connectWithPlayer(0);
+    mod.startPlayback({} as never, 'guild-A');
+    goIdle();
+    // A new connection (joinVoiceChannel hands back a fresh object here) starts its own RTP clock.
+    await mod.connect(client as never, 'guild-A', 'chan-2');
+
+    mod.startPlayback({} as never, 'guild-A');
+    now.mockRestore();
+
+    expect(advance).not.toHaveBeenCalled();
   });
 });
