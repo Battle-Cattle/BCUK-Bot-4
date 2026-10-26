@@ -15,6 +15,7 @@ vi.mock('../discord/discordUtils', () => ({
 // One shared logger instance, so tests can assert on the playback-start log lines.
 const log = vi.hoisted(() => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }));
 vi.mock('../shared/logger', () => ({ createLogger: () => log }));
+vi.mock('./rtpClock', () => ({ syncRtpTimestamp: vi.fn() }));
 // The only runtime value audioPlayer takes from Discord's API types; stubbed so the test doesn't load the package.
 vi.mock('discord-api-types/v10', () => ({ ChannelType: { GuildVoice: 2 } }));
 
@@ -764,5 +765,51 @@ describe('per-guild audio player', () => {
       expect(log.debug).not.toHaveBeenCalled();
       expect(log.warn).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe('RTP clock sync on Playing', () => {
+  /** Connects guild-A with a capturable fake player; returns its Playing handler and the mocked sync. */
+  async function connectWithPlayer() {
+    const { client } = makeClient();
+    const voice = await import('@discordjs/voice');
+    const fakePlayer = { on: vi.fn(), stop: vi.fn(), play: vi.fn() };
+    vi.mocked(voice.createAudioPlayer).mockReturnValue(fakePlayer as never);
+    await mod.connect(client as never, 'guild-A', 'chan-1');
+    mod.startPlayback({} as never, 'guild-A');
+    const { syncRtpTimestamp } = await import('./rtpClock.js');
+    const playing = fakePlayer.on.mock.calls.find(([e]) => e === 'playing')?.[1] as () => void;
+    return { playing, sync: vi.mocked(syncRtpTimestamp) };
+  }
+
+  it('syncs the guild connection\'s RTP clock against the monotonic clock whenever the player enters Playing', async () => {
+    const { playing, sync } = await connectWithPlayer();
+    const now = vi.spyOn(performance, 'now').mockReturnValue(12_345);
+
+    playing();
+    playing(); // e.g. a resume from auto-pause
+    now.mockRestore();
+
+    expect(sync).toHaveBeenCalledTimes(2);
+    expect(sync).toHaveBeenCalledWith(createdConnections[0], 12_345);
+  });
+
+  it('logs a move at debug level', async () => {
+    const { playing, sync } = await connectWithPlayer();
+    sync.mockReturnValueOnce(300_000.4);
+
+    playing();
+
+    expect(log.debug).toHaveBeenCalledWith('Moved the RTP clock forward 300000ms in guild guild-A');
+  });
+
+  it('logs nothing when the clock was already in step or could not be synced', async () => {
+    const { playing, sync } = await connectWithPlayer();
+    sync.mockReturnValueOnce(0).mockReturnValueOnce(null);
+
+    playing();
+    playing();
+
+    expect(log.debug).not.toHaveBeenCalledWith(expect.stringContaining('RTP clock'));
   });
 });

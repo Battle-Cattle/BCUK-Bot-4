@@ -18,6 +18,7 @@ const log = createLogger('AudioPlayer');
 import { isPermanentVoiceMisconfigurationError } from '../discord/discordUtils';
 import { getOrCreate } from '../shared/mapUtils';
 import { createVoiceAdapterFactory, type VoiceAdapterFactory } from './voiceAdapter';
+import { syncRtpTimestamp } from './rtpClock';
 import {
   type ConnectionHandlerDeps,
   setupConnectionHandlers,
@@ -156,7 +157,10 @@ function getPlayer(state: GuildVoiceState): DjsAudioPlayer {
     const guildPlayer = createAudioPlayer({
       behaviors: { noSubscriber: NoSubscriberBehavior.Pause },
     });
-    guildPlayer.on(AudioPlayerStatus.Playing, () => logPlaybackStart(state));
+    guildPlayer.on(AudioPlayerStatus.Playing, () => {
+      syncRtpClock(state);
+      logPlaybackStart(state);
+    });
     guildPlayer.on(AudioPlayerStatus.Idle, () => {
       state.playing = false;
       state.playRequestedAt = null;
@@ -171,6 +175,20 @@ function getPlayer(state: GuildVoiceState): DjsAudioPlayer {
     state.player = guildPlayer;
   }
   return state.player;
+}
+
+/**
+ * Brings the guild connection's RTP timestamp up to real time whenever the player enters Playing:
+ * a new sound once it has buffered, a replacement, or a resume from auto-pause. That runs before
+ * any packet of what follows is prepared, so the next frame carries a timestamp that matches when
+ * it is sent, however long the bot sent nothing. See {@link syncRtpTimestamp}. Logs a move at
+ * debug level, so production can confirm the correction is happening.
+ * @param state - The guild's voice state.
+ */
+function syncRtpClock(state: GuildVoiceState): void {
+  if (!state.connection) return;
+  const movedMs = syncRtpTimestamp(state.connection, performance.now());
+  if (movedMs) log.debug(`Moved the RTP clock forward ${Math.round(movedMs)}ms in guild ${state.guildId}`);
 }
 
 /**
