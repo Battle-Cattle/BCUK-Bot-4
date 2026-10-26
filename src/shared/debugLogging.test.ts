@@ -15,6 +15,12 @@ vi.mock('fs', () => ({
       if (data === undefined) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
       return data;
     }),
+    rename: vi.fn(async (from: string, to: string) => {
+      const data = files.get(from);
+      if (data === undefined) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+      files.set(to, data);
+      files.delete(from);
+    }),
     rm: vi.fn(async (file: string) => { files.delete(file); }),
   },
 }));
@@ -58,6 +64,16 @@ describe('enableDebugLogging', () => {
     expect(setDebugLogFile).toHaveBeenCalledWith(true);
     expect(readState()).toEqual({ until: until.toISOString() });
     expect(getDebugLoggingUntil()).toEqual(until);
+  });
+
+  it('writes the state to a temporary file and renames it into place', async () => {
+    const { promises } = await import('fs');
+
+    await enableDebugLogging(24, NOW);
+
+    expect(promises.writeFile).toHaveBeenCalledWith(`${DEBUG_LOGGING_STATE_FILE}.tmp`, expect.any(String));
+    expect(promises.rename).toHaveBeenCalledWith(`${DEBUG_LOGGING_STATE_FILE}.tmp`, DEBUG_LOGGING_STATE_FILE);
+    expect([...files.keys()]).toEqual([DEBUG_LOGGING_STATE_FILE]);
   });
 
   it('switches itself off when the time runs out', async () => {

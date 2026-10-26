@@ -20,7 +20,12 @@ MAX_DEBUG_HOURS=72
 # or off without a deploy.
 DEBUG_HOURS=""
 if [ "${1:-}" = "debug" ]; then
-    DEBUG_HOURS="${2:-24}"
+    if [ "$#" -gt 2 ]; then
+        echo "Usage: npm run deploy [debug [hours]]"
+        exit 1
+    fi
+    # Only a missing hours argument means 24: an empty one ("") fails the check below.
+    DEBUG_HOURS="${2-24}"
     if ! [[ "$DEBUG_HOURS" =~ ^[0-9]+$ ]] || [ "$DEBUG_HOURS" -lt 1 ] || [ "$DEBUG_HOURS" -gt "$MAX_DEBUG_HOURS" ]; then
         echo "ERROR: Debug hours must be a whole number from 1 to $MAX_DEBUG_HOURS (got '$DEBUG_HOURS')."
         exit 1
@@ -233,9 +238,13 @@ port_listener_pids() {
 # on. logs/ is gitignored, so it never dirties the next deploy's working-tree check.
 if [ -n "$DEBUG_HOURS" ]; then
     mkdir -p logs
+    # Written to a temporary file and renamed into place, so an interrupted write never leaves a
+    # half-written state file for the bot to discard.
     "$SERVICE_NODE_BIN" -e '
+        const fs = require("fs");
         const until = new Date(Date.now() + Number(process.argv[1]) * 3600000).toISOString();
-        require("fs").writeFileSync("logs/debug-logging.json", JSON.stringify({ until }));
+        fs.writeFileSync("logs/debug-logging.json.tmp", JSON.stringify({ until }));
+        fs.renameSync("logs/debug-logging.json.tmp", "logs/debug-logging.json");
     ' "$DEBUG_HOURS"
     echo "==> Debug logging will be on for ${DEBUG_HOURS}h from the restart (logs/debug-YYYY-MM-DD.log)."
 fi

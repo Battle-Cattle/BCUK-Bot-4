@@ -58,7 +58,11 @@ export async function enableDebugLogging(hours: number, nowMs = Date.now()): Pro
   }
   const until = new Date(nowMs + hours * MS_PER_HOUR);
   await fs.mkdir(path.dirname(DEBUG_LOGGING_STATE_FILE), { recursive: true });
-  await fs.writeFile(DEBUG_LOGGING_STATE_FILE, JSON.stringify({ until: until.toISOString() }));
+  // A temporary file renamed into place: an interrupted write never leaves a half-written state
+  // file, which restoreDebugLogging would discard along with the debug window.
+  const tmpFile = `${DEBUG_LOGGING_STATE_FILE}.tmp`;
+  await fs.writeFile(tmpFile, JSON.stringify({ until: until.toISOString() }));
+  await fs.rename(tmpFile, DEBUG_LOGGING_STATE_FILE);
   applyUntil(until, nowMs);
   log.info(`Debug logging on until ${until.toISOString()} (logs/debug-*.log)`);
   return until;
