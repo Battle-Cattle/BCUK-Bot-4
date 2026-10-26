@@ -15,7 +15,7 @@ vi.mock('../discord/discordUtils', () => ({
 // One shared logger instance, so tests can assert on the playback-start log lines.
 const log = vi.hoisted(() => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }));
 vi.mock('../shared/logger', () => ({ createLogger: () => log }));
-vi.mock('./rtpClock', () => ({ advanceRtpTimestamp: vi.fn() }));
+vi.mock('./rtpClock', () => ({ syncRtpTimestamp: vi.fn() }));
 // The only runtime value audioPlayer takes from Discord's API types; stubbed so the test doesn't load the package.
 vi.mock('discord-api-types/v10', () => ({ ChannelType: { GuildVoice: 2 } }));
 
@@ -768,85 +768,48 @@ describe('per-guild audio player', () => {
   });
 });
 
-describe('RTP timestamp across silence', () => {
-  /** Connects guild-A with a capturable fake player; returns its handlers, a Date.now spy and the mocked advance. */
-  async function connectWithPlayer(at: number) {
+describe('RTP clock sync on Playing', () => {
+  /** Connects guild-A with a capturable fake player; returns its Playing handler and the mocked sync. */
+  async function connectWithPlayer() {
     const { client } = makeClient();
     const voice = await import('@discordjs/voice');
     const fakePlayer = { on: vi.fn(), stop: vi.fn(), play: vi.fn() };
     vi.mocked(voice.createAudioPlayer).mockReturnValue(fakePlayer as never);
-    const now = vi.spyOn(Date, 'now').mockReturnValue(at);
     await mod.connect(client as never, 'guild-A', 'chan-1');
-    const { advanceRtpTimestamp } = await import('./rtpClock.js');
-    const advance = vi.mocked(advanceRtpTimestamp);
-    advance.mockReturnValue(true);
-    const handler = (event: string) => fakePlayer.on.mock.calls.find(([e]) => e === event)?.[1] as () => void;
-    /** Starts a sound and reports its first frame `bufferMs` later. */
-    const playSound = (atMs: number, bufferMs = 0) => {
-      now.mockReturnValue(atMs);
-      mod.startPlayback({} as never, 'guild-A');
-      now.mockReturnValue(atMs + bufferMs);
-      handler('playing')();
-    };
-    const goIdle = (atMs: number) => { now.mockReturnValue(atMs); handler('idle')(); };
-    return { now, playSound, goIdle, advance, client };
+    mod.startPlayback({} as never, 'guild-A');
+    const { syncRtpTimestamp } = await import('./rtpClock.js');
+    const playing = fakePlayer.on.mock.calls.find(([e]) => e === 'playing')?.[1] as () => void;
+    return { playing, sync: vi.mocked(syncRtpTimestamp) };
   }
 
-  it('moves the timestamp past the silence and buffering before the next sound\'s first frame', async () => {
-    const { now, playSound, goIdle, advance } = await connectWithPlayer(0);
-    playSound(0);
-    goIdle(10_000);
+  it('syncs the guild connection\'s RTP clock against the monotonic clock whenever the player enters Playing', async () => {
+    const { playing, sync } = await connectWithPlayer();
+    const now = vi.spyOn(performance, 'now').mockReturnValue(12_345);
 
-    playSound(10_000 + 5 * 60_000, 150);
+    playing();
+    playing(); // e.g. a resume from auto-pause
     now.mockRestore();
 
-    expect(advance).toHaveBeenCalledExactlyOnceWith(createdConnections[0], 5 * 60_000 + 150);
+    expect(sync).toHaveBeenCalledTimes(2);
+    expect(sync).toHaveBeenCalledWith(createdConnections[0], 12_345);
   });
 
-  it('leaves the first sound on a connection alone', async () => {
-    const { now, playSound, advance } = await connectWithPlayer(0);
+  it('logs a move at debug level', async () => {
+    const { playing, sync } = await connectWithPlayer();
+    sync.mockReturnValueOnce(300_000.4);
 
-    playSound(1_000, 100);
-    now.mockRestore();
+    playing();
 
-    expect(advance).not.toHaveBeenCalled();
+    expect(log.debug).toHaveBeenCalledWith('Moved the RTP clock forward 300000ms in guild guild-A');
   });
 
-  it('leaves a sound that replaces one still playing alone', async () => {
-    const { now, playSound, advance } = await connectWithPlayer(0);
-    playSound(0);
+  it('logs nothing when the clock was already in step or could not be synced', async () => {
+    const { playing, sync } = await connectWithPlayer();
+    sync.mockReturnValueOnce(0).mockReturnValueOnce(null);
 
-    playSound(500);
-    now.mockRestore();
+    playing();
+    playing();
 
-    expect(advance).not.toHaveBeenCalled();
-  });
-
-  it('keeps the silence for the next sound when the timestamp cannot be moved yet', async () => {
-    const { now, playSound, goIdle, advance } = await connectWithPlayer(0);
-    playSound(0);
-    goIdle(10_000);
-    advance.mockReturnValueOnce(false); // e.g. networking resuming
-    playSound(20_000);
-    goIdle(25_000);
-
-    playSound(30_000);
-    now.mockRestore();
-
-    expect(advance).toHaveBeenLastCalledWith(createdConnections[0], 20_000);
-    expect(advance).toHaveBeenCalledTimes(2);
-  });
-
-  it('does not carry silence over to a new connection', async () => {
-    const { now, playSound, goIdle, advance, client } = await connectWithPlayer(0);
-    playSound(0);
-    goIdle(1_000);
-    // A new connection (joinVoiceChannel hands back a fresh object here) starts its own RTP clock.
-    await mod.connect(client as never, 'guild-A', 'chan-2');
-
-    playSound(5_000);
-    now.mockRestore();
-
-    expect(advance).not.toHaveBeenCalled();
+    expect(log.debug).not.toHaveBeenCalledWith(expect.stringContaining('RTP clock'));
   });
 });

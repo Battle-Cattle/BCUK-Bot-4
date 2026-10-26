@@ -18,7 +18,7 @@ const log = createLogger('AudioPlayer');
 import { isPermanentVoiceMisconfigurationError } from '../discord/discordUtils';
 import { getOrCreate } from '../shared/mapUtils';
 import { createVoiceAdapterFactory, type VoiceAdapterFactory } from './voiceAdapter';
-import { advanceRtpTimestamp } from './rtpClock';
+import { syncRtpTimestamp } from './rtpClock';
 import {
   type ConnectionHandlerDeps,
   setupConnectionHandlers,
@@ -61,9 +61,6 @@ interface GuildVoiceState {
   connectedAt: number | null;
   // When startPlayback last handed the player a resource, until the player reports Playing.
   playRequestedAt: number | null;
-  // When the current connection last stopped sending audio (Date.now()), until a sound's first
-  // frame moves its RTP timestamp past that silence. See advanceSilentRtpClock.
-  silentSince: number | null;
 }
 
 const states = new Map<string, GuildVoiceState>();
@@ -90,7 +87,6 @@ function getState(guildId: string): GuildVoiceState {
     playing: false,
     connectedAt: null,
     playRequestedAt: null,
-    silentSince: null,
   }));
 }
 
@@ -162,20 +158,18 @@ function getPlayer(state: GuildVoiceState): DjsAudioPlayer {
       behaviors: { noSubscriber: NoSubscriberBehavior.Pause },
     });
     guildPlayer.on(AudioPlayerStatus.Playing, () => {
-      advanceSilentRtpClock(state);
+      syncRtpClock(state);
       logPlaybackStart(state);
     });
     guildPlayer.on(AudioPlayerStatus.Idle, () => {
       state.playing = false;
       state.playRequestedAt = null;
-      state.silentSince ??= Date.now();
       setVoiceIdle(state.guildId);
     });
     guildPlayer.on('error', (err) => {
       log.error(`Error: ${err.message}`, err);
       state.playing = false;
       state.playRequestedAt = null;
-      state.silentSince ??= Date.now();
       setVoiceIdle(state.guildId);
     });
     state.player = guildPlayer;
@@ -184,17 +178,17 @@ function getPlayer(state: GuildVoiceState): DjsAudioPlayer {
 }
 
 /**
- * Moves the guild connection's RTP timestamp past the silence since it last sent audio, just
- * before a sound's first frame goes out (the player has entered Playing; no packet of this sound
- * is prepared yet). Measuring up to this point, not to {@link startPlayback}, also covers the time
- * the sound spent buffering. When the move can't happen yet (e.g. networking is resuming), the
- * silence is kept for the next sound: over-counting it is harmless, dropping it is the lag this
- * corrects. See {@link advanceRtpTimestamp}.
+ * Brings the guild connection's RTP timestamp up to real time whenever the player enters Playing:
+ * a new sound once it has buffered, a replacement, or a resume from auto-pause. That runs before
+ * any packet of what follows is prepared, so the next frame carries a timestamp that matches when
+ * it is sent, however long the bot sent nothing. See {@link syncRtpTimestamp}. Logs a move at
+ * debug level, so production can confirm the correction is happening.
  * @param state - The guild's voice state.
  */
-function advanceSilentRtpClock(state: GuildVoiceState): void {
-  if (state.silentSince === null || !state.connection) return;
-  if (advanceRtpTimestamp(state.connection, Date.now() - state.silentSince)) state.silentSince = null;
+function syncRtpClock(state: GuildVoiceState): void {
+  if (!state.connection) return;
+  const movedMs = syncRtpTimestamp(state.connection, performance.now());
+  if (movedMs) log.debug(`Moved the RTP clock forward ${Math.round(movedMs)}ms in guild ${state.guildId}`);
 }
 
 /**
@@ -322,11 +316,7 @@ export async function connect(client: Client, guildId: string, channelId: string
     state.connection = joinedConnection;
     // @discordjs/voice hands back the live connection when this guild is already joined, so keep
     // its original Ready time for a reused connection; only a new one restarts the age.
-    if (joinedConnection !== previousConnection || state.connectedAt === null) {
-      state.connectedAt = Date.now();
-      // A new connection starts its own RTP clock, so silence from before it doesn't carry over.
-      state.silentSince = null;
-    }
+    if (joinedConnection !== previousConnection || state.connectedAt === null) state.connectedAt = Date.now();
     state.currentChannelId = channel.id;
 
     clearReconnectTimer(state);
