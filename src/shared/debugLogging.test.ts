@@ -80,6 +80,15 @@ describe('enableDebugLogging', () => {
     expect(setDebugLogFile).not.toHaveBeenCalledWith(false);
   });
 
+  it('saves the switch-off time but reports debug logging off when there is no debug file to switch', async () => {
+    setDebugLogFile.mockReturnValueOnce(false);
+
+    await enableDebugLogging(24, NOW);
+
+    expect(getDebugLoggingUntil()).toBeNull();
+    expect(stateSaved()).toBe(true);
+  });
+
   it.each([0, -1, 1.5, MAX_DEBUG_LOGGING_HOURS + 1, Number.NaN])('rejects %s hours', async (hours) => {
     await expect(enableDebugLogging(hours, NOW)).rejects.toThrow(RangeError);
     expect(setDebugLogFile).not.toHaveBeenCalled();
@@ -134,6 +143,15 @@ describe('restoreDebugLogging', () => {
 
     expect(await restoreDebugLogging(NOW)).toBeNull();
     expect(log.error).toHaveBeenCalledWith(expect.stringContaining('debug logging state'), expect.anything());
+  });
+
+  it('logs and stays off when the saved file exists but cannot be read, without throwing', async () => {
+    const { promises } = await import('fs');
+    vi.mocked(promises.readFile).mockRejectedValueOnce(Object.assign(new Error('EACCES'), { code: 'EACCES' }));
+
+    expect(await restoreDebugLogging(NOW)).toBeNull();
+    expect(log.error).toHaveBeenCalledWith(expect.stringContaining('debug logging state'), expect.objectContaining({ code: 'EACCES' }));
+    expect(setDebugLogFile).not.toHaveBeenCalledWith(true);
   });
 
   it('treats a missing or invalid until as nothing to restore', async () => {
