@@ -8,7 +8,27 @@ SERVICE_NAME="bcuk-bot"
 # Startup pings the DB, loads the guild registry and logs in to Discord/Twitch before the panel
 # starts listening, so allow for slow logins.
 HEALTH_TIMEOUT_SECONDS=90
+# Longest debug window `deploy.sh debug <hours>` accepts. Matches MAX_DEBUG_LOGGING_HOURS in
+# src/shared/debugLogging.ts, which also refuses a longer saved window at startup.
+MAX_DEBUG_HOURS=72
 # ─────────────────────────────────────────────────────────────────────────────
+
+# ── Arguments ────────────────────────────────────────────────────────────────
+# `npm run deploy debug [hours]` (or `bash deploy.sh debug [hours]`) also turns on the bot's debug
+# log file, logs/debug-YYYY-MM-DD.log, for that many hours (default 24) from the restart. It
+# switches itself off when the time runs out. The owner Health page (/admin/health) can turn it on
+# or off without a deploy.
+DEBUG_HOURS=""
+if [ "${1:-}" = "debug" ]; then
+    DEBUG_HOURS="${2:-24}"
+    if ! [[ "$DEBUG_HOURS" =~ ^[0-9]+$ ]] || [ "$DEBUG_HOURS" -lt 1 ] || [ "$DEBUG_HOURS" -gt "$MAX_DEBUG_HOURS" ]; then
+        echo "ERROR: Debug hours must be a whole number from 1 to $MAX_DEBUG_HOURS (got '$DEBUG_HOURS')."
+        exit 1
+    fi
+elif [ "$#" -gt 0 ]; then
+    echo "Usage: npm run deploy [debug [hours]]"
+    exit 1
+fi
 
 cd "$(dirname "$0")"
 
@@ -208,6 +228,17 @@ HEALTH_URL="http://127.0.0.1:${WEB_PORT}/healthz"
 port_listener_pids() {
     { ss -Hltnp "sport = :${WEB_PORT}" 2>/dev/null || true; } | { grep -o 'pid=[0-9]*' || true; } | cut -d= -f2 | sort -u
 }
+
+# The bot reads this at startup (restoreDebugLogging), so the new process starts with debug logging
+# on. logs/ is gitignored, so it never dirties the next deploy's working-tree check.
+if [ -n "$DEBUG_HOURS" ]; then
+    mkdir -p logs
+    "$SERVICE_NODE_BIN" -e '
+        const until = new Date(Date.now() + Number(process.argv[1]) * 3600000).toISOString();
+        require("fs").writeFileSync("logs/debug-logging.json", JSON.stringify({ until }));
+    ' "$DEBUG_HOURS"
+    echo "==> Debug logging will be on for ${DEBUG_HOURS}h from the restart (logs/debug-YYYY-MM-DD.log)."
+fi
 
 echo "==> Restarting $SERVICE_NAME..."
 # SIGTERM runs the bot's graceful shutdown; systemd waits for it (TimeoutStopSec) before starting

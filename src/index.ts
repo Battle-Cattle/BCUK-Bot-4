@@ -43,6 +43,7 @@ import { startTimerCommandScheduler, stopTimerCommandScheduler, registerTimerCom
 import { createLogger } from './shared/logger';
 import { withTimeout } from './shared/withTimeout';
 import { startEventLoopMonitor, stopEventLoopMonitor } from './shared/eventLoopMonitor';
+import { restoreDebugLogging } from './shared/debugLogging';
 
 const log = createLogger('Bot');
 
@@ -273,6 +274,9 @@ async function sweepPendingCompanionAcks(): Promise<void> {
  */
 async function main(): Promise<void> {
   log.info('Starting BCUK Bot 4...');
+  // First, so a debug window (switched on from the health page or `npm run deploy debug`) also
+  // captures the rest of startup.
+  await restoreDebugLogging();
 
   // Verify DB connection early
   try {

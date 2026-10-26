@@ -106,6 +106,9 @@ vi.mock('./twitch/pricing/rewardPricingScheduler', () => ({
   startRewardPricingScheduler: vi.fn(),
   stopRewardPricingScheduler: vi.fn().mockResolvedValue(undefined),
 }));
+vi.mock('./shared/debugLogging', () => ({
+  restoreDebugLogging: vi.fn().mockResolvedValue(null),
+}));
 vi.mock('./shared/eventLoopMonitor', () => ({
   startEventLoopMonitor: vi.fn(),
   stopEventLoopMonitor: vi.fn(),
@@ -349,9 +352,11 @@ describe('startup — reward pricing scheduler', () => {
     const { startEventSubReconciliation } = await import('./twitch/eventsub/twitchEventSubReconciliation.js');
     const { startChannelReconciliationPoll } = await import('./twitch/twitchChannelReconciliationPoll.js');
     const { startEventLoopMonitor } = await import('./shared/eventLoopMonitor.js');
+    const { restoreDebugLogging } = await import('./shared/debugLogging.js');
 
     await runMain();
 
+    expect(vi.mocked(restoreDebugLogging)).toHaveBeenCalledOnce();
     expect(vi.mocked(startRewardPricingScheduler)).toHaveBeenCalledOnce();
     expect(vi.mocked(startEventLoopMonitor)).toHaveBeenCalledOnce();
     expect(vi.mocked(startEventSub)).toHaveBeenCalledOnce();

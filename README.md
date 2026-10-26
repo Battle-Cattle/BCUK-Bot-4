@@ -56,6 +56,15 @@ journalctl -u bcuk-bot -f        # follow the logs (the bot also writes logs/ as
 sudo systemctl restart bcuk-bot  # manual restart
 ```
 
+### Debug logging
+
+The bot writes `logs/combined-YYYY-MM-DD.log` (at `LOG_LEVEL`, info by default in production) and `logs/error-YYYY-MM-DD.log`. Debug lines go to their own file, `logs/debug-YYYY-MM-DD.log`, and only while debug logging is switched on. It switches itself off after a set time, at most 72 hours, and a restart in the meantime keeps it on. Two ways to turn it on:
+
+- **Health page:** `/admin/health` (owner only). Pick 1, 6, 24 or 72 hours and press **Turn on**. It takes effect immediately, with no restart. The page shows when it ends and has a **Turn off now** button.
+- **With a deploy:** `npm run deploy debug` turns it on for 24 hours from the restart; `npm run deploy debug 6` for 6.
+
+While it's on, the debug file holds info, warning and error lines as well, so it reads on its own. Debug files are kept for 3 days.
+
 ## Database migrations
 
 The bot keeps the schema up to date itself. On every start, after checking it can reach the database and before anything else, it applies each file in `migrations/` that the `schema_migrations` table doesn't record yet, in order, and records it. A named lock stops two processes migrating at once. If a migration fails, the bot logs which one and exits, so a deploy fails its health check instead of running against a half-upgraded schema.
