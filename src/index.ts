@@ -43,7 +43,7 @@ import { startTimerCommandScheduler, stopTimerCommandScheduler, registerTimerCom
 import { createLogger } from './shared/logger';
 import { withTimeout } from './shared/withTimeout';
 import { startEventLoopMonitor, stopEventLoopMonitor } from './shared/eventLoopMonitor';
-import { restoreDebugLogging } from './shared/debugLogging';
+import { restoreDebugLogging, startDebugLogPruning, stopDebugLogPruning } from './shared/debugLogging';
 
 const log = createLogger('Bot');
 
@@ -150,6 +150,7 @@ async function shutdown(signal: string): Promise<void> {
   await safeStop('web panel', stopWebPanel);
   stopDbHealthCheck();
   stopEventLoopMonitor();
+  stopDebugLogPruning();
   stopCounterScheduler();
   stopAllRaffles();
   stopChannelReconciliationPoll();
@@ -261,7 +262,8 @@ async function sweepPendingCompanionAcks(): Promise<void> {
 }
 
 /**
- * Boots the bot: verifies DB connectivity, wires every Twitch/EventSub runtime callback,
+ * Boots the bot: restores a debug logging window saved before the restart (and starts pruning old
+ * debug log files), so the window also captures the rest of startup; verifies DB connectivity, wires every Twitch/EventSub runtime callback,
  * loads the guild registry, then starts the Discord bot, Twitch bot, web panel, and
  * schedulers, in that order (see the Startup Sequence section of `CLAUDE.md`), finishing with
  * an owner DM (see `ownerAlerts.ts`'s `announceStartup`) confirming the bot is back online —
@@ -277,6 +279,7 @@ async function main(): Promise<void> {
   // First, so a debug window (switched on from the health page or `npm run deploy debug`) also
   // captures the rest of startup.
   await restoreDebugLogging();
+  startDebugLogPruning();
 
   // Verify DB connection early
   try {

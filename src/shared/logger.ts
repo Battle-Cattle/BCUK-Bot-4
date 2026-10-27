@@ -4,7 +4,13 @@ import DailyRotateFile from 'winston-daily-rotate-file';
 import { recordError } from './healthStore';
 
 const LOG_LEVEL = process.env.LOG_LEVEL ?? (process.env.NODE_ENV === 'production' ? 'info' : 'debug');
-const LOG_DIR = 'logs';
+/** Folder the log files are written to, relative to the working directory. */
+export const LOG_DIR = 'logs';
+/**
+ * Days a debug log file is kept. The rotator prunes older ones only when it opens a file (at
+ * startup or a new day's first write), so src/shared/debugLogging.ts also prunes them on a timer.
+ */
+export const DEBUG_LOG_RETENTION_DAYS = 3;
 const IS_TEST = !!process.env.VITEST;
 
 /**
@@ -73,7 +79,7 @@ const debugFile = IS_TEST
       datePattern: 'YYYY-MM-DD',
       level: 'debug',
       maxSize: '50m',
-      maxFiles: '3d',
+      maxFiles: `${DEBUG_LOG_RETENTION_DAYS}d`,
       zippedArchive: true,
       format: fileFormat,
       silent: true,

@@ -2,10 +2,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const log = vi.hoisted(() => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }));
 const setDebugLogFile = vi.hoisted(() => vi.fn(() => true));
-vi.mock('./logger', () => ({ createLogger: () => log, setDebugLogFile }));
+vi.mock('./logger', () => ({ createLogger: () => log, setDebugLogFile, LOG_DIR: 'logs', DEBUG_LOG_RETENTION_DAYS: 3 }));
 
-// An in-memory stand-in for the few fs.promises calls the module makes.
+// An in-memory stand-in for the few fs.promises calls the module makes. Keys are paths; the log
+// folder's listing is every key under `logs/`, and mtimes default to 0 unless set.
 const files = vi.hoisted(() => new Map<string, string>());
+const mtimes = vi.hoisted(() => new Map<string, number>());
 vi.mock('fs', () => ({
   promises: {
     mkdir: vi.fn(async () => undefined),
@@ -22,11 +24,16 @@ vi.mock('fs', () => ({
       files.delete(from);
     }),
     rm: vi.fn(async (file: string) => { files.delete(file); }),
+    readdir: vi.fn(async (dir: string) => [...files.keys()]
+      .filter((f) => f.startsWith(`${dir}/`))
+      .map((f) => f.slice(dir.length + 1))),
+    stat: vi.fn(async (file: string) => ({ mtimeMs: mtimes.get(file) ?? 0 })),
   },
 }));
 
 import {
   enableDebugLogging, disableDebugLogging, restoreDebugLogging, getDebugLoggingUntil,
+  pruneOldDebugLogs, startDebugLogPruning, stopDebugLogPruning,
   DEBUG_LOGGING_STATE_FILE, MAX_DEBUG_LOGGING_HOURS,
 } from './debugLogging';
 
@@ -47,12 +54,14 @@ function writeState(contents: string) {
 
 beforeEach(async () => {
   files.clear();
+  mtimes.clear();
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
   await disableDebugLogging();
   vi.clearAllMocks();
 });
 
 afterEach(() => {
+  stopDebugLogPruning();
   vi.useRealTimers();
 });
 
@@ -175,5 +184,79 @@ describe('restoreDebugLogging', () => {
 
     expect(await restoreDebugLogging(NOW)).toBeNull();
     expect(stateSaved()).toBe(false);
+  });
+});
+
+describe('pruneOldDebugLogs', () => {
+  const DAY = 24 * HOUR;
+
+  function addLog(name: string, ageMs: number) {
+    files.set(`logs/${name}`, '');
+    mtimes.set(`logs/${name}`, NOW - ageMs);
+  }
+
+  it('deletes debug log files older than three days and keeps everything else', async () => {
+    addLog('debug-2026-10-20.log', 6 * DAY);
+    addLog('debug-2026-10-21.log.gz', 5 * DAY);
+    addLog('debug-2026-10-22.log.1', 4 * DAY);
+    addLog('debug-2026-10-25.log', DAY);
+    addLog('combined-2026-10-20.log', 6 * DAY);
+    files.set(DEBUG_LOGGING_STATE_FILE, '{}');
+
+    expect(await pruneOldDebugLogs(NOW)).toBe(3);
+
+    expect([...files.keys()].sort()).toEqual([
+      'logs/combined-2026-10-20.log', 'logs/debug-2026-10-25.log', DEBUG_LOGGING_STATE_FILE,
+    ].sort());
+    expect(log.info).toHaveBeenCalledWith(expect.stringContaining('Pruned 3 debug log file(s)'));
+  });
+
+  it('returns 0 without logging when there is nothing to prune or no log folder', async () => {
+    const { promises } = await import('fs');
+    vi.mocked(promises.readdir).mockRejectedValueOnce(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }));
+
+    expect(await pruneOldDebugLogs(NOW)).toBe(0);
+    expect(await pruneOldDebugLogs(NOW)).toBe(0);
+    expect(log.info).not.toHaveBeenCalled();
+  });
+
+  it('skips a file it cannot read, with a warning, and carries on', async () => {
+    const { promises } = await import('fs');
+    addLog('debug-2026-10-19.log', 7 * DAY);
+    addLog('debug-2026-10-20.log', 6 * DAY);
+    vi.mocked(promises.stat).mockRejectedValueOnce(new Error('EACCES'));
+
+    expect(await pruneOldDebugLogs(NOW)).toBe(1);
+    expect(log.warn).toHaveBeenCalledWith(expect.stringContaining("Couldn't prune old debug log"), expect.any(Error));
+  });
+});
+
+describe('startDebugLogPruning', () => {
+  it('prunes now and every six hours until stopped', async () => {
+    const { promises } = await import('fs');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+
+    startDebugLogPruning();
+    startDebugLogPruning(); // a second start is a no-op
+    await vi.advanceTimersByTimeAsync(0);
+    expect(promises.readdir).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(6 * HOUR);
+    expect(promises.readdir).toHaveBeenCalledTimes(2);
+
+    stopDebugLogPruning();
+    await vi.advanceTimersByTimeAsync(12 * HOUR);
+    expect(promises.readdir).toHaveBeenCalledTimes(2);
+  });
+
+  it('logs rather than throws if a prune fails unexpectedly', async () => {
+    const { promises } = await import('fs');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+    vi.mocked(promises.readdir).mockResolvedValueOnce(null as never); // not iterable: an unexpected failure
+
+    startDebugLogPruning();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(log.error).toHaveBeenCalledWith('Failed to prune old debug logs:', expect.any(TypeError));
   });
 });

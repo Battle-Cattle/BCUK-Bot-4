@@ -63,7 +63,7 @@ The bot writes `logs/combined-YYYY-MM-DD.log` (at `LOG_LEVEL`, info by default i
 - **Health page:** `/admin/health` (owner only). Pick 1, 6, 24 or 72 hours and press **Turn on**. It takes effect immediately, with no restart. The page shows when it ends and has a **Turn off now** button.
 - **With a deploy:** `npm run deploy debug` turns it on for 24 hours from the restart; `npm run deploy debug 6` for 6.
 
-While it's on, the debug file holds info, warning and error lines as well, so it reads on its own. Debug files are kept for 3 days.
+While it's on, the debug file holds info, warning and error lines as well, so it reads on its own. Debug files are deleted after 3 days, whether or not debug logging is on.
 
 ## Database migrations
 

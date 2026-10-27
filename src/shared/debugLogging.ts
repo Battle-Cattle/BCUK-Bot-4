@@ -1,6 +1,6 @@
 import { promises as fs } from 'fs';
 import path from 'path';
-import { createLogger, setDebugLogFile } from './logger';
+import { createLogger, setDebugLogFile, LOG_DIR, DEBUG_LOG_RETENTION_DAYS } from './logger';
 
 const log = createLogger('DebugLogging');
 
@@ -18,8 +18,15 @@ export const MAX_DEBUG_LOGGING_HOURS = 72;
 
 const MS_PER_HOUR = 60 * 60 * 1000;
 
+/** How often {@link pruneOldDebugLogs} runs while the bot is up. */
+const PRUNE_INTERVAL_MS = 6 * MS_PER_HOUR;
+
+/** A debug log file as the rotator names it, current or compressed: `debug-YYYY-MM-DD.log[.N][.gz]`. */
+const DEBUG_LOG_FILE = /^debug-\d{4}-\d{2}-\d{2}\.log(\.\d+)?(\.gz)?$/;
+
 let debugUntil: Date | null = null;
 let offTimer: ReturnType<typeof setTimeout> | null = null;
+let pruneTimer: ReturnType<typeof setInterval> | null = null;
 
 /** Cancels the pending switch-off timer, if any. */
 function clearOffTimer(): void {
@@ -114,4 +121,51 @@ export async function restoreDebugLogging(nowMs = Date.now()): Promise<Date | nu
  */
 export function getDebugLoggingUntil(): Date | null {
   return debugUntil;
+}
+
+/**
+ * Deletes debug log files last written more than {@link DEBUG_LOG_RETENTION_DAYS} days ago. The
+ * rotator only prunes when it opens a file, which doesn't happen while debug logging is off, so
+ * without this a long-running bot would keep old debug files past their retention.
+ * @param nowMs - The current time in epoch milliseconds (injectable for tests).
+ * @returns How many files were deleted. A missing log folder, or a file that can't be read or
+ *   removed, is skipped rather than thrown.
+ */
+export async function pruneOldDebugLogs(nowMs = Date.now()): Promise<number> {
+  const cutoffMs = nowMs - DEBUG_LOG_RETENTION_DAYS * 24 * MS_PER_HOUR;
+  const names = await fs.readdir(LOG_DIR).catch(() => [] as string[]);
+  let removed = 0;
+  for (const name of names.filter((n) => DEBUG_LOG_FILE.test(n))) {
+    const file = path.join(LOG_DIR, name);
+    try {
+      if ((await fs.stat(file)).mtimeMs >= cutoffMs) continue;
+      await fs.rm(file, { force: true });
+      removed++;
+    } catch (err) {
+      log.warn(`Couldn't prune old debug log ${name}:`, err);
+    }
+  }
+  if (removed > 0) log.info(`Pruned ${removed} debug log file(s) older than ${DEBUG_LOG_RETENTION_DAYS} days`);
+  return removed;
+}
+
+/** Runs {@link pruneOldDebugLogs}, logging rather than throwing on an unexpected failure. */
+function pruneSafely(): void {
+  void pruneOldDebugLogs().catch((err: unknown) => log.error('Failed to prune old debug logs:', err));
+}
+
+/** Prunes old debug log files now and every {@link PRUNE_INTERVAL_MS} after. No-ops if already started. */
+export function startDebugLogPruning(): void {
+  if (pruneTimer) return;
+  pruneSafely();
+  // Unref'd so it never keeps the process alive on its own; shutdown() stops it too.
+  pruneTimer = setInterval(pruneSafely, PRUNE_INTERVAL_MS).unref();
+}
+
+/** Stops the periodic debug log pruning, if running. */
+export function stopDebugLogPruning(): void {
+  if (pruneTimer) {
+    clearInterval(pruneTimer);
+    pruneTimer = null;
+  }
 }

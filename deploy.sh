@@ -24,9 +24,11 @@ if [ "${1:-}" = "debug" ]; then
         echo "Usage: npm run deploy [debug [hours]]"
         exit 1
     fi
-    # Only a missing hours argument means 24: an empty one ("") fails the check below.
+    # Only a missing hours argument means 24: an empty one ("") fails the check below. At most two
+    # digits before comparing, so an oversized number can't overflow the shell's integer test
+    # (which errors, and so would let it through).
     DEBUG_HOURS="${2-24}"
-    if ! [[ "$DEBUG_HOURS" =~ ^[0-9]+$ ]] || [ "$DEBUG_HOURS" -lt 1 ] || [ "$DEBUG_HOURS" -gt "$MAX_DEBUG_HOURS" ]; then
+    if ! [[ "$DEBUG_HOURS" =~ ^[0-9]{1,2}$ ]] || [ "$DEBUG_HOURS" -lt 1 ] || [ "$DEBUG_HOURS" -gt "$MAX_DEBUG_HOURS" ]; then
         echo "ERROR: Debug hours must be a whole number from 1 to $MAX_DEBUG_HOURS (got '$DEBUG_HOURS')."
         exit 1
     fi
