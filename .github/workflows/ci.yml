@@ -98,7 +98,7 @@ jobs:
 
       # The coverage job below publishes this to Qlty.
       - name: Keep lcov coverage for the Qlty upload
-        if: always() && matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-latest'
         uses: actions/upload-artifact@v7
         with:
           name: coverage-lcov
@@ -109,11 +109,12 @@ jobs:
   # trades for a Qlty upload; the install, build and test steps above never see it. GitHub gives
   # fork and Dependabot pull requests no OIDC token, and qlty-action fails the job when it can't
   # get one, so those runs skip the upload.
+  # It also waits for its test job to pass: a failed one leaves no report to upload.
   coverage:
     name: Publish coverage to Qlty
     needs: ci
     if: >-
-      always() &&
+      needs.ci.result == 'success' &&
       (github.event_name != 'pull_request' ||
        (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]'))
     runs-on: ubuntu-latest
