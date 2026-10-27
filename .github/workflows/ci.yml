@@ -8,12 +8,13 @@ on:
 
 permissions:
   contents: read
+  # Lets qlty-action exchange GitHub's OIDC token for a Qlty upload, instead of a stored coverage token.
+  id-token: write
 
 jobs:
   ci:
     name: Build & Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    environment: ci
 
     strategy:
       fail-fast: false
@@ -101,5 +102,5 @@ jobs:
         if: always() && matrix.os == 'ubuntu-latest'
         uses: qltysh/qlty-action/coverage@v2
         with:
-          token: ${{ secrets.QLTY_COVERAGE_TOKEN }}
+          oidc: true
           files: coverage/lcov.info
