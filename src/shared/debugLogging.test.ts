@@ -1,11 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import path from 'path';
 
 const log = vi.hoisted(() => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }));
 const setDebugLogFile = vi.hoisted(() => vi.fn(() => true));
 vi.mock('./logger', () => ({ createLogger: () => log, setDebugLogFile, LOG_DIR: 'logs', DEBUG_LOG_RETENTION_DAYS: 3 }));
 
-// An in-memory stand-in for the few fs.promises calls the module makes. Keys are paths; the log
-// folder's listing is every key under `logs/`, and mtimes default to 0 unless set.
+// An in-memory stand-in for the few fs.promises calls the module makes. Keys are paths as the module
+// builds them (path.join, so `logs\\…` on Windows); the log folder's listing is every key directly
+// under it, and mtimes default to 0 unless set.
 const files = vi.hoisted(() => new Map<string, string>());
 const mtimes = vi.hoisted(() => new Map<string, number>());
 vi.mock('fs', () => ({
@@ -25,8 +27,8 @@ vi.mock('fs', () => ({
     }),
     rm: vi.fn(async (file: string) => { files.delete(file); }),
     readdir: vi.fn(async (dir: string) => [...files.keys()]
-      .filter((f) => f.startsWith(`${dir}/`))
-      .map((f) => f.slice(dir.length + 1))),
+      .filter((f) => path.dirname(f) === dir)
+      .map((f) => path.basename(f))),
     stat: vi.fn(async (file: string) => ({ mtimeMs: mtimes.get(file) ?? 0 })),
   },
 }));
@@ -191,8 +193,8 @@ describe('pruneOldDebugLogs', () => {
   const DAY = 24 * HOUR;
 
   function addLog(name: string, ageMs: number) {
-    files.set(`logs/${name}`, '');
-    mtimes.set(`logs/${name}`, NOW - ageMs);
+    files.set(path.join('logs', name), '');
+    mtimes.set(path.join('logs', name), NOW - ageMs);
   }
 
   it('deletes debug log files older than three days and keeps everything else', async () => {
@@ -206,7 +208,7 @@ describe('pruneOldDebugLogs', () => {
     expect(await pruneOldDebugLogs(NOW)).toBe(3);
 
     expect([...files.keys()].sort()).toEqual([
-      'logs/combined-2026-10-20.log', 'logs/debug-2026-10-25.log', DEBUG_LOGGING_STATE_FILE,
+      path.join('logs', 'combined-2026-10-20.log'), path.join('logs', 'debug-2026-10-25.log'), DEBUG_LOGGING_STATE_FILE,
     ].sort());
     expect(log.info).toHaveBeenCalledWith(expect.stringContaining('Pruned 3 debug log file(s)'));
   });
