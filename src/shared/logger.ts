@@ -4,7 +4,13 @@ import DailyRotateFile from 'winston-daily-rotate-file';
 import { recordError } from './healthStore';
 
 const LOG_LEVEL = process.env.LOG_LEVEL ?? (process.env.NODE_ENV === 'production' ? 'info' : 'debug');
-const LOG_DIR = 'logs';
+/** Folder the log files are written to, relative to the working directory. */
+export const LOG_DIR = 'logs';
+/**
+ * Days a debug log file is kept. The rotator prunes older ones only when it opens a file (at
+ * startup or a new day's first write), so src/shared/debugLogging.ts also prunes them on a timer.
+ */
+export const DEBUG_LOG_RETENTION_DAYS = 3;
 const IS_TEST = !!process.env.VITEST;
 
 /**
@@ -62,15 +68,33 @@ const consoleFormat = format.combine(
   format.printf((info) => formatLogLine(info, info.level)),
 );
 
+// Debug lines go to their own file, and only while debug logging is switched on (see
+// setDebugLogFile and src/shared/debugLogging.ts), so they never bury combined-*.log or the
+// journal. Silent until then.
+const debugFile = IS_TEST
+  ? null
+  : new DailyRotateFile({
+      dirname: LOG_DIR,
+      filename: 'debug-%DATE%.log',
+      datePattern: 'YYYY-MM-DD',
+      level: 'debug',
+      maxSize: '50m',
+      maxFiles: `${DEBUG_LOG_RETENTION_DAYS}d`,
+      zippedArchive: true,
+      format: fileFormat,
+      silent: true,
+    });
+
 const rootLogger = winstonCreateLogger({
   level: LOG_LEVEL,
   transports: [
-    ...(!IS_TEST
+    ...(debugFile
       ? [
           new DailyRotateFile({
             dirname: LOG_DIR,
             filename: 'combined-%DATE%.log',
             datePattern: 'YYYY-MM-DD',
+            level: LOG_LEVEL,
             maxSize: '20m',
             maxFiles: '14d',
             zippedArchive: true,
@@ -86,9 +110,11 @@ const rootLogger = winstonCreateLogger({
             zippedArchive: true,
             format: fileFormat,
           }),
+          debugFile,
         ]
       : []),
     new transports.Console({
+      level: LOG_LEVEL,
       format: consoleFormat,
     }),
     // Error-capturing feeds healthStore's error ring buffer for the owner health
@@ -97,6 +123,24 @@ const rootLogger = winstonCreateLogger({
     ...(!IS_TEST ? [new HealthStoreErrorTransport({ level: 'error' })] : []),
   ],
 });
+
+/**
+ * Turns the separate debug log file (`logs/debug-YYYY-MM-DD.log`) on or off. While it's on, the
+ * root logger passes debug entries through to it; the combined file and the console keep their own
+ * `LOG_LEVEL`, so they don't fill up with debug lines. Use src/shared/debugLogging.ts, which also
+ * persists the setting and switches it off again on time, rather than calling this directly.
+ * @param enabled - True to write debug lines to the debug file, false to stop.
+ * @returns False when there is no debug file to switch (under tests), true otherwise.
+ */
+export function setDebugLogFile(enabled: boolean): boolean {
+  if (!debugFile) return false;
+  debugFile.silent = !enabled;
+  // Never lower an already more verbose LOG_LEVEL (e.g. `silly`); otherwise open up to debug.
+  const levels = rootLogger.levels;
+  const base = LOG_LEVEL in levels ? LOG_LEVEL : 'info';
+  rootLogger.level = enabled && levels[base]! < levels.debug! ? 'debug' : base;
+  return true;
+}
 
 /**
  * Returns a child logger tagged with the given module label.
