@@ -13,7 +13,6 @@ jobs:
   ci:
     name: Build & Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    environment: ci
 
     strategy:
       fail-fast: false
@@ -97,9 +96,46 @@ jobs:
           path: coverage/coverage-report.txt
           retention-days: 30
 
-      - name: Publish coverage to Qlty
-        if: always() && matrix.os == 'ubuntu-latest'
-        uses: qltysh/qlty-action/coverage@v2
+      # The coverage job below publishes this to Qlty.
+      - name: Keep lcov coverage for the Qlty upload
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v7
         with:
-          token: ${{ secrets.QLTY_COVERAGE_TOKEN }}
+          name: coverage-lcov
+          path: coverage/lcov.info
+          retention-days: 1
+
+  # Publishes coverage in a job of its own, so only this job can mint the OIDC token qlty-action
+  # trades for a Qlty upload; the install, build and test steps above never see it. GitHub gives
+  # fork and Dependabot pull requests no OIDC token, and qlty-action fails the job when it can't
+  # get one, so those runs skip the upload.
+  # It also waits for its test job to pass: a failed one leaves no report to upload.
+  coverage:
+    name: Publish coverage to Qlty
+    needs: ci
+    if: >-
+      needs.ci.result == 'success' &&
+      (github.event_name != 'pull_request' ||
+       (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      # Qlty checks the report's source paths against the checkout.
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Download lcov coverage
+        uses: actions/download-artifact@v8
+        with:
+          name: coverage-lcov
+          path: coverage
+
+      - name: Publish coverage to Qlty
+        uses: qltysh/qlty-action/coverage@ebcd284bf32e36a030afe15f1e136c7be08b9506 # v2.5.0
+        with:
+          oidc: true
           files: coverage/lcov.info
