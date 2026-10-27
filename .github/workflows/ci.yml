@@ -105,7 +105,7 @@ jobs:
           always() && matrix.os == 'ubuntu-latest' &&
           (github.event_name != 'pull_request' ||
            (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]'))
-        uses: qltysh/qlty-action/coverage@v2
+        uses: qltysh/qlty-action/coverage@ebcd284bf32e36a030afe15f1e136c7be08b9506 # v2.5.0
         with:
           oidc: true
           files: coverage/lcov.info
