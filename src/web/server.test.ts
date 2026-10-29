@@ -5,7 +5,6 @@ import { EventEmitter } from 'events';
 import http from 'http';
 import net from 'net';
 import type { AddressInfo } from 'net';
-import { mockLogger } from '../test-utils/loggerMock';
 import { waitFor } from '../test-utils/waitFor';
 
 vi.mock('../shared/config', () => ({
@@ -35,7 +34,11 @@ vi.mock('express-mysql-session', () => ({
     },
 }));
 
-vi.mock('../shared/logger', () => ({ createLogger: mockLogger }));
+// One shared logger instance, so the client-error tests can assert which level server.ts logged at.
+const { mockLog } = vi.hoisted(() => ({
+  mockLog: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+}));
+vi.mock('../shared/logger', () => ({ createLogger: () => mockLog }));
 
 vi.mock('./csrf', () => ({
   ensureSessionCsrfToken: vi.fn().mockReturnValue('csrf-token'),
@@ -318,6 +321,10 @@ describe('csrfErrorHandler', () => {
 });
 
 describe('centralised error handler — client errors', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it('answers a body with an unsupported Content-Encoding with 415, not 500', async () => {
     const res = await request(app)
       .post('/__marker_dashboard')
@@ -326,6 +333,8 @@ describe('centralised error handler — client errors', () => {
       .send('{}');
     expect(res.status).toBe(415);
     expect(res.text).toContain('The request could not be processed.');
+    expect(mockLog.warn).toHaveBeenCalled();
+    expect(mockLog.error).not.toHaveBeenCalled();
   });
 
   it('answers a corrupt Brotli body with 400, not 500', async () => {
@@ -336,6 +345,8 @@ describe('centralised error handler — client errors', () => {
       .send('definitely not brotli');
     expect(res.status).toBe(400);
     expect(res.text).toContain('The request could not be processed.');
+    expect(mockLog.warn).toHaveBeenCalled();
+    expect(mockLog.error).not.toHaveBeenCalled();
   });
 
   it('answers malformed JSON with 400', async () => {
@@ -345,6 +356,8 @@ describe('centralised error handler — client errors', () => {
       .send('{not json');
     expect(res.status).toBe(400);
     expect(res.text).toContain('The request could not be processed.');
+    expect(mockLog.warn).toHaveBeenCalled();
+    expect(mockLog.error).not.toHaveBeenCalled();
   });
 });
 
