@@ -317,6 +317,37 @@ describe('csrfErrorHandler', () => {
   });
 });
 
+describe('centralised error handler — client errors', () => {
+  it('answers a body with an unsupported Content-Encoding with 415, not 500', async () => {
+    const res = await request(app)
+      .post('/__marker_dashboard')
+      .set('Content-Type', 'application/json')
+      .set('Content-Encoding', 'x')
+      .send('{}');
+    expect(res.status).toBe(415);
+    expect(res.text).toContain('The request could not be processed.');
+  });
+
+  it('answers a corrupt Brotli body with 400, not 500', async () => {
+    const res = await request(app)
+      .post('/__marker_dashboard')
+      .set('Content-Type', 'application/json')
+      .set('Content-Encoding', 'br')
+      .send('definitely not brotli');
+    expect(res.status).toBe(400);
+    expect(res.text).toContain('The request could not be processed.');
+  });
+
+  it('answers malformed JSON with 400', async () => {
+    const res = await request(app)
+      .post('/__marker_dashboard')
+      .set('Content-Type', 'application/json')
+      .send('{not json');
+    expect(res.status).toBe(400);
+    expect(res.text).toContain('The request could not be processed.');
+  });
+});
+
 /**
  * Mounts the real `generalLimiter`/`sessionLimiter` instances exported from server.ts behind
  * a stub session middleware, so a request loop can drive them past their threshold directly —

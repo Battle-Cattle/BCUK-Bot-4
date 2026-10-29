@@ -188,18 +188,35 @@ mountRoutes(app, { streamdeckLimiter });
  * Shared by the 404, CSRF-failure, and catch-all error handlers below — unlike
  * `routes/shared.ts`'s `renderError`, which always passes an empty `csrfToken` and is
  * meant for already-authenticated route handlers rather than this app-wide fallback tier.
- * @param req - Express request; reads `req.session.user` if present.
+ * @param req - Express request; reads `req.session.user` if present. `req.session` itself is
+ *   absent when the error came from middleware ahead of the session (e.g. the body parsers).
  * @param res - Express response; renders the `error` view with `status`.
  * @param status - HTTP status code to set.
  * @param message - Human-readable error message shown to the user.
  */
 function renderErrorPage(req: express.Request, res: express.Response, status: number, message: string): void {
+  // Typed as always present, but body-parser errors reach the handlers before session middleware runs.
+  const user = (req.session as express.Request['session'] | undefined)?.user ?? null;
   res.status(status);
   renderView(res, 'error', {
     message,
-    user: req.session.user ?? null,
-    csrfToken: req.session.user ? ensureSessionCsrfToken(req) : '',
+    user,
+    csrfToken: user ? ensureSessionCsrfToken(req) : '',
   });
+}
+
+/**
+ * Reads the 4xx status an `http-errors`-style error (e.g. body-parser's malformed-body,
+ * bad-encoding or too-large errors) carries, so the catch-all handler can answer the client
+ * with it instead of treating the client's mistake as a server failure.
+ * @param err - The error handed to the error handler.
+ * @returns The error's 4xx `status`/`statusCode`, or `undefined` when it has none (a real 500).
+ */
+function clientErrorStatus(err: unknown): number | undefined {
+  if (typeof err !== 'object' || err === null) return undefined;
+  const { status, statusCode } = err as { status?: unknown; statusCode?: unknown };
+  const code = status ?? statusCode;
+  return typeof code === 'number' && code >= 400 && code < 500 ? code : undefined;
 }
 
 /**
@@ -243,12 +260,23 @@ app.use(csrfErrorHandler);
 
 /**
  * Centralised error handler — catches anything unhandled by earlier middleware/routes.
+ * Client errors (a 4xx `status`, e.g. a corrupt or unsupported-encoding request body from
+ * body-parser) get that status and a one-line warning; anything else is logged as an error
+ * and answered with a 500.
  * @param err - The unhandled error.
  * @param req - Express request; reads `req.session.user` if present.
- * @param res - Express response; renders the `error` view with a 500 status.
+ * @param res - Express response; renders the `error` view with the client-error status or 500.
  * @param _next - Unused, but required for Express to recognize this as an error handler.
  */
 app.use((err: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  const status = clientErrorStatus(err);
+  if (status !== undefined) {
+    // `status` is only set on objects, so `err` is one here.
+    const { message } = err as { message?: unknown };
+    log.warn(`Rejected bad request ${req.method} ${req.originalUrl} (${status}): ${String(message)}`);
+    renderErrorPage(req, res, status, 'The request could not be processed.');
+    return;
+  }
   log.error('Unhandled error:', err);
   renderErrorPage(req, res, 500, 'An unexpected error occurred.');
 });
