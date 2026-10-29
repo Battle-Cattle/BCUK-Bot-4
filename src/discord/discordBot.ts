@@ -1,4 +1,4 @@
-import { Client, GatewayIntentBits, Guild, Partials } from 'discord.js';
+import { Client, GatewayCloseCodes, GatewayIntentBits, Guild, Partials, WebSocketShardEvents } from 'discord.js';
 import { DISCORD_TOKEN } from '../shared/config';
 import { handleCommand, forgetGuildCommandState } from '../commands/commandRouter';
 import { fireAndForget, extractCommand } from '../commands/commandUtils';
@@ -27,7 +27,7 @@ let bootingClient: Client | null = null;
 // ─── Reconnect backoff ──────────────────────────────────────────────────────
 //
 // startDiscordBot()'s login() call can itself fail (a transient Discord outage exactly
-// overlapping a shardDisconnect self-heal, a revoked token, network unreachability at that
+// overlapping an unrecoverable-close self-heal, a revoked token, network unreachability at that
 // instant) — without a retry loop here, that single failed attempt would leave the process
 // alive-but-permanently-disconnected from Discord for the rest of its life, since nothing else
 // ever calls startDiscordBot() again. Mirrors audioPlayer.ts's per-guild voice reconnect backoff.
@@ -258,36 +258,111 @@ function registerClientReadyHandler(client: Client): void {
 }
 
 /**
+ * Gateway close codes after which `@discordjs/ws` destroys the shard without reconnecting
+ * (see `WebSocketShard#onClose`): every other code is resumed or re-identified on its own.
+ */
+const UNRECOVERABLE_CLOSE_CODES: ReadonlySet<number> = new Set([
+  GatewayCloseCodes.AuthenticationFailed,
+  GatewayCloseCodes.InvalidShard,
+  GatewayCloseCodes.ShardingRequired,
+  GatewayCloseCodes.InvalidAPIVersion,
+  GatewayCloseCodes.InvalidIntents,
+  GatewayCloseCodes.DisallowedIntents,
+]);
+
+/**
+ * Marks the gateway as down and logs a recoverable shard close, which `@discordjs/ws`
+ * resumes or re-identifies on its own.
+ * @param code - The gateway close code.
+ * @param shardId - The shard that closed.
+ */
+function onShardReconnecting(code: number, shardId: number): void {
+  recordShardActivity();
+  // This bot runs a single (unsharded) client, so a shard reconnecting means the gateway is
+  // not currently connected — without this, checkGatewayStall()'s gatewayConnected guard would
+  // stay true from the prior clientReady and never let the watchdog catch a reconnect loop that
+  // never progresses past this event.
+  recordDiscordConnected(false);
+  setGatewayConnected(false);
+  log.warn(`Shard ${shardId} lost its connection (code ${code}) and is reconnecting...`);
+}
+
+/**
+ * Replaces the client after an unrecoverable shard close, which `@discordjs/ws` will not retry.
+ * @param code - The gateway close code.
+ * @param shardId - The shard that closed.
+ */
+function onShardDisconnectedPermanently(code: number, shardId: number): void {
+  recordShardActivity();
+  log.error(`Shard ${shardId} disconnected permanently (code ${code}) — reconnecting client.`);
+  recordDiscordConnected(false);
+  setGatewayConnected(false);
+  disconnectAllVoice();
+  stopDiscordBot();
+  startDiscordBot();
+}
+
+/**
+ * Marks the gateway as down and logs (throttled) a shard connection error.
+ * @param err - The gateway connection error.
+ * @param shardId - The shard that reported it.
+ */
+function onShardError(err: Error, shardId: number): void {
+  recordShardActivity();
+  recordDiscordConnected(false);
+  setGatewayConnected(false);
+  logShardError(shardId, err);
+}
+
+/** Marks the gateway as connected again once a shard is ready or has resumed. */
+function onShardConnected(): void {
+  recordShardActivity();
+  recordDiscordConnected(true);
+  setGatewayConnected(true);
+}
+
+/**
+ * Marks the gateway as connected again after a resume, and logs it so a reconnect cycle has a
+ * visible end in the log.
+ * @param shardId - The shard that resumed its gateway session.
+ */
+function onShardResumed(shardId: number): void {
+  onShardConnected();
+  log.info(`Shard ${shardId} resumed its gateway session.`);
+}
+
+/**
  * Registers gateway-connection visibility/self-healing handlers.
  *
- * discord.js's own WebSocketManager already retries every recoverable gateway
- * disconnect on its own (reflected by 'shardReconnecting'), so most of these are purely
- * visibility logging — without them, a reconnect cycle produces zero log output,
- * making post-incident diagnosis impossible. 'shardError' is a connection-level
- * error on the gateway socket itself (distinct from the generic 'error' handler);
- * the manager keeps retrying after it, so it doesn't need any recovery action here —
- * but it's still worth an error-level log, throttled (see {@link logShardError}) so a burst
- * of retries during an outage doesn't flood it. The owner hears about an outage from the
- * health watcher instead (via `recordDiscordConnected`), which skips blips shorter than its
- * grace period and pairs a "down" DM with a "recovered" one.
+ * Since discord.js v15 the Client no longer re-emits shard lifecycle events
+ * ('shardReconnecting'/'shardError'/'shardReady'/'shardResume'/'shardDisconnect'); they come
+ * from `client.ws`, the `@discordjs/ws` WebSocketManager, as {@link WebSocketShardEvents}.
  *
- * 'shardDisconnect' fires only for an unrecoverable close code — the one case
- * where discord.js gives up and will *not* reconnect that shard on its own. With
- * this bot running a single (unsharded) client, that means every guild silently
- * stops receiving events. Force a fresh login so the process self-heals instead
- * of sitting alive-but-dead until someone notices and restarts it manually.
+ * The manager already retries every recoverable gateway disconnect on its own (each one
+ * reported as `Closed`), so most of these are purely visibility logging — without them, a
+ * reconnect cycle produces zero log output, making post-incident diagnosis impossible.
+ * `SocketError` is a connection-level error on the gateway socket itself and `Error` a fatal
+ * shard error (distinct from the client's generic 'error' handler); both are logged at error
+ * level, throttled (see {@link logShardError}) so a burst of retries during an outage doesn't
+ * flood it. The owner hears about an outage from the health watcher instead (via
+ * `recordDiscordConnected`), which skips blips shorter than its grace period and pairs a "down"
+ * DM with a "recovered" one.
  *
- * 'shardError' also flips the health store's `discordConnected` flag to `false` —
- * without this, a shard stuck in a reconnect-retry loop (e.g. a sustained run of
- * `Unexpected server response: 503` on every attempt) never fires `shardDisconnect`
- * (discord.js keeps retrying rather than giving up) and never re-fires `clientReady`
- * (that only fires once per client lifetime), so nothing else would ever mark the
- * bot as down — the `!health` command goes unanswered (expected, the gateway is
- * down) while the web panel's health dashboard kept reading the last-known `true`
- * forever. 'shardReady'/'shardResume' flip it back to `true` once the shard
- * actually recovers, since a full client replacement (via `clientReady`) isn't
- * guaranteed to happen for every recovery path. 'shardResume' also logs the resume, so a
- * reconnect cycle has a visible end in the log.
+ * A `Closed` with one of {@link UNRECOVERABLE_CLOSE_CODES} is the one case where the manager
+ * gives up and will *not* reconnect that shard on its own. With this bot running a single
+ * (unsharded) client, that means every guild silently stops receiving events. Force a fresh
+ * login so the process self-heals instead of sitting alive-but-dead until someone notices and
+ * restarts it manually.
+ *
+ * Errors also flip the health store's `discordConnected` flag to `false` — without this, a
+ * shard stuck in a reconnect-retry loop (e.g. a sustained run of
+ * `Unexpected server response: 503` on every attempt) never closes unrecoverably and never
+ * re-fires `clientReady` (that only fires once per client lifetime), so nothing else would ever
+ * mark the bot as down — the `!health` command goes unanswered (expected, the gateway is down)
+ * while the web panel's health dashboard kept reading the last-known `true` forever.
+ * `Ready`/`Resumed` flip it back to `true` once the shard actually recovers, since a full client
+ * replacement (via `clientReady`) isn't guaranteed to happen for every recovery path.
+ * `Resumed` also logs the resume, so a reconnect cycle has a visible end in the log.
  *
  * `stopDiscordBot()`/`startDiscordBot()` destroy the old `Client` and construct a brand-new one —
  * `audioPlayer.ts`'s custom (non-`voiceAdapterCreator`) voice adapter isn't registered with
@@ -305,42 +380,23 @@ function registerConnectionHandlers(client: Client): void {
   client.on('error', (err) => {
     log.error('Client error:', err);
   });
-  client.on('shardReconnecting', (shardId) => {
-    recordShardActivity();
-    // This bot runs a single (unsharded) client, so a shard reconnecting means the gateway is
-    // not currently connected — without this, checkGatewayStall()'s gatewayConnected guard would
-    // stay true from the prior clientReady and never let the watchdog catch a reconnect loop that
-    // never progresses past this event.
-    recordDiscordConnected(false);
-    setGatewayConnected(false);
-    log.warn(`Shard ${shardId} lost its connection and is reconnecting...`);
+  /**
+   * Whether `client` is still the current (ready or booting) client. `Client.destroy()` closes its
+   * shards asynchronously and emits `Closed` (code 1000) as it does, so a client replaced by
+   * `stopDiscordBot()`/`startDiscordBot()` can report a close after its successor exists; that
+   * must not mark the successor's gateway as down.
+   * @returns True while `client` is the live client.
+   */
+  const isCurrent = (): boolean => client === bootingClient || client === getDiscordClient();
+  client.ws.on(WebSocketShardEvents.Closed, (code, shardId) => {
+    if (!isCurrent()) return;
+    if (UNRECOVERABLE_CLOSE_CODES.has(code)) onShardDisconnectedPermanently(code, shardId);
+    else onShardReconnecting(code, shardId);
   });
-  client.on('shardError', (err, shardId) => {
-    recordShardActivity();
-    recordDiscordConnected(false);
-    setGatewayConnected(false);
-    logShardError(shardId, err);
-  });
-  client.on('shardReady', () => {
-    recordShardActivity();
-    recordDiscordConnected(true);
-    setGatewayConnected(true);
-  });
-  client.on('shardResume', (shardId, replayedEvents) => {
-    recordShardActivity();
-    recordDiscordConnected(true);
-    setGatewayConnected(true);
-    log.info(`Shard ${shardId} resumed its gateway session (${replayedEvents} events replayed).`);
-  });
-  client.on('shardDisconnect', (event, shardId) => {
-    recordShardActivity();
-    log.error(`Shard ${shardId} disconnected permanently (code ${event.code}) — reconnecting client.`);
-    recordDiscordConnected(false);
-    setGatewayConnected(false);
-    disconnectAllVoice();
-    stopDiscordBot();
-    startDiscordBot();
-  });
+  client.ws.on(WebSocketShardEvents.SocketError, (err, shardId) => { if (isCurrent()) onShardError(err, shardId); });
+  client.ws.on(WebSocketShardEvents.Error, (err, shardId) => { if (isCurrent()) onShardError(err, shardId); });
+  client.ws.on(WebSocketShardEvents.Ready, () => { if (isCurrent()) onShardConnected(); });
+  client.ws.on(WebSocketShardEvents.Resumed, (shardId) => { if (isCurrent()) onShardResumed(shardId); });
 }
 
 /**
@@ -405,7 +461,7 @@ export function startDiscordBot(): void {
  * Also stops the gateway stall watchdog — restarted fresh by the next {@link startDiscordBot}.
  *
  * Unconditionally clears the watchdog recovery guard (see `clearWatchdogRecovery`): any stop — intentional shutdown,
- * the `shardDisconnect` self-heal, or the watchdog's own recovery — cancels whatever login was in
+ * the unrecoverable-close self-heal, or the watchdog's own recovery — cancels whatever login was in
  * flight, so the guard must not survive it. `checkGatewayStall()` re-sets it itself immediately
  * after calling this, synchronously and with nothing async in between, so its own recovery's guard
  * is never lost to this clear.

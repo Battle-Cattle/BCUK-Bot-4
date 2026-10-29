@@ -19,16 +19,17 @@
     "deploy": "bash deploy.sh"
   },
   "dependencies": {
-    "@discordjs/builders": "^1.14.1",
-    "@discordjs/formatters": "^0.6.2",
-    "@discordjs/rest": "^2.6.3",
-    "@discordjs/voice": "^0.19.2",
+    "@discordjs/builders": "2.0.0-dev.1792497873-5050a3b54",
+    "@discordjs/formatters": "1.0.0-dev.1792497873-5050a3b54",
+    "@discordjs/rest": "3.0.0-dev.1792497873-5050a3b54",
+    "@discordjs/voice": "1.0.0-dev.1792497873-5050a3b54",
+    "@discordjs/ws": "3.0.0-dev.1792497873-5050a3b54",
     "@simplewebauthn/browser": "^14.0.0",
     "@simplewebauthn/server": "^14.0.3",
     "@twurple/auth": "^8.2.0",
     "@twurple/chat": "^8.2.0",
     "discord-api-types": "^0.38.57",
-    "discord.js": "^14.27.0",
+    "discord.js": "15.0.0-dev.1792497873-5050a3b54",
     "dotenv": "^18.0.9",
     "ejs": "^7.0.2",
     "express": "^5.3.0",
@@ -47,7 +48,6 @@
   },
   "overrides": {
     "ws": ">=8.21.1",
-    "undici": "^6.29.1",
     "mysql2": "^3.24.6",
     "qs": ">=6.16.0",
     "madge": {

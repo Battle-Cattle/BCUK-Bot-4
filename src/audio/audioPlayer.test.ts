@@ -18,6 +18,8 @@ vi.mock('../shared/logger', () => ({ createLogger: () => log }));
 vi.mock('./rtpClock', () => ({ syncRtpTimestamp: vi.fn() }));
 // The only runtime value audioPlayer takes from Discord's API types; stubbed so the test doesn't load the package.
 vi.mock('discord-api-types/v10', () => ({ ChannelType: { GuildVoice: 2 } }));
+// voiceAdapter's only runtime value from @discordjs/ws; stubbed for the same reason.
+vi.mock('@discordjs/ws', () => ({ WebSocketShardEvents: { Dispatch: 'dispatch' } }));
 
 // Each joinVoiceChannel call returns a fresh fake connection so per-guild
 // state can be asserted independently.
@@ -56,8 +58,8 @@ function makeClient(channelType: number = 2) {
     id: channelId,
     type: channelType,
     name: `vc-${channelId}`,
-    client: { on: vi.fn(), off: vi.fn(), getMaxListeners: () => 10, setMaxListeners: vi.fn() },
-    guild: { shard: { send: vi.fn() } },
+    client: { on: vi.fn(), off: vi.fn(), getMaxListeners: () => 10, setMaxListeners: vi.fn(), ws: { on: vi.fn(), send: vi.fn(async () => undefined) } },
+    guild: { shardId: 0 },
   }));
   const client = {
     guilds: {
