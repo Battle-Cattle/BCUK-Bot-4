@@ -138,6 +138,16 @@ a:hover { text-decoration: underline; }
 .dashboard-layout .status-grid { grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
 /* Long Twitch names wrap inside the narrower status card so the connection badge stays in view. */
 .dashboard-layout .channel-name { overflow-wrap: anywhere; }
+/* Cap the Twitch list at about the height of the other status cards (Last Played is the tallest) and scroll the
+   rest, so a long channel list neither stretches every card in the row nor pushes Quick Links down. */
+.dashboard-twitch-body { max-height: 10rem; overflow-y: auto; }
+/* Dark, thin scrollbars for the dashboard's inner scroll areas (event feed, Twitch list) instead of the
+   browser's default light ones. */
+.dashboard-scroll { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+.dashboard-scroll::-webkit-scrollbar { width: 8px; }
+.dashboard-scroll::-webkit-scrollbar-track { background: transparent; }
+.dashboard-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+.dashboard-scroll::-webkit-scrollbar-thumb:hover { background: var(--muted); }
 /* The feed's cap keeps the whole sidebar no taller than the viewport minus the navbar, its 1rem sticky gap,
    the section title and card chrome (~2.6rem) and what sits below the layout (container padding + footer,
    ~7.6rem). When the feed is the tallest column it sets the grid area's height, leaving sticky no travel, so
