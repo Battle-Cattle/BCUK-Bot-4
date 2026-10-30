@@ -92,6 +92,15 @@ describe('views/dashboard.ejs layout', () => {
     expect(narrowRules).toMatch(/\.dashboard-layout\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\);/);
     expect(narrowRules).toMatch(/grid-template-areas:\s*"status" "events" "links" "usage"/);
   });
+
+  it('caps the desktop feed to leave room for the navbar, sidebar chrome and footer', () => {
+    const css = fs.readFileSync(stylePath, 'utf8');
+    const desktopRules = css.slice(0, css.indexOf('@media (max-width: 1100px)'));
+    const cap = /\.dashboard-events-body\s*\{[^}]*max-height:\s*calc\(100vh - var\(--dashboard-nav-offset\) - ([\d.]+)rem\)/.exec(desktopRules);
+
+    // Below ~11rem a feed taller than the main column scrolls under the navbar at the bottom of the page.
+    expect(Number(cap?.[1])).toBeGreaterThanOrEqual(11);
+  });
 });
 
 /** Runs public/dashboard-layout.js against a stub DOM with the given navbar and ResizeObserver. */
