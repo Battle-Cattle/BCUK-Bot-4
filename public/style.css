@@ -116,28 +116,33 @@ a:hover { text-decoration: underline; }
 .event-meta  { font-size: .75rem; color: var(--muted); margin-top: .1rem; }
 
 /* ── Dashboard layout: main column + live events sidebar ─ */
-/* On desktop the event feed sits in a sticky right-hand column, sized to the viewport and scrolling
-   internally, so it stays in view while streaming however far the main column is scrolled. */
-:root { --dashboard-nav-offset: 3.75rem; } /* sticky .navbar height */
+/* Source order is Status, events sidebar, Quick Links, Usage, so screen readers and keyboard users
+   reach the live feed right after Bot Status. On desktop the grid areas put the feed in a sticky
+   right-hand column spanning every row, sized to the viewport and scrolling internally. The last row
+   is 1fr so the sidebar's height goes there instead of opening gaps between the main-column sections.
+   --dashboard-nav-offset is the sticky .navbar's height: this is the fallback, and
+   dashboard-layout.js keeps it in step with the rendered navbar (which wraps taller on some widths). */
+:root { --dashboard-nav-offset: 3.75rem; }
 .container--wide { max-width: 1600px; }
-.dashboard-layout  { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 1.5rem; align-items: start; }
-.dashboard-sidebar { position: sticky; top: calc(var(--dashboard-nav-offset) + 1rem); }
+.dashboard-layout {
+  display: grid; grid-template-columns: minmax(0, 1fr) 360px; grid-template-rows: auto auto 1fr;
+  grid-template-areas: "status events" "links events" "usage events";
+  column-gap: 1.5rem; align-items: start;
+}
+.dashboard-status  { grid-area: status; }
+.dashboard-sidebar { grid-area: events; position: sticky; top: calc(var(--dashboard-nav-offset) + 1rem); }
+.dashboard-links   { grid-area: links; }
+.dashboard-usage   { grid-area: usage; }
 .dashboard-sidebar .section { margin-bottom: 0; }
-/* A lower column floor than .status-grid's 280px so the four status cards and usage tiles stay on one row next to the sidebar. */
-.dashboard-main .status-grid { grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); }
+/* A lower column floor than .status-grid's 280px so the four status cards and usage tiles stay on one row next to the sidebar; auto-fit stretches them over any spare column on wide screens. */
+.dashboard-layout .status-grid { grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
 .dashboard-events-body { max-height: calc(100vh - var(--dashboard-nav-offset) - 6rem); overflow-y: auto; padding-top: .25rem; padding-bottom: .25rem; }
 
-/* Narrower screens: one column, with the event feed straight after Bot Status instead of last.
-   `display: contents` lifts the main column's sections into the flex column so `order` can slot
-   the sidebar between them. */
+/* Narrower screens: one column in source order, with the event feed straight after Bot Status. */
 @media (max-width: 1100px) {
-  .dashboard-layout  { display: flex; flex-direction: column; align-items: stretch; gap: 0; }
-  .dashboard-main    { display: contents; }
-  .dashboard-status  { order: 1; }
-  .dashboard-sidebar { order: 2; position: static; }
+  .dashboard-layout  { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; grid-template-areas: "status" "events" "links" "usage"; }
+  .dashboard-sidebar { position: static; }
   .dashboard-sidebar .section { margin-bottom: 2rem; }
-  .dashboard-links   { order: 3; }
-  .dashboard-usage   { order: 4; }
   .dashboard-events-body { max-height: 50vh; }
 }
 
