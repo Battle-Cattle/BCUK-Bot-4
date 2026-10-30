@@ -100,6 +100,22 @@ describe('views/dashboard.ejs layout', () => {
     expect(css).toMatch(/\.dashboard-layout \.channel-name\s*\{[^}]*overflow-wrap:\s*anywhere/);
   });
 
+  it('gives the event feed and Twitch list the dark scroll styling', async () => {
+    const html = await render();
+
+    expect(html).toMatch(/class="[^"]*\bdashboard-scroll\b[^"]*" id="recent-events-list"/);
+    expect(html).toMatch(/class="[^"]*\bdashboard-scroll\b[^"]*" id="twitch-channels"/);
+    expect(fs.readFileSync(stylePath, 'utf8')).toMatch(/\.dashboard-scroll\s*\{[^}]*scrollbar-color:\s*var\(--border\) transparent/);
+  });
+
+  it('caps the Twitch channel list so a long list scrolls instead of stretching the status row', async () => {
+    const html = await render();
+    const css = fs.readFileSync(stylePath, 'utf8');
+
+    expect(html).toMatch(/class="[^"]*\bdashboard-twitch-body\b[^"]*" id="twitch-channels"/);
+    expect(css).toMatch(/\.dashboard-twitch-body\s*\{[^}]*max-height:\s*10rem;[^}]*overflow-y:\s*auto/);
+  });
+
   it('caps the desktop feed to leave room for the navbar, sidebar chrome and footer', () => {
     const css = fs.readFileSync(stylePath, 'utf8');
     const desktopRules = css.slice(0, css.indexOf('@media (max-width: 1100px)'));
