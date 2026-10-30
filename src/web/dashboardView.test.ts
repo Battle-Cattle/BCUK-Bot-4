@@ -93,6 +93,13 @@ describe('views/dashboard.ejs layout', () => {
     expect(narrowRules).toMatch(/grid-template-areas:\s*"status" "events" "links" "usage"/);
   });
 
+  it('lets long Twitch channel names wrap inside the status card', () => {
+    const css = fs.readFileSync(stylePath, 'utf8');
+
+    // Twitch names run to 25 characters; unwrapped, one pushes the connection badge out of a 210px card.
+    expect(css).toMatch(/\.dashboard-layout \.channel-name\s*\{[^}]*overflow-wrap:\s*anywhere/);
+  });
+
   it('caps the desktop feed to leave room for the navbar, sidebar chrome and footer', () => {
     const css = fs.readFileSync(stylePath, 'utf8');
     const desktopRules = css.slice(0, css.indexOf('@media (max-width: 1100px)'));

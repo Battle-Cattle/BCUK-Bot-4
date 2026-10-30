@@ -136,6 +136,8 @@ a:hover { text-decoration: underline; }
 .dashboard-sidebar .section { margin-bottom: 0; }
 /* A lower column floor than .status-grid's 280px so the four status cards and usage tiles stay on one row next to the sidebar; auto-fit stretches them over any spare column on wide screens. */
 .dashboard-layout .status-grid { grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
+/* Long Twitch names wrap inside the narrower status card so the connection badge stays in view. */
+.dashboard-layout .channel-name { overflow-wrap: anywhere; }
 /* The feed's cap keeps the whole sidebar no taller than the viewport minus the navbar, its 1rem sticky gap,
    the section title and card chrome (~2.6rem) and what sits below the layout (container padding + footer,
    ~7.6rem). When the feed is the tallest column it sets the grid area's height, leaving sticky no travel, so
