@@ -108,6 +108,14 @@ describe('views/dashboard.ejs layout', () => {
     expect(fs.readFileSync(stylePath, 'utf8')).toMatch(/\.dashboard-scroll\s*\{[^}]*scrollbar-color:\s*var\(--border\) transparent/);
   });
 
+  it('makes both scroll areas keyboard-focusable, labelled regions', async () => {
+    const html = await render();
+
+    // Safari doesn't focus scroll containers on its own, so without tabindex keyboard users can't scroll them.
+    expect(html).toMatch(/id="twitch-channels" tabindex="0" role="region" aria-label="Twitch channels"/);
+    expect(html).toMatch(/id="recent-events-list" tabindex="0" role="region" aria-label="Recent events feed"/);
+  });
+
   it('caps the Twitch channel list so a long list scrolls instead of stretching the status row', async () => {
     const html = await render();
     const css = fs.readFileSync(stylePath, 'utf8');

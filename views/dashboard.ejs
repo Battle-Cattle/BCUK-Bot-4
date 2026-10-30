@@ -74,7 +74,7 @@ function htmlAttrJson(value) {
 
           <div class="card" id="card-twitch">
             <div class="card-header"><span class="card-icon">🟣</span><span class="card-label">Twitch Channels</span></div>
-            <div class="card-body dashboard-twitch-body dashboard-scroll" id="twitch-channels"><p class="empty-msg">No Twitch channels configured.</p></div>
+            <div class="card-body dashboard-twitch-body dashboard-scroll" id="twitch-channels" tabindex="0" role="region" aria-label="Twitch channels"><p class="empty-msg">No Twitch channels configured.</p></div>
           </div>
 
         </div>
@@ -86,7 +86,7 @@ function htmlAttrJson(value) {
         <section class="section dashboard-events">
           <h2 class="section-title">Recent Events</h2>
           <div class="card">
-            <div class="card-body dashboard-events-body dashboard-scroll" id="recent-events-list">
+            <div class="card-body dashboard-events-body dashboard-scroll" id="recent-events-list" tabindex="0" role="region" aria-label="Recent events feed">
               <% if (!user) { %>
               <p class="empty-msg">Sign in to see recent activity.</p>
               <% } else if (!hasStreamer) { %>
