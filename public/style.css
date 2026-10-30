@@ -139,8 +139,11 @@ a:hover { text-decoration: underline; }
 /* The feed's cap keeps the whole sidebar no taller than the viewport minus the navbar, its 1rem sticky gap,
    the section title and card chrome (~2.6rem) and what sits below the layout (container padding + footer,
    ~7.6rem). When the feed is the tallest column it sets the grid area's height, leaving sticky no travel, so
-   the page scrolls it by exactly that bottom space; reserving it keeps the sidebar's top below the navbar. */
-.dashboard-events-body { max-height: calc(100vh - var(--dashboard-nav-offset) - 11.5rem); overflow-y: auto; padding-top: .25rem; padding-bottom: .25rem; }
+   the page scrolls it by exactly that bottom space; reserving it keeps the sidebar's top below the navbar.
+   The 6rem floor keeps a few rows visible on very short windows, where the cap would otherwise reach zero. */
+.dashboard-events-body { min-height: 6rem; max-height: calc(100vh - var(--dashboard-nav-offset) - 11.5rem); overflow-y: auto; padding-top: .25rem; padding-bottom: .25rem; }
+/* The reserve above assumes a one-line title, so keep it on one line even with very large text. */
+.dashboard-sidebar .section-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* Narrower screens: one column in source order, with the event feed straight after Bot Status. */
 @media (max-width: 1100px) {
