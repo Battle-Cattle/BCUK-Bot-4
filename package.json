@@ -50,6 +50,7 @@
     "undici": "^6.29.1",
     "mysql2": "^3.24.6",
     "qs": ">=6.16.0",
+    "minimatch": "^11.0.1",
     "madge": {
       "typescript": "$typescript",
       "dependency-tree": {
