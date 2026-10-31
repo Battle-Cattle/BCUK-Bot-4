@@ -7,4 +7,4 @@ CREATE TABLE IF NOT EXISTS sessions (
   expires    INT UNSIGNED NOT NULL,
   data       MEDIUMTEXT   COLLATE utf8mb4_bin,
   PRIMARY KEY (session_id)
-) ENGINE=InnoDB;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;

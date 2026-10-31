@@ -20,10 +20,11 @@ vi.mock('../shared/config', () => ({
 }));
 
 // The session pool server.ts hands the session store, and the store's constructor args/close calls.
-const { mockPool, storeCtorArgs, storeClose } = vi.hoisted(() => ({
+const { mockPool, storeCtorArgs, storeClose, storeClearExpired } = vi.hoisted(() => ({
   mockPool: { pool: { marker: 'session-callback-pool' } },
   storeCtorArgs: [] as unknown[][],
   storeClose: vi.fn().mockResolvedValue(undefined),
+  storeClearExpired: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('../db', () => ({ getSessionPool: () => mockPool }));
 
@@ -36,6 +37,9 @@ vi.mock('express-mysql-session', () => ({
       }
       close() {
         return storeClose();
+      }
+      clearExpiredSessions() {
+        return storeClearExpired();
       }
       get(_id: string, cb: (err: unknown, session?: unknown) => void) {
         cb(null, undefined);
@@ -323,8 +327,10 @@ describe('csrfErrorHandler', () => {
     mockLog.warn.mockClear();
     mockLog.error.mockClear();
     await request(app).post('/__trigger_csrf_error');
-    await request(app).get('/__trigger_csrf_error');
+    await request(app).get('/__trigger_csrf_error?token=secret-value');
+    // The path only: query values stay out of the log.
     expect(mockLog.warn).toHaveBeenCalledWith('Rejected invalid CSRF token on GET /__trigger_csrf_error');
+    expect(JSON.stringify(mockLog.warn.mock.calls)).not.toContain('secret-value');
     expect(mockLog.error).not.toHaveBeenCalled();
   });
 
@@ -563,13 +569,53 @@ describe('startWebPanel / stopWebPanel', () => {
   });
 });
 
+describe('expired-session cleanup', () => {
+  const FIFTEEN_MINUTES = 15 * 60 * 1000;
+
+  beforeEach(() => {
+    storeClearExpired.mockReset().mockResolvedValue(undefined);
+    mockLog.warn.mockClear();
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+  });
+
+  afterEach(async () => {
+    await stopWebPanel();
+    vi.useRealTimers();
+  });
+
+  it('does not run until the panel starts, then runs every 15 minutes', async () => {
+    await vi.advanceTimersByTimeAsync(FIFTEEN_MINUTES);
+    expect(storeClearExpired).not.toHaveBeenCalled();
+    await startWebPanel(0);
+    await vi.advanceTimersByTimeAsync(FIFTEEN_MINUTES);
+    expect(storeClearExpired).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(FIFTEEN_MINUTES);
+    expect(storeClearExpired).toHaveBeenCalledTimes(2);
+  });
+
+  it('logs a failed cleanup as a warning instead of rejecting', async () => {
+    const failure = new Error('db down');
+    storeClearExpired.mockRejectedValueOnce(failure);
+    await startWebPanel(0);
+    await vi.advanceTimersByTimeAsync(FIFTEEN_MINUTES);
+    expect(mockLog.warn).toHaveBeenCalledWith(expect.stringContaining('Failed to clear expired sessions'), failure);
+  });
+
+  it('stops when the panel stops', async () => {
+    await startWebPanel(0);
+    await stopWebPanel();
+    await vi.advanceTimersByTimeAsync(FIFTEEN_MINUTES * 2);
+    expect(storeClearExpired).not.toHaveBeenCalled();
+  });
+});
+
 describe('session store', () => {
   it('runs on the dedicated session pool and leaves table creation to the migrations', () => {
     // Other tests in this file re-import server.ts, so check every store it has built.
     expect(storeCtorArgs.length).toBeGreaterThan(0);
     for (const [options, connection] of storeCtorArgs) {
       expect(connection).toBe(mockPool.pool);
-      expect(options).toMatchObject({ createDatabaseTable: false, schema: { tableName: 'sessions' } });
+      expect(options).toMatchObject({ createDatabaseTable: false, clearExpired: false, schema: { tableName: 'sessions' } });
       expect(options).not.toHaveProperty('host');
     }
   });

@@ -154,11 +154,13 @@ app.set('trust proxy', 1);
 // cookie-carrying request ahead of the rate limiters, and must not be able to queue out bot queries.
 // The store takes mysql2's callback API, so it gets the callback pool the promise pool wraps
 // (`.pool`). Handed a pool, the store leaves it open on close(); closePool() ends it at shutdown.
-// The table comes from migrations/0007_sessions_table.sql, which startup applies before the panel listens.
+// The table comes from migrations/0007_sessions_table.sql, which startup applies before the panel
+// listens. The store's own expired-session timer is off (clearExpired: false): see startSessionCleanup.
 const sessionStore = new (MySQLStore(session))(
   {
     expiration: 24 * 60 * 60 * 1000,
     createDatabaseTable: false,
+    clearExpired: false,
     schema: { tableName: 'sessions' },
   },
   getSessionPool().pool,
@@ -248,7 +250,8 @@ const csrfErrorHandler: ErrorRequestHandler = (err, req, res, next) => {
   }
 
   // A warning, not an error: a form left open past its session's expiry lands here routinely.
-  log.warn(`Rejected invalid CSRF token on ${req.method} ${req.originalUrl}`);
+  // req.path, not originalUrl, so query values stay out of the log.
+  log.warn(`Rejected invalid CSRF token on ${req.method} ${req.path}`);
 
   if (req.originalUrl === '/api' || req.originalUrl.startsWith('/api/')) {
     res.status(403).json({
@@ -299,6 +302,40 @@ export { generalLimiter, sessionLimiter };
 /** The panel's listening server, kept so {@link stopWebPanel} can close it on shutdown. */
 let webServer: Server | null = null;
 
+/** How often expired rows are deleted from the `sessions` table (the store's own default). */
+const SESSION_CLEANUP_INTERVAL_MS = 15 * 60 * 1000;
+/** The expired-session cleanup timer, running while the panel is up. */
+let sessionCleanupTimer: NodeJS.Timeout | null = null;
+
+/**
+ * Deletes expired sessions, logging a failure instead of letting it escape. The store's own timer
+ * ignores the promise its cleanup returns, so a failed DELETE (a database restart, say) would
+ * reach the process-level unhandledRejection handler and take the bot down.
+ * @returns Resolves once the cleanup has run or its failure has been logged; never rejects.
+ */
+async function clearExpiredSessionsSafely(): Promise<void> {
+  try {
+    await sessionStore.clearExpiredSessions();
+  } catch (err) {
+    log.warn('Failed to clear expired sessions; will retry on the next interval:', err);
+  }
+}
+
+/**
+ * Starts the expired-session cleanup timer. Run from {@link startWebPanel}, which main() reaches
+ * only after migrations, so the timer can't query `sessions` before migration 0007 creates it.
+ */
+function startSessionCleanup(): void {
+  stopSessionCleanup();
+  sessionCleanupTimer = setInterval(() => void clearExpiredSessionsSafely(), SESSION_CLEANUP_INTERVAL_MS);
+}
+
+/** Stops the expired-session cleanup timer, if it is running. */
+function stopSessionCleanup(): void {
+  if (sessionCleanupTimer) clearInterval(sessionCleanupTimer);
+  sessionCleanupTimer = null;
+}
+
 /**
  * Starts the Express app listening on {@link WEB_PORT}.
  * @param port - Port to listen on; defaults to {@link WEB_PORT} (tests pass 0 for a free port).
@@ -314,6 +351,7 @@ export function startWebPanel(port: number = WEB_PORT): Promise<Server> {
         return;
       }
       webServer = server;
+      startSessionCleanup();
       log.info(`Panel available at http://localhost:${port}`);
       resolve(server);
     });
@@ -321,16 +359,17 @@ export function startWebPanel(port: number = WEB_PORT): Promise<Server> {
 }
 
 /**
- * Stops the web panel: stops accepting connections and drops the open ones — long-lived SSE
- * streams would otherwise hold `server.close()` open indefinitely — then closes the session
- * store, stopping its expired-session cleanup timer. The store leaves its DB pool open;
- * shutdown's closePool() ends it last. No-op if the panel isn't running.
+ * Stops the web panel: stops the expired-session cleanup timer, stops accepting connections and
+ * drops the open ones — long-lived SSE streams would otherwise hold `server.close()` open
+ * indefinitely — then closes the session store. The store leaves its DB pool open; shutdown's
+ * closePool() ends it last. No-op if the panel isn't running.
  * @returns Resolves once the server and the session store have closed.
  */
 export async function stopWebPanel(): Promise<void> {
   const server = webServer;
   if (!server) return;
   webServer = null;
+  stopSessionCleanup();
   await new Promise<void>((resolve, reject) => {
     server.close((err) => (err ? reject(err) : resolve()));
     server.closeAllConnections();

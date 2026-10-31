@@ -77,6 +77,10 @@ describe('parseAccessLevel', () => {
     ['a hex string', '0x1'],
     ['an exponent string', '1e0'],
     ['a padded string', ' 2 '],
+    ['an array (repeated field or JSON)', ['2']],
+    ['an object whose toString is not callable', { toString: null }],
+    ['a number', 2],
+    ['undefined', undefined],
   ])('returns null for %s', (_label, input) => {
     expect(parseAccessLevel(input)).toBeNull();
   });

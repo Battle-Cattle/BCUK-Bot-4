@@ -57,12 +57,13 @@ export function discordIdError(id: string): string | null {
 
 /**
  * Parses a submitted `access_level` form value into a known `AccessLevel`. Only a plain decimal
- * string naming one of the levels is accepted (no sign, spaces, fraction or `0x`/`e` forms).
- * @param levelStr Raw `access_level` form value.
+ * string naming one of the levels is accepted (no sign, spaces, fraction or `0x`/`e` forms), and
+ * anything that isn't a string — a repeated form field or a JSON array/object — is rejected.
+ * @param levelStr Raw `access_level` request-body value, whatever type the body parser produced.
  * @returns The access level it names, or null when it isn't a known level.
  */
-export function parseAccessLevel(levelStr: string): AccessLevelValue | null {
-  if (!/^\d+$/.test(levelStr)) return null;
+export function parseAccessLevel(levelStr: unknown): AccessLevelValue | null {
+  if (typeof levelStr !== 'string' || !/^\d+$/.test(levelStr)) return null;
   const level = Number(levelStr);
   return (Object.values(AccessLevel) as number[]).includes(level) ? (level as AccessLevelValue) : null;
 }
