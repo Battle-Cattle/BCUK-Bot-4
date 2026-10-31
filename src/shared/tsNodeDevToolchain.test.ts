@@ -12,6 +12,13 @@ import path from 'path';
 // That registration type-checks the whole project (~7s of CPU), so this file is excluded from
 // `npm test` and runs on its own via `npm run test:toolchain` (vitest.toolchain.config.mts), which
 // CI runs on every push.
+//
+// CI runs it in the background alongside tsc, type-aware ESLint, knip and Vitest with coverage on a
+// 4-vCPU runner, so that ~7s of CPU can take well over 15s of wall time (issue #879). The test checks
+// that ts-node registers and transpiles, not how fast, and a real breakage still fails fast through
+// the non-zero exit status, so the timeout is generous.
+const TOOLCHAIN_TEST_TIMEOUT_MS = 60_000;
+
 describe('ts-node dev toolchain', () => {
   it('registers and transpiles a real project module without throwing', () => {
     const projectRoot = path.resolve(__dirname, '..', '..');
@@ -31,5 +38,5 @@ describe('ts-node dev toolchain', () => {
       result.status,
       `ts-node failed to register/transpile a project module — this breaks \`npm run dev\`:\n${result.stderr || result.error?.message}`,
     ).toBe(0);
-  }, 15000);
+  }, TOOLCHAIN_TEST_TIMEOUT_MS);
 });
