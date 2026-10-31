@@ -148,12 +148,13 @@ a:hover { text-decoration: underline; }
 .dashboard-scroll::-webkit-scrollbar-track { background: transparent; }
 .dashboard-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 .dashboard-scroll::-webkit-scrollbar-thumb:hover { background: var(--muted); }
-/* The feed's cap keeps the whole sidebar no taller than the viewport minus the navbar, its 1rem sticky gap,
-   the section title and card chrome (~2.6rem) and what sits below the layout (container padding + footer,
-   ~7.6rem). When the feed is the tallest column it sets the grid area's height, leaving sticky no travel, so
-   the page scrolls it by exactly that bottom space; reserving it keeps the sidebar's top below the navbar.
-   The 6rem floor keeps a few rows visible on very short windows, where the cap would otherwise reach zero. */
-.dashboard-events-body { min-height: 6rem; max-height: calc(100vh - var(--dashboard-nav-offset) - 11.5rem); overflow-y: auto; padding-top: .25rem; padding-bottom: .25rem; }
+/* When the feed is the tallest column it sets the page height, so its cap must leave room for everything else
+   in the viewport: the navbar, the container's top padding (1.5rem), the section title and card chrome (~2.6rem)
+   and the container padding + footer below the layout (~7.6rem). Those add up to ~11.7rem plus the navbar, so
+   12rem keeps the page from overflowing (no stray page scrollbar) with a few pixels to spare, and the sidebar's
+   top stays below the navbar at the end of the scroll. The 6rem floor keeps a few rows visible on very short
+   windows, where the cap would otherwise reach zero. */
+.dashboard-events-body { min-height: 6rem; max-height: calc(100vh - var(--dashboard-nav-offset) - 12rem); overflow-y: auto; padding-top: .25rem; padding-bottom: .25rem; }
 /* The reserve above assumes a one-line title, so keep it on one line even with very large text. */
 .dashboard-sidebar .section-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 

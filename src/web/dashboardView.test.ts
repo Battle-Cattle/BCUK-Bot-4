@@ -129,10 +129,11 @@ describe('views/dashboard.ejs layout', () => {
     const desktopRules = css.slice(0, css.indexOf('@media (max-width: 1100px)'));
     const cap = /\.dashboard-events-body\s*\{[^}]*max-height:\s*calc\(100vh - var\(--dashboard-nav-offset\) - ([\d.]+)rem\)/.exec(desktopRules);
 
-    // A static guard on the stylesheet, not a rendered check (the suite has no browser): below ~11rem a feed
-    // taller than the main column scrolls under the navbar at the bottom of the page. If the footer or sidebar
-    // chrome grows, re-measure the bottom-of-scroll clearance in a browser and raise the reserve and this floor.
-    expect(Number(cap?.[1])).toBeGreaterThanOrEqual(11);
+    // A static guard on the stylesheet, not a rendered check (the suite has no browser). The page around the feed
+    // measures ~11.7rem plus the navbar, so a smaller reserve makes the page overflow by a few pixels (a stray page
+    // scrollbar) when the feed is the tallest column. If the footer or sidebar chrome grows, re-measure in a
+    // browser and raise the reserve and this floor.
+    expect(Number(cap?.[1])).toBeGreaterThanOrEqual(11.75);
   });
 });
 
