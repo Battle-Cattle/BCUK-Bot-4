@@ -72,8 +72,8 @@ describe('getSessionPool', () => {
     expect(getPool()).toBe(shared);
     expect(getSessionPool()).toBe(session);
     expect(createPool).toHaveBeenLastCalledWith(expect.objectContaining({
-      host: 'test-host', database: 'test-db', bigNumberStrings: true, connectTimeout: 10_000,
-      enableKeepAlive: true, keepAliveInitialDelay: 10_000,
+      host: 'test-host', port: 1234, user: 'test-user', password: 'test-password', database: 'test-db',
+      bigNumberStrings: true, connectTimeout: 10_000, enableKeepAlive: true, keepAliveInitialDelay: 10_000,
     }));
   });
 
@@ -102,6 +102,20 @@ describe('closePool', () => {
     expect(session.end).toHaveBeenCalledOnce();
     getSessionPool();
     expect(createPool).toHaveBeenCalledTimes(3);
+  });
+
+  it("still ends the session pool when the shared pool's end() rejects, then rethrows", async () => {
+    const failure = new Error('shared end failed');
+    const shared = { end: vi.fn().mockRejectedValue(failure) };
+    const session = { end: vi.fn().mockResolvedValue(undefined) };
+    createPool.mockReturnValueOnce(shared).mockReturnValueOnce(session);
+    getPool();
+    getSessionPool();
+    await expect(closePool()).rejects.toBe(failure);
+    expect(session.end).toHaveBeenCalledOnce();
+    // Both singletons are cleared, so the next close is a no-op and the next get builds afresh.
+    await expect(closePool()).resolves.toBeUndefined();
+    expect(shared.end).toHaveBeenCalledOnce();
   });
 
   it('ends the existing pool', async () => {

@@ -61,16 +61,20 @@ export function getSessionPool(): mysql.Pool {
   return sessionPool;
 }
 
-/** Closes the shared and session-store pools, if they have been created, and clears both singletons. */
+/**
+ * Closes the shared and session-store pools, if they have been created, and clears both
+ * singletons. Both are ended even if one `end()` fails, so a failure on the bot's pool can't leave
+ * the session pool open; the first failure is then rethrown. The singletons are cleared up front
+ * because mysql2 marks a pool closed as soon as `end()` starts, so it can't be reused either way.
+ * @returns Resolves once both pools have ended; rejects with the first `end()` failure.
+ */
 export async function closePool(): Promise<void> {
-  if (pool) {
-    await pool.end();
-    pool = undefined;
-  }
-  if (sessionPool) {
-    await sessionPool.end();
-    sessionPool = undefined;
-  }
+  const pools = [pool, sessionPool].filter((p): p is mysql.Pool => p !== undefined);
+  pool = undefined;
+  sessionPool = undefined;
+  const results = await Promise.allSettled(pools.map((p) => p.end()));
+  const failure = results.find((r): r is PromiseRejectedResult => r.status === 'rejected');
+  if (failure) throw failure.reason;
 }
 
 /**
