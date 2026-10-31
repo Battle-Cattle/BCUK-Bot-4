@@ -19,13 +19,13 @@ vi.mock('../shared/config', () => ({
   SFX_MAX_FILE_MB: 10,
 }));
 
-// The shared pool server.ts hands the session store, and the store's constructor args/close calls.
+// The session pool server.ts hands the session store, and the store's constructor args/close calls.
 const { mockPool, storeCtorArgs, storeClose } = vi.hoisted(() => ({
-  mockPool: { pool: { marker: 'shared-callback-pool' } },
+  mockPool: { pool: { marker: 'session-callback-pool' } },
   storeCtorArgs: [] as unknown[][],
   storeClose: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock('../db', () => ({ getPool: () => mockPool }));
+vi.mock('../db', () => ({ getSessionPool: () => mockPool }));
 
 vi.mock('express-mysql-session', () => ({
   default: () =>
@@ -564,7 +564,7 @@ describe('startWebPanel / stopWebPanel', () => {
 });
 
 describe('session store', () => {
-  it('runs on the shared DB pool and leaves table creation to the migrations', () => {
+  it('runs on the dedicated session pool and leaves table creation to the migrations', () => {
     // Other tests in this file re-import server.ts, so check every store it has built.
     expect(storeCtorArgs.length).toBeGreaterThan(0);
     for (const [options, connection] of storeCtorArgs) {

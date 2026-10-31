@@ -8,7 +8,7 @@ import rateLimit from 'express-rate-limit';
 import path from 'path';
 import type { Server } from 'http';
 import { WEB_PORT, SESSION_SECRET } from '../shared/config';
-import { getPool } from '../db';
+import { getSessionPool } from '../db';
 
 const log = createLogger('Web');
 
@@ -150,18 +150,18 @@ app.use(express.json());
 // Always trust exactly one proxy hop (Caddy). Without this, req.ip resolves to
 // Caddy's loopback address and all users share a single rate-limit bucket.
 app.set('trust proxy', 1);
-// Runs on the app's shared pool rather than opening a second one of its own, so session queries
-// get the same keepalive/timeout settings and count toward the same connection limit. The store
-// takes mysql2's callback API, so it gets the callback pool the promise pool wraps (`.pool`): the
-// same connections. Handed a pool, the store leaves it open on close() (closePool() ends it). The table comes
-// from migrations/0007_sessions_table.sql, which startup applies before the panel listens.
+// Runs on its own pool (getSessionPool), kept apart from the bot's: session lookups happen on every
+// cookie-carrying request ahead of the rate limiters, and must not be able to queue out bot queries.
+// The store takes mysql2's callback API, so it gets the callback pool the promise pool wraps
+// (`.pool`). Handed a pool, the store leaves it open on close(); closePool() ends it at shutdown.
+// The table comes from migrations/0007_sessions_table.sql, which startup applies before the panel listens.
 const sessionStore = new (MySQLStore(session))(
   {
     expiration: 24 * 60 * 60 * 1000,
     createDatabaseTable: false,
     schema: { tableName: 'sessions' },
   },
-  getPool().pool,
+  getSessionPool().pool,
 );
 app.use(
   session({
@@ -323,8 +323,8 @@ export function startWebPanel(port: number = WEB_PORT): Promise<Server> {
 /**
  * Stops the web panel: stops accepting connections and drops the open ones — long-lived SSE
  * streams would otherwise hold `server.close()` open indefinitely — then closes the session
- * store, stopping its expired-session cleanup timer. The store leaves the shared DB pool open;
- * shutdown ends that last. No-op if the panel isn't running.
+ * store, stopping its expired-session cleanup timer. The store leaves its DB pool open;
+ * shutdown's closePool() ends it last. No-op if the panel isn't running.
  * @returns Resolves once the server and the session store have closed.
  */
 export async function stopWebPanel(): Promise<void> {

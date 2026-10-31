@@ -2,6 +2,15 @@ import mysql, { type PoolConnection } from 'mysql2/promise';
 import { DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME } from '../shared/config';
 
 let pool: mysql.Pool | undefined;
+let sessionPool: mysql.Pool | undefined;
+
+// `connectTimeout` only bounds opening a *new* connection. Without these, a connection whose
+// socket goes silently dead (e.g. a network drop that never sends a TCP RST/FIN) can sit hung
+// indefinitely — mysql2 only frees a pooled connection on an 'error'/'end' event, which a true
+// black hole never fires, so stuck connections would otherwise leak out of a pool permanently.
+// TCP keepalive probes detect that dead socket and surface it as a connection error instead, so
+// the pool can evict and replace it. Shared by both pools below.
+const KEEPALIVE_OPTIONS = { enableKeepAlive: true, keepAliveInitialDelay: 10_000 } as const;
 
 /**
  * Connection settings shared by the pool and the migration runner's dedicated connection, so
@@ -32,25 +41,35 @@ export function getPool(): mysql.Pool {
       waitForConnections: true,
       connectionLimit: 15,
       queueLimit: 100,
-      // `connectTimeout` only bounds opening a *new* connection. Without these, a
-      // connection whose socket goes silently dead (e.g. a network drop that never
-      // sends a TCP RST/FIN) can sit hung indefinitely — mysql2 only frees a pooled
-      // connection on an 'error'/'end' event, which a true black hole never fires,
-      // so stuck connections would otherwise leak out of the 15-connection pool
-      // permanently. TCP keepalive probes detect that dead socket and surface it as
-      // a connection error instead, so the pool can evict and replace it.
-      enableKeepAlive: true,
-      keepAliveInitialDelay: 10_000,
+      ...KEEPALIVE_OPTIONS,
     });
   }
   return pool;
 }
 
-/** Closes the shared connection pool, if one has been created, and clears the singleton. */
+/**
+ * Returns the web panel's session-store pool, creating it on first use. It is kept apart from
+ * {@link getPool}'s on purpose: express-session looks a session up on every request that carries
+ * a cookie, ahead of the rate limiters, so on the shared pool a burst of panel requests could fill
+ * its bounded queue and make the bot's own queries fail. Its size and queue are mysql2's defaults,
+ * the same as the pool express-mysql-session used to open for itself; what it adds is the shared
+ * connection settings and keepalive, and being ended by {@link closePool} at shutdown.
+ * @returns The process-wide mysql2 pool for session storage.
+ */
+export function getSessionPool(): mysql.Pool {
+  sessionPool ??= mysql.createPool({ ...connectionOptions(), ...KEEPALIVE_OPTIONS });
+  return sessionPool;
+}
+
+/** Closes the shared and session-store pools, if they have been created, and clears both singletons. */
 export async function closePool(): Promise<void> {
   if (pool) {
     await pool.end();
     pool = undefined;
+  }
+  if (sessionPool) {
+    await sessionPool.end();
+    sessionPool = undefined;
   }
 }
 
