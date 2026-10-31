@@ -21,7 +21,7 @@ import { AccessLevel } from '../../db';
 import { normalizeTwitchChannelName } from '../../twitch/twitchChannelName';
 import {
   discordIdError,
-  accessLevelError,
+  parseAccessLevel,
   parseTwitchEnabled,
   parseTwitchNameInput,
   resolveGuildId,
@@ -59,33 +59,30 @@ describe('discordIdError', () => {
   });
 });
 
-// ─── accessLevelError ────────────────────────────────────────────────────────
+// ─── parseAccessLevel ────────────────────────────────────────────────────────
 
-describe('accessLevelError', () => {
-  it('returns null for each valid access level', () => {
+describe('parseAccessLevel', () => {
+  it('returns the level for each valid access level', () => {
     for (const level of ACCESS_LEVEL_VALUES) {
-      expect(accessLevelError(String(level))).toBeNull();
+      expect(parseAccessLevel(String(level))).toBe(level);
     }
   });
 
-  it('returns "invalid_access_level" for a non-numeric string', () => {
-    expect(accessLevelError('admin')).toBe('invalid_access_level');
-  });
-
-  it('returns "invalid_access_level" for an empty string', () => {
-    expect(accessLevelError('')).toBe('invalid_access_level');
-  });
-
-  it('returns "invalid_access_level" for a number not in the enum (e.g. 5)', () => {
-    expect(accessLevelError('5')).toBe('invalid_access_level');
-  });
-
-  it('returns "invalid_access_level" for a negative number string', () => {
-    expect(accessLevelError('-1')).toBe('invalid_access_level');
-  });
-
-  it('returns "invalid_access_level" for a float string', () => {
-    expect(accessLevelError('1.5')).toBe('invalid_access_level');
+  it.each([
+    ['a non-numeric string', 'admin'],
+    ['an empty string', ''],
+    ['a number not in the enum', '5'],
+    ['a negative number string', '-1'],
+    ['a float string', '1.5'],
+    ['a hex string', '0x1'],
+    ['an exponent string', '1e0'],
+    ['a padded string', ' 2 '],
+    ['an array (repeated field or JSON)', ['2']],
+    ['an object whose toString is not callable', { toString: null }],
+    ['a number', 2],
+    ['undefined', undefined],
+  ])('returns null for %s', (_label, input) => {
+    expect(parseAccessLevel(input)).toBeNull();
   });
 });
 

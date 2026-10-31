@@ -1,7 +1,7 @@
 // Input parsing and validation for the admin user-management routes. Authorization checks live in
 // `adminUserAuth.ts`; mapping DB errors to redirects lives in `adminUserErrors.ts`.
 import { Request, Response } from 'express';
-import { AccessLevel } from '../../db';
+import { AccessLevel, type AccessLevelValue } from '../../db';
 import { trimField, normalizeDiscordId } from './validation';
 import { getSessionUser } from '../session';
 import { normalizeTwitchChannelName } from '../../twitch/twitchChannelName';
@@ -56,13 +56,16 @@ export function discordIdError(id: string): string | null {
 }
 
 /**
- * Returns `'invalid_access_level'` when `levelStr` isn't a known `AccessLevel` value, else null.
- * @param levelStr Raw `access_level` form value (a decimal string).
- * @returns `'invalid_access_level'` when not a known level, or null when valid.
+ * Parses a submitted `access_level` form value into a known `AccessLevel`. Only a plain decimal
+ * string naming one of the levels is accepted (no sign, spaces, fraction or `0x`/`e` forms), and
+ * anything that isn't a string — a repeated form field or a JSON array/object — is rejected.
+ * @param levelStr Raw `access_level` request-body value, whatever type the body parser produced.
+ * @returns The access level it names, or null when it isn't a known level.
  */
-export function accessLevelError(levelStr: string): string | null {
-  if (!/^\d+$/.test(levelStr)) return 'invalid_access_level';
-  return (Object.values(AccessLevel) as number[]).includes(Number(levelStr)) ? null : 'invalid_access_level';
+export function parseAccessLevel(levelStr: unknown): AccessLevelValue | null {
+  if (typeof levelStr !== 'string' || !/^\d+$/.test(levelStr)) return null;
+  const level = Number(levelStr);
+  return (Object.values(AccessLevel) as number[]).includes(level) ? (level as AccessLevelValue) : null;
 }
 
 /**

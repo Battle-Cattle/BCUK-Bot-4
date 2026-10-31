@@ -171,8 +171,9 @@ process.on('SIGTERM', () => { shutdown('SIGTERM').catch((err: unknown) => { log.
 
 // Without these, a rejection or throw originating from inside a third-party library's own
 // internals (discord.js, @twurple/chat, mysql2, ws) rather than the app's own promise chains would go
-// fully unhandled and silently kill the process — there's no supervisor (pm2/systemd) to restart
-// it, so we log loudly and exit deliberately instead, making the failure visible and diagnosable.
+// fully unhandled and kill the process without a trace. Instead we log it loudly and exit 1, so the
+// failure is diagnosable and systemd (deploy/bcuk-bot.service, Restart=on-failure) restarts the
+// bot from a clean state rather than letting it limp on.
 
 /**
  * Wraps a non-`Error` rejection/throw value in an `Error`, since winston (no `format.splat()`)

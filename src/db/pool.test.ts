@@ -10,7 +10,7 @@ vi.mock('../shared/config', () => ({
   DB_NAME: 'test-db',
 }));
 
-import { getPool, closePool, connectionOptions, withTransaction, withTransactionOrNotFound, runInTransaction } from './pool';
+import { getPool, getSessionPool, closePool, connectionOptions, withTransaction, withTransactionOrNotFound, runInTransaction } from './pool';
 
 beforeEach(async () => {
   vi.clearAllMocks();
@@ -64,7 +64,60 @@ describe('getPool', () => {
   });
 });
 
+describe('getSessionPool', () => {
+  it('creates a separate pool with the shared connection settings and keepalive', () => {
+    const shared = { end: vi.fn().mockResolvedValue(undefined) };
+    const session = { end: vi.fn().mockResolvedValue(undefined) };
+    createPool.mockReturnValueOnce(shared).mockReturnValueOnce(session);
+    expect(getPool()).toBe(shared);
+    expect(getSessionPool()).toBe(session);
+    expect(createPool).toHaveBeenLastCalledWith(expect.objectContaining({
+      host: 'test-host', port: 1234, user: 'test-user', password: 'test-password', database: 'test-db',
+      bigNumberStrings: true, connectTimeout: 10_000, enableKeepAlive: true, keepAliveInitialDelay: 10_000,
+    }));
+  });
+
+  it("uses mysql2's default size and queue rather than the shared pool's limits", () => {
+    getSessionPool();
+    const [options] = createPool.mock.calls[0]! as [Record<string, unknown>]; // getSessionPool() just created it
+    expect(options).not.toHaveProperty('connectionLimit');
+    expect(options).not.toHaveProperty('queueLimit');
+  });
+
+  it('returns the same pool instance on repeated calls (singleton)', () => {
+    expect(getSessionPool()).toBe(getSessionPool());
+    expect(createPool).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('closePool', () => {
+  it('ends both the shared and the session pool', async () => {
+    const shared = { end: vi.fn().mockResolvedValue(undefined) };
+    const session = { end: vi.fn().mockResolvedValue(undefined) };
+    createPool.mockReturnValueOnce(shared).mockReturnValueOnce(session);
+    getPool();
+    getSessionPool();
+    await closePool();
+    expect(shared.end).toHaveBeenCalledOnce();
+    expect(session.end).toHaveBeenCalledOnce();
+    getSessionPool();
+    expect(createPool).toHaveBeenCalledTimes(3);
+  });
+
+  it("still ends the session pool when the shared pool's end() rejects, then rethrows", async () => {
+    const failure = new Error('shared end failed');
+    const shared = { end: vi.fn().mockRejectedValue(failure) };
+    const session = { end: vi.fn().mockResolvedValue(undefined) };
+    createPool.mockReturnValueOnce(shared).mockReturnValueOnce(session);
+    getPool();
+    getSessionPool();
+    await expect(closePool()).rejects.toBe(failure);
+    expect(session.end).toHaveBeenCalledOnce();
+    // Both singletons are cleared, so the next close is a no-op and the next get builds afresh.
+    await expect(closePool()).resolves.toBeUndefined();
+    expect(shared.end).toHaveBeenCalledOnce();
+  });
+
   it('ends the existing pool', async () => {
     const mockPool = { end: vi.fn().mockResolvedValue(undefined) };
     createPool.mockReturnValue(mockPool);
