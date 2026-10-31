@@ -7,7 +7,7 @@ export {
   DEFAULT_REFRESH_FAILURE_BACKOFF_MS,
   DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS,
 } from './db/lookupCache';
-export { getPool, closePool } from './db/pool';
+export { getPool, getSessionPool, closePool } from './db/pool';
 export { runMigrations } from './db/migrations';
 export { pingDb } from './db/health';
 
