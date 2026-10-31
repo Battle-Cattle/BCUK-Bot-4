@@ -5,9 +5,9 @@ import { schemaFromMigrations } from '../test-utils/migrationSchema';
 
 const REPO_ROOT = path.resolve(__dirname, '../..');
 
-// Documented in DATABASE-SCHEMA.md but created outside migrations/: express-mysql-session creates
-// `sessions` itself on first run, and the migration runner creates `schema_migrations`.
-const DOC_ONLY_TABLES = new Set(['sessions', 'schema_migrations']);
+// Documented in DATABASE-SCHEMA.md but created outside migrations/: the migration runner creates
+// `schema_migrations` itself.
+const DOC_ONLY_TABLES = new Set(['schema_migrations']);
 
 /**
  * Table name → column names, from each "## `table`" section's column table in

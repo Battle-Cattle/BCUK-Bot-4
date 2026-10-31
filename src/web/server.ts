@@ -7,7 +7,8 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import path from 'path';
 import type { Server } from 'http';
-import { WEB_PORT, SESSION_SECRET, DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME } from '../shared/config';
+import { WEB_PORT, SESSION_SECRET } from '../shared/config';
+import { getPool } from '../db';
 
 const log = createLogger('Web');
 
@@ -149,16 +150,19 @@ app.use(express.json());
 // Always trust exactly one proxy hop (Caddy). Without this, req.ip resolves to
 // Caddy's loopback address and all users share a single rate-limit bucket.
 app.set('trust proxy', 1);
-const sessionStore = new (MySQLStore(session))({
-  host: DB_HOST,
-  port: DB_PORT,
-  user: DB_USER,
-  password: DB_PASSWORD,
-  database: DB_NAME,
-  expiration: 24 * 60 * 60 * 1000,
-  createDatabaseTable: true,
-  schema: { tableName: 'sessions' },
-});
+// Runs on the app's shared pool rather than opening a second one of its own, so session queries
+// get the same keepalive/timeout settings and count toward the same connection limit. The store
+// takes mysql2's callback API, so it gets the callback pool the promise pool wraps (`.pool`): the
+// same connections. Handed a pool, the store leaves it open on close() (closePool() ends it). The table comes
+// from migrations/0007_sessions_table.sql, which startup applies before the panel listens.
+const sessionStore = new (MySQLStore(session))(
+  {
+    expiration: 24 * 60 * 60 * 1000,
+    createDatabaseTable: false,
+    schema: { tableName: 'sessions' },
+  },
+  getPool().pool,
+);
 app.use(
   session({
     secret: SESSION_SECRET,
@@ -243,7 +247,8 @@ const csrfErrorHandler: ErrorRequestHandler = (err, req, res, next) => {
     return;
   }
 
-  log.error('Invalid CSRF token:', err);
+  // A warning, not an error: a form left open past its session's expiry lands here routinely.
+  log.warn(`Rejected invalid CSRF token on ${req.method} ${req.originalUrl}`);
 
   if (req.originalUrl === '/api' || req.originalUrl.startsWith('/api/')) {
     res.status(403).json({
@@ -317,15 +322,18 @@ export function startWebPanel(port: number = WEB_PORT): Promise<Server> {
 
 /**
  * Stops the web panel: stops accepting connections and drops the open ones — long-lived SSE
- * streams would otherwise hold `server.close()` open indefinitely. No-op if it isn't running.
- * @returns Resolves once the server has closed.
+ * streams would otherwise hold `server.close()` open indefinitely — then closes the session
+ * store, stopping its expired-session cleanup timer. The store leaves the shared DB pool open;
+ * shutdown ends that last. No-op if the panel isn't running.
+ * @returns Resolves once the server and the session store have closed.
  */
-export function stopWebPanel(): Promise<void> {
+export async function stopWebPanel(): Promise<void> {
   const server = webServer;
-  if (!server) return Promise.resolve();
+  if (!server) return;
   webServer = null;
-  return new Promise((resolve, reject) => {
+  await new Promise<void>((resolve, reject) => {
     server.close((err) => (err ? reject(err) : resolve()));
     server.closeAllConnections();
   });
+  await sessionStore.close();
 }

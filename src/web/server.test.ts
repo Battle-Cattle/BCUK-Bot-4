@@ -19,9 +19,24 @@ vi.mock('../shared/config', () => ({
   SFX_MAX_FILE_MB: 10,
 }));
 
+// The shared pool server.ts hands the session store, and the store's constructor args/close calls.
+const { mockPool, storeCtorArgs, storeClose } = vi.hoisted(() => ({
+  mockPool: { pool: { marker: 'shared-callback-pool' } },
+  storeCtorArgs: [] as unknown[][],
+  storeClose: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock('../db', () => ({ getPool: () => mockPool }));
+
 vi.mock('express-mysql-session', () => ({
   default: () =>
     class MockStore extends EventEmitter {
+      constructor(...args: unknown[]) {
+        super();
+        storeCtorArgs.push(args);
+      }
+      close() {
+        return storeClose();
+      }
       get(_id: string, cb: (err: unknown, session?: unknown) => void) {
         cb(null, undefined);
       }
@@ -304,6 +319,15 @@ describe('csrfErrorHandler', () => {
     expect(res.text).toContain('Your form session expired');
   });
 
+  it('logs a CSRF failure as a warning naming the request, not as an error', async () => {
+    mockLog.warn.mockClear();
+    mockLog.error.mockClear();
+    await request(app).post('/__trigger_csrf_error');
+    await request(app).get('/__trigger_csrf_error');
+    expect(mockLog.warn).toHaveBeenCalledWith('Rejected invalid CSRF token on GET /__trigger_csrf_error');
+    expect(mockLog.error).not.toHaveBeenCalled();
+  });
+
   it('responds with JSON for a CSRF failure under /api', async () => {
     const res = await request(app).get('/api/__trigger_csrf_error');
     expect(res.status).toBe(403);
@@ -527,5 +551,26 @@ describe('startWebPanel / stopWebPanel', () => {
 
   it('is a no-op when the panel is not running', async () => {
     await expect(stopWebPanel()).resolves.toBeUndefined();
+    expect(storeClose).not.toHaveBeenCalled();
+  });
+
+  it('closes the session store after the server on stop', async () => {
+    const server = await startWebPanel(0);
+    storeClose.mockClear();
+    await stopWebPanel();
+    expect(server.listening).toBe(false);
+    expect(storeClose).toHaveBeenCalledOnce();
+  });
+});
+
+describe('session store', () => {
+  it('runs on the shared DB pool and leaves table creation to the migrations', () => {
+    // Other tests in this file re-import server.ts, so check every store it has built.
+    expect(storeCtorArgs.length).toBeGreaterThan(0);
+    for (const [options, connection] of storeCtorArgs) {
+      expect(connection).toBe(mockPool.pool);
+      expect(options).toMatchObject({ createDatabaseTable: false, schema: { tableName: 'sessions' } });
+      expect(options).not.toHaveProperty('host');
+    }
   });
 });
