@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { mockLogger } from '../test-utils/loggerMock';
 
-vi.mock('../shared/logger', () => ({ createLogger: mockLogger }));
+const { log } = vi.hoisted(() => ({
+  log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+}));
+vi.mock('../shared/logger', () => ({ createLogger: () => log }));
 vi.mock('../shared/config', () => ({
   TWITCH_CLIENT_ID: 'test-client-id',
   TWITCH_CLIENT_SECRET: 'test-client-secret',
@@ -121,6 +123,19 @@ describe('getValidToken', () => {
     const token = await getValidToken(streamer);
     expect(token).toBeNull();
     expect(clearStreamerToken).not.toHaveBeenCalled();
+  });
+
+  it('saves a null expiry when Twitch returns no expires_in, and logs an unnamed streamer as unknown', async () => {
+    const streamer = makeStreamer({
+      eventsub_token_expiry: String(Date.now() + 2 * 60 * 1000),
+      twitch_name: null,
+    });
+    vi.mocked(twitchFetch).mockResolvedValue(
+      mockFetch(200, { access_token: 'new-token', refresh_token: 'new-refresh' }),
+    );
+    await expect(getValidToken(streamer)).resolves.toBe('new-token');
+    expect(saveStreamerToken).toHaveBeenCalledWith(1, 'u123', 'new-token', 'new-refresh', null);
+    expect(log.info).toHaveBeenCalledWith('Token refreshed for unknown');
   });
 
   it('returns null when token needs refresh but no refresh_token is stored', async () => {
