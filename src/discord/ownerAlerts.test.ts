@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mockLogger } from '../test-utils/loggerMock';
 
-vi.mock('../shared/logger', () => ({ createLogger: mockLogger }));
+const mockLog = vi.hoisted(() => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }));
+vi.mock('../shared/logger', () => ({ createLogger: () => mockLog }));
 
 vi.mock('../db', () => ({
   findOwnerUser: vi.fn(),
@@ -305,6 +305,40 @@ describe('ownerAlerts', () => {
     }
   });
 
+  it('cancels a pending "down" DM for a component removed from health before the grace period ends', async () => {
+    healthStore.recordEventSubConnected('removedstreamer', true);
+    await flush();
+    healthStore.recordEventSubConnected('removedstreamer', false, 'socket closed');
+    await vi.advanceTimersByTimeAsync(DOWN_ALERT_GRACE_MS / 2);
+
+    healthStore.removeEventSubHealth('removedstreamer');
+    await advanceGrace();
+
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('tracks a removed component afresh if it comes back, rather than from its old state', async () => {
+    healthStore.recordEventSubConnected('returningstreamer', false, 'socket closed');
+    healthStore.removeEventSubHealth('returningstreamer');
+    // Seen again as healthy: a first-seen healthy component is stored without any alert.
+    healthStore.recordEventSubConnected('returningstreamer', true);
+    await advanceGrace();
+    expect(send).not.toHaveBeenCalled();
+
+    healthStore.recordEventSubConnected('returningstreamer', false, 'dropped again');
+    await advanceGrace();
+    expect(send).toHaveBeenCalledExactlyOnceWith(OWNER_ID, expect.stringContaining('dropped again'));
+    healthStore.removeEventSubHealth('returningstreamer');
+  });
+
+  it('registers its health listener only once, however many times it is started', async () => {
+    const spy = vi.spyOn(healthStore, 'onHealthChanged');
+    startOwnerAlertWatcher();
+    startOwnerAlertWatcher();
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
   it('drops a "down" DM that was waiting on the runtime when the component recovered meanwhile', async () => {
     let markReady!: () => void;
     const ready = new Promise<void>((resolve) => { markReady = resolve; });
@@ -365,15 +399,24 @@ describe('sendOwnerAlert with no runtime registered', () => {
     // file's shared/top-level-imported one, so this test can exercise the "never registered"
     // path without needing to un-register the runtime the other describe blocks depend on —
     // there's no unregister API, and runtimeRegistry has no reset hook of its own.
-    vi.resetModules();
-    const freshHealthStore = await import('../shared/healthStore.js');
-    const fresh = await import('./ownerAlerts.js');
+    vi.useFakeTimers();
+    try {
+      vi.resetModules();
+      const freshHealthStore = await import('../shared/healthStore.js');
+      const fresh = await import('./ownerAlerts.js');
 
-    await fresh.primeOwnerAlertBaseline();
-    fresh.startOwnerAlertWatcher();
+      await fresh.primeOwnerAlertBaseline();
+      fresh.startOwnerAlertWatcher();
+      mockLog.warn.mockClear();
 
-    expect(() => freshHealthStore.recordDbPing(false, 'boom')).not.toThrow();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(() => freshHealthStore.recordDbPing(false, 'boom')).not.toThrow();
+      // The "down" DM is only attempted once the grace period has passed.
+      await vi.advanceTimersByTimeAsync(fresh.DOWN_ALERT_GRACE_MS);
+
+      expect(mockLog.warn).toHaveBeenCalledWith('No owner-alert runtime registered — skipping alert:', expect.stringContaining('boom'));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
