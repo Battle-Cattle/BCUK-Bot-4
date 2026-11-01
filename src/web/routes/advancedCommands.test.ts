@@ -129,6 +129,12 @@ describe('POST /advanced-commands/add', () => {
     const res = await post('/advanced-commands/add', { name: 'x', point_cost: 'lots' }).expect(302);
     expect(res.headers.location).toBe('/advanced-commands?error=invalid_number');
   });
+
+  it('rejects a number too large to parse exactly before writing', async () => {
+    const res = await post('/advanced-commands/add', { name: 'x', point_cost: '99999999999999999999' }).expect(302);
+    expect(res.headers.location).toBe('/advanced-commands?error=invalid_number');
+    expect(db.addAdvancedCommand).not.toHaveBeenCalled();
+  });
 });
 
 describe('command routes', () => {

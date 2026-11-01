@@ -8,6 +8,52 @@ export function parseCheckboxField(value: string | string[] | undefined): boolea
   return !Array.isArray(value) && value === 'on';
 }
 
+/** Largest value a MySQL signed `INT` column can hold. */
+export const MAX_INT_COLUMN_VALUE = 2_147_483_647;
+
+/**
+ * Parses a whole-number form field: plain decimal digits only (no sign, spaces, fraction or
+ * `0x`/`e` forms), within `[min, max]`. A repeated field (arriving as an array) is rejected rather
+ * than silently taking the first value, so a duplicated/tampered value can't slip past validation.
+ * @param value - Raw form value (an array when repeated).
+ * @param min - Smallest allowed value, inclusive.
+ * @param max - Largest allowed value, inclusive; defaults to `Number.MAX_SAFE_INTEGER`.
+ * @returns The parsed integer, or null when missing, not a whole number, repeated, or out of range.
+ */
+export function parseIntField(
+  value: string | string[] | undefined,
+  min: number,
+  max: number = Number.MAX_SAFE_INTEGER,
+): number | null {
+  if (Array.isArray(value)) return null;
+  if (typeof value !== 'string' || !/^\d+$/.test(value)) return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= min && parsed <= max ? parsed : null;
+}
+
+/** Lower bound for {@link parseDecimalField}. */
+export interface DecimalFieldBound {
+  /** The bound itself. */
+  min: number;
+  /** True when `min` itself is not allowed (e.g. "strictly positive"). */
+  exclusive?: boolean;
+}
+
+/**
+ * Parses a required decimal form field (e.g. a multiplier) with a lower bound. Rejects arrays
+ * (repeated fields), empty/whitespace input, non-numeric input and values below the bound.
+ * @param value - Raw form value (an array when repeated).
+ * @param bound - The lower bound, and whether it is exclusive.
+ * @returns The parsed number, or null when invalid.
+ */
+export function parseDecimalField(value: string | string[] | undefined, bound: DecimalFieldBound): number | null {
+  if (Array.isArray(value)) return null;
+  if (typeof value !== 'string' || value.trim() === '') return null;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  return n > bound.min || (!bound.exclusive && n === bound.min) ? n : null;
+}
+
 /**
  * Parse a positive integer id form field. A repeated field (arriving as an array) is
  * rejected rather than silently taking the first value, so a duplicated/tampered id
@@ -16,10 +62,7 @@ export function parseCheckboxField(value: string | string[] | undefined): boolea
  * @returns The ID as a positive safe integer, or null when missing, malformed, repeated, or out of range.
  */
 export function parsePositiveIntId(value: string | string[] | undefined): number | null {
-  if (Array.isArray(value)) return null;
-  if (typeof value !== 'string' || !/^\d+$/.test(value)) return null;
-  const parsed = Number(value);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+  return parseIntField(value, 1);
 }
 
 /**

@@ -15,12 +15,12 @@ import {
   type TextAnimation,
   ALERT_TEXT_ANIMATIONS,
 } from '../../db';
-import { parseCheckboxField } from './validation';
+import { parseCheckboxField, parseIntField } from './validation';
 
 /** A submitted form body: Express's urlencoded parser yields strings, or arrays for repeated fields. */
 export type FormBody = Record<string, string | string[] | undefined>;
 
-/** Thrown for a field that isn't a whole number at all; the page shows it as `?error=invalid_number`. */
+/** Thrown for a field that isn't a whole number at all (or is too large to be one exactly); the page shows it as `?error=invalid_number`. */
 class FormNumberError extends AdvancedCommandValidationError {
   constructor(field: string) {
     super('invalid_number', `${field} must be a whole number`);
@@ -48,8 +48,9 @@ function text(body: FormBody, field: string): string {
 function wholeNumber<T extends number | null>(body: FormBody, field: string, blank: T): number | T {
   const value = text(body, field);
   if (value === '') return blank;
-  if (!/^\d+$/.test(value)) throw new FormNumberError(field);
-  return Number(value);
+  const parsed = parseIntField(value, 0);
+  if (parsed === null) throw new FormNumberError(field);
+  return parsed;
 }
 
 /**
