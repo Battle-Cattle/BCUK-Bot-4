@@ -533,6 +533,93 @@ describe('reconnect', () => {
       expect(conn!.destroy).toHaveBeenCalledOnce();
       expect(mod.isConnected('guild-A')).toBe(false);
     });
+
+    it('a superseded attempt skips destroying a connection that was already destroyed meanwhile', async () => {
+      const { client } = makeClient();
+      const voice = await useRealisticJoin();
+      let finishReady!: () => void;
+      vi.mocked(voice.entersState)
+        .mockImplementationOnce(() => new Promise<void>((resolve) => { finishReady = resolve; }) as never);
+
+      const pending = mod.connect(client as never, 'guild-A', 'chan-1');
+      await waitFor(() => expect(createdConnections).toHaveLength(1));
+      const [conn] = createdConnections;
+
+      mod.disconnect('guild-A');
+      conn!.state.status = 'destroyed'; // e.g. @discordjs/voice tore it down itself
+      finishReady();
+
+      // destroy() on a destroyed connection throws, so it must not be called.
+      await expect(pending).resolves.toBeUndefined();
+      expect(conn!.destroy).not.toHaveBeenCalled();
+    });
+  });
+
+  it('a newer connect() cancels a pending rejoin even while it is still waiting on Ready', async () => {
+    vi.useFakeTimers();
+    try {
+      const { client } = makeClient();
+      const voice = await import('@discordjs/voice');
+      vi.mocked(voice.entersState).mockRejectedValueOnce(new Error('ready timeout'));
+      await expect(mod.connect(client as never, 'guild-A', 'chan-1')).rejects.toThrow('ready timeout');
+      expect(log.warn).toHaveBeenCalledWith(expect.stringContaining('Scheduling voice rejoin for guild guild-A in 5000ms'));
+
+      // A newer connect() is still waiting on Ready when the rejoin timer would have fired.
+      let finishReady!: () => void;
+      vi.mocked(voice.entersState)
+        .mockImplementationOnce(() => new Promise<void>((resolve) => { finishReady = resolve; }) as never);
+      const pending = mod.connect(client as never, 'guild-A', 'chan-2');
+      await vi.advanceTimersByTimeAsync(0);
+      const joinsBefore = vi.mocked(voice.joinVoiceChannel).mock.calls.length;
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(vi.mocked(voice.joinVoiceChannel).mock.calls.length).toBe(joinsBefore);
+
+      finishReady();
+      await pending;
+      expect(mod.getCurrentChannelId('guild-A')).toBe('chan-2');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a repeated drop event while a rejoin is already pending does not schedule a second one', async () => {
+    vi.useFakeTimers();
+    try {
+      const { client } = makeClient();
+      const voice = await import('@discordjs/voice');
+      await mod.connect(client as never, 'guild-A', 'chan-1');
+      const dropHandler = createdConnections[0]!.on.mock.calls.find(([e]) => e === 'disconnected')?.[1] as () => Promise<void>;
+      vi.mocked(voice.entersState).mockRejectedValue(new Error('gone'));
+      log.warn.mockClear();
+
+      await dropHandler();
+      await dropHandler();
+
+      expect(log.warn.mock.calls.filter(([m]) => String(m).startsWith('Scheduling voice rejoin'))).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('abandons a superseded connect() once its voice-channel lookup resolves', async () => {
+    const { client, channelsFetch } = makeClient();
+    const voice = await import('@discordjs/voice');
+    let releaseLookup!: () => void;
+    const defaultFetch = channelsFetch.getMockImplementation()!;
+    channelsFetch.mockImplementationOnce(async (channelId: string) => {
+      await new Promise<void>((resolve) => { releaseLookup = resolve; });
+      return defaultFetch(channelId);
+    });
+
+    const first = mod.connect(client as never, 'guild-A', 'chan-1');
+    await waitFor(() => expect(channelsFetch).toHaveBeenCalledOnce());
+    await mod.connect(client as never, 'guild-A', 'chan-2');
+    releaseLookup();
+    await first;
+
+    expect(vi.mocked(voice.joinVoiceChannel)).toHaveBeenCalledOnce();
+    expect(mod.getCurrentChannelId('guild-A')).toBe('chan-2');
   });
 
   it('clears a pending reconnect timer when connect is called again', async () => {
@@ -583,6 +670,27 @@ describe('reconnect', () => {
 });
 
 describe('per-guild audio player', () => {
+  it('reports not playing for a guild it has never seen', () => {
+    expect(mod.isPlaying('unknown-guild')).toBe(false);
+  });
+
+  it('skips the RTP sync and logs unknown age and ping when a guild with no voice connection starts playing', async () => {
+    const voice = await import('@discordjs/voice');
+    const { syncRtpTimestamp } = await import('./rtpClock.js');
+    const fakePlayer = { on: vi.fn(), stop: vi.fn(), play: vi.fn() };
+    vi.mocked(voice.createAudioPlayer).mockReturnValue(fakePlayer as never);
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000);
+    mod.startPlayback({} as never, 'guild-A');
+    const playing = fakePlayer.on.mock.calls.find(([e]) => e === 'playing')?.[1] as () => void;
+    now.mockReturnValue(1_050);
+
+    playing();
+    now.mockRestore();
+
+    expect(vi.mocked(syncRtpTimestamp)).not.toHaveBeenCalled();
+    expect(log.debug).toHaveBeenCalledWith('Playback started in guild guild-A after 50ms (voice connected ?min, ping ws ?ms / udp ?ms)');
+  });
+
   it('Idle handler clears the playing flag and reports idle status', async () => {
     const { client } = makeClient();
     const voice = await import('@discordjs/voice');

@@ -80,21 +80,6 @@ export function parsePositiveBigIntId(value: string | string[] | undefined): big
 }
 
 /**
- * Parse a weight form field into a positive integer ≥ 1 (floored), or null when
- * the value is missing, non-numeric, not positive, or an array (repeated field).
- * Rejecting arrays is consistent with `parsePositiveIntId` — a duplicated weight
- * field can't slip through silently.
- * @param raw - Raw value from a form field.
- * @returns A positive integer weight, or null when invalid.
- */
-export function parseWeight(raw: string | string[] | undefined): number | null {
-  if (Array.isArray(raw)) return null;
-  const n = Number(raw);
-  if (!Number.isFinite(n) || n < 1) return null;
-  return Math.floor(n);
-}
-
-/**
  * Returns `value` trimmed if it is a string, or an empty string otherwise.
  * @param value - Any value from a form or request body.
  * @returns Trimmed string, or `''` for non-string inputs.

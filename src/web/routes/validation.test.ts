@@ -11,7 +11,6 @@ import {
   normalizeDiscordId,
   parseDiscordIdList,
   filterQueryParam,
-  parseWeight,
   parseRewardIdParam,
   toStringArray,
 } from './validation';
@@ -308,56 +307,6 @@ describe('filterQueryParam', () => {
 
   it('returns null when the allowed set is empty', () => {
     expect(filterQueryParam('known_error', new Set())).toBeNull();
-  });
-});
-
-describe('parseWeight', () => {
-  it('returns null for undefined', () => {
-    expect(parseWeight(undefined)).toBeNull();
-  });
-
-  it('returns null for a non-numeric string', () => {
-    expect(parseWeight('abc')).toBeNull();
-  });
-
-  it('returns null for zero', () => {
-    expect(parseWeight('0')).toBeNull();
-  });
-
-  it('returns null for a negative number', () => {
-    expect(parseWeight('-5')).toBeNull();
-  });
-
-  it('returns the parsed integer for a valid positive number', () => {
-    expect(parseWeight('10')).toBe(10);
-  });
-
-  it('floors a float string', () => {
-    expect(parseWeight('3.9')).toBe(3);
-  });
-
-  it('floors a float close to the next integer', () => {
-    expect(parseWeight('2.99')).toBe(2);
-  });
-
-  it('returns null for an array (repeated field)', () => {
-    expect(parseWeight(['7', '99'])).toBeNull();
-  });
-
-  it('returns null for an array with a non-numeric first element', () => {
-    expect(parseWeight(['abc'])).toBeNull();
-  });
-
-  it('returns null for an empty array', () => {
-    expect(parseWeight([])).toBeNull();
-  });
-
-  it('returns null for Infinity (not finite)', () => {
-    expect(parseWeight('Infinity')).toBeNull();
-  });
-
-  it('returns null for a single-element array (repeated field)', () => {
-    expect(parseWeight(['7'])).toBeNull();
   });
 });
 

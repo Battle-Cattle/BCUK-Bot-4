@@ -11,6 +11,7 @@ import { filterQueryParam } from './validation';
 import { renderError, renderView } from './viewHelpers';
 import { router as mutationsRouter, MAX_UPLOAD_MB } from './overlayAdminMutations';
 import { router as rewardMutationsRouter } from './overlayAdminRewardMutations';
+import { MAX_OVERLAY_VIDEO_WEIGHT } from './overlayAdminShared';
 import { connections as overlaySourceConnections } from './overlaySource';
 import { createOverlayStatusEventsHandler } from './sseEventsHandlers';
 
@@ -25,7 +26,7 @@ export const statusConnections = new Map<number, Set<Response>>();
 const KNOWN_ERRORS = new Set([
   'not_a_streamer', 'invalid_file', 'upload_failed', 'delete_failed',
   'invalid_reward_id', 'no_videos_selected', 'save_failed', 'invalid_id', 'invalid_path',
-  'file_too_large',
+  'file_too_large', 'invalid_weight',
 ]);
 const KNOWN_SUCCESSES = new Set([
   'video_uploaded', 'video_deleted', 'reward_saved', 'reward_deleted',
@@ -60,6 +61,7 @@ router.get('/settings', requireAuth, csrfProtection, async (req, res) => {
       twitchRewards,
       baseUrl: PUBLIC_URL,
       maxFileMb: MAX_UPLOAD_MB,
+      maxVideoWeight: MAX_OVERLAY_VIDEO_WEIGHT,
       error:   filterQueryParam(req.query.error,   KNOWN_ERRORS),
       success: filterQueryParam(req.query.success, KNOWN_SUCCESSES),
     });

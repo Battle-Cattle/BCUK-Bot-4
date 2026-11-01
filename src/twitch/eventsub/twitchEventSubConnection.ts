@@ -286,13 +286,15 @@ export class StreamerConnection {
    * @returns Nothing.
    */
   private forceReconnect(socket: WebSocket | null): void {
-    if (this.ws !== socket) return;
+    // A null socket means there's nothing live to tear down (e.g. a late message from an already
+    // torn-down socket while a reconnect is pending), so it must not reschedule that reconnect.
+    if (!socket || this.ws !== socket) return;
     recordEventSubConnected(this.name, false);
     // Best-effort: request a close (harmless if already closing/closed) so Twitch has a
     // better chance of revoking this session's EventSub subscriptions promptly, rather than
     // leaving them "enabled" until Twitch's own delayed dead-connection detection catches up.
     // We don't wait on it — the next connect() proceeds immediately regardless.
-    socket?.close();
+    socket.close();
     this.clearKeepaliveTimer();
     this.clearConnectTimer();
     // The next session's welcome subscribes afresh, so a pending retry for this one is moot.
