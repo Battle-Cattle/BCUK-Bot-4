@@ -557,6 +557,66 @@ describe('StreamerConnection lifecycle', () => {
     expect((conn as any).ws).toBe(secondWs);
   });
 
+  it('ignores an invalid session_reconnect from an old socket while a reconnect is already pending, instead of rescheduling it', () => {
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    const oldWs = (conn as any).ws as MockWebSocket;
+    oldWs.listeners.get('close')!({ code: 1006, reason: 'abnormal' } as any);
+    expect((conn as any).ws).toBeNull();
+    expect((conn as any).reconnectAttempts).toBe(1);
+    const pendingTimer = (conn as any).reconnectTimer;
+    vi.mocked(recordEventSubConnected).mockClear();
+
+    // A frame the old socket had already received still lands after it was torn down.
+    oldWs.listeners.get('message')!({ data: JSON.stringify(makeMsg({
+      message_type: 'session_reconnect',
+      payload: { session: { id: 'sess-old', keepalive_timeout_seconds: 10, reconnect_url: 'wss://evil.example.com/ws' } },
+    })) } as any);
+
+    expect((conn as any).reconnectAttempts).toBe(1);
+    expect((conn as any).reconnectTimer).toBe(pendingTimer);
+    expect(recordEventSubConnected).not.toHaveBeenCalled();
+  });
+
+  it('ignores an error event from a socket already superseded by a reconnect', () => {
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    const firstWs = (conn as any).ws as MockWebSocket;
+    firstWs.listeners.get('close')!({ code: 1006, reason: 'abnormal' } as any);
+    vi.advanceTimersByTime(1_000);
+    const secondWs = (conn as any).ws as MockWebSocket;
+    vi.mocked(recordEventSubConnected).mockClear();
+
+    firstWs.listeners.get('error')!();
+
+    expect((conn as any).ws).toBe(secondWs);
+    expect((conn as any).reconnectAttempts).toBe(1);
+    expect(recordEventSubConnected).not.toHaveBeenCalled();
+  });
+
+  it('cancels a pending reconnect on stop(), so no socket is opened afterwards', () => {
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    ((conn as any).ws as MockWebSocket).listeners.get('close')!({ code: 1006, reason: 'abnormal' } as any);
+    expect((conn as any).reconnectTimer).not.toBeNull();
+
+    conn.stop();
+    vi.advanceTimersByTime(60_000);
+
+    expect((conn as any).reconnectTimer).toBeNull();
+    expect((conn as any).ws).toBeNull();
+  });
+
+  it('does not open a socket when connect() is called after stop()', () => {
+    const conn = new StreamerConnection(makeStreamerData());
+    conn.start();
+    conn.stop();
+
+    conn.connect();
+
+    expect((conn as any).ws).toBeNull();
+  });
+
   it('ignores a stale open event from a socket already superseded by a force-reconnect', () => {
     const conn = new StreamerConnection(makeStreamerData());
     conn.start();

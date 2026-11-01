@@ -291,6 +291,35 @@ describe('executeCustomCommandForTwitch', () => {
     expect(mockRuntime.send).toHaveBeenCalledWith('#a', 'Hi!');
   });
 
+  it('logs that a multi-twitch broadcast reached no channels when none has the command registered', async () => {
+    vi.mocked(getCustomCommandForTwitchChannel)
+      .mockResolvedValueOnce({ output: 'Multi!', is_multi_twitch: true } as any)
+      .mockResolvedValue(null);
+
+    await executeCustomCommandForTwitch('#a', '!multi', null);
+
+    expect(mockRuntime.send).not.toHaveBeenCalled();
+    expect(log.info).toHaveBeenCalledWith("[Twitch] Broadcast custom command '!multi' in #a reached no channels.");
+  });
+
+  it('logs, without throwing, when a multi-twitch broadcast fails', async () => {
+    vi.mocked(getCustomCommandForTwitchChannel).mockResolvedValue({ output: 'Multi!', is_multi_twitch: true } as any);
+    mockRuntime.getActiveChannels.mockImplementation(() => { throw new Error('chat client gone'); });
+
+    await expect(executeCustomCommandForTwitch('#a', '!multi', null)).resolves.toBeUndefined();
+
+    expect(log.error).toHaveBeenCalledWith("[Twitch] Failed to broadcast custom command '!multi' in #a:", expect.any(Error));
+  });
+
+  it('logs, without throwing, when sending a non-multi-twitch command fails', async () => {
+    vi.mocked(getCustomCommandForTwitchChannel).mockResolvedValue({ output: 'Hey!', is_multi_twitch: false } as any);
+    mockRuntime.send.mockRejectedValue(new Error('not connected'));
+
+    await expect(executeCustomCommandForTwitch('#chan', '!hey', null)).resolves.toBeUndefined();
+
+    expect(log.error).toHaveBeenCalledWith("[Twitch] Failed to send custom command '!hey' in #chan:", expect.any(Error));
+  });
+
   it('substitutes {user}, {args}, and {arg} in the response before sending', async () => {
     vi.mocked(getCustomCommandForTwitchChannel).mockResolvedValue({
       output: '{user} said {args} (first: {arg})',
@@ -489,6 +518,24 @@ describe('resolveSharedChatSessionId', () => {
     expect(result).toBe('sess-1');
     expect(getSharedChatSession).toHaveBeenCalledWith('user-1');
     expect(sessionCache.get('user-1')?.sessionId).toBe('sess-1');
+  });
+
+  it('caches a null session id when the channel is not in a shared-chat session', async () => {
+    vi.mocked(getSharedChatSession).mockResolvedValue(null);
+
+    expect(await resolveSharedChatSessionId('user-1')).toBeNull();
+    expect(sessionCache.get('user-1')?.sessionId).toBeNull();
+  });
+
+  it('caches null when a background refresh finds the shared-chat session has ended', async () => {
+    sessionCache.set('user-1', { sessionId: 'stale', expiry: Date.now() - 1 });
+    vi.mocked(getSharedChatSession).mockResolvedValue(null);
+
+    expect(await resolveSharedChatSessionId('user-1')).toBe('stale');
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(sessionCache.get('user-1')?.sessionId).toBeNull();
   });
 
   it('caches a null session id and retries sooner on fetch failure', async () => {

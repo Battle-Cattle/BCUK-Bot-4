@@ -33,17 +33,14 @@ interface LiveStreamerParams {
  */
 async function handleLiveStreamer(params: LiveStreamerParams): Promise<void> {
   const { liveStates, streamer, loginKey, existing, pollStream, isCurrent } = params;
-  const stateKey = String(streamer.id);
-  const isNew = !liveStates.has(stateKey);
-  if (isNew || (existing && !existing.messageId)) {
-    // Went live, or state exists with no Discord message (e.g. Discord wasn't ready at startup).
-    // Every isCurrent() check below guards against acting after being superseded while awaiting —
-    // a newer op already owns this login's state.
+  if (!existing?.messageId) {
+    // Went live (no state yet), or state exists with no Discord message (e.g. Discord wasn't
+    // ready at startup). Every isCurrent() check below guards against acting after being
+    // superseded while awaiting — a newer op already owns this login's state.
     await postAnnouncement(liveStates, streamer, pollStream, isCurrent);
-    if (isNew && isCurrent()) log.info(`${loginKey} went live in group ${streamer.group.name}`);
+    if (!existing && isCurrent()) log.info(`${loginKey} went live in group ${streamer.group.name}`);
     return;
   }
-  if (!existing) return;
 
   if (existing.currentGame !== pollStream.game_name) {
     // Game changed
@@ -130,7 +127,7 @@ export async function dispatchStreamerPolls(
         try {
           await withLoginLock(loginKey, (isCurrent) => handlePollStreamer(liveStates, loginToUserId, streamer, liveByUserId, isCurrent));
         } catch (err) {
-          log.error(`Error handling streamer poll for ${streamer.twitch_name ?? 'unknown'} in group ${streamer.group.name}:`, err);
+          log.error(`Error handling streamer poll for ${loginKey} in group ${streamer.group.name}:`, err);
         }
       }
     }),
