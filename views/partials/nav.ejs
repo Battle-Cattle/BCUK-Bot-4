@@ -18,6 +18,23 @@
           <% } %>
         </div>
       </div>
+      <% if (user) { %>
+      <div class="nav-group">
+        <button class="nav-group-label" aria-haspopup="true" aria-expanded="false">Overlays <span class="nav-caret">▾</span></button>
+        <div class="nav-group-items">
+          <a href="/overlay/settings" class="nav-item">Video</a>
+          <a href="/alerts/settings" class="nav-item">Alerts</a>
+          <a href="/overlay/controller/settings" class="nav-item">Controller</a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-label" aria-haspopup="true" aria-expanded="false">Viewer Rewards <span class="nav-caret">▾</span></button>
+        <div class="nav-group-items">
+          <a href="/channel-points" class="nav-item">Channel Points</a>
+          <a href="/loyalty-points" class="nav-item">Loyalty Points</a>
+        </div>
+      </div>
+      <% } %>
       <div class="nav-group">
         <button class="nav-group-label" aria-haspopup="true" aria-expanded="false">Devices <span class="nav-caret">▾</span></button>
         <div class="nav-group-items">
@@ -25,6 +42,9 @@
           <a href="/companion-key" class="nav-item">Companion App</a>
         </div>
       </div>
+      <% if (user) { %>
+      <a href="/user/settings" class="nav-item">Settings</a>
+      <% } %>
       <% if (user && user.accessLevel >= 2) { %>
       <div class="nav-group">
         <button class="nav-group-label" aria-haspopup="true" aria-expanded="false">Admin <span class="nav-caret">▾</span></button>
@@ -39,19 +59,6 @@
           <% } %>
         </div>
       </div>
-      <% } %>
-      <% if (user) { %>
-      <div class="nav-group">
-        <button class="nav-group-label" aria-haspopup="true" aria-expanded="false">Overlays <span class="nav-caret">▾</span></button>
-        <div class="nav-group-items">
-          <a href="/overlay/settings" class="nav-item">Video</a>
-          <a href="/alerts/settings" class="nav-item">Alerts</a>
-          <a href="/overlay/controller/settings" class="nav-item">Controller</a>
-        </div>
-      </div>
-      <a href="/channel-points" class="nav-item">Channel Points</a>
-      <a href="/loyalty-points" class="nav-item">Loyalty Points</a>
-      <a href="/user/settings" class="nav-item">Settings</a>
       <% } %>
     </div>
     <div class="navbar-end">
