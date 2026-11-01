@@ -290,6 +290,27 @@ describe('POST /counters/update', () => {
     expect(res.headers.location).toBe('/counters?error=reserved_command');
   });
 
+  it('redirects ?error=duplicate_command without updating when isCounterCommandTaken returns true', async () => {
+    vi.mocked(isCounterCommandTaken).mockResolvedValue(true);
+    const res = await supertest(buildApp())
+      .post('/counters/update')
+      .type('form')
+      .send(VALID_UPDATE);
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('/counters?error=duplicate_command');
+    expect(updateCounter).not.toHaveBeenCalled();
+  });
+
+  it('redirects ?error=update_failed when updateCounter throws unknown error', async () => {
+    vi.mocked(updateCounter).mockRejectedValue(new Error('unknown db error'));
+    const res = await supertest(buildApp())
+      .post('/counters/update')
+      .type('form')
+      .send(VALID_UPDATE);
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('/counters?error=update_failed');
+  });
+
   it('16. redirects /counters on valid update', async () => {
     const res = await supertest(buildApp())
       .post('/counters/update')
@@ -335,6 +356,16 @@ describe('POST /counters/remove', () => {
     expect(res.headers.location).toBe('/counters?error=counter_not_found');
   });
 
+  it('redirects ?error=remove_failed when removeCounter throws unknown error', async () => {
+    vi.mocked(removeCounter).mockRejectedValue(new Error('unknown db error'));
+    const res = await supertest(buildApp())
+      .post('/counters/remove')
+      .type('form')
+      .send({ id: '5' });
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('/counters?error=remove_failed');
+  });
+
   it('19. redirects /counters on valid remove', async () => {
     const res = await supertest(buildApp())
       .post('/counters/remove')
@@ -363,6 +394,20 @@ describe('POST /counters/reset/:id', () => {
       .post('/counters/reset/notanumber');
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/counters?error=invalid_id');
+  });
+
+  it('redirects ?error=counter_not_found when resetCounterCurrentValue throws CounterNotFoundError', async () => {
+    vi.mocked(resetCounterCurrentValue).mockRejectedValue(new CounterNotFoundError(7));
+    const res = await supertest(buildApp()).post('/counters/reset/7');
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('/counters?error=counter_not_found');
+  });
+
+  it('redirects ?error=reset_failed when resetCounterCurrentValue throws unknown error', async () => {
+    vi.mocked(resetCounterCurrentValue).mockRejectedValue(new Error('unknown db error'));
+    const res = await supertest(buildApp()).post('/counters/reset/7');
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('/counters?error=reset_failed');
   });
 
   it('21. redirects /counters?reset=1 on valid reset', async () => {

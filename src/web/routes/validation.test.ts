@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
   parsePositiveIntId,
+  parseIntField,
+  parseDecimalField,
+  MAX_INT_COLUMN_VALUE,
   parseCheckboxField,
   trimField,
   normalizeRequiredText,
@@ -62,6 +65,72 @@ describe('parsePositiveIntId', () => {
 
   it('returns null for a multi-element array (repeated field)', () => {
     expect(parsePositiveIntId(['3', '9'])).toBeNull();
+  });
+});
+
+describe('parseIntField', () => {
+  it('accepts a value at either bound', () => {
+    expect(parseIntField('60', 60, 100)).toBe(60);
+    expect(parseIntField('100', 60, 100)).toBe(100);
+  });
+
+  it('rejects a value outside the bounds', () => {
+    expect(parseIntField('59', 60, 100)).toBeNull();
+    expect(parseIntField('101', 60, 100)).toBeNull();
+  });
+
+  it('caps at the INT column maximum when given it', () => {
+    expect(parseIntField(String(MAX_INT_COLUMN_VALUE), 0, MAX_INT_COLUMN_VALUE)).toBe(MAX_INT_COLUMN_VALUE);
+    expect(parseIntField(String(MAX_INT_COLUMN_VALUE + 1), 0, MAX_INT_COLUMN_VALUE)).toBeNull();
+  });
+
+  it('defaults the upper bound to the largest safe integer', () => {
+    expect(parseIntField(String(Number.MAX_SAFE_INTEGER), 0)).toBe(Number.MAX_SAFE_INTEGER);
+    expect(parseIntField('99999999999999999999', 0)).toBeNull();
+  });
+
+  it.each(['', ' 5', '5 ', '-5', '+5', '5.0', '1e3', '0x10', 'abc'])('rejects %j as not plain digits', (value) => {
+    expect(parseIntField(value, 0)).toBeNull();
+  });
+
+  it('rejects undefined and repeated fields', () => {
+    expect(parseIntField(undefined, 0)).toBeNull();
+    expect(parseIntField(['5'], 0)).toBeNull();
+  });
+});
+
+describe('parseDecimalField', () => {
+  it('accepts the bound itself when inclusive', () => {
+    expect(parseDecimalField('0', { min: 0 })).toBe(0);
+  });
+
+  it('rejects the bound itself when exclusive', () => {
+    expect(parseDecimalField('0', { min: 0, exclusive: true })).toBeNull();
+  });
+
+  it('accepts a decimal above the bound', () => {
+    expect(parseDecimalField('4.5', { min: 0 })).toBe(4.5);
+    expect(parseDecimalField('1.5', { min: 0, exclusive: true })).toBe(1.5);
+  });
+
+  it('rejects a value below the bound', () => {
+    expect(parseDecimalField('-1', { min: 0 })).toBeNull();
+    expect(parseDecimalField('-1', { min: 0, exclusive: true })).toBeNull();
+  });
+
+  it('rejects non-finite input', () => {
+    expect(parseDecimalField('abc', { min: 0 })).toBeNull();
+    expect(parseDecimalField('Infinity', { min: 0 })).toBeNull();
+  });
+
+  it('rejects undefined and repeated fields', () => {
+    expect(parseDecimalField(undefined, { min: 0 })).toBeNull();
+    expect(parseDecimalField(['1', '2'], { min: 0 })).toBeNull();
+  });
+
+  it('rejects empty and whitespace-only input instead of coercing it to 0', () => {
+    expect(parseDecimalField('', { min: 0 })).toBeNull();
+    expect(parseDecimalField('   ', { min: 0 })).toBeNull();
   });
 });
 

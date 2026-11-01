@@ -1,8 +1,8 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import { OVERLAY_FOLDER, OVERLAY_MAX_SSE_PER_CHANNEL } from '../../shared/config';
-import { safeResolve, realPathWithin } from '../../shared/pathUtils';
 import { renderView } from './viewHelpers';
+import { resolveStreamerFile, sendStreamerFile } from './streamerFileServing';
 import { broadcastToChannel } from './sseChannel';
 import { createSseEventsHandler, createLoginValidator } from './sseEventsHandlers';
 
@@ -89,38 +89,8 @@ router.get('/:login/events', createSseEventsHandler({
  *   outside the overlay folder.
  */
 router.get('/videos/:streamerId/:filename', async (req, res) => {
-  const { streamerId, filename } = req.params;
-
-  if (!/^\d+$/.test(streamerId)) { res.status(400).end(); return; }
-  if (!FILENAME_RE.test(filename)) { res.status(400).end(); return; }
-
-  const resolved = safeResolve(OVERLAY_FOLDER, streamerId, filename);
-  if (!resolved) { res.status(400).end(); return; }
-
-  // safeResolve is purely lexical; also follow symlinks and re-check containment, since
-  // sendFile would follow a link under the folder that points outside it. Not atomic with the
-  // open inside sendFile: a path component swapped for a link in between would still be
-  // followed. Closing that needs fd-based serving (losing sendFile's Range/ETag handling, which
-  // videos rely on), and exploiting it needs write access to the folder — which already allows
-  // replacing the served files. Keeping the folder writable only by the bot's user (README,
-  // "Deployment") is what actually closes it.
-  let realPath: string | null;
-  try {
-    realPath = await realPathWithin(OVERLAY_FOLDER, resolved);
-  } catch {
-    realPath = null;
-  }
-  if (!realPath) { res.status(404).end(); return; }
-
-  // A TOCTOU race is possible here: the file can be removed between the realpath check above
-  // and sendFile() actually reading it (e.g. a concurrent delete). Passing a callback stops
-  // Express from falling through to the default error handler (a 500) for that race — reply
-  // 404 instead, as long as headers haven't already gone out.
-  res.sendFile(realPath, (err) => {
-    if (err && !res.headersSent) {
-      res.status(404).end();
-    }
-  });
+  const file = await resolveStreamerFile(res, OVERLAY_FOLDER, req.params, FILENAME_RE);
+  if (file) sendStreamerFile(res, file.realPath);
 });
 
 export default router;

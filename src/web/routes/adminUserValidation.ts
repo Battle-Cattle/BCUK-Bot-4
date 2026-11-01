@@ -2,7 +2,7 @@
 // `adminUserAuth.ts`; mapping DB errors to redirects lives in `adminUserErrors.ts`.
 import { Request, Response } from 'express';
 import { AccessLevel, type AccessLevelValue } from '../../db';
-import { trimField, normalizeDiscordId } from './validation';
+import { trimField, normalizeDiscordId, parseIntField } from './validation';
 import { getSessionUser } from '../session';
 import { normalizeTwitchChannelName } from '../../twitch/twitchChannelName';
 
@@ -63,9 +63,9 @@ export function discordIdError(id: string): string | null {
  * @returns The access level it names, or null when it isn't a known level.
  */
 export function parseAccessLevel(levelStr: unknown): AccessLevelValue | null {
-  if (typeof levelStr !== 'string' || !/^\d+$/.test(levelStr)) return null;
-  const level = Number(levelStr);
-  return (Object.values(AccessLevel) as number[]).includes(level) ? (level as AccessLevelValue) : null;
+  if (typeof levelStr !== 'string') return null;
+  const level = parseIntField(levelStr, 0);
+  return level !== null && (Object.values(AccessLevel) as number[]).includes(level) ? (level as AccessLevelValue) : null;
 }
 
 /**

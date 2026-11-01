@@ -1,5 +1,5 @@
 import { createLogger } from '../../shared/logger';
-import { Router } from 'express';
+import { Router, type Response } from 'express';
 import {
   addCounter,
   CounterNotFoundError,
@@ -21,6 +21,42 @@ const router = Router();
 
 /** `handleReservedOrConflictCommandError` options scoped to the counters admin page. */
 const COUNTER_WRITE_ERROR_OPTIONS = { basePath: '/counters', conflictErrorCode: 'duplicate_command' };
+
+/** How {@link runCounterWrite} reports a failed write: the log prefix and the `?error=` code. */
+interface CounterWriteFailure {
+  /** Prefix for the logged error. */
+  logLabel: string;
+  /** `?error=` code for an unexpected failure. */
+  errorCode: 'add_failed' | 'update_failed' | 'remove_failed' | 'reset_failed';
+}
+
+/**
+ * Runs one counter write and redirects with its outcome, mapping the errors every counter route
+ * shares: a missing counter to `counter_not_found`, a reserved/conflicting command to its code,
+ * and anything else to `failure.errorCode` (logged).
+ * @param res - Express response to redirect.
+ * @param failure - The log prefix and error code for an unexpected failure.
+ * @param write - Does the write; resolves to an `?error=` code to redirect with, or undefined on success.
+ * @param successPath - Where to redirect on success.
+ * @returns Resolves once the response has been redirected.
+ */
+async function runCounterWrite(
+  res: Response,
+  failure: CounterWriteFailure,
+  write: () => Promise<string | undefined>,
+  successPath = '/counters',
+): Promise<void> {
+  let errorCode: string | undefined;
+  try {
+    errorCode = await write();
+  } catch (err) {
+    if (err instanceof CounterNotFoundError) return redirectWithError(res, '/counters', 'counter_not_found');
+    if (handleReservedOrConflictCommandError(err, res, COUNTER_WRITE_ERROR_OPTIONS)) return;
+    return logAndRedirectError({ res, log, ...failure, err, basePath: '/counters' });
+  }
+  if (errorCode) return redirectWithError(res, '/counters', errorCode);
+  res.redirect(successPath);
+}
 
 const KNOWN_ERRORS = new Set([
   'missing_fields',
@@ -119,15 +155,8 @@ router.post('/counters/add', requireGuildContext, requireMod, csrfProtection, as
     return redirectWithError(res, '/counters', form.error);
   }
 
-  try {
-    const hasDuplicateCommand = await isCounterCommandTaken(guildId, [
-      form.triggerCommand,
-      form.checkCommand,
-    ]);
-    if (hasDuplicateCommand) {
-      return redirectWithError(res, '/counters', 'duplicate_command');
-    }
-
+  await runCounterWrite(res, { logLabel: 'Add counter error:', errorCode: 'add_failed' }, async () => {
+    if (await isCounterCommandTaken(guildId, [form.triggerCommand, form.checkCommand])) return 'duplicate_command';
     await addCounter(guildId, {
       triggerCommand: form.triggerCommand,
       checkCommand: form.checkCommand,
@@ -135,12 +164,8 @@ router.post('/counters/add', requireGuildContext, requireMod, csrfProtection, as
       incrementMessage: form.incrementMessage,
       resetYearly: form.resetYearly,
     });
-  } catch (err) {
-    if (handleReservedOrConflictCommandError(err, res, COUNTER_WRITE_ERROR_OPTIONS)) return;
-    return logAndRedirectError({ res, log, logLabel: 'Add counter error:', err, basePath: '/counters', errorCode: 'add_failed' });
-  }
-
-  res.redirect('/counters');
+    return undefined;
+  });
 });
 
 /**
@@ -168,16 +193,8 @@ router.post('/counters/update', requireGuildContext, requireMod, csrfProtection,
     return redirectWithError(res, '/counters', 'invalid_id');
   }
 
-  try {
-    const hasDuplicateCommand = await isCounterCommandTaken(
-      guildId,
-      [form.triggerCommand, form.checkCommand],
-      parsedId,
-    );
-    if (hasDuplicateCommand) {
-      return redirectWithError(res, '/counters', 'duplicate_command');
-    }
-
+  await runCounterWrite(res, { logLabel: 'Update counter error:', errorCode: 'update_failed' }, async () => {
+    if (await isCounterCommandTaken(guildId, [form.triggerCommand, form.checkCommand], parsedId)) return 'duplicate_command';
     await updateCounter(guildId, {
       id: parsedId,
       triggerCommand: form.triggerCommand,
@@ -186,15 +203,8 @@ router.post('/counters/update', requireGuildContext, requireMod, csrfProtection,
       incrementMessage: form.incrementMessage,
       resetYearly: form.resetYearly,
     });
-  } catch (err) {
-    if (err instanceof CounterNotFoundError) {
-      return redirectWithError(res, '/counters', 'counter_not_found');
-    }
-    if (handleReservedOrConflictCommandError(err, res, COUNTER_WRITE_ERROR_OPTIONS)) return;
-    return logAndRedirectError({ res, log, logLabel: 'Update counter error:', err, basePath: '/counters', errorCode: 'update_failed' });
-  }
-
-  res.redirect('/counters');
+    return undefined;
+  });
 });
 
 /**
@@ -213,17 +223,10 @@ router.post('/counters/remove', requireGuildContext, requireMod, csrfProtection,
     return redirectWithError(res, '/counters', 'invalid_id');
   }
 
-  try {
+  await runCounterWrite(res, { logLabel: 'Remove counter error:', errorCode: 'remove_failed' }, async () => {
     await removeCounter(guildId, parsedId);
-  } catch (err) {
-    if (err instanceof CounterNotFoundError) {
-      return redirectWithError(res, '/counters', 'counter_not_found');
-    }
-
-    return logAndRedirectError({ res, log, logLabel: 'Remove counter error:', err, basePath: '/counters', errorCode: 'remove_failed' });
-  }
-
-  res.redirect('/counters');
+    return undefined;
+  });
 });
 
 /**
@@ -236,23 +239,15 @@ router.post('/counters/remove', requireGuildContext, requireMod, csrfProtection,
  */
 router.post('/counters/reset/:id', requireGuildContext, requireManager, csrfProtection, async (req, res) => {
   const guildId = getCurrentGuildId(req);
-  const rawId = req.params.id;
-  const parsedId = parsePositiveIntId(typeof rawId === 'string' ? rawId : undefined);
+  const parsedId = parsePositiveIntId(req.params.id);
   if (parsedId === null) {
     return redirectWithError(res, '/counters', 'invalid_id');
   }
 
-  try {
+  await runCounterWrite(res, { logLabel: 'Reset counter error:', errorCode: 'reset_failed' }, async () => {
     await resetCounterCurrentValue(guildId, parsedId);
-  } catch (err) {
-    if (err instanceof CounterNotFoundError) {
-      return redirectWithError(res, '/counters', 'counter_not_found');
-    }
-
-    return logAndRedirectError({ res, log, logLabel: 'Reset counter error:', err, basePath: '/counters', errorCode: 'reset_failed' });
-  }
-
-  res.redirect('/counters?reset=1');
+    return undefined;
+  }, '/counters?reset=1');
 });
 
 export default router;

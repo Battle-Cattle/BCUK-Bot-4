@@ -192,6 +192,27 @@ describe('executeHealthCommandForDiscord', () => {
     expect(dmText).toContain('timer: 🔴 failing');
   });
 
+  it('shows each failing state, its last error, and a dash for a time that never happened', async () => {
+    vi.mocked(getHealthSnapshot).mockReturnValue({
+      ...EMPTY_SNAPSHOT,
+      discordConnected: false,
+      twitchChatConnected: false,
+      db: { lastPingOk: false, lastPingAt: null, lastError: 'ECONNREFUSED' },
+      eventsub: {
+        streamerB: { connected: false, lastConnectedAt: null, lastDisconnectedAt: null, reconnectAttempts: 3, lastError: null },
+      },
+      monitor: { lastPollOk: false, lastPollAt: null, lastError: 'helix 503' },
+    } as any);
+    const message = makeMockMessage('!health', OWNER_ID);
+    await executeHealthCommandForDiscord(message as any);
+    const dmText = message.author.send.mock.calls[0]![0] as string;
+    expect(dmText).toContain('Discord: 🔴 disconnected');
+    expect(dmText).toContain('Twitch chat: 🔴 disconnected');
+    expect(dmText).toContain('DB: 🔴 failing (last ping —, last error: ECONNREFUSED)');
+    expect(dmText).toContain('streamerB: 🔴 disconnected (reconnect attempts: 3)');
+    expect(dmText).toContain('Monitor: 🔴 failing (last poll —, last error: helix 503)');
+  });
+
   it('truncates a summary that would otherwise exceed the Discord message limit', async () => {
     const manyEventSubEntries = Object.fromEntries(
       Array.from({ length: 100 }, (_, i) => [

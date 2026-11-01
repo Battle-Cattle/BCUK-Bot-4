@@ -4,7 +4,6 @@ vi.mock('../../db', () => ({ getStreamerByDiscordId: vi.fn(), DEFAULT_PRICING_CO
 
 import { getStreamerByDiscordId } from '../../db';
 import {
-  parseNonNegativeNumberField, parsePositiveNumberField,
   parseHexColorField, parseRoundToNearestField, parseRewardFields,
   effectiveCooldownSeconds, handleRewardDeleteAction,
 } from './channelPointsAdminShared';
@@ -63,66 +62,6 @@ describe('handleRewardDeleteAction', () => {
     await handleRewardDeleteAction(req, res, action, opts);
     expect(opts.log.error).toHaveBeenCalledWith(opts.errorLogLabel, expect.any(Error));
     expect(res.redirect).toHaveBeenCalledWith('/channel-points?error=delete_failed');
-  });
-});
-
-describe('parseNonNegativeNumberField', () => {
-  it('accepts zero', () => {
-    expect(parseNonNegativeNumberField('0')).toBe(0);
-  });
-
-  it('accepts a positive decimal', () => {
-    expect(parseNonNegativeNumberField('4.5')).toBe(4.5);
-  });
-
-  it('rejects a negative number', () => {
-    expect(parseNonNegativeNumberField('-1')).toBeNull();
-  });
-
-  it('rejects an array (repeated field)', () => {
-    expect(parseNonNegativeNumberField(['1', '2'])).toBeNull();
-  });
-
-  it('rejects undefined', () => {
-    expect(parseNonNegativeNumberField(undefined)).toBeNull();
-  });
-
-  it('rejects an empty string instead of silently coercing to 0', () => {
-    expect(parseNonNegativeNumberField('')).toBeNull();
-  });
-
-  it('rejects a whitespace-only string instead of silently coercing to 0', () => {
-    expect(parseNonNegativeNumberField('   ')).toBeNull();
-  });
-});
-
-describe('parsePositiveNumberField', () => {
-  it('accepts a positive decimal', () => {
-    expect(parsePositiveNumberField('1.5')).toBe(1.5);
-  });
-
-  it('rejects zero', () => {
-    expect(parsePositiveNumberField('0')).toBeNull();
-  });
-
-  it('rejects a negative number', () => {
-    expect(parsePositiveNumberField('-1')).toBeNull();
-  });
-
-  it('rejects an array (repeated field)', () => {
-    expect(parsePositiveNumberField(['1', '2'])).toBeNull();
-  });
-
-  it('rejects undefined', () => {
-    expect(parsePositiveNumberField(undefined)).toBeNull();
-  });
-
-  it('rejects an empty string instead of silently coercing to 0', () => {
-    expect(parsePositiveNumberField('')).toBeNull();
-  });
-
-  it('rejects a whitespace-only string instead of silently coercing to 0', () => {
-    expect(parsePositiveNumberField('   ')).toBeNull();
   });
 });
 
