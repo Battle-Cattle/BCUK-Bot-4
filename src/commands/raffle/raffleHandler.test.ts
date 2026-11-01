@@ -9,8 +9,8 @@ vi.mock('../../db', () => ({
 
 vi.mock('../customCommandHandler', () => ({ resolveSharedChatSessionId: vi.fn() }));
 
-const { logErrorSpy } = vi.hoisted(() => ({ logErrorSpy: vi.fn() }));
-vi.mock('../../shared/logger', () => ({ createLogger: () => ({ info: vi.fn(), error: logErrorSpy }) }));
+const { logErrorSpy, logInfoSpy } = vi.hoisted(() => ({ logErrorSpy: vi.fn(), logInfoSpy: vi.fn() }));
+vi.mock('../../shared/logger', () => ({ createLogger: () => ({ info: logInfoSpy, error: logErrorSpy }) }));
 
 import { adjustLoyaltyPointsBalance, getLoyaltyPointsConfig, isExcludedFromLoyaltyPoints } from '../../db';
 import { resolveSharedChatSessionId } from '../customCommandHandler';
@@ -155,6 +155,23 @@ describe('raffle lifecycle', () => {
     expect(SEND).toHaveBeenLastCalledWith('streamer', '🎉 Raffle over! 2 entries, 1 winner: @alice wins 1,000 points!');
   });
 
+  it('logs a single entrant as one entry', async () => {
+    await chat('streamer', '!raffle 100', true);
+    await chat('alice', '!join');
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(logInfoSpy).toHaveBeenCalledWith('Raffle in streamer drew 1 winner(s) from 1 entry.');
+  });
+
+  it('ignores !raffle and !join in a channel name that cannot be normalised', async () => {
+    const message = (text: string) => ({
+      channel: 'not a channel!', streamerId: 7, message: text, userLogin: 'streamer', command: text.split(' ')[0]!, isBroadcaster: true,
+    });
+    await executeRaffleCommandForTwitch(message('!raffle 100'));
+    await executeRaffleCommandForTwitch(message('!join'));
+    expect(SEND).not.toHaveBeenCalled();
+    expect(isExcludedFromLoyaltyPoints).not.toHaveBeenCalled();
+  });
+
   it('splits the prize between several winners', async () => {
     await chat('streamer', '!raffle 100', true);
     for (const user of ['a', 'b', 'c', 'd', 'e', 'f', 'g']) await chat(user, '!join');
@@ -234,6 +251,32 @@ describe('startRaffle', () => {
     SEND.mockRejectedValueOnce(new Error('not connected'));
     expect(await startRaffle('streamer', 7, 100)).toBe('chat_unavailable');
     expect(await startRaffle('streamer', 7, 100)).toBe('ok');
+  });
+
+  it('leaves a newer raffle open when an older one\'s announcement fails after being cancelled', async () => {
+    let failFirst: (err: Error) => void = () => undefined;
+    SEND.mockReturnValueOnce(new Promise((_resolve, reject) => { failFirst = reject; }));
+    const first = startRaffle('streamer', 7, 100);
+    await vi.advanceTimersByTimeAsync(0);
+    stopAllRaffles();
+    expect(await startRaffle('streamer', 7, 200)).toBe('ok');
+    failFirst(new Error('not connected'));
+    expect(await first).toBe('chat_unavailable');
+    expect(await startRaffle('streamer', 7, 300)).toBe('already_running');
+  });
+
+  it('skips the shared-chat lookup for a channel with no known Twitch user id', async () => {
+    expect(await startRaffle('other', 7, 100)).toBe('ok');
+    expect(resolveSharedChatSessionId).not.toHaveBeenCalled();
+    expect(SEND.mock.calls[0]![1]).not.toMatch(/shared chat/i);
+  });
+
+  it('returns chat_unavailable when no Twitch runtime has been registered', async () => {
+    vi.resetModules();
+    const fresh = await import('./raffleHandler.js');
+    expect(await fresh.startRaffle('streamer', 7, 100)).toBe('chat_unavailable');
+    expect(logErrorSpy).toHaveBeenCalledWith('[Twitch] Failed to announce raffle in streamer:', expect.any(Error));
+    expect(await fresh.startRaffle('streamer', 7, 100)).toBe('chat_unavailable');
   });
 
   it('returns chat_unavailable for an invalid channel name', async () => {

@@ -173,6 +173,19 @@ describe('joinTwitchChannel', () => {
     expect(getActiveChannels().has('alice')).toBe(true);
   });
 
+  it('logs, without failing the join, when caching the channel user ID fails', async () => {
+    const client = makeMockClient();
+    setChatClient(client as any);
+    setConnected(true);
+    vi.mocked(getUsers).mockRejectedValue(new Error('helix down'));
+
+    await joinTwitchChannel('alice');
+    await flushMicrotasks();
+
+    expect(getActiveChannels().has('alice')).toBe(true);
+    expect(mockLog.warn).toHaveBeenCalledWith('Failed to cache user ID for channel alice:', expect.any(Error));
+  });
+
   it('caches the channel user ID when the channel is already joined', async () => {
     const client = makeMockClient(['alice']);
     setChatClient(client as any);
@@ -568,7 +581,8 @@ describe('reconcileJoinedChannels', () => {
     const client = makeMockClient(['stale', 'other']);
     setChatClient(client as any);
     setConnected(true);
-    client.part.mockImplementation(async (channel: string) => {
+    // Twurple's part() is synchronous, so a failure is a throw, not a rejected promise.
+    client.part.mockImplementation((channel: string) => {
       if (channel === 'stale') throw new Error('part failed');
     });
 
@@ -578,7 +592,26 @@ describe('reconcileJoinedChannels', () => {
 
     expect(client.part).toHaveBeenCalledWith('stale');
     expect(client.part).toHaveBeenCalledWith('other');
+    expect(mockLog.error).toHaveBeenCalledWith('Failed to part stale channel stale:', expect.any(Error));
     expect(vi.mocked(setTwitchChannel)).toHaveBeenCalledWith('other', false);
+    expect(vi.mocked(setTwitchChannel)).not.toHaveBeenCalledWith('stale', false);
+  });
+
+  it('stops parting over the network once the connection drops mid-reconcile', async () => {
+    const client = makeMockClient(['first', 'second']);
+    setChatClient(client as any);
+    setConnected(true);
+    client.part.mockImplementation((channel: string) => {
+      if (channel === 'first') setConnected(false);
+    });
+
+    const p = reconcileJoinedChannels();
+    await vi.runAllTimersAsync();
+    await p;
+
+    expect(client.part).toHaveBeenCalledOnce();
+    expect(vi.mocked(setTwitchChannel)).toHaveBeenCalledWith('first', false);
+    expect(vi.mocked(setTwitchChannel)).toHaveBeenCalledWith('second', false);
   });
 
   it('refreshes status to online for a joined channel that is still in activeChannels', async () => {
@@ -609,6 +642,68 @@ describe('reconcileJoinedChannels', () => {
 
     expect(client.join).toHaveBeenCalledWith('alice');
     expect(vi.mocked(setTwitchChannel)).toHaveBeenCalledWith('alice', true);
+  });
+
+  it('queues the remaining channels offline, without applying a stale join, once the connection drops mid-reconcile', async () => {
+    const client = makeMockClient([]);
+    setChatClient(client as any);
+    setConnected(false);
+    await joinTwitchChannel('alice');
+    await joinTwitchChannel('carol');
+    setConnected(true);
+    const hook = vi.fn();
+    setChannelJoinedHook(hook);
+    client.join.mockImplementation(async (channel: string) => {
+      if (channel === 'alice') setConnected(false);
+    });
+    vi.mocked(setTwitchChannel).mockClear();
+
+    const p = reconcileJoinedChannels();
+    await vi.runAllTimersAsync();
+    await p;
+
+    expect(client.join).toHaveBeenCalledExactlyOnceWith('alice');
+    expect(hook).not.toHaveBeenCalled();
+    expect(vi.mocked(setTwitchChannel)).not.toHaveBeenCalledWith('alice', true);
+    expect(vi.mocked(setTwitchChannel)).toHaveBeenCalledWith('carol', false);
+  });
+
+  it('does not re-join a channel whose in-flight join finished while reconcile waited behind it', async () => {
+    const client = makeMockClient([]);
+    setChatClient(client as any);
+    setConnected(true);
+    const join = deferred();
+    client.join.mockReturnValueOnce(join.promise);
+    const firstJoin = joinTwitchChannel('alice');
+    await flushMicrotasks();
+
+    const reconcile = reconcileJoinedChannels();
+    join.resolve();
+    await vi.runAllTimersAsync();
+    await Promise.all([firstJoin, reconcile]);
+
+    expect(client.join).toHaveBeenCalledOnce();
+    expect(vi.mocked(setTwitchChannel)).toHaveBeenLastCalledWith('alice', true);
+  });
+
+  it('skips a channel whose in-flight join failed and was rolled back while reconcile waited behind it', async () => {
+    const client = makeMockClient([]);
+    setChatClient(client as any);
+    setConnected(true);
+    const join = deferred();
+    client.join.mockReturnValueOnce(join.promise);
+    const firstJoin = joinTwitchChannel('alice');
+    const firstJoinFailure = expect(firstJoin).rejects.toThrow('join failed');
+    await flushMicrotasks();
+
+    const reconcile = reconcileJoinedChannels();
+    join.reject(new Error('join failed'));
+    await vi.runAllTimersAsync();
+    await firstJoinFailure;
+    await reconcile;
+
+    expect(client.join).toHaveBeenCalledOnce();
+    expect(getActiveChannels().has('alice')).toBe(false);
   });
 
   it('continues reconciling other channels when one fails to join', async () => {
