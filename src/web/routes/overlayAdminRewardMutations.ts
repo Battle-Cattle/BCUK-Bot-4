@@ -3,17 +3,17 @@ import { Router } from 'express';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import { saveRewardWithVideos, deleteReward } from '../../db';
-import { MAX_INT_COLUMN_VALUE, parseIntField, parsePositiveIntId, parseRewardIdParam, trimField, toStringArray } from './validation';
+import { parseIntField, parsePositiveIntId, parseRewardIdParam, trimField, toStringArray } from './validation';
 import { requireStreamer } from './viewHelpers';
 import { logAndRedirectError } from './errorHandling';
-import { NOT_A_STREAMER_REDIRECT } from './overlayAdminShared';
+import { MAX_OVERLAY_VIDEO_WEIGHT, NOT_A_STREAMER_REDIRECT } from './overlayAdminShared';
 
 const log = createLogger('OverlayAdminReward');
 export const router = Router();
 
 /**
  * Reads each selected video's `weight_<videoId>` field. A blank or missing weight means 1; anything
- * else must be a whole number from 1 up to what the `INT` column holds.
+ * else must be a whole number from 1 to {@link MAX_OVERLAY_VIDEO_WEIGHT}.
  * @param body - The submitted form body.
  * @param videoIds - The selected video ids.
  * @returns Each video with its weight, or null if any weight isn't a valid whole number.
@@ -25,7 +25,7 @@ function parseVideoWeights(
   const videos: { videoId: number; weight: number }[] = [];
   for (const videoId of videoIds) {
     const raw = body[`weight_${videoId}`];
-    const weight = raw === undefined || raw === '' ? 1 : parseIntField(raw, 1, MAX_INT_COLUMN_VALUE);
+    const weight = raw === undefined || raw === '' ? 1 : parseIntField(raw, 1, MAX_OVERLAY_VIDEO_WEIGHT);
     if (weight === null) return null;
     videos.push({ videoId, weight });
   }
@@ -41,7 +41,7 @@ function parseVideoWeights(
  *   on success, or to `/overlay/settings?error=<code>` if the requester isn't a
  *   streamer (`not_a_streamer`), the reward ID isn't a valid UUID
  *   (`invalid_reward_id`), no videos were selected (`no_videos_selected`), a weight
- *   isn't a whole number of at least 1 (`invalid_weight`), or
+ *   isn't a whole number from 1 to {@link MAX_OVERLAY_VIDEO_WEIGHT} (`invalid_weight`), or
  *   saving fails (`save_failed`).
  */
 router.post('/settings/rewards', requireAuth, csrfProtection, async (req, res) => {

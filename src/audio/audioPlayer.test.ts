@@ -562,6 +562,7 @@ describe('reconnect', () => {
       const voice = await import('@discordjs/voice');
       vi.mocked(voice.entersState).mockRejectedValueOnce(new Error('ready timeout'));
       await expect(mod.connect(client as never, 'guild-A', 'chan-1')).rejects.toThrow('ready timeout');
+      expect(log.warn).toHaveBeenCalledWith(expect.stringContaining('Scheduling voice rejoin for guild guild-A in 5000ms'));
 
       // A newer connect() is still waiting on Ready when the rejoin timer would have fired.
       let finishReady!: () => void;

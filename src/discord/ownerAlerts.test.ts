@@ -332,11 +332,17 @@ describe('ownerAlerts', () => {
   });
 
   it('registers its health listener only once, however many times it is started', async () => {
-    const spy = vi.spyOn(healthStore, 'onHealthChanged');
-    startOwnerAlertWatcher();
-    startOwnerAlertWatcher();
-    expect(spy).not.toHaveBeenCalled();
-    spy.mockRestore();
+    // A fresh module pair, so the first start is observed (beforeEach already started the shared one)
+    // and the listener it adds stays off the healthStore the other tests use.
+    vi.resetModules();
+    const freshHealthStore = await import('../shared/healthStore.js');
+    const spy = vi.spyOn(freshHealthStore, 'onHealthChanged');
+    const fresh = await import('./ownerAlerts.js');
+
+    fresh.startOwnerAlertWatcher();
+    fresh.startOwnerAlertWatcher();
+
+    expect(spy).toHaveBeenCalledOnce();
   });
 
   it('drops a "down" DM that was waiting on the runtime when the component recovered meanwhile', async () => {

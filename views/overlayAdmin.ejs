@@ -21,7 +21,7 @@
         delete_failed:    'Delete failed — please try again.',
         invalid_reward_id:'Invalid reward ID format. Paste the UUID from your Twitch dashboard.',
         no_videos_selected:'Select at least one video to assign to the reward.',
-        invalid_weight:   'Each video weight must be a whole number of at least 1.',
+        invalid_weight:   `Each video weight must be a whole number from 1 to ${maxVideoWeight}.`,
         save_failed:      'Failed to save — please try again.',
         invalid_id:       'Invalid request.',
         file_too_large:   `That file is too large (max ${maxFileMb} MB).`,
@@ -188,7 +188,7 @@
                 </label>
                 <div class="flex-1 d-flex items-center gap-04">
                   <span class="hint hint-compact nowrap">Weight</span>
-                  <input class="input w-5rem" type="number" name="weight_<%= v.id %>" value="1" min="1" max="100" step="1">
+                  <input class="input w-5rem" type="number" name="weight_<%= v.id %>" value="1" min="1" max="<%= maxVideoWeight %>" step="1">
                 </div>
               </div>
               <% } %>

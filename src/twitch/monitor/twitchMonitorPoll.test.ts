@@ -93,6 +93,7 @@ describe('handlePollStreamer', () => {
 
     expect(postAnnouncement).toHaveBeenCalledOnce();
     expect(editAnnouncement).not.toHaveBeenCalled();
+    expect(mockLog.info).not.toHaveBeenCalled();
   });
 
   it('edits with new_game_message when the game changes', async () => {
