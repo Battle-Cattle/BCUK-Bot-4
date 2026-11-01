@@ -18,8 +18,21 @@ Do this once per session before `npm install`/`npm ci`/`npm test`/etc. — don't
 ## ALWAYS: Before Committing
 
 ```bash
-npx tsc --noEmit && npm test
+npm run typecheck && npm test
 ```
+
+Not `npx tsc` — see "TypeScript 6 + 7" below for why the bare `tsc` command is ambiguous here.
+
+## TypeScript 6 + 7
+
+The project is installed with two TypeScript versions side by side:
+
+- **`typescript7`** (`npm:typescript@7.0.2`, the native Go compiler) does all type-checking and building: `npm run typecheck` and `npm run build` (so `deploy.sh` and CI too). About 5× faster than 6.x on this project, with less memory.
+- **`typescript`** (6.x) stays the package that tools load as a library: typescript-eslint, eslint-plugin-sonarjs, madge and ts-node (`npm run dev`). TypeScript 7.x no longer exposes the JS compiler API (`require('typescript')` returns only `version`), and these tools still need it — typescript-eslint's peer range is `<6.1.0`, and ts-node crashes on 7.x ([TypeStrong/ts-node#2174](https://github.com/TypeStrong/ts-node/issues/2174)). A nested `overrides` entry can't give them their own copy, because a peer dependency always resolves to the root `typescript`. Dependabot ignores `typescript` major updates for the same reason.
+
+Both packages ship a `tsc` bin and which one npm links depends on how it installed (`npm i` and `npm ci` disagree), so `npx tsc`/`node_modules/.bin/tsc` may be either version. Scripts call the 7.x compiler by path (`node node_modules/typescript7/bin/tsc`); `src/shared/typescriptToolchain.test.ts` holds that in place.
+
+**Moving `typescript` itself to 7.x** once typescript-eslint, sonarjs and madge support it: drop the `typescript7` alias, point the scripts back at plain `tsc`, remove the Dependabot ignore, and keep ts-node working by adding `@typescript/typescript6` (the TypeScript team's package of the 6.x API) and running it with `TS_NODE_COMPILER=@typescript/typescript6` in `dev` and `register({ compiler: require.resolve('@typescript/typescript6') })` in the toolchain test (`require.resolve` is also what lets knip see the package as used) — or replace ts-node.
 
 ---
 
@@ -56,7 +69,7 @@ Tests run in Vitest's `vmThreads` pool (each file gets a fresh VM context on a r
 - **Runtime:** discord.js v14, `@twurple/chat` + `@twurple/auth` (Twitch chat), `mediaplex` (Opus), express v5 + `express-session`/`express-mysql-session`, `mysql2`, `helmet`, `winston`.
 - **TypeScript:** `strict: true` plus `noUncheckedIndexedAccess` (so `rows[0]` is `T | undefined` — guard it, or use `!` only where a nearby check guarantees it, with a comment saying which), target ES2024, `moduleResolution: NodeNext`. `package.json` pins `"engines": { "node": ">=24.22.1" }` — see Node/npm version above.
 - **ESLint** (flat config, type-aware): `no-floating-promises`, `no-misused-promises`, and `no-console` are all **errors**, not warnings — these affect how code must be written (await/void everything, use `logger` not `console.*`). `no-explicit-any` is a warning; relaxed for `*.test.ts`. `eslint-plugin-jsdoc` enforces the Docstrings rule below (`require-jsdoc` on function declarations, methods and module-level arrow functions, in `src/` and the `public/` browser scripts alike; `require-param`/`require-returns`, with descriptions, for what each documented function takes and returns; `check-param-names` catches stale `@param`s), `eslint-plugin-sonarjs` adds complexity checks on source files (`sonarjs/cognitive-complexity` ≤ 15, the same metric as Qlty's function-complexity smell, plus cyclomatic `complexity` ≤ 12, `max-params` 5, `max-depth` 3, `max-nested-callbacks` 3, all errors), and `@vitest/eslint-plugin` guards tests (no `.only`/`.skip`, no assertion-free tests). The browser scripts in `public/` (classic `<script>`s, no bundler) are linted too, with browser globals: a name a script uses from another script on the same page goes in a `/* global name */` header at its top (`name:writable` if it assigns to it).
-- **Test/build scripts:** `npm run build` (`tsc -p tsconfig.build.json`), `npm run lint`, `npm run check:circular` (madge), `npm run check:unused` (knip: unused files, exports and dependencies; `knip.json`). An export used only in its own file is fine; an alias of another export needs an `@alias` JSDoc tag.
+- **Test/build scripts:** `npm run build` (`tsc -p tsconfig.build.json`, on TypeScript 7), `npm run typecheck` (`tsc --noEmit`, the whole project including tests, on TypeScript 7), `npm run lint`, `npm run check:circular` (madge), `npm run check:unused` (knip: unused files, exports and dependencies; `knip.json`). An export used only in its own file is fine; an alias of another export needs an `@alias` JSDoc tag.
 
 ---
 
