@@ -10,11 +10,21 @@ const makeUser = (accessLevel: number, isOwner = false) => ({
   discordId: '123', discordName: 'Someone', accessLevel, isOwner, currentGuildId: null, guilds: [],
 });
 
-/** The top-level menu entries (group labels and plain links) in render order, from the `.navbar-menu` only. */
+/** Strips every dropdown's contents (`nav-group-items`) so only top-level entries are left. */
+function withoutDropdownItems(menu: string): string {
+  return menu.replace(/<div class="nav-group-items">[\s\S]*?<\/div>/g, '');
+}
+
+/** The `.navbar-menu` part of the rendered nav (excluding `navbar-end`). */
+function menuOf(html: string): string {
+  return html.slice(html.indexOf('class="navbar-menu"'), html.indexOf('class="navbar-end"'));
+}
+
+/** The top-level menu entries (group labels and plain links) in render order, at any indentation. */
 function topLevelLabels(html: string): string[] {
-  const menu = html.slice(html.indexOf('class="navbar-menu"'), html.indexOf('class="navbar-end"'));
+  const menu = withoutDropdownItems(menuOf(html));
   const labels: string[] = [];
-  const re = /<button class="nav-group-label"[^>]*>([^<]+?)\s*<span|^ {6}<a href="[^"]+" class="nav-item">([^<]+)<\/a>/gm;
+  const re = /<button class="nav-group-label"[^>]*>([^<]+?)\s*<span|<a href="[^"]+" class="nav-item">([^<]+)<\/a>/g;
   for (const m of menu.matchAll(re)) labels.push((m[1] ?? m[2])!.trim());
   return labels;
 }
@@ -27,13 +37,17 @@ describe('views/partials/nav.ejs ordering', () => {
     ]);
   });
 
-  it('groups Channel Points and Loyalty Points under Viewer Rewards', async () => {
+  it('puts Channel Points and Loyalty Points inside the Viewer Rewards dropdown', async () => {
     const html = await renderNav(makeUser(0));
-    const groupStart = html.indexOf('Viewer Rewards');
-    const groupEnd = html.indexOf('Devices');
-    const group = html.slice(groupStart, groupEnd);
-    expect(group).toContain('href="/channel-points"');
-    expect(group).toContain('href="/loyalty-points"');
+    const menu = menuOf(html);
+    const labelAt = menu.indexOf('Viewer Rewards');
+    const itemsStart = menu.indexOf('<div class="nav-group-items">', labelAt);
+    const dropdown = menu.slice(itemsStart, menu.indexOf('</div>', itemsStart));
+    expect(dropdown).toContain('href="/channel-points"');
+    expect(dropdown).toContain('href="/loyalty-points"');
+    // Neither link may also sit at the top level, outside the dropdown.
+    expect(withoutDropdownItems(menu)).not.toContain('href="/channel-points"');
+    expect(withoutDropdownItems(menu)).not.toContain('href="/loyalty-points"');
   });
 
   it('ends with Settings and shows no Admin menu for a plain user', async () => {
