@@ -172,6 +172,16 @@ describe('raffle lifecycle', () => {
     expect(isExcludedFromLoyaltyPoints).not.toHaveBeenCalled();
   });
 
+  it('does not enter a !join sent from a malformed variant of the open raffle\'s channel', async () => {
+    await chat('streamer', '!raffle 100', true);
+    await executeRaffleCommandForTwitch({
+      channel: 'streamer!', streamerId: 7, message: '!join', userLogin: 'alice', command: '!join', isBroadcaster: false,
+    });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(adjustLoyaltyPointsBalance).not.toHaveBeenCalled();
+    expect(SEND).toHaveBeenLastCalledWith('streamer', 'Raffle over. Nobody entered, so no points were given out.');
+  });
+
   it('splits the prize between several winners', async () => {
     await chat('streamer', '!raffle 100', true);
     for (const user of ['a', 'b', 'c', 'd', 'e', 'f', 'g']) await chat(user, '!join');

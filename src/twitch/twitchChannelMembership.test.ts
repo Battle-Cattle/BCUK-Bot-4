@@ -666,6 +666,7 @@ describe('reconcileJoinedChannels', () => {
     expect(hook).not.toHaveBeenCalled();
     expect(vi.mocked(setTwitchChannel)).not.toHaveBeenCalledWith('alice', true);
     expect(vi.mocked(setTwitchChannel)).toHaveBeenCalledWith('carol', false);
+    expect(getActiveChannels().has('carol')).toBe(true);
   });
 
   it('does not re-join a channel whose in-flight join finished while reconcile waited behind it', async () => {
