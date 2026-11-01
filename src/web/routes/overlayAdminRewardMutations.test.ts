@@ -105,6 +105,31 @@ describe('POST /settings/rewards', () => {
     );
   });
 
+  it('saves a blank or missing weight as 1', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    vi.mocked(saveRewardWithVideos).mockResolvedValue(42);
+    const res = await supertest(buildApp())
+      .post('/settings/rewards')
+      .type('form')
+      .send({ twitch_reward_id: '12345678-1234-1234-8234-123456789abc', video_ids: ['7', '8'], weight_7: '' });
+    expect(res.headers.location).toBe('/overlay/settings?success=reward_saved');
+    expect(vi.mocked(saveRewardWithVideos)).toHaveBeenCalledWith(
+      MOCK_STREAMER.id,
+      '12345678-1234-1234-8234-123456789abc',
+      [{ videoId: 7, weight: 1 }, { videoId: 8, weight: 1 }],
+    );
+  });
+
+  it.each(['1.5', '0', '-2', 'abc', '2147483648'])('rejects a weight of %j with invalid_weight, without saving', async (weight) => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    const res = await supertest(buildApp())
+      .post('/settings/rewards')
+      .type('form')
+      .send({ twitch_reward_id: '12345678-1234-1234-8234-123456789abc', video_ids: ['7'], weight_7: weight });
+    expect(res.headers.location).toBe('/overlay/settings?error=invalid_weight');
+    expect(vi.mocked(saveRewardWithVideos)).not.toHaveBeenCalled();
+  });
+
   it('redirects with save_failed when the atomic save throws (e.g. a video not owned by the streamer)', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
     vi.mocked(saveRewardWithVideos).mockRejectedValue(new Error('Video 999 does not belong to streamer 123'));
