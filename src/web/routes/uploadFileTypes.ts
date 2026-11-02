@@ -100,18 +100,42 @@ export function detectImageType(buf: Buffer): 'png' | 'gif' | 'jpeg' | 'webp' | 
   return null;
 }
 
+const FTYP_MAGIC = Buffer.from('ftyp', 'ascii');
+const QUICKTIME_BRAND = Buffer.from('qt  ', 'ascii');
+
+/**
+ * Top-level atom types an older QuickTime file (one written without an `ftyp` box) can start
+ * with. MP4 always starts with `ftyp`, so these only identify QuickTime.
+ */
+const LEGACY_QUICKTIME_FIRST_ATOMS = new Set(['moov', 'mdat', 'wide', 'free', 'skip', 'pnot']);
+
+/**
+ * True if `buf` looks like a QuickTime (.mov) file: an `ftyp` box whose major brand is `qt  `,
+ * or, for files written without `ftyp`, a first atom that only QuickTime starts with.
+ * @param buf - Uploaded file bytes.
+ * @returns True when the bytes are a QuickTime movie.
+ */
+function isQuickTime(buf: Buffer): boolean {
+  if (startsWithBytes(buf, FTYP_MAGIC, 4)) return startsWithBytes(buf, QUICKTIME_BRAND, 8);
+  return buf.length >= 8 && LEGACY_QUICKTIME_FIRST_ATOMS.has(buf.subarray(4, 8).toString('latin1'));
+}
+
 /**
  * Detect video type from buffer magic bytes, independent of the client-supplied MIME type.
  * WebM: EBML header 0x1A 0x45 0xDF 0xA3
+ * MOV: see {@link isQuickTime} (checked before MP4, which shares the `ftyp` box)
  * MP4: ftyp box signature at bytes 4–7: 0x66 0x74 0x79 0x70
  * @param buf - Uploaded file bytes.
- * @returns The detected format, or null when it is neither.
+ * @returns The detected format, or null when it is none of them.
  */
-export function detectVideoType(buf: Buffer): 'webm' | 'mp4' | null {
+export function detectVideoType(buf: Buffer): 'webm' | 'mp4' | 'mov' | null {
   if (buf.subarray(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]))) {
     return 'webm';
   }
-  if (buf.subarray(4, 8).equals(Buffer.from([0x66, 0x74, 0x79, 0x70]))) {
+  if (isQuickTime(buf)) {
+    return 'mov';
+  }
+  if (startsWithBytes(buf, FTYP_MAGIC, 4)) {
     return 'mp4';
   }
   return null;

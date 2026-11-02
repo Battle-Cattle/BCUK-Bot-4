@@ -145,6 +145,22 @@ describe('detectVideoType', () => {
     expect(detectVideoType(Buffer.from([0x00, 0x00, 0x00, 0x1c, 0x66, 0x74, 0x79, 0x70]))).toBe('mp4');
   });
 
+  it('detects MOV by an ftyp box with the QuickTime brand', () => {
+    expect(detectVideoType(Buffer.from([0x00, 0x00, 0x00, 0x14, ...Buffer.from('ftypqt  ', 'ascii')]))).toBe('mov');
+  });
+
+  it('detects an MP4 whose ftyp brand is not QuickTime as MP4', () => {
+    expect(detectVideoType(Buffer.from([0x00, 0x00, 0x00, 0x1c, ...Buffer.from('ftypisom', 'ascii')]))).toBe('mp4');
+  });
+
+  it.each(['moov', 'mdat', 'wide', 'free', 'skip', 'pnot'])('detects an older MOV with no ftyp box that starts with a %s atom', (atom) => {
+    expect(detectVideoType(Buffer.from([0x00, 0x00, 0x00, 0x08, ...Buffer.from(atom, 'ascii')]))).toBe('mov');
+  });
+
+  it('does not treat an unknown first atom as MOV', () => {
+    expect(detectVideoType(Buffer.from([0x00, 0x00, 0x00, 0x08, ...Buffer.from('abcd', 'ascii')]))).toBeNull();
+  });
+
   it('returns null for unrecognised bytes', () => {
     expect(detectVideoType(Buffer.from('not a video'))).toBeNull();
   });

@@ -9,7 +9,8 @@
     <div class="card card-alert-danger">
       <% const errorMessages = {
         not_a_streamer:   'You are not configured as a monitored streamer.',
-        invalid_file:     'No valid file was uploaded. Accepted formats: WebM, MP4.',
+        invalid_file:     'No valid file was uploaded. Accepted formats: WebM, MP4, MOV.',
+        transcode_failed: 'The MOV file could not be converted to WebM. Check it plays locally, or export it as WebM.',
         upload_failed:    'Upload failed — please try again.',
         delete_failed:    'Delete failed — please try again.',
         invalid_reward_id:'Invalid reward ID format. Paste the UUID from your Twitch dashboard.',
@@ -57,14 +58,14 @@
                 <input id="video-name" class="input" type="text" name="name" maxlength="100" placeholder="e.g. Confetti Explosion">
               </div>
               <div class="flex-1">
-                <label class="hint hint-compact" for="video-file">Video file (WebM or MP4)</label>
-                <input id="video-file" class="input" type="file" name="video" accept="video/webm,video/mp4" required>
+                <label class="hint hint-compact" for="video-file">Video file (WebM, MP4 or MOV)</label>
+                <input id="video-file" class="input" type="file" name="video" accept="video/webm,video/mp4,video/quicktime,.mov" required>
               </div>
               <div>
                 <button type="submit" class="btn">Upload</button>
               </div>
             </div>
-            <p class="hint mt-04">WebM with alpha channel recommended for transparent overlays. Max <%= maxFileMb %> MB.</p>
+            <p class="hint mt-04">For transparent overlays, upload WebM with an alpha channel or a MOV (e.g. ProRes 4444): MOV files are converted to WebM on upload, keeping transparency, which can take a minute. Max <%= maxFileMb %> MB.</p>
           </form>
         </div>
       </div>
