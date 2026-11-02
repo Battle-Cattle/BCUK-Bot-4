@@ -210,13 +210,14 @@ describe('POST /settings/videos/upload', () => {
       .attach('video', MOV_BUF, { filename: 'clip.mov', contentType: 'video/quicktime' });
     expect(res.headers.location).toBe('/overlay/settings?success=video_uploaded');
     const sourcePath = vi.mocked(fs.promises.writeFile).mock.calls[0]![0] as string;
-    expect(sourcePath).toMatch(/^\/app\/overlay-videos\/123\/[0-9a-f-]+\.mov\.upload$/);
+    // path.join uses the platform's separator, so accept either.
+    expect(sourcePath).toMatch(/^[\\/]app[\\/]overlay-videos[\\/]123[\\/][0-9a-f-]+\.mov\.upload$/);
     expect(vi.mocked(fs.promises.writeFile).mock.calls[0]![1]).toEqual(MOV_BUF);
     const outputPath = sourcePath.replace(/\.mov\.upload$/, '.webm');
     expect(vi.mocked(transcodeToWebm)).toHaveBeenCalledWith(sourcePath, outputPath);
     expect(vi.mocked(fs.promises.rm)).toHaveBeenCalledWith(sourcePath, { force: true });
     expect(vi.mocked(fs.promises.rm)).not.toHaveBeenCalledWith(outputPath, expect.anything());
-    expect(vi.mocked(addVideo)).toHaveBeenCalledWith(MOCK_STREAMER.id, 'Transparent Clip', outputPath.split('/').at(-1));
+    expect(vi.mocked(addVideo)).toHaveBeenCalledWith(MOCK_STREAMER.id, 'Transparent Clip', outputPath.split(/[\\/]/).at(-1));
   });
 
   it('redirects with transcode_failed and removes both files when the MOV conversion fails', async () => {
