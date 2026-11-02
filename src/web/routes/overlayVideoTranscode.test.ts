@@ -113,3 +113,17 @@ describe('transcodeToWebm', () => {
     await expect(secondPromise).resolves.toBeUndefined();
   });
 });
+
+describe('transcodeToWebm without an ffmpeg binary', () => {
+  it('rejects without spawning when ffmpeg-static has no binary for this platform', async () => {
+    vi.resetModules();
+    vi.doMock('ffmpeg-static', () => ({ default: null }));
+    try {
+      const { transcodeToWebm: transcodeWithoutFfmpeg } = await import('./overlayVideoTranscode.js');
+      await expect(transcodeWithoutFfmpeg('/in', '/out')).rejects.toThrow('ffmpeg-static returned no path');
+      expect(spawn).not.toHaveBeenCalled();
+    } finally {
+      vi.doUnmock('ffmpeg-static');
+    }
+  });
+});
