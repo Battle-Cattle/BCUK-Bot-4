@@ -65,6 +65,18 @@ const RESERVED_RENDER_DATA_KEYS = new Set([
 ]);
 
 /**
+ * Whether `value` is a plain object: an object literal (prototype `Object.prototype`) or one made
+ * with `Object.create(null)`. Arrays, class instances (e.g. `Date`, `Map`) and primitives are not.
+ * @param value - The value to check.
+ * @returns True for a plain object, narrowing `value` to `object`.
+ */
+function isPlainObject(value: unknown): value is object {
+  if (typeof value !== 'object' || value === null) return false;
+  const proto: unknown = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+/**
  * Renders an EJS view after checking `view` against the actual `.ejs` files present
  * under `views/`. Throws if `view` isn't a real template, so a template name can never
  * be attacker-controlled or silently mistyped. Also validates `data`: it must be a plain
@@ -74,7 +86,8 @@ const RESERVED_RENDER_DATA_KEYS = new Set([
  * @param res - Express response object.
  * @param view - Name of the view to render (without the `.ejs` extension).
  * @param data - Template data: a plain object of template variables, forwarded to `res.render`
- *   unchanged once validated. Anything else (array, primitive, `null`) throws.
+ *   unchanged once validated. Anything else (array, class instance such as a `Date`, primitive,
+ *   `null`) throws.
  */
 export function renderView(res: Response, view: string, data?: unknown): void {
   if (!getKnownViews().has(view)) {
@@ -82,8 +95,8 @@ export function renderView(res: Response, view: string, data?: unknown): void {
   }
   if (data !== undefined) {
     // Typed `unknown` so this guard is a real check: it narrows `data` to a plain object and
-    // also catches a caller passing loosely-typed (`any`) data.
-    if (typeof data !== 'object' || data === null || Array.isArray(data)) {
+    // also catches a caller passing loosely-typed (`any`) data or a class instance such as a Date.
+    if (!isPlainObject(data)) {
       throw new Error('renderView: data must be a plain object');
     }
     for (const key of Object.keys(data)) {

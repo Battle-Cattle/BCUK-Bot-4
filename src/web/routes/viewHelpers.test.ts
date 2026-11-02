@@ -90,6 +90,19 @@ describe('renderView', () => {
     expect(render).not.toHaveBeenCalled();
   });
 
+  it('throws when data is a class instance such as a Date, without rendering', () => {
+    const { res, render } = mockRes();
+    expect(() => renderView(res, 'error', new Date(0))).toThrow(/plain object/);
+    expect(render).not.toHaveBeenCalled();
+  });
+
+  it('accepts a null-prototype object', () => {
+    const { res, render } = mockRes();
+    const data = Object.assign(Object.create(null) as Record<string, unknown>, { message: 'hi' });
+    renderView(res, 'error', data);
+    expect(render).toHaveBeenCalledWith('error', data);
+  });
+
   it('throws when data is not a plain object', () => {
     const { res } = mockRes();
     expect(() => renderView(res, 'error', [1, 2, 3])).toThrow(
