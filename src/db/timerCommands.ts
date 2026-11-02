@@ -136,6 +136,24 @@ export async function getAllTimerCommandsWithAssignments(): Promise<DbTimerComma
   return Array.from(timerMap.values());
 }
 
+/** Updates every editable field of one `timer_command` row; params are {@link timerFieldParams} then the id. */
+const UPDATE_TIMER_FIELDS_SQL = `UPDATE timer_command
+  SET name = ?, message = ?, interval_seconds = ?, min_messages = ?, require_live = ?, enabled = ?
+  WHERE id = ?`;
+
+/**
+ * The bound parameters for a timer's editable columns, in the column order the insert and
+ * {@link UPDATE_TIMER_FIELDS_SQL} use, with the booleans as `1`/`0` bits.
+ * @param input - The timer's fields.
+ * @returns name, message, interval_seconds, min_messages, require_live, enabled.
+ */
+function timerFieldParams(input: TimerCommandInput): [string, string, number, number, 0 | 1, 0 | 1] {
+  return [
+    input.name, input.message, input.intervalSeconds, input.minMessages,
+    input.requireLive ? 1 : 0, input.enabled ? 1 : 0,
+  ];
+}
+
 /**
  * Creates a new timer command.
  * @param input - The timer's fields.
@@ -145,10 +163,7 @@ export async function addTimerCommand(input: TimerCommandInput): Promise<number>
   const [result] = await getPool().execute<mysql.ResultSetHeader>(
     `INSERT INTO timer_command (name, message, interval_seconds, min_messages, require_live, enabled)
      VALUES (?, ?, ?, ?, ?, ?)`,
-    [
-      input.name, input.message, input.intervalSeconds, input.minMessages,
-      input.requireLive ? 1 : 0, input.enabled ? 1 : 0,
-    ],
+    timerFieldParams(input),
   );
   return result.insertId;
 }
@@ -161,13 +176,8 @@ export async function addTimerCommand(input: TimerCommandInput): Promise<number>
  */
 export async function updateTimerCommand(id: number, input: TimerCommandInput): Promise<void> {
   const [result] = await getPool().execute<mysql.ResultSetHeader>(
-    `UPDATE timer_command
-     SET name = ?, message = ?, interval_seconds = ?, min_messages = ?, require_live = ?, enabled = ?
-     WHERE id = ?`,
-    [
-      input.name, input.message, input.intervalSeconds, input.minMessages,
-      input.requireLive ? 1 : 0, input.enabled ? 1 : 0, id,
-    ],
+    UPDATE_TIMER_FIELDS_SQL,
+    [...timerFieldParams(input), id],
   );
   // affectedRows is 0 both when no row matched and when the row matched but every value was
   // already equal (MySQL's default UPDATE semantics count only rows actually changed) — a
@@ -309,13 +319,8 @@ async function writeOwnedTimer(
 export async function updateOwnTimerCommand(id: number, input: TimerCommandInput, discordId: string): Promise<void> {
   await writeOwnedTimer(id, { discordId, allows: isTimerSelfManageableBy }, async (connection) => {
     await connection.execute(
-      `UPDATE timer_command
-       SET name = ?, message = ?, interval_seconds = ?, min_messages = ?, require_live = ?, enabled = ?
-       WHERE id = ?`,
-      [
-        input.name, input.message, input.intervalSeconds, input.minMessages,
-        input.requireLive ? 1 : 0, input.enabled ? 1 : 0, id,
-      ],
+      UPDATE_TIMER_FIELDS_SQL,
+      [...timerFieldParams(input), id],
     );
   });
 }

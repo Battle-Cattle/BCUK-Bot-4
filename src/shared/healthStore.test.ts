@@ -167,6 +167,42 @@ describe('Scheduler runs', () => {
   });
 });
 
+describe('failure without an error message', () => {
+  it('keeps the previous lastError for a DB ping, monitor poll or scheduler run that fails without one', () => {
+    mod.recordDbPing(false, 'db boom');
+    mod.recordDbPing(false);
+    mod.recordMonitorPoll(false, 'poll boom');
+    mod.recordMonitorPoll(false);
+    mod.recordSchedulerRun('counter', false, 'tick boom');
+    mod.recordSchedulerRun('counter', false);
+    const snapshot = mod.getHealthSnapshot();
+    expect(snapshot.db.lastError).toBe('db boom');
+    expect(snapshot.monitor.lastError).toBe('poll boom');
+    expect(snapshot.schedulers.counter?.lastError).toBe('tick boom');
+  });
+
+  it('keeps the previous EventSub lastError for a disconnect without one', () => {
+    mod.recordEventSubConnected('streamerA', false, 'socket closed');
+    mod.recordEventSubConnected('streamerA', false);
+    expect(mod.getHealthSnapshot().eventsub.streamerA?.lastError).toBe('socket closed');
+  });
+});
+
+describe('normalizeError', () => {
+  it('returns an Error\'s message', () => {
+    expect(mod.normalizeError(new Error('boom'))).toBe('boom');
+  });
+
+  it('stringifies a non-Error value', () => {
+    expect(mod.normalizeError(42)).toBe('42');
+    expect(mod.normalizeError(null)).toBe('null');
+  });
+
+  it('returns undefined for undefined', () => {
+    expect(mod.normalizeError(undefined)).toBeUndefined();
+  });
+});
+
 describe('Error ring buffer', () => {
   it('starts empty', () => {
     expect(mod.getHealthSnapshot().errors).toEqual([]);

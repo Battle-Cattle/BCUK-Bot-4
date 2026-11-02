@@ -8,11 +8,10 @@ import {
 } from '../../db';
 import { getCustomRewards } from '../../twitch/twitchRewardsApi';
 import { getValidToken } from '../../twitch/twitchUserTokens';
-import { parsePositiveIntId, parseRewardIdParam, parseCheckboxField } from './validation';
+import { parsePositiveIntId, parseRewardIdParam, parseCheckboxField, parseDecimalField } from './validation';
 import { requireStreamer } from './viewHelpers';
 import { logAndRedirectError } from './errorHandling';
 import {
-  parseNonNegativeNumberField, parsePositiveNumberField,
   parseRoundToNearestField, effectiveCooldownSeconds, handleRewardDeleteAction,
   NOT_A_STREAMER_REDIRECT,
 } from './channelPointsAdminShared';
@@ -69,8 +68,8 @@ router.post('/rewards/:twitchRewardId/pricing', requireAuth, csrfProtection, asy
 
     const body = req.body as Record<string, string | string[] | undefined>;
     const baseCost = parsePositiveIntId(body.base_cost);
-    const maxMultiplier = parseNonNegativeNumberField(body.max_multiplier);
-    const curve = parsePositiveNumberField(body.curve);
+    const maxMultiplier = parseDecimalField(body.max_multiplier, { min: 0 });
+    const curve = parseDecimalField(body.curve, { min: 0, exclusive: true });
     const roundToNearest = parseRoundToNearestField(body.round_to_nearest);
     if (baseCost === null || maxMultiplier === null || curve === null || roundToNearest === null) {
       return res.redirect('/channel-points?error=invalid_config');
@@ -129,8 +128,8 @@ router.post('/settings/pricing', requireAuth, csrfProtection, async (req, res) =
     if (!streamer) return;
 
     const body = req.body as Record<string, string | string[] | undefined>;
-    const halfLifeMinutes = parsePositiveNumberField(body.half_life_minutes);
-    const timeToMaxMultiplier = parsePositiveNumberField(body.time_to_max_multiplier);
+    const halfLifeMinutes = parseDecimalField(body.half_life_minutes, { min: 0, exclusive: true });
+    const timeToMaxMultiplier = parseDecimalField(body.time_to_max_multiplier, { min: 0, exclusive: true });
     if (halfLifeMinutes === null || timeToMaxMultiplier === null) {
       return res.redirect('/channel-points?error=invalid_settings');
     }

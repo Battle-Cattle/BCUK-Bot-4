@@ -90,7 +90,6 @@ a:hover { text-decoration: underline; }
 
 /* ── Status grid ───────────────────────────────────────── */
 .status-grid  { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; }
-.channels-grid { display: grid; grid-template-columns: 1fr; gap: 1rem; }
 
 /* ── Quick links (dashboard) ──────────────────────────── */
 .quick-links-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: .75rem; }
@@ -115,6 +114,57 @@ a:hover { text-decoration: underline; }
 .event-body  { flex: 1; min-width: 0; }
 .event-line  { font-size: .88rem; overflow-wrap: break-word; }
 .event-meta  { font-size: .75rem; color: var(--muted); margin-top: .1rem; }
+
+/* ── Dashboard layout: main column + live events sidebar ─ */
+/* Source order is Status, events sidebar, Quick Links, Usage, so screen readers and keyboard users
+   reach the live feed right after Bot Status. On desktop the grid areas put the feed in a sticky
+   right-hand column spanning every row, sized to the viewport and scrolling internally. The last row
+   is 1fr so the sidebar's height goes there instead of opening gaps between the main-column sections.
+   --dashboard-nav-offset is the sticky .navbar's height: this is the fallback, and
+   dashboard-layout.js keeps it in step with the rendered navbar (which wraps taller on some widths). */
+:root { --dashboard-nav-offset: 3.75rem; }
+.container--wide { max-width: 1600px; }
+.dashboard-layout {
+  display: grid; grid-template-columns: minmax(0, 1fr) 360px; grid-template-rows: auto auto 1fr;
+  grid-template-areas: "status events" "links events" "usage events";
+  column-gap: 1.5rem; align-items: start;
+}
+.dashboard-status  { grid-area: status; }
+.dashboard-sidebar { grid-area: events; position: sticky; top: calc(var(--dashboard-nav-offset) + 1rem); }
+.dashboard-links   { grid-area: links; }
+.dashboard-usage   { grid-area: usage; }
+.dashboard-sidebar .section { margin-bottom: 0; }
+/* A lower column floor than .status-grid's 280px so the four status cards and usage tiles stay on one row next to the sidebar; auto-fit stretches them over any spare column on wide screens. */
+.dashboard-layout .status-grid { grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
+/* Long Twitch names wrap inside the narrower status card so the connection badge stays in view. */
+.dashboard-layout .channel-name { overflow-wrap: anywhere; }
+/* Cap the Twitch list at about the height of the other status cards (Last Played is the tallest) and scroll the
+   rest, so a long channel list neither stretches every card in the row nor pushes Quick Links down. */
+.dashboard-twitch-body { max-height: 10rem; overflow-y: auto; }
+/* Dark, thin scrollbars for the dashboard's inner scroll areas (event feed, Twitch list) instead of the
+   browser's default light ones. */
+.dashboard-scroll { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+.dashboard-scroll::-webkit-scrollbar { width: 8px; }
+.dashboard-scroll::-webkit-scrollbar-track { background: transparent; }
+.dashboard-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+.dashboard-scroll::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+/* When the feed is the tallest column it sets the page height, so its cap must leave room for everything else
+   in the viewport: the navbar, the container's top padding (1.5rem), the section title and card chrome (~2.6rem)
+   and the container padding + footer below the layout (~7.6rem). Those add up to ~11.7rem plus the navbar, so
+   12rem keeps the page from overflowing (no stray page scrollbar) with a few pixels to spare, and the sidebar's
+   top stays below the navbar at the end of the scroll. The 6rem floor keeps a few rows visible on very short
+   windows, where the cap would otherwise reach zero. */
+.dashboard-events-body { min-height: 6rem; max-height: calc(100vh - var(--dashboard-nav-offset) - 12rem); overflow-y: auto; padding-top: .25rem; padding-bottom: .25rem; }
+/* The reserve above assumes a one-line title, so keep it on one line even with very large text. */
+.dashboard-sidebar .section-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Narrower screens: one column in source order, with the event feed straight after Bot Status. */
+@media (max-width: 1100px) {
+  .dashboard-layout  { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; grid-template-areas: "status" "events" "links" "usage"; }
+  .dashboard-sidebar { position: static; }
+  .dashboard-sidebar .section { margin-bottom: 2rem; }
+  .dashboard-events-body { max-height: 50vh; }
+}
 
 /* ── Stat rows ─────────────────────────────────────────── */
 .stat-row   { display: flex; justify-content: space-between; align-items: baseline; padding: .3rem 0; border-bottom: 1px solid var(--border); }

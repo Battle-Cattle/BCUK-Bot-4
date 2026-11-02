@@ -7,7 +7,8 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import path from 'path';
 import type { Server } from 'http';
-import { WEB_PORT, SESSION_SECRET, DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_NAME } from '../shared/config';
+import { WEB_PORT, SESSION_SECRET } from '../shared/config';
+import { getSessionPool } from '../db';
 
 const log = createLogger('Web');
 
@@ -149,16 +150,21 @@ app.use(express.json());
 // Always trust exactly one proxy hop (Caddy). Without this, req.ip resolves to
 // Caddy's loopback address and all users share a single rate-limit bucket.
 app.set('trust proxy', 1);
-const sessionStore = new (MySQLStore(session))({
-  host: DB_HOST,
-  port: DB_PORT,
-  user: DB_USER,
-  password: DB_PASSWORD,
-  database: DB_NAME,
-  expiration: 24 * 60 * 60 * 1000,
-  createDatabaseTable: true,
-  schema: { tableName: 'sessions' },
-});
+// Runs on its own pool (getSessionPool), kept apart from the bot's: session lookups happen on every
+// cookie-carrying request ahead of the rate limiters, and must not be able to queue out bot queries.
+// The store takes mysql2's callback API, so it gets the callback pool the promise pool wraps
+// (`.pool`). Handed a pool, the store leaves it open on close(); closePool() ends it at shutdown.
+// The table comes from migrations/0007_sessions_table.sql, which startup applies before the panel
+// listens. The store's own expired-session timer is off (clearExpired: false): see startSessionCleanup.
+const sessionStore = new (MySQLStore(session))(
+  {
+    expiration: 24 * 60 * 60 * 1000,
+    createDatabaseTable: false,
+    clearExpired: false,
+    schema: { tableName: 'sessions' },
+  },
+  getSessionPool().pool,
+);
 app.use(
   session({
     secret: SESSION_SECRET,
@@ -188,18 +194,35 @@ mountRoutes(app, { streamdeckLimiter });
  * Shared by the 404, CSRF-failure, and catch-all error handlers below — unlike
  * `routes/shared.ts`'s `renderError`, which always passes an empty `csrfToken` and is
  * meant for already-authenticated route handlers rather than this app-wide fallback tier.
- * @param req - Express request; reads `req.session.user` if present.
+ * @param req - Express request; reads `req.session.user` if present. `req.session` itself is
+ *   absent when the error came from middleware ahead of the session (e.g. the body parsers).
  * @param res - Express response; renders the `error` view with `status`.
  * @param status - HTTP status code to set.
  * @param message - Human-readable error message shown to the user.
  */
 function renderErrorPage(req: express.Request, res: express.Response, status: number, message: string): void {
+  // Typed as always present, but body-parser errors reach the handlers before session middleware runs.
+  const user = (req.session as express.Request['session'] | undefined)?.user ?? null;
   res.status(status);
   renderView(res, 'error', {
     message,
-    user: req.session.user ?? null,
-    csrfToken: req.session.user ? ensureSessionCsrfToken(req) : '',
+    user,
+    csrfToken: user ? ensureSessionCsrfToken(req) : '',
   });
+}
+
+/**
+ * Reads the 4xx status an `http-errors`-style error (e.g. body-parser's malformed-body,
+ * bad-encoding or too-large errors) carries, so the catch-all handler can answer the client
+ * with it instead of treating the client's mistake as a server failure.
+ * @param err - The error handed to the error handler.
+ * @returns The error's 4xx `status`/`statusCode`, or `undefined` when it has none (a real 500).
+ */
+function clientErrorStatus(err: unknown): number | undefined {
+  if (typeof err !== 'object' || err === null) return undefined;
+  const { status, statusCode } = err as { status?: unknown; statusCode?: unknown };
+  const code = status ?? statusCode;
+  return typeof code === 'number' && code >= 400 && code < 500 ? code : undefined;
 }
 
 /**
@@ -226,7 +249,9 @@ const csrfErrorHandler: ErrorRequestHandler = (err, req, res, next) => {
     return;
   }
 
-  log.error('Invalid CSRF token:', err);
+  // A warning, not an error: a form left open past its session's expiry lands here routinely.
+  // req.path, not originalUrl, so query values stay out of the log.
+  log.warn(`Rejected invalid CSRF token on ${req.method} ${req.path}`);
 
   if (req.originalUrl === '/api' || req.originalUrl.startsWith('/api/')) {
     res.status(403).json({
@@ -243,12 +268,23 @@ app.use(csrfErrorHandler);
 
 /**
  * Centralised error handler — catches anything unhandled by earlier middleware/routes.
+ * Client errors (a 4xx `status`, e.g. a corrupt or unsupported-encoding request body from
+ * body-parser) get that status and a one-line warning; anything else is logged as an error
+ * and answered with a 500.
  * @param err - The unhandled error.
  * @param req - Express request; reads `req.session.user` if present.
- * @param res - Express response; renders the `error` view with a 500 status.
+ * @param res - Express response; renders the `error` view with the client-error status or 500.
  * @param _next - Unused, but required for Express to recognize this as an error handler.
  */
 app.use((err: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  const status = clientErrorStatus(err);
+  if (status !== undefined) {
+    // `status` is only set on objects, so `err` is one here.
+    const { message } = err as { message?: unknown };
+    log.warn(`Rejected bad request ${req.method} ${req.originalUrl} (${status}): ${String(message)}`);
+    renderErrorPage(req, res, status, 'The request could not be processed.');
+    return;
+  }
   log.error('Unhandled error:', err);
   renderErrorPage(req, res, 500, 'An unexpected error occurred.');
 });
@@ -266,6 +302,40 @@ export { generalLimiter, sessionLimiter };
 /** The panel's listening server, kept so {@link stopWebPanel} can close it on shutdown. */
 let webServer: Server | null = null;
 
+/** How often expired rows are deleted from the `sessions` table (the store's own default). */
+const SESSION_CLEANUP_INTERVAL_MS = 15 * 60 * 1000;
+/** The expired-session cleanup timer, running while the panel is up. */
+let sessionCleanupTimer: NodeJS.Timeout | null = null;
+
+/**
+ * Deletes expired sessions, logging a failure instead of letting it escape. The store's own timer
+ * ignores the promise its cleanup returns, so a failed DELETE (a database restart, say) would
+ * reach the process-level unhandledRejection handler and take the bot down.
+ * @returns Resolves once the cleanup has run or its failure has been logged; never rejects.
+ */
+async function clearExpiredSessionsSafely(): Promise<void> {
+  try {
+    await sessionStore.clearExpiredSessions();
+  } catch (err) {
+    log.warn('Failed to clear expired sessions; will retry on the next interval:', err);
+  }
+}
+
+/**
+ * Starts the expired-session cleanup timer. Run from {@link startWebPanel}, which main() reaches
+ * only after migrations, so the timer can't query `sessions` before migration 0007 creates it.
+ */
+function startSessionCleanup(): void {
+  stopSessionCleanup();
+  sessionCleanupTimer = setInterval(() => void clearExpiredSessionsSafely(), SESSION_CLEANUP_INTERVAL_MS);
+}
+
+/** Stops the expired-session cleanup timer, if it is running. */
+function stopSessionCleanup(): void {
+  if (sessionCleanupTimer) clearInterval(sessionCleanupTimer);
+  sessionCleanupTimer = null;
+}
+
 /**
  * Starts the Express app listening on {@link WEB_PORT}.
  * @param port - Port to listen on; defaults to {@link WEB_PORT} (tests pass 0 for a free port).
@@ -281,6 +351,7 @@ export function startWebPanel(port: number = WEB_PORT): Promise<Server> {
         return;
       }
       webServer = server;
+      startSessionCleanup();
       log.info(`Panel available at http://localhost:${port}`);
       resolve(server);
     });
@@ -288,16 +359,20 @@ export function startWebPanel(port: number = WEB_PORT): Promise<Server> {
 }
 
 /**
- * Stops the web panel: stops accepting connections and drops the open ones — long-lived SSE
- * streams would otherwise hold `server.close()` open indefinitely. No-op if it isn't running.
- * @returns Resolves once the server has closed.
+ * Stops the web panel: stops the expired-session cleanup timer, stops accepting connections and
+ * drops the open ones — long-lived SSE streams would otherwise hold `server.close()` open
+ * indefinitely — then closes the session store. The store leaves its DB pool open; shutdown's
+ * closePool() ends it last. No-op if the panel isn't running.
+ * @returns Resolves once the server and the session store have closed.
  */
-export function stopWebPanel(): Promise<void> {
+export async function stopWebPanel(): Promise<void> {
   const server = webServer;
-  if (!server) return Promise.resolve();
+  if (!server) return;
   webServer = null;
-  return new Promise((resolve, reject) => {
+  stopSessionCleanup();
+  await new Promise<void>((resolve, reject) => {
     server.close((err) => (err ? reject(err) : resolve()));
     server.closeAllConnections();
   });
+  await sessionStore.close();
 }

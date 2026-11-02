@@ -135,29 +135,27 @@ class CacheManager<TCache extends RefreshingLookupCache> implements ManagedLooku
   }
 
   /**
-   * Starts a background reload if none is in flight and the backoff window has passed.
-   * @param now - Current time in epoch ms.
-   * @returns The in-flight refresh promise (new or existing), or null if backoff blocks a new one
-   *   and none is running.
+   * Returns the in-flight refresh, starting one if none is running. Ignores the backoff window:
+   * {@link getCache} checks it before a background refresh, and a cold load is never under one
+   * (a failed load at the current version always installs the empty fallback cache, and
+   * {@link invalidate} clears both the cache and the backoff together).
+   * @returns The in-flight refresh promise, new or existing.
    */
-  private startRefresh(now: number): Promise<TCache> | null {
-    if (!this.inFlightPromise && now >= this.refreshAllowedAt) {
-      const requestVersion = this.version;
-      this.inFlightPromise = (async () => {
-        const rebuiltCache = await this.options.loadCache();
-        this.applyRefreshSuccess(requestVersion, rebuiltCache);
-        return rebuiltCache;
-      })();
-
-      const promiseForFinally = this.inFlightPromise;
-      void promiseForFinally
-        .catch((err: unknown) => this.applyRefreshError(requestVersion, err))
-        .finally(() => {
-          this.clearInFlightIfCurrent(promiseForFinally);
-        });
-    }
-
-    return this.inFlightPromise;
+  private startRefresh(): Promise<TCache> {
+    if (this.inFlightPromise) return this.inFlightPromise;
+    const requestVersion = this.version;
+    const refresh = (async () => {
+      const rebuiltCache = await this.options.loadCache();
+      this.applyRefreshSuccess(requestVersion, rebuiltCache);
+      return rebuiltCache;
+    })();
+    this.inFlightPromise = refresh;
+    void refresh
+      .catch((err: unknown) => this.applyRefreshError(requestVersion, err))
+      .finally(() => {
+        this.clearInFlightIfCurrent(refresh);
+      });
+    return refresh;
   }
 
   /**
@@ -184,44 +182,25 @@ class CacheManager<TCache extends RefreshingLookupCache> implements ManagedLooku
    * @returns The current cache.
    */
   async getCache(): Promise<TCache> {
-    const now = Date.now();
-
     if (this.cache) {
+      const now = Date.now();
       if (now - this.cache.loadedAt >= this.options.ttlMs && now >= this.refreshAllowedAt) {
-        void this.startRefresh(now);
+        void this.startRefresh();
       }
       return this.cache;
     }
 
     const requestVersion = this.version;
-    const initialRefreshPromise = this.startRefresh(now);
-    if (!initialRefreshPromise) {
-      throw new Error(`${this.options.cacheName} refresh did not start`);
-    }
-
     let resolvedCache: TCache;
     try {
-      resolvedCache = await this.awaitCachePromise(initialRefreshPromise);
+      resolvedCache = await this.awaitCachePromise(this.startRefresh());
     } catch (err) {
-      if (requestVersion !== this.version) {
-        const retryAfterVersionChange = this.startRefresh(Date.now());
-        if (retryAfterVersionChange) {
-          return this.awaitCachePromise(retryAfterVersionChange);
-        }
-      }
+      // An invalidate() while the cold load was in flight orphaned it; load again for the new version.
+      if (requestVersion !== this.version) return this.awaitCachePromise(this.startRefresh());
       throw err;
     }
     const postRefreshCache = requestVersion === this.version ? resolvedCache : this.cache;
-    if (postRefreshCache !== null) {
-      return postRefreshCache;
-    }
-
-    const retryRefreshPromise = this.startRefresh(Date.now());
-    if (!retryRefreshPromise) {
-      throw new Error(`${this.options.cacheName} refresh did not start`);
-    }
-
-    return this.awaitCachePromise(retryRefreshPromise);
+    return postRefreshCache ?? this.awaitCachePromise(this.startRefresh());
   }
 
   /**

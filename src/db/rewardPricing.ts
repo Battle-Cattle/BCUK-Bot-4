@@ -63,6 +63,8 @@ export const DEFAULT_PRICING_COOLDOWN_SECONDS = 60;
  * @returns The mapped pricing row.
  */
 function mapRow(r: mysql.RowDataPacket): RewardPricingRow {
+  // max_multiplier, curve and demand are small DECIMAL columns, which mysql2 returns as strings;
+  // last_pushed_cost is an INT. None is a BIGINT, so Number() can't lose precision here.
   return {
     id: r.id,
     streamer_id: r.streamer_id,
@@ -78,6 +80,20 @@ function mapRow(r: mysql.RowDataPacket): RewardPricingRow {
     last_pushed_cost: r.last_pushed_cost == null ? null : Number(r.last_pushed_cost),
     last_redemption_id: r.last_redemption_id ?? null,
     twitch_unsupported: fromBit(r.twitch_unsupported),
+  };
+}
+
+/**
+ * Maps a raw `reward_pricing_settings` row into {@link StreamerPricingSettings}.
+ * @param row - Row selected from `reward_pricing_settings`.
+ * @returns The streamer's pricing settings.
+ */
+function mapSettingsRow(row: mysql.RowDataPacket): StreamerPricingSettings {
+  // half_life_seconds is an INT and time_to_max_multiplier a DECIMAL(6,3) (a string from mysql2):
+  // neither is a BIGINT, so Number() can't lose precision here.
+  return {
+    half_life_seconds: Number(row.half_life_seconds),
+    time_to_max_multiplier: Number(row.time_to_max_multiplier),
   };
 }
 
@@ -288,11 +304,7 @@ export async function getPricingSettingsForStreamer(streamerId: number): Promise
     [streamerId],
   );
   const row = rows[0];
-  if (!row) return { ...DEFAULT_STREAMER_PRICING_SETTINGS };
-  return {
-    half_life_seconds: Number(row.half_life_seconds),
-    time_to_max_multiplier: Number(row.time_to_max_multiplier),
-  };
+  return row ? mapSettingsRow(row) : { ...DEFAULT_STREAMER_PRICING_SETTINGS };
 }
 
 /**
@@ -315,10 +327,7 @@ export async function getPricingSettingsForStreamers(streamerIds: number[]): Pro
   );
   return new Map(rows.map((row) => [
     row.streamer_id as number,
-    {
-      half_life_seconds: Number(row.half_life_seconds),
-      time_to_max_multiplier: Number(row.time_to_max_multiplier),
-    },
+    mapSettingsRow(row),
   ]));
 }
 

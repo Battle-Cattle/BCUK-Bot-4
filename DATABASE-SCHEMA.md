@@ -8,7 +8,7 @@ This project targets a MySQL 8 database. The bot creates and upgrades the tables
 - Character set: `utf8mb4`
 - Discord IDs and other snowflake-style IDs should be stored as `BIGINT` in MySQL and treated as strings in application code.
 - Boolean-like columns may be returned by `mysql2` as `Buffer` or numeric values depending on server/driver configuration.
-- `express-mysql-session` manages the `sessions` table automatically on first run when enabled.
+- The `sessions` table is created by a migration like every other table; `express-mysql-session` reads and writes it but no longer creates it.
 
 ### Verifying and Enforcing `utf8mb4`
 
@@ -840,6 +840,10 @@ Which files in `migrations/` have been applied. Created and maintained by the mi
 
 ## `sessions`
 
-Managed automatically by `express-mysql-session`.
+Web panel session data, read and written by `express-mysql-session` (the store behind `express-session`). Created by `migrations/0007_sessions_table.sql` with the store's own schema; the store clears expired rows itself.
 
-This table is not maintained manually in this repository. It is created on first run if missing and used to store Express session data for the web panel.
+| Column | Type | Notes |
+| --- | --- | --- |
+| `session_id` | `VARCHAR(128)` PK | Session ID (`utf8mb4_bin`) |
+| `expires` | `INT UNSIGNED` | Expiry as a Unix timestamp in seconds |
+| `data` | `MEDIUMTEXT` NULL | JSON-serialised session (`utf8mb4_bin`) |

@@ -57,7 +57,7 @@ describe('root logger configuration (set at import)', () => {
   async function importLoggerWith(env: Record<string, string | undefined>) {
     vi.resetModules();
     for (const [key, value] of Object.entries(env)) vi.stubEnv(key, value);
-    const rotateFileOptions: Array<{ filename: string; level?: string }> = [];
+    const rotateFileOptions: Array<{ filename: string; level?: string; silent?: boolean }> = [];
     // The finished line each stubbed log file would have written, keyed by file name.
     const writtenLines: Record<string, string[]> = {};
     vi.doMock('winston-daily-rotate-file', async () => {
@@ -93,12 +93,13 @@ describe('root logger configuration (set at import)', () => {
     expect((await importLoggerWith({ LOG_LEVEL: 'warn', NODE_ENV: 'production' })).logger.createLogger('x').level).toBe('warn');
   });
 
-  it('adds the rotating combined/error log files and the health-store transport outside tests', async () => {
-    const { logger, rotateFileOptions } = await importLoggerWith({ VITEST: '' });
+  it('adds the rotating combined/error/debug log files and the health-store transport outside tests', async () => {
+    const { logger, rotateFileOptions } = await importLoggerWith({ VITEST: '', LOG_LEVEL: 'info' });
 
-    expect(rotateFileOptions.map((o) => [o.filename, o.level])).toEqual([
-      ['combined-%DATE%.log', undefined],
-      ['error-%DATE%.log', 'error'],
+    expect(rotateFileOptions.map((o) => [o.filename, o.level, o.silent])).toEqual([
+      ['debug-%DATE%.log', 'debug', true],
+      ['combined-%DATE%.log', 'info', undefined],
+      ['error-%DATE%.log', 'error', undefined],
     ]);
     const transports = logger.createLogger('x').transports;
     expect(transports.some((t: unknown) => t instanceof logger.HealthStoreErrorTransport)).toBe(true);
@@ -114,6 +115,40 @@ describe('root logger configuration (set at import)', () => {
     ]);
     // Below the error file's level, so it never reaches it.
     expect(writtenLines['error-%DATE%.log']).toBeUndefined();
+  });
+
+  it('writes debug lines only to the debug file, and only while it is switched on', async () => {
+    const { logger, writtenLines } = await importLoggerWith({ VITEST: '', LOG_LEVEL: 'info' });
+    const log = logger.createLogger('Audio');
+
+    log.debug('before');
+    expect(logger.setDebugLogFile(true)).toBe(true);
+    log.debug('during');
+    log.info('still info');
+    logger.setDebugLogFile(false);
+    log.debug('after');
+
+    expect(writtenLines['debug-%DATE%.log']).toEqual([
+      expect.stringMatching(/\[DEBUG\] \[Audio\] during$/),
+      expect.stringMatching(/\[INFO\] \[Audio\] still info$/),
+    ]);
+    expect(writtenLines['combined-%DATE%.log']).toEqual([expect.stringMatching(/\[INFO\] \[Audio\] still info$/)]);
+    expect(log.level).toBe('info');
+  });
+
+  it('never lowers a LOG_LEVEL that is already more verbose than debug', async () => {
+    const { logger } = await importLoggerWith({ VITEST: '', LOG_LEVEL: 'silly' });
+
+    logger.setDebugLogFile(true);
+    expect(logger.createLogger('x').level).toBe('silly');
+    logger.setDebugLogFile(false);
+    expect(logger.createLogger('x').level).toBe('silly');
+  });
+
+  it('has no debug file to switch under tests', async () => {
+    const { logger } = await importLoggerWith({ VITEST: 'true' });
+
+    expect(logger.setDebugLogFile(true)).toBe(false);
   });
 
   it('logs to the console only under tests', async () => {

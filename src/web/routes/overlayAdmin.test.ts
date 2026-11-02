@@ -154,6 +154,11 @@ describe('GET /settings — query param filtering', () => {
     expect(res.status).toBe(200);
     expect(res.body.maxFileMb).toBe(100);
   });
+
+  it('passes the overlay video weight limit to the template as maxVideoWeight', async () => {
+    const res = await supertest(buildApp()).get('/settings');
+    expect(res.body.maxVideoWeight).toBe(100);
+  });
 });
 
 describe('GET /controller/settings', () => {

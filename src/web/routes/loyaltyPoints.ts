@@ -17,7 +17,7 @@ import { requireAuth } from '../middleware';
 import { getSessionUser } from '../session';
 import { requireStreamer, renderView, renderError } from './viewHelpers';
 import { logAndRedirectError } from './errorHandling';
-import { filterQueryParam } from './validation';
+import { filterQueryParam, MAX_INT_COLUMN_VALUE, parseIntField } from './validation';
 
 const log = createLogger('Web');
 const router = Router();
@@ -62,24 +62,6 @@ function computePrerequisites(
   return { prerequisites, allMet: Object.values(prerequisites).every(Boolean) };
 }
 
-/** Largest value a MySQL signed `INT` column (every `loyalty_points_config` column) can hold. */
-const MAX_SIGNED_INT = 2_147_483_647;
-
-/**
- * Parses a required non-negative integer form field (e.g. points_per_message), bounded to what
- * a signed `INT` column can hold (every `loyalty_points_config` column).
- * Rejects arrays (repeated fields), empty/whitespace input, non-integer input, negative values,
- * and values above {@link MAX_SIGNED_INT}.
- * @param value - The raw form field value.
- * @returns The parsed integer, or null if invalid.
- */
-function parseNonNegativeIntField(value: string | string[] | undefined): number | null {
-  if (Array.isArray(value)) return null;
-  if (typeof value !== 'string' || !/^\d+$/.test(value)) return null;
-  const n = Number(value);
-  return Number.isSafeInteger(n) && n <= MAX_SIGNED_INT ? n : null;
-}
-
 /**
  * Parses the `twitch_username` field posted by the "Exclude bot" / "Remove exclusion" buttons.
  * Rejects arrays (repeated fields) and anything that isn't a plausible Twitch login.
@@ -100,10 +82,10 @@ function parseTwitchUsernameField(value: string | string[] | undefined): string 
  * @returns The parsed config, or null if any rate field is missing/invalid.
  */
 function parseConfigForm(body: Record<string, string | string[] | undefined>): LoyaltyPointsConfig | null {
-  const pointsPerMessage = parseNonNegativeIntField(body.points_per_message);
-  const cooldownSeconds = parseNonNegativeIntField(body.cooldown_seconds);
-  const pointsPerSub = parseNonNegativeIntField(body.points_per_sub);
-  const pointsPerGiftSub = parseNonNegativeIntField(body.points_per_gift_sub);
+  const pointsPerMessage = parseIntField(body.points_per_message, 0, MAX_INT_COLUMN_VALUE);
+  const cooldownSeconds = parseIntField(body.cooldown_seconds, 0, MAX_INT_COLUMN_VALUE);
+  const pointsPerSub = parseIntField(body.points_per_sub, 0, MAX_INT_COLUMN_VALUE);
+  const pointsPerGiftSub = parseIntField(body.points_per_gift_sub, 0, MAX_INT_COLUMN_VALUE);
   if (pointsPerMessage === null || cooldownSeconds === null || pointsPerSub === null || pointsPerGiftSub === null) return null;
   return { enabled: body.enabled === '1', pointsPerMessage, cooldownSeconds, pointsPerSub, pointsPerGiftSub };
 }

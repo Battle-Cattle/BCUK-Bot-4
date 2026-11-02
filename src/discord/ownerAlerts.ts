@@ -364,6 +364,25 @@ function handleHealthChanged(): void {
       handleFirstSeenComponent(componentId, ok, error);
     }
   }
+  forgetRemovedComponents(componentOks);
+}
+
+/**
+ * Drops the tracked state of every component no longer in the health snapshot (e.g. an EventSub
+ * streamer whose connection was stopped for good), cancelling any pending "down" DM for it — the
+ * component was removed on purpose, so alerting on it later would be a false alarm, and its
+ * state would otherwise never be cleared.
+ * @param componentOks - The components in the current health snapshot.
+ * @returns void.
+ */
+function forgetRemovedComponents(componentOks: Map<string, unknown>): void {
+  for (const [componentId, state] of componentStates) {
+    if (componentOks.has(componentId)) continue;
+    if (state.pendingDownTimer) clearTimeout(state.pendingDownTimer);
+    // Bump the generation so a "down" DM already waiting on Discord or the owner lookup is dropped too.
+    state.generation += 1;
+    componentStates.delete(componentId);
+  }
 }
 
 /**

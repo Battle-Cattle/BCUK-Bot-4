@@ -157,6 +157,13 @@ describe('addTimerCommand', () => {
     expect(id).toBe(42);
     expect(pool.execute.mock.calls[0]![1]).toEqual(['Discord plug', 'Join our Discord!', 600, 5, 1, 1]);
   });
+
+  it('binds require_live and enabled as 0 when they are off', async () => {
+    const pool = makeMockPool({ executeResult: [{ insertId: 43 }] });
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await addTimerCommand({ ...sampleInput, requireLive: false, enabled: false });
+    expect(pool.execute.mock.calls[0]![1]).toEqual(['Discord plug', 'Join our Discord!', 600, 5, 0, 0]);
+  });
 });
 
 describe('updateTimerCommand', () => {
@@ -383,6 +390,12 @@ describe('owner-checked timer writes', () => {
     const connection = poolWithTimer(true, [STREAMER_ID]);
     await setOwnTimerCommandEnabled(7, false, STREAMER_ID);
     expect(connection.execute.mock.calls[2]).toEqual(['UPDATE timer_command SET enabled = ? WHERE id = ?', [0, 7]]);
+  });
+
+  it('binds enabled as 1 when re-enabling a timer the streamer owns outright', async () => {
+    const connection = poolWithTimer(true, [STREAMER_ID]);
+    await setOwnTimerCommandEnabled(7, true, STREAMER_ID);
+    expect(connection.execute.mock.calls[2]).toEqual(['UPDATE timer_command SET enabled = ? WHERE id = ?', [1, 7]]);
   });
 
   it('deletes a timer the streamer owns outright, but not someone else\'s', async () => {

@@ -176,15 +176,18 @@ export async function resolveSharedChatSessionId(userId: string): Promise<string
  * share a Twitch shared-chat session are de-duplicated via {@link sendDedupedBySession}
  * so only one message is sent per session. Returns true if at least one channel
  * received the message.
+ * @param runtime - The registered Twitch chat runtime to send through.
  * @param sourceChannel - Twitch login of the channel the command was used in.
  * @param command - Lowercased, prefixed command token used to check registration per channel.
  * @param output - Filled-in response text to send.
- * @returns True if at least one channel received the message; false if none did or no runtime is registered.
+ * @returns True if at least one channel received the message, false if none did.
  */
-async function broadcastToActiveChannels(sourceChannel: string, command: string, output: string): Promise<boolean> {
-  const runtime = twitchChatRuntime.get();
-  if (!runtime) return false;
-
+async function broadcastToActiveChannels(
+  runtime: TwitchChatRuntime,
+  sourceChannel: string,
+  command: string,
+  output: string,
+): Promise<boolean> {
   const { send, getActiveChannels, getLoginUserIds, getMultiTwitchDataForChannel } = runtime;
   const activeChannels = getActiveChannels();
   const loginUserIds = getLoginUserIds();
@@ -314,7 +317,7 @@ export async function executeCustomCommandForTwitch(
 
   if (result.isMultiTwitch) {
     try {
-      const sent = await broadcastToActiveChannels(channel, command, filledResponse);
+      const sent = await broadcastToActiveChannels(runtime, channel, command, filledResponse);
       if (sent) {
         log.info(`[Twitch] Sent custom command '${command}' in ${channel}.`);
       } else {

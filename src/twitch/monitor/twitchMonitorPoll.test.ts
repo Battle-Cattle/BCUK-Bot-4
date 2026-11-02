@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mockLogger } from '../../test-utils/loggerMock';
 
-vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
+const mockLog = vi.hoisted(() => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }));
+vi.mock('../../shared/logger', () => ({ createLogger: () => mockLog }));
 vi.mock('../../shared/statusStore', () => ({ setTwitchChannelLive: vi.fn() }));
 vi.mock('./twitchMonitorAnnouncements', () => ({
   postAnnouncement: vi.fn().mockResolvedValue(undefined),
@@ -85,6 +85,17 @@ describe('handlePollStreamer', () => {
     expect(cancelOfflineTimersForLogin).toHaveBeenCalledWith(liveStates, 'teststreamer');
   });
 
+  it('posts a fresh announcement for a live state that has no Discord message yet, without logging it as going live', async () => {
+    const liveStates = new Map<string, LiveState>([['5', makeLiveState({ messageId: null })]]);
+    const loginToUserId = new Map([['teststreamer', 'uid-5']]);
+
+    await handlePollStreamer(liveStates, loginToUserId, makeStreamer(), new Map([['uid-5', makeStream()]]));
+
+    expect(postAnnouncement).toHaveBeenCalledOnce();
+    expect(editAnnouncement).not.toHaveBeenCalled();
+    expect(mockLog.info).not.toHaveBeenCalled();
+  });
+
   it('edits with new_game_message when the game changes', async () => {
     const liveStates = new Map<string, LiveState>([['5', makeLiveState({ messageId: 'msg1' })]]);
     const loginToUserId = new Map([['teststreamer', 'uid-5']]);
@@ -93,6 +104,21 @@ describe('handlePollStreamer', () => {
     await handlePollStreamer(liveStates, loginToUserId, makeStreamer(), liveByUserId);
 
     expect(editAnnouncement).toHaveBeenCalledWith(liveStates, expect.anything(), expect.objectContaining({ game_name: 'Valorant' }), 'new_game_message', expect.any(Function));
+    expect(mockLog.info).toHaveBeenCalledWith('teststreamer game changed to Valorant');
+  });
+
+  it.each([
+    ['a game change', { game_name: 'Valorant' }],
+    ['a title change', { title: 'new title' }],
+  ])('still edits but does not log %s once superseded mid-edit', async (_label, streamOverrides) => {
+    const liveStates = new Map<string, LiveState>([['5', makeLiveState({ messageId: 'msg1' })]]);
+    const loginToUserId = new Map([['teststreamer', 'uid-5']]);
+    const liveByUserId = new Map([['uid-5', makeStream(streamOverrides)]]);
+
+    await handlePollStreamer(liveStates, loginToUserId, makeStreamer(), liveByUserId, () => false);
+
+    expect(editAnnouncement).toHaveBeenCalledOnce();
+    expect(mockLog.info).not.toHaveBeenCalled();
   });
 
   it('edits with live_message when only the title changes', async () => {
@@ -170,6 +196,28 @@ describe('dispatchStreamerPolls', () => {
     await dispatchStreamerPolls(liveStates, loginToUserId, streamers, liveByUserId);
 
     expect(postAnnouncement).toHaveBeenCalledTimes(2);
+  });
+
+  it('handles rows sharing a login one after another, never concurrently', async () => {
+    let inFlight = 0;
+    let maxInFlight = 0;
+    vi.mocked(postAnnouncement).mockImplementation(async () => {
+      inFlight++;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await Promise.resolve();
+      inFlight--;
+    });
+    const liveStates = new Map<string, LiveState>();
+    const loginToUserId = new Map([['teststreamer', 'uid-5']]);
+    const streamers = [
+      makeStreamer({ id: 1, group: makeGroup({ id: 1, name: 'Main' }) }),
+      makeStreamer({ id: 2, group: makeGroup({ id: 2, name: 'Other' }) }),
+    ];
+
+    await dispatchStreamerPolls(liveStates, loginToUserId, streamers, new Map([['uid-5', makeStream()]]));
+
+    expect(vi.mocked(postAnnouncement).mock.calls.map((c) => c[1].id)).toEqual([1, 2]);
+    expect(maxInFlight).toBe(1);
   });
 
   it('skips streamers with no twitch_name', async () => {

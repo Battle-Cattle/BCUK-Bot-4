@@ -15,6 +15,7 @@ vi.mock('../discord/discordUtils', () => ({
 // One shared logger instance, so tests can assert on the playback-start log lines.
 const log = vi.hoisted(() => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }));
 vi.mock('../shared/logger', () => ({ createLogger: () => log }));
+vi.mock('./rtpClock', () => ({ syncRtpTimestamp: vi.fn() }));
 // The only runtime value audioPlayer takes from Discord's API types; stubbed so the test doesn't load the package.
 vi.mock('discord-api-types/v10', () => ({ ChannelType: { GuildVoice: 2 } }));
 // voiceAdapter's only runtime value from @discordjs/ws; stubbed for the same reason.
@@ -534,6 +535,93 @@ describe('reconnect', () => {
       expect(conn!.destroy).toHaveBeenCalledOnce();
       expect(mod.isConnected('guild-A')).toBe(false);
     });
+
+    it('a superseded attempt skips destroying a connection that was already destroyed meanwhile', async () => {
+      const { client } = makeClient();
+      const voice = await useRealisticJoin();
+      let finishReady!: () => void;
+      vi.mocked(voice.entersState)
+        .mockImplementationOnce(() => new Promise<void>((resolve) => { finishReady = resolve; }) as never);
+
+      const pending = mod.connect(client as never, 'guild-A', 'chan-1');
+      await waitFor(() => expect(createdConnections).toHaveLength(1));
+      const [conn] = createdConnections;
+
+      mod.disconnect('guild-A');
+      conn!.state.status = 'destroyed'; // e.g. @discordjs/voice tore it down itself
+      finishReady();
+
+      // destroy() on a destroyed connection throws, so it must not be called.
+      await expect(pending).resolves.toBeUndefined();
+      expect(conn!.destroy).not.toHaveBeenCalled();
+    });
+  });
+
+  it('a newer connect() cancels a pending rejoin even while it is still waiting on Ready', async () => {
+    vi.useFakeTimers();
+    try {
+      const { client } = makeClient();
+      const voice = await import('@discordjs/voice');
+      vi.mocked(voice.entersState).mockRejectedValueOnce(new Error('ready timeout'));
+      await expect(mod.connect(client as never, 'guild-A', 'chan-1')).rejects.toThrow('ready timeout');
+      expect(log.warn).toHaveBeenCalledWith(expect.stringContaining('Scheduling voice rejoin for guild guild-A in 5000ms'));
+
+      // A newer connect() is still waiting on Ready when the rejoin timer would have fired.
+      let finishReady!: () => void;
+      vi.mocked(voice.entersState)
+        .mockImplementationOnce(() => new Promise<void>((resolve) => { finishReady = resolve; }) as never);
+      const pending = mod.connect(client as never, 'guild-A', 'chan-2');
+      await vi.advanceTimersByTimeAsync(0);
+      const joinsBefore = vi.mocked(voice.joinVoiceChannel).mock.calls.length;
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(vi.mocked(voice.joinVoiceChannel).mock.calls.length).toBe(joinsBefore);
+
+      finishReady();
+      await pending;
+      expect(mod.getCurrentChannelId('guild-A')).toBe('chan-2');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a repeated drop event while a rejoin is already pending does not schedule a second one', async () => {
+    vi.useFakeTimers();
+    try {
+      const { client } = makeClient();
+      const voice = await import('@discordjs/voice');
+      await mod.connect(client as never, 'guild-A', 'chan-1');
+      const dropHandler = createdConnections[0]!.on.mock.calls.find(([e]) => e === 'disconnected')?.[1] as () => Promise<void>;
+      vi.mocked(voice.entersState).mockRejectedValue(new Error('gone'));
+      log.warn.mockClear();
+
+      await dropHandler();
+      await dropHandler();
+
+      expect(log.warn.mock.calls.filter(([m]) => String(m).startsWith('Scheduling voice rejoin'))).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('abandons a superseded connect() once its voice-channel lookup resolves', async () => {
+    const { client, channelsFetch } = makeClient();
+    const voice = await import('@discordjs/voice');
+    let releaseLookup!: () => void;
+    const defaultFetch = channelsFetch.getMockImplementation()!;
+    channelsFetch.mockImplementationOnce(async (channelId: string) => {
+      await new Promise<void>((resolve) => { releaseLookup = resolve; });
+      return defaultFetch(channelId);
+    });
+
+    const first = mod.connect(client as never, 'guild-A', 'chan-1');
+    await waitFor(() => expect(channelsFetch).toHaveBeenCalledOnce());
+    await mod.connect(client as never, 'guild-A', 'chan-2');
+    releaseLookup();
+    await first;
+
+    expect(vi.mocked(voice.joinVoiceChannel)).toHaveBeenCalledOnce();
+    expect(mod.getCurrentChannelId('guild-A')).toBe('chan-2');
   });
 
   it('clears a pending reconnect timer when connect is called again', async () => {
@@ -584,6 +672,27 @@ describe('reconnect', () => {
 });
 
 describe('per-guild audio player', () => {
+  it('reports not playing for a guild it has never seen', () => {
+    expect(mod.isPlaying('unknown-guild')).toBe(false);
+  });
+
+  it('skips the RTP sync and logs unknown age and ping when a guild with no voice connection starts playing', async () => {
+    const voice = await import('@discordjs/voice');
+    const { syncRtpTimestamp } = await import('./rtpClock.js');
+    const fakePlayer = { on: vi.fn(), stop: vi.fn(), play: vi.fn() };
+    vi.mocked(voice.createAudioPlayer).mockReturnValue(fakePlayer as never);
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000);
+    mod.startPlayback({} as never, 'guild-A');
+    const playing = fakePlayer.on.mock.calls.find(([e]) => e === 'playing')?.[1] as () => void;
+    now.mockReturnValue(1_050);
+
+    playing();
+    now.mockRestore();
+
+    expect(vi.mocked(syncRtpTimestamp)).not.toHaveBeenCalled();
+    expect(log.debug).toHaveBeenCalledWith('Playback started in guild guild-A after 50ms (voice connected ?min, ping ws ?ms / udp ?ms)');
+  });
+
   it('Idle handler clears the playing flag and reports idle status', async () => {
     const { client } = makeClient();
     const voice = await import('@discordjs/voice');
@@ -766,5 +875,51 @@ describe('per-guild audio player', () => {
       expect(log.debug).not.toHaveBeenCalled();
       expect(log.warn).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe('RTP clock sync on Playing', () => {
+  /** Connects guild-A with a capturable fake player; returns its Playing handler and the mocked sync. */
+  async function connectWithPlayer() {
+    const { client } = makeClient();
+    const voice = await import('@discordjs/voice');
+    const fakePlayer = { on: vi.fn(), stop: vi.fn(), play: vi.fn() };
+    vi.mocked(voice.createAudioPlayer).mockReturnValue(fakePlayer as never);
+    await mod.connect(client as never, 'guild-A', 'chan-1');
+    mod.startPlayback({} as never, 'guild-A');
+    const { syncRtpTimestamp } = await import('./rtpClock.js');
+    const playing = fakePlayer.on.mock.calls.find(([e]) => e === 'playing')?.[1] as () => void;
+    return { playing, sync: vi.mocked(syncRtpTimestamp) };
+  }
+
+  it('syncs the guild connection\'s RTP clock against the monotonic clock whenever the player enters Playing', async () => {
+    const { playing, sync } = await connectWithPlayer();
+    const now = vi.spyOn(performance, 'now').mockReturnValue(12_345);
+
+    playing();
+    playing(); // e.g. a resume from auto-pause
+    now.mockRestore();
+
+    expect(sync).toHaveBeenCalledTimes(2);
+    expect(sync).toHaveBeenCalledWith(createdConnections[0], 12_345);
+  });
+
+  it('logs a move at debug level', async () => {
+    const { playing, sync } = await connectWithPlayer();
+    sync.mockReturnValueOnce(300_000.4);
+
+    playing();
+
+    expect(log.debug).toHaveBeenCalledWith('Moved the RTP clock forward 300000ms in guild guild-A');
+  });
+
+  it('logs nothing when the clock was already in step or could not be synced', async () => {
+    const { playing, sync } = await connectWithPlayer();
+    sync.mockReturnValueOnce(0).mockReturnValueOnce(null);
+
+    playing();
+    playing();
+
+    expect(log.debug).not.toHaveBeenCalledWith(expect.stringContaining('RTP clock'));
   });
 });

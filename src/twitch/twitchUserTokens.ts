@@ -12,6 +12,15 @@ const log = createLogger('TwitchToken');
 const TOKEN_BUFFER_MS = 5 * 60 * 1000;
 
 /**
+ * Names a streamer in a log line.
+ * @param streamer - The streamer row.
+ * @returns Their Twitch login, or `unknown` when none is stored.
+ */
+function streamerLabel(streamer: DbStreamerEventSub): string {
+  return streamer.twitch_name ?? 'unknown';
+}
+
+/**
  * Returns a usable EventSub access token for `streamer`. Returns null if no access token is
  * stored; otherwise, refreshes it if it is expired or within {@link TOKEN_BUFFER_MS} of expiring.
  * Persists a successful refresh to the DB via `saveStreamerToken`.
@@ -27,13 +36,13 @@ export async function getValidToken(streamer: DbStreamerEventSub): Promise<strin
 
   if (!streamer.eventsub_refresh_token || !streamer.twitch_user_id) {
     if (!streamer.eventsub_refresh_token) {
-      log.warn(`No refresh token for ${streamer.twitch_name ?? 'unknown'}`);
+      log.warn(`No refresh token for ${streamerLabel(streamer)}`);
     } else {
       // Should not happen: eventsub_access_token and twitch_user_id are only ever written/cleared
       // together (see saveStreamerToken/clearStreamerToken). Treat as a permanent failure rather
       // than asserting non-null and letting mysql2 reject `undefined` as a bind parameter, which
       // would otherwise be misclassified below as a transient error that never self-heals.
-      log.error(`Token refresh for ${streamer.twitch_name ?? 'unknown'} has an access token but no twitch_user_id — refusing to save; re-authorization required.`);
+      log.error(`Token refresh for ${streamerLabel(streamer)} has an access token but no twitch_user_id — refusing to save; re-authorization required.`);
     }
     return null;
   }
@@ -58,14 +67,14 @@ async function refreshAndSaveToken(
     const tokens = await refreshUserToken(refreshToken);
     const expiryMs = tokens.expires_in != null ? Date.now() + tokens.expires_in * 1000 - 60_000 : null;
     await saveStreamerToken(streamer.id, twitchUserId, tokens.access_token, tokens.refresh_token, expiryMs);
-    log.info(`Token refreshed for ${streamer.twitch_name ?? 'unknown'}`);
+    log.info(`Token refreshed for ${streamerLabel(streamer)}`);
     return tokens.access_token;
   } catch (err) {
     if (err instanceof TwitchAuthError) {
       await clearStreamerToken(streamer.id);
-      log.error(`Token refresh failed for ${streamer.twitch_name ?? 'unknown'} — re-authorization required:`, err);
+      log.error(`Token refresh failed for ${streamerLabel(streamer)} — re-authorization required:`, err);
     } else {
-      log.error(`Token refresh failed for ${streamer.twitch_name ?? 'unknown'} — transient error, will retry on next reload:`, err);
+      log.error(`Token refresh failed for ${streamerLabel(streamer)} — transient error, will retry on next reload:`, err);
     }
     return null;
   }

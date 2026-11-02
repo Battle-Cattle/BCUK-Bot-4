@@ -10,6 +10,12 @@ updates:
     schedule:
       interval: "daily"
     open-pull-requests-limit: 50
+    ignore:
+      # `typescript` stays on 6.x until typescript-eslint, eslint-plugin-sonarjs and madge support
+      # TypeScript 7 (they load its JS API, which 7.x doesn't expose); type-checking and the build
+      # already run on 7.x through the `typescript7` alias. See CLAUDE.md "TypeScript 6 + 7".
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
     groups:
       vitest:
         patterns:

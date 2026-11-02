@@ -29,7 +29,7 @@ const FLOAT_EPSILON = 1e-9;
  * (even to a Twitch-invalid 0) or above the max.
  *
  * `config.curve` is floored to {@link MIN_CURVE} if it isn't strictly positive: the admin panel
- * already rejects `curve <= 0` at write time (`parsePositiveNumberField`), but `Math.pow(x, 0)`
+ * already rejects `curve <= 0` at write time (`parseDecimalField` with an exclusive 0 bound), but `Math.pow(x, 0)`
  * is `1` for every `x` including `0`, so a `curve` of `0` (or negative) reaching this function —
  * a stale row predating that validation, or a value edited directly in the DB, which is managed
  * outside this repo — would otherwise pin the price to the maximum at *every* demand level,

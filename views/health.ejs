@@ -22,6 +22,16 @@ function htmlAttrJson(value) {
     <section class="section">
       <h2 class="section-title">Bot Health</h2>
 
+      <% if (success === 'debug_on') { %>
+      <div class="card card-alert-success">Debug logging is on. It switches itself off at the time shown below.</div>
+      <% } else if (success === 'debug_off') { %>
+      <div class="card card-alert-success">Debug logging is off.</div>
+      <% } else if (error === 'debug_invalid') { %>
+      <div class="card card-alert-danger" role="alert">Pick one of the listed durations.</div>
+      <% } else if (error === 'debug_failed') { %>
+      <div class="card card-alert-danger" role="alert">Couldn't change debug logging. Check the server logs.</div>
+      <% } %>
+
       <div class="table-scroll">
         <table class="table" id="health-table" aria-label="Component health">
           <thead>
@@ -36,6 +46,34 @@ function htmlAttrJson(value) {
             <!-- Populated by /health.js from the server-rendered snapshot and live SSE updates. -->
           </tbody>
         </table>
+      </div>
+
+      <div class="card card-spaced">
+        <div class="card-header">
+          <span class="card-icon">&#128269;</span>
+          <span class="card-label">Debug Logging</span>
+        </div>
+        <% if (debugLoggingUntil) { %>
+        <p>On until <strong><%= debugLoggingUntil.toISOString().replace('T', ' ').slice(0, 16) %> UTC</strong>, writing to <code>logs/debug-YYYY-MM-DD.log</code>.</p>
+        <form method="POST" action="/admin/health/debug-logging" class="inline-form-sm">
+          <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+          <input type="hidden" name="action" value="disable">
+          <button type="submit" class="btn btn-sm btn-ghost">Turn off now</button>
+        </form>
+        <% } else { %>
+        <p class="muted">Off. Turn it on to write debug lines to their own file, <code>logs/debug-YYYY-MM-DD.log</code>. It switches itself off when the time runs out.</p>
+        <% } %>
+        <form method="POST" action="/admin/health/debug-logging" class="d-flex gap-04 flex-wrap">
+          <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+          <input type="hidden" name="action" value="enable">
+          <label for="debug-logging-hours">Keep on for</label>
+          <select class="input" id="debug-logging-hours" name="hours">
+            <% debugLoggingHourOptions.forEach(function (h) { %>
+            <option value="<%= h %>"<%= h === defaultDebugLoggingHours ? ' selected' : '' %>><%= h %> hour<%= h === 1 ? '' : 's' %></option>
+            <% }) %>
+          </select>
+          <button type="submit" class="btn btn-sm"><%= debugLoggingUntil ? 'Restart timer' : 'Turn on' %></button>
+        </form>
       </div>
 
       <div class="card card-spaced">

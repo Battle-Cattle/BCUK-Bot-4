@@ -5,7 +5,6 @@ import {
   setMemberAccessLevel,
   removeGuildMember,
   ACCESS_LEVEL_LABELS,
-  AccessLevelValue,
 } from '../../db';
 import { reloadGuildRegistry } from '../../discord/guildRegistry';
 import { csrfProtection } from '../csrf';
@@ -24,7 +23,7 @@ import {
   addOrUpdateUserMutation,
   toggleTwitchMutation,
 } from './adminUserMutations';
-import { accessLevelError, parseTwitchNameInput, parseTwitchEnabled, resolveValidDiscordId } from './adminUserValidation';
+import { parseAccessLevel, parseTwitchNameInput, parseTwitchEnabled, resolveValidDiscordId } from './adminUserValidation';
 import {
   checkManagerEditAuth,
   checkRemoveAuth,
@@ -149,10 +148,9 @@ router.post('/users/add', requireManager, csrfProtection, async (req, res) => {
   if (!trimmedDiscordId) return;
   if (!access_level) return res.redirect('/admin/users');
 
-  const levelErr = accessLevelError(access_level);
-  if (levelErr) return res.redirect(`/admin/users?error=${levelErr}`);
+  const level = parseAccessLevel(access_level);
+  if (level === null) return res.redirect('/admin/users?error=invalid_access_level');
 
-  const level = Number(access_level) as AccessLevelValue;
   const { normalizedTwitchName, shouldClearTwitchName, error: twitchErr } = parseTwitchNameInput(twitch_name, clear_twitch_name);
   if (twitchErr) return res.redirect(`/admin/users?error=${twitchErr}`);
 
@@ -214,10 +212,9 @@ router.post('/users/update', requireManager, csrfProtection, async (req, res) =>
   const trimmedDiscordId = resolveValidDiscordId(res, discord_id);
   if (!trimmedDiscordId) return;
 
-  const levelErr = accessLevelError(access_level);
-  if (levelErr) return res.redirect(`/admin/users?error=${levelErr}`);
+  const level = parseAccessLevel(access_level);
+  if (level === null) return res.redirect('/admin/users?error=invalid_access_level');
 
-  const level = Number(access_level);
   const sessionUser = getSessionUser(req);
   await runGuardedUserMutation(res, sessionUser.discordId, trimmedDiscordId, async () => {
     // Re-checked here, not before enqueueing — see checkManagerEditAuth's doc comment.

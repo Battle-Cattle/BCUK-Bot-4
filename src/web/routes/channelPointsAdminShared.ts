@@ -58,32 +58,6 @@ export function parseHexColorField(value: string | string[] | undefined): string
   return /^#[0-9A-Fa-f]{6}$/.test(trimmed) ? trimmed : null;
 }
 
-/**
- * Parses a required non-negative decimal form field (e.g. max_multiplier).
- * Rejects arrays (repeated fields), empty/whitespace input, non-numeric input, and negative values.
- * @param value - Raw form value (an array when repeated).
- * @returns The parsed number (0 or more), or null when invalid.
- */
-export function parseNonNegativeNumberField(value: string | string[] | undefined): number | null {
-  if (Array.isArray(value)) return null;
-  if (typeof value !== 'string' || value.trim() === '') return null;
-  const n = Number(value);
-  return Number.isFinite(n) && n >= 0 ? n : null;
-}
-
-/**
- * Parses a required strictly-positive decimal form field (e.g. curve, half_life_minutes).
- * Rejects arrays (repeated fields), empty/whitespace input, non-numeric input, and non-positive values.
- * @param value - Raw form value (an array when repeated).
- * @returns The parsed number (greater than 0), or null when invalid.
- */
-export function parsePositiveNumberField(value: string | string[] | undefined): number | null {
-  if (Array.isArray(value)) return null;
-  if (typeof value !== 'string' || value.trim() === '') return null;
-  const n = Number(value);
-  return Number.isFinite(n) && n > 0 ? n : null;
-}
-
 const VALID_ROUND_TO_NEAREST = new Set([0, 5, 10]);
 
 /**
