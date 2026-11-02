@@ -41,6 +41,7 @@ vi.mock('fs', () => ({
 }));
 
 vi.mock('./overlayMovConversion', () => ({ storeMovAsWebm: vi.fn() }));
+vi.mock('./overlayVideoTranscode', () => ({ isWebmTranscodeQueueFull: vi.fn() }));
 
 import supertest from 'supertest';
 import multer from 'multer';
@@ -50,6 +51,7 @@ import { AccessLevel } from '../../db';
 import fs from 'fs';
 import { csrfProtection } from '../csrf';
 import { storeMovAsWebm } from './overlayMovConversion';
+import { isWebmTranscodeQueueFull } from './overlayVideoTranscode';
 import type { RequestHandler } from 'express';
 import { buildTestApp, drainBodyBeforeRedirect } from '../../test-utils/expressTestApp';
 
@@ -81,6 +83,7 @@ beforeEach(() => {
   vi.mocked(fs.promises.mkdir).mockResolvedValue(undefined);
   vi.mocked(fs.promises.writeFile).mockResolvedValue(undefined);
   vi.mocked(fs.promises.rm).mockResolvedValue(undefined);
+  vi.mocked(isWebmTranscodeQueueFull).mockReturnValue(false);
   vi.mocked(storeMovAsWebm).mockImplementation(async (_dir, baseName) => `${baseName}.webm`);
 });
 
@@ -237,6 +240,29 @@ describe('POST /settings/videos/upload', () => {
     expect(res.headers.location).toBe('/overlay/settings?error=upload_failed');
     const baseName = vi.mocked(storeMovAsWebm).mock.calls[0]![1];
     expect(vi.mocked(fs.promises.rm)).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`${baseName}\\.webm$`)), { force: true });
+  });
+
+  it.each([
+    ['a .mov name', { filename: 'clip.mov', contentType: 'application/octet-stream' }],
+    ['a video/quicktime type', { filename: 'clip', contentType: 'video/quicktime' }],
+  ])('turns away an upload declared as MOV by %s before buffering it when the conversion queue is full', async (_label, attach) => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    vi.mocked(isWebmTranscodeQueueFull).mockReturnValue(true);
+    const res = await supertest(buildApp())
+      .post('/settings/videos/upload')
+      .attach('video', MOV_BUF, attach);
+    expect(res.headers.location).toBe('/overlay/settings?error=transcode_busy');
+    expect(vi.mocked(storeMovAsWebm)).not.toHaveBeenCalled();
+    expect(vi.mocked(addVideo)).not.toHaveBeenCalled();
+  });
+
+  it('still accepts WebM and MP4 uploads while the conversion queue is full', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    vi.mocked(isWebmTranscodeQueueFull).mockReturnValue(true);
+    const res = await supertest(buildApp())
+      .post('/settings/videos/upload')
+      .attach('video', WEBM_BUF, { filename: 'clip.webm', contentType: 'video/webm' });
+    expect(res.headers.location).toBe('/overlay/settings?success=video_uploaded');
   });
 
   it('does not convert WebM or MP4 uploads', async () => {
@@ -409,6 +435,12 @@ describe('handleUploadError', () => {
     const res = makeRes();
     expect(handleUploadError(null, res)).toBe(false);
     expect(res.redirect).not.toHaveBeenCalled();
+  });
+
+  it('redirects a full conversion queue to transcode_busy', () => {
+    const res = makeRes();
+    expect(handleUploadError(Object.assign(new Error('busy'), { code: 'transcode_busy' }), res)).toBe(true);
+    expect(res.redirect).toHaveBeenCalledWith('/overlay/settings?error=transcode_busy');
   });
 
   it('redirects oversized files to file_too_large', () => {

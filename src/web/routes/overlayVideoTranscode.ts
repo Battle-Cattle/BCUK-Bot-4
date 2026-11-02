@@ -1,6 +1,10 @@
-import { spawn } from 'child_process';
+import { spawn, type ChildProcess } from 'child_process';
 import ffmpegPath from 'ffmpeg-static';
+import path from 'path';
+import { createLogger } from '../../shared/logger';
 import { createMutationQueue } from '../../shared/mutationQueue';
+
+const log = createLogger('OverlayVideoTranscode');
 
 // Converts uploaded QuickTime (.mov) overlay videos to WebM. Editors export transparent video as
 // MOV (ProRes 4444, QuickTime Animation, PNG-in-MOV), which browsers — and so OBS's browser
@@ -35,6 +39,35 @@ const transcodeQueue = createMutationQueue<'webm'>();
 /** Number of conversions currently queued or running (see {@link MAX_PENDING_WEBM_TRANSCODES}). */
 let pendingTranscodes = 0;
 
+/** The ffmpeg process converting right now, if any, so shutdown can stop it. */
+let activeProcess: ChildProcess | undefined;
+
+/** Set by {@link stopWebmTranscodes}: once the bot is shutting down, no new conversion starts. */
+let stopped = false;
+
+/**
+ * True when a new conversion would be turned away as `transcode_busy`. The upload route checks
+ * this before buffering a file the client says is a MOV, so a busy server doesn't first take in
+ * the whole upload only to refuse it.
+ * @returns True when {@link MAX_PENDING_WEBM_TRANSCODES} conversions are queued or running.
+ */
+export function isWebmTranscodeQueueFull(): boolean {
+  return pendingTranscodes >= MAX_PENDING_WEBM_TRANSCODES;
+}
+
+/**
+ * Stops conversions for shutdown: kills the running ffmpeg, if any, and makes every queued or
+ * later conversion reject without starting one. Their temporary files are removed by the
+ * caller's failure path or, if the process exits first, by the next upload's stale-file sweep.
+ */
+export function stopWebmTranscodes(): void {
+  stopped = true;
+  if (activeProcess) {
+    log.info(`Stopping the running overlay video conversion (pid ${activeProcess.pid}) for shutdown`);
+    activeProcess.kill('SIGKILL');
+  }
+}
+
 /**
  * Builds the ffmpeg arguments that convert `inputPath` to a VP9/Opus WebM at `outputPath`.
  * `yuva420p` keeps the alpha channel (an opaque source just gets a fully opaque one), and
@@ -67,10 +100,20 @@ function timeoutError(): Error {
 }
 
 /**
+ * Builds the error a conversion rejects with when ffmpeg exits other than cleanly.
+ * @param code - ffmpeg's exit code, or null when a signal ended it.
+ * @param stderrTail - The last characters ffmpeg wrote to stderr.
+ * @returns An Error carrying both.
+ */
+function exitError(code: number | null, stderrTail: string): Error {
+  return new Error(`ffmpeg exited with code ${code}: ${stderrTail}`);
+}
+
+/**
  * Runs the bundled ffmpeg with `args`. If it hasn't exited within
  * {@link WEBM_TRANSCODE_TIMEOUT_MS} it's killed, and the promise rejects once it has actually
- * exited (or after {@link KILLED_FFMPEG_EXIT_GRACE_MS}), so the caller never removes files or
- * starts the next conversion while it's still running.
+ * exited (or after {@link KILLED_FFMPEG_EXIT_GRACE_MS}, with a warning that it may still be
+ * running), so the caller never removes files or starts the next conversion while it's running.
  * @param args - Arguments to pass to ffmpeg.
  * @returns Resolves once ffmpeg exits with code 0.
  * @throws If ffmpeg can't be started, exits non-zero (the message carries the end of its
@@ -83,31 +126,55 @@ function runFfmpeg(args: string[]): Promise<void> {
       return;
     }
     const proc = spawn(ffmpegPath, args, { stdio: ['ignore', 'ignore', 'pipe'] });
+    activeProcess = proc;
     let stderrTail = '';
     let timedOut = false;
     let exitGrace: NodeJS.Timeout | undefined;
+    const settle = (err?: Error): void => {
+      clearTimeout(timeout);
+      clearTimeout(exitGrace);
+      if (activeProcess === proc) activeProcess = undefined;
+      if (err) reject(err);
+      else resolve();
+    };
     const timeout = setTimeout(() => {
       timedOut = true;
       proc.kill('SIGKILL');
-      exitGrace = setTimeout(() => reject(timeoutError()), KILLED_FFMPEG_EXIT_GRACE_MS);
+      exitGrace = setTimeout(() => {
+        log.warn(`ffmpeg (pid ${proc.pid}) had not exited ${KILLED_FFMPEG_EXIT_GRACE_MS}ms after SIGKILL; releasing its conversion slot anyway`);
+        settle(timeoutError());
+      }, KILLED_FFMPEG_EXIT_GRACE_MS);
     }, WEBM_TRANSCODE_TIMEOUT_MS);
     proc.stderr.setEncoding('utf8');
     proc.stderr.on('data', (chunk: string) => {
       stderrTail = (stderrTail + chunk).slice(-STDERR_TAIL_CHARS);
     });
-    proc.on('error', (err) => {
-      clearTimeout(timeout);
-      clearTimeout(exitGrace);
-      reject(err);
-    });
+    proc.on('error', (err) => settle(err));
     proc.on('close', (code) => {
-      clearTimeout(timeout);
-      clearTimeout(exitGrace);
-      if (timedOut) reject(timeoutError());
-      else if (code === 0) resolve();
-      else reject(new Error(`ffmpeg exited with code ${code}: ${stderrTail}`));
+      if (timedOut) settle(timeoutError());
+      else settle(code === 0 ? undefined : exitError(code, stderrTail));
     });
   });
+}
+
+/**
+ * Runs one queued conversion, logging how long it took and how it ended.
+ * @param inputPath - Absolute path of the uploaded source video.
+ * @param outputPath - Absolute path to write the WebM to.
+ * @returns Resolves once the WebM has been written.
+ * @throws If the bot is shutting down, or ffmpeg fails or times out.
+ */
+async function runConversion(inputPath: string, outputPath: string): Promise<void> {
+  if (stopped) throw new Error('Overlay video conversion stopped for shutdown');
+  const started = Date.now();
+  log.info(`Converting ${path.basename(inputPath)} to WebM`);
+  try {
+    await runFfmpeg(buildWebmTranscodeArgs(inputPath, outputPath));
+  } catch (err) {
+    log.warn(`Converting ${path.basename(inputPath)} to WebM failed after ${Date.now() - started}ms`);
+    throw err;
+  }
+  log.info(`Converted ${path.basename(inputPath)} to WebM in ${Date.now() - started}ms`);
 }
 
 /**
@@ -119,15 +186,15 @@ function runFfmpeg(args: string[]): Promise<void> {
  * @returns Resolves once the WebM has been written.
  * @throws With `code: 'transcode_busy'`, without queueing, when
  *   {@link MAX_PENDING_WEBM_TRANSCODES} conversions are already queued or running; otherwise if
- *   ffmpeg fails or times out.
+ *   the bot is shutting down, or ffmpeg fails or times out.
  */
 export async function transcodeToWebm(inputPath: string, outputPath: string): Promise<void> {
-  if (pendingTranscodes >= MAX_PENDING_WEBM_TRANSCODES) {
+  if (isWebmTranscodeQueueFull()) {
     throw Object.assign(new Error('Too many WebM conversions pending'), { code: 'transcode_busy' });
   }
   pendingTranscodes++;
   try {
-    await transcodeQueue.run('webm', () => runFfmpeg(buildWebmTranscodeArgs(inputPath, outputPath)));
+    await transcodeQueue.run('webm', () => runConversion(inputPath, outputPath));
   } finally {
     pendingTranscodes--;
   }

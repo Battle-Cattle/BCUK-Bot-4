@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { createLogger } from '../../shared/logger';
 import { transcodeToWebm } from './overlayVideoTranscode';
+import { detectVideoType } from './uploadFileTypes';
 
 const log = createLogger('OverlayMovConversion');
 
@@ -74,10 +75,34 @@ export async function sweepStaleConversionFiles(dir: string): Promise<void> {
   await Promise.all(names.filter(isConversionTempFile).map((name) => removeIfStale(path.join(dir, name), now)));
 }
 
+/** Bytes read from the start of a converted file to check it's a WebM. */
+const HEADER_BYTES = 16;
+
+/**
+ * Checks that ffmpeg's output is a non-empty WebM before it's published: ffmpeg exiting cleanly
+ * doesn't by itself prove it wrote a usable file (an empty or truncated output would otherwise
+ * be stored and fail only when the overlay tries to play it).
+ * @param fullPath - Absolute path of the converted file.
+ * @returns Resolves when the file is a non-empty WebM.
+ * @throws If the file is missing, empty, or doesn't start with a WebM (EBML) header.
+ */
+async function assertWebmOutput(fullPath: string): Promise<void> {
+  const handle = await fs.promises.open(fullPath, 'r');
+  try {
+    const header = Buffer.alloc(HEADER_BYTES);
+    const { bytesRead } = await handle.read(header, 0, HEADER_BYTES, 0);
+    if (detectVideoType(header.subarray(0, bytesRead)) !== 'webm') {
+      throw new Error(`Conversion output ${path.basename(fullPath)} is not a WebM (${bytesRead} header bytes)`);
+    }
+  } finally {
+    await handle.close();
+  }
+}
+
 /**
  * Wraps a conversion failure in the error the upload route reports: `transcode_busy` when the
  * conversion queue was full, `transcode_failed` otherwise.
- * @param err - What the conversion or rename threw.
+ * @param err - What the conversion, output check or rename threw.
  * @returns An Error carrying the code for the route's redirect.
  */
 function conversionError(err: unknown): Error {
@@ -90,15 +115,15 @@ function conversionError(err: unknown): Error {
 /**
  * Converts an uploaded QuickTime video to `<baseName>.webm` in `dir`, via a temporary copy of
  * the upload (ffmpeg needs a seekable file: a MOV's index is often at the end). ffmpeg writes to
- * a `.webm.part` file that's renamed once complete, so a half-written WebM never has a servable
- * name. Both temporary files are removed afterwards; any whose removal fails is picked up by
+ * a `.webm.part` file that's checked (see {@link assertWebmOutput}) and renamed once complete,
+ * so a half-written or unusable WebM never has a servable name. Both temporary files are removed afterwards; any whose removal fails is picked up by
  * {@link sweepStaleConversionFiles} on a later upload.
  * @param dir - Absolute path of the streamer's overlay folder (already safe-resolved and created).
  * @param baseName - Random base name (no extension) for the stored file.
  * @param buffer - The uploaded MOV's bytes.
  * @returns The stored WebM's filename.
  * @throws With `code: 'transcode_busy'` if too many conversions are pending, or
- *   `code: 'transcode_failed'` if ffmpeg can't convert the file; or the error from writing the
+ *   `code: 'transcode_failed'` if ffmpeg can't convert the file or its output isn't a WebM; or the error from writing the
  *   temporary copy (after removing any partial copy).
  */
 export async function storeMovAsWebm(dir: string, baseName: string, buffer: Buffer): Promise<string> {
@@ -114,6 +139,7 @@ export async function storeMovAsWebm(dir: string, baseName: string, buffer: Buff
   }
   try {
     await transcodeToWebm(sourcePath, partialPath);
+    await assertWebmOutput(partialPath);
     await fs.promises.rename(partialPath, path.join(dir, filename));
   } catch (err) {
     log.error('Overlay MOV to WebM conversion failed:', err);

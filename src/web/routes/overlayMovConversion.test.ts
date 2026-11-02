@@ -11,6 +11,8 @@ import { transcodeToWebm } from './overlayVideoTranscode';
 import { storeMovAsWebm, sweepStaleConversionFiles, STALE_CONVERSION_FILE_MS } from './overlayMovConversion';
 
 const MOV_BYTES = Buffer.from('fake mov bytes');
+/** A converted file that starts with a WebM (EBML) header. */
+const WEBM_BYTES = Buffer.concat([Buffer.from([0x1a, 0x45, 0xdf, 0xa3]), Buffer.from('rest of the webm')]);
 let dir: string;
 /** What the most recent conversion read from its input file. */
 let convertedInput: Buffer | undefined;
@@ -35,7 +37,7 @@ beforeEach(async () => {
   convertedInput = undefined;
   vi.mocked(transcodeToWebm).mockImplementation(async (inputPath, outputPath) => {
     convertedInput = await fs.promises.readFile(inputPath);
-    await fs.promises.writeFile(outputPath, 'webm bytes');
+    await fs.promises.writeFile(outputPath, WEBM_BYTES);
   });
 });
 
@@ -50,7 +52,7 @@ describe('storeMovAsWebm', () => {
     expect(vi.mocked(transcodeToWebm)).toHaveBeenCalledWith(path.join(dir, 'abc.mov.upload'), path.join(dir, 'abc.webm.part'));
     expect(convertedInput).toEqual(MOV_BYTES);
     expect(await files()).toEqual(['abc.webm']);
-    expect(await fs.promises.readFile(path.join(dir, 'abc.webm'), 'utf8')).toBe('webm bytes');
+    expect(await fs.promises.readFile(path.join(dir, 'abc.webm'))).toEqual(WEBM_BYTES);
   });
 
   it('removes both temporary files and reports transcode_failed when ffmpeg fails partway', async () => {
@@ -58,6 +60,23 @@ describe('storeMovAsWebm', () => {
       await fs.promises.writeFile(outputPath, 'half a webm');
       throw new Error('ffmpeg exited with code 1');
     });
+    await expect(storeMovAsWebm(dir, 'abc', MOV_BYTES)).rejects.toMatchObject({ code: 'transcode_failed' });
+    expect(await files()).toEqual([]);
+  });
+
+  it.each([
+    ['is empty', Buffer.alloc(0)],
+    ['is not a WebM', Buffer.from('definitely not a webm file')],
+  ])('rejects with transcode_failed, publishing nothing, when ffmpeg exits cleanly but its output %s', async (_label, output) => {
+    vi.mocked(transcodeToWebm).mockImplementation(async (_inputPath, outputPath) => {
+      await fs.promises.writeFile(outputPath, output);
+    });
+    await expect(storeMovAsWebm(dir, 'abc', MOV_BYTES)).rejects.toMatchObject({ code: 'transcode_failed' });
+    expect(await files()).toEqual([]);
+  });
+
+  it('rejects with transcode_failed when ffmpeg exits cleanly without writing any output', async () => {
+    vi.mocked(transcodeToWebm).mockResolvedValue(undefined);
     await expect(storeMovAsWebm(dir, 'abc', MOV_BYTES)).rejects.toMatchObject({ code: 'transcode_failed' });
     expect(await files()).toEqual([]);
   });

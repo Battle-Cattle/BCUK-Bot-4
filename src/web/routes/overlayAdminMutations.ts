@@ -1,5 +1,5 @@
 import { createLogger } from '../../shared/logger';
-import { Router } from 'express';
+import { Router, type Response } from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
@@ -17,6 +17,7 @@ import { safeResolve } from '../../shared/pathUtils';
 import { detectVideoType } from './uploadFileTypes';
 import { NOT_A_STREAMER_REDIRECT } from './overlayAdminShared';
 import { storeMovAsWebm } from './overlayMovConversion';
+import { isWebmTranscodeQueueFull } from './overlayVideoTranscode';
 
 const log = createLogger('OverlayAdmin');
 
@@ -28,12 +29,37 @@ export const router = Router();
 export const MAX_UPLOAD_MB = OVERLAY_MAX_FILE_MB;
 const MAX_FILE_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
 
-// No fileFilter: client-supplied MIME type is unreliable (some browsers send
-// application/octet-stream). detectVideoType() validates via magic bytes instead,
-// mirroring the audio upload approach.
+/**
+ * True if the client says the upload is a QuickTime file, by its name or MIME type. That claim
+ * can't be trusted to accept a file (magic bytes decide that), only to turn one away early.
+ * @param file - Multer's description of the incoming file, before its bytes are read.
+ * @returns True for a `.mov` name or a `video/quicktime` type.
+ */
+function declaresMov(file: Express.Multer.File): boolean {
+  return file.mimetype === 'video/quicktime' || path.extname(file.originalname).toLowerCase() === '.mov';
+}
+
+/**
+ * Multer `fileFilter`: refuses a declared MOV with `transcode_busy` when the conversion queue is
+ * already full, before Multer buffers it into memory. Every other upload (and a MOV sent under
+ * another name) is let through; `detectVideoType()` still validates the bytes, and
+ * `transcodeToWebm` still enforces the limit for a MOV this check didn't recognise.
+ * @param _req - Express request (unused).
+ * @param file - Multer's description of the incoming file.
+ * @param cb - Multer's callback: an error to refuse the file, or `true` to accept it.
+ */
+function admitUpload(_req: Express.Request, file: Express.Multer.File, cb: multer.FileFilterCallback): void {
+  if (declaresMov(file) && isWebmTranscodeQueueFull()) {
+    cb(Object.assign(new Error('Too many WebM conversions pending'), { code: 'transcode_busy' }));
+    return;
+  }
+  cb(null, true);
+}
+
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: MAX_FILE_BYTES },
+  fileFilter: admitUpload,
 });
 
 /**
@@ -81,16 +107,25 @@ async function saveVideoFile(streamer: DbStreamerEventSub, file: Express.Multer.
   log.info(`Overlay video uploaded for ${streamer.twitch_name}: ${filename}${type === 'mov' ? ' (converted from MOV)' : ''}`);
 }
 
+/** Redirects a Multer error: `file_too_large` for an oversized file, `upload_failed` otherwise. */
+const redirectMulterError = createMulterErrorRedirectHandler('/overlay/settings', log, 'Overlay upload middleware error:');
+
 /**
- * Translate a Multer error into a user-facing redirect, instead of letting it
- * reach the centralised 500 handler. An oversized file (`LIMIT_FILE_SIZE`) gets
- * the `file_too_large` code; any other error falls back to `upload_failed`.
+ * Translate an upload-middleware error into a user-facing redirect, instead of letting it reach
+ * the centralised 500 handler: `transcode_busy` from {@link admitUpload}, `file_too_large` for an
+ * oversized file, and `upload_failed` for anything else.
  * @param err - The error passed by Multer's callback, or null/undefined if none.
  * @param res - Express response used to issue the redirect when an error occurred.
- * @returns true when `err` was an error and a redirect was sent (caller should
- *   stop); false when there was no error (caller should continue).
+ * @returns true when `err` was an error and a redirect was sent (caller should stop); false when
+ *   there was no error (caller should continue).
  */
-export const handleUploadError = createMulterErrorRedirectHandler('/overlay/settings', log, 'Overlay upload middleware error:');
+export function handleUploadError(err: unknown, res: Response): boolean {
+  if (err instanceof Error && (err as NodeJS.ErrnoException).code === 'transcode_busy') {
+    res.redirect('/overlay/settings?error=transcode_busy');
+    return true;
+  }
+  return redirectMulterError(err, res);
+}
 
 /** Express middleware running Multer's single-file (`video`) parser, redirecting on error. */
 const uploadVideo = makeUploadMiddleware(upload, 'video', handleUploadError);

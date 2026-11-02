@@ -1,13 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { EventEmitter } from 'events';
+import { mockLogger } from '../../test-utils/loggerMock';
 
 vi.mock('child_process', () => ({ spawn: vi.fn() }));
 vi.mock('ffmpeg-static', () => ({ default: '/usr/bin/ffmpeg' }));
+vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
 import { spawn } from 'child_process';
 import { waitFor } from '../../test-utils/waitFor';
 import {
-  buildWebmTranscodeArgs, transcodeToWebm, WEBM_TRANSCODE_TIMEOUT_MS, KILLED_FFMPEG_EXIT_GRACE_MS, MAX_PENDING_WEBM_TRANSCODES,
+  buildWebmTranscodeArgs, transcodeToWebm, isWebmTranscodeQueueFull,
+  WEBM_TRANSCODE_TIMEOUT_MS, KILLED_FFMPEG_EXIT_GRACE_MS, MAX_PENDING_WEBM_TRANSCODES,
 } from './overlayVideoTranscode';
 
 /** Fake ChildProcess-like EventEmitter for mocking `spawn`. */
@@ -114,6 +117,9 @@ describe('transcodeToWebm', () => {
       const assertion = expect(promise).rejects.toThrow(/timed out/);
       await vi.advanceTimersByTimeAsync(WEBM_TRANSCODE_TIMEOUT_MS + KILLED_FFMPEG_EXIT_GRACE_MS);
       await assertion;
+      // A late exit after the slot was released changes nothing.
+      expect(() => proc.emit('close', null)).not.toThrow();
+      await expect(promise).rejects.toThrow(/timed out/);
     } finally {
       vi.useRealTimers();
     }
@@ -122,7 +128,9 @@ describe('transcodeToWebm', () => {
   it('turns a conversion away without queueing it when too many are already pending', async () => {
     const procs = Array.from({ length: MAX_PENDING_WEBM_TRANSCODES }, () => makeFakeProcess());
     for (const proc of procs) vi.mocked(spawn).mockReturnValueOnce(proc);
+    expect(isWebmTranscodeQueueFull()).toBe(false);
     const pending = procs.map((_, i) => transcodeToWebm(`/in${i}`, `/out${i}`));
+    expect(isWebmTranscodeQueueFull()).toBe(true);
     await expect(transcodeToWebm('/extra', '/extra.webm')).rejects.toMatchObject({ code: 'transcode_busy' });
     // Finishing one frees a slot for the next upload.
     await spawnCalled(1);
@@ -169,5 +177,38 @@ describe('transcodeToWebm without an ffmpeg binary', () => {
     } finally {
       vi.doUnmock('ffmpeg-static');
     }
+  });
+});
+
+describe('stopWebmTranscodes', () => {
+  /** Imports a fresh copy of the module, so its stopped state doesn't leak into other tests. */
+  async function freshModule() {
+    vi.resetModules();
+    return import('./overlayVideoTranscode.js');
+  }
+
+  it('kills the running ffmpeg and starts no queued or later conversion', async () => {
+    const mod = await freshModule();
+    const proc = makeFakeProcess();
+    proc.kill = vi.fn(() => { proc.emit('close', null); return true; });
+    vi.mocked(spawn).mockReturnValue(proc);
+    const running = mod.transcodeToWebm('/a', '/a.webm');
+    const queued = mod.transcodeToWebm('/b', '/b.webm');
+    await spawnCalled(1);
+
+    mod.stopWebmTranscodes();
+
+    expect(proc.kill).toHaveBeenCalledWith('SIGKILL');
+    await expect(running).rejects.toThrow(/code null/);
+    await expect(queued).rejects.toThrow(/stopped for shutdown/);
+    await expect(mod.transcodeToWebm('/c', '/c.webm')).rejects.toThrow(/stopped for shutdown/);
+    expect(spawn).toHaveBeenCalledOnce();
+  });
+
+  it('does nothing but block later conversions when none is running', async () => {
+    const mod = await freshModule();
+    mod.stopWebmTranscodes();
+    await expect(mod.transcodeToWebm('/a', '/a.webm')).rejects.toThrow(/stopped for shutdown/);
+    expect(spawn).not.toHaveBeenCalled();
   });
 });
