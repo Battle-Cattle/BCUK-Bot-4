@@ -40,7 +40,7 @@ vi.mock('fs', () => ({
   },
 }));
 
-vi.mock('./overlayVideoTranscode', () => ({ transcodeToWebm: vi.fn() }));
+vi.mock('./overlayMovConversion', () => ({ storeMovAsWebm: vi.fn() }));
 
 import supertest from 'supertest';
 import multer from 'multer';
@@ -49,7 +49,7 @@ import { getStreamerByDiscordId, addVideo, deleteVideo } from '../../db';
 import { AccessLevel } from '../../db';
 import fs from 'fs';
 import { csrfProtection } from '../csrf';
-import { transcodeToWebm } from './overlayVideoTranscode';
+import { storeMovAsWebm } from './overlayMovConversion';
 import type { RequestHandler } from 'express';
 import { buildTestApp, drainBodyBeforeRedirect } from '../../test-utils/expressTestApp';
 
@@ -81,7 +81,7 @@ beforeEach(() => {
   vi.mocked(fs.promises.mkdir).mockResolvedValue(undefined);
   vi.mocked(fs.promises.writeFile).mockResolvedValue(undefined);
   vi.mocked(fs.promises.rm).mockResolvedValue(undefined);
-  vi.mocked(transcodeToWebm).mockResolvedValue(undefined);
+  vi.mocked(storeMovAsWebm).mockImplementation(async (_dir, baseName) => `${baseName}.webm`);
 });
 
 // --- POST /settings/videos/upload ---
@@ -202,46 +202,30 @@ describe('POST /settings/videos/upload', () => {
     expect(vi.mocked(addVideo)).toHaveBeenCalled();
   });
 
-  it('converts a MOV to WebM, stores only the WebM and records it', async () => {
+  it('stores a MOV through the WebM conversion and records the converted file', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
     const res = await supertest(buildApp())
       .post('/settings/videos/upload')
       .field('name', 'Transparent Clip')
       .attach('video', MOV_BUF, { filename: 'clip.mov', contentType: 'video/quicktime' });
     expect(res.headers.location).toBe('/overlay/settings?success=video_uploaded');
-    const sourcePath = vi.mocked(fs.promises.writeFile).mock.calls[0]![0] as string;
-    // path.join uses the platform's separator, so accept either.
-    expect(sourcePath).toMatch(/^[\\/]app[\\/]overlay-videos[\\/]123[\\/][0-9a-f-]+\.mov\.upload$/);
-    expect(vi.mocked(fs.promises.writeFile).mock.calls[0]![1]).toEqual(MOV_BUF);
-    const outputPath = sourcePath.replace(/\.mov\.upload$/, '.webm');
-    expect(vi.mocked(transcodeToWebm)).toHaveBeenCalledWith(sourcePath, outputPath);
-    expect(vi.mocked(fs.promises.rm)).toHaveBeenCalledWith(sourcePath, { force: true });
-    expect(vi.mocked(fs.promises.rm)).not.toHaveBeenCalledWith(outputPath, expect.anything());
-    expect(vi.mocked(addVideo)).toHaveBeenCalledWith(MOCK_STREAMER.id, 'Transparent Clip', outputPath.split(/[\\/]/).at(-1));
+    const [dir, baseName, buffer] = vi.mocked(storeMovAsWebm).mock.calls[0]!;
+    // path.resolve uses the platform's separator, so accept either.
+    expect(dir).toMatch(/[\\/]app[\\/]overlay-videos[\\/]123$/);
+    expect(baseName).toMatch(/^[0-9a-f-]{36}$/);
+    expect(buffer).toEqual(MOV_BUF);
+    expect(vi.mocked(fs.promises.writeFile)).not.toHaveBeenCalled();
+    expect(vi.mocked(addVideo)).toHaveBeenCalledWith(MOCK_STREAMER.id, 'Transparent Clip', `${baseName}.webm`);
   });
 
-  it('redirects with transcode_failed and removes both files when the MOV conversion fails', async () => {
+  it.each(['transcode_failed', 'transcode_busy'])('redirects with %s when the MOV cannot be stored', async (code) => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
-    vi.mocked(transcodeToWebm).mockRejectedValue(new Error('ffmpeg exited with code 1'));
+    vi.mocked(storeMovAsWebm).mockRejectedValue(Object.assign(new Error('conversion'), { code }));
     const res = await supertest(buildApp())
       .post('/settings/videos/upload')
       .attach('video', MOV_BUF, { filename: 'clip.mov', contentType: 'video/quicktime' });
-    expect(res.headers.location).toBe('/overlay/settings?error=transcode_failed');
-    const sourcePath = vi.mocked(fs.promises.writeFile).mock.calls[0]![0] as string;
-    expect(vi.mocked(fs.promises.rm)).toHaveBeenCalledWith(sourcePath, { force: true });
-    expect(vi.mocked(fs.promises.rm)).toHaveBeenCalledWith(sourcePath.replace(/\.mov\.upload$/, '.webm'), { force: true });
+    expect(res.headers.location).toBe(`/overlay/settings?error=${code}`);
     expect(vi.mocked(addVideo)).not.toHaveBeenCalled();
-  });
-
-  it('still reports transcode_failed when removing the leftover files also fails', async () => {
-    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
-    vi.mocked(transcodeToWebm).mockRejectedValue(new Error('ffmpeg exited with code 1'));
-    vi.mocked(fs.promises.rm).mockRejectedValue(new Error('EACCES'));
-    const res = await supertest(buildApp())
-      .post('/settings/videos/upload')
-      .attach('video', MOV_BUF, { filename: 'clip.mov', contentType: 'video/quicktime' });
-    expect(res.headers.location).toBe('/overlay/settings?error=transcode_failed');
-    expect(vi.mocked(fs.promises.rm)).toHaveBeenCalledTimes(2);
   });
 
   it('removes the converted WebM when the DB insert fails after a MOV conversion', async () => {
@@ -251,8 +235,8 @@ describe('POST /settings/videos/upload', () => {
       .post('/settings/videos/upload')
       .attach('video', MOV_BUF, { filename: 'clip.mov', contentType: 'video/quicktime' });
     expect(res.headers.location).toBe('/overlay/settings?error=upload_failed');
-    const sourcePath = vi.mocked(fs.promises.writeFile).mock.calls[0]![0] as string;
-    expect(vi.mocked(fs.promises.rm)).toHaveBeenCalledWith(sourcePath.replace(/\.mov\.upload$/, '.webm'), { force: true });
+    const baseName = vi.mocked(storeMovAsWebm).mock.calls[0]![1];
+    expect(vi.mocked(fs.promises.rm)).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`${baseName}\\.webm$`)), { force: true });
   });
 
   it('does not convert WebM or MP4 uploads', async () => {
@@ -260,7 +244,7 @@ describe('POST /settings/videos/upload', () => {
     await supertest(buildApp())
       .post('/settings/videos/upload')
       .attach('video', MP4_BUF, { filename: 'test.mp4', contentType: 'video/mp4' });
-    expect(vi.mocked(transcodeToWebm)).not.toHaveBeenCalled();
+    expect(vi.mocked(storeMovAsWebm)).not.toHaveBeenCalled();
   });
 
   it('rejects a file with no recognised magic bytes even if MIME type is correct', async () => {

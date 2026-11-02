@@ -6,12 +6,15 @@ vi.mock('ffmpeg-static', () => ({ default: '/usr/bin/ffmpeg' }));
 
 import { spawn } from 'child_process';
 import { waitFor } from '../../test-utils/waitFor';
-import { buildWebmTranscodeArgs, transcodeToWebm, WEBM_TRANSCODE_TIMEOUT_MS } from './overlayVideoTranscode';
+import {
+  buildWebmTranscodeArgs, transcodeToWebm, WEBM_TRANSCODE_TIMEOUT_MS, KILLED_FFMPEG_EXIT_GRACE_MS, MAX_PENDING_WEBM_TRANSCODES,
+} from './overlayVideoTranscode';
 
 /** Fake ChildProcess-like EventEmitter for mocking `spawn`. */
 function makeFakeProcess() {
   const proc = new EventEmitter() as any;
   proc.stderr = new EventEmitter();
+  proc.stderr.setEncoding = vi.fn();
   proc.kill = vi.fn();
   return proc;
 }
@@ -44,7 +47,10 @@ describe('buildWebmTranscodeArgs', () => {
 
   it('keeps the first video stream, an optional audio stream and no metadata', () => {
     const args = buildWebmTranscodeArgs('/in', '/out');
-    expect(args).toEqual(expect.arrayContaining(['-map', '0:v:0', '0:a:0?', '-map_metadata', '-1', '-nostdin']));
+    const mapped = args.flatMap((arg, i) => (arg === '-map' ? [args[i + 1]] : []));
+    expect(mapped).toEqual(['0:v:0', '0:a:0?']);
+    expect(args[args.indexOf('-map_metadata') + 1]).toBe('-1');
+    expect(args).toContain('-nostdin');
   });
 });
 
@@ -64,8 +70,8 @@ describe('transcodeToWebm', () => {
     vi.mocked(spawn).mockReturnValue(proc);
     const promise = transcodeToWebm('/in', '/out');
     await spawnCalled();
-    proc.stderr.emit('data', Buffer.from('x'.repeat(1000)));
-    proc.stderr.emit('data', Buffer.from('moov atom not found'));
+    proc.stderr.emit('data', 'x'.repeat(1000));
+    proc.stderr.emit('data', 'moov atom not found');
     proc.emit('close', 1);
     const error = await promise.then(() => null, (e: unknown) => e as Error);
     expect(error?.message).toMatch(/^ffmpeg exited with code 1: x+moov atom not found$/);
@@ -81,20 +87,58 @@ describe('transcodeToWebm', () => {
     await expect(promise).rejects.toThrow('spawn ENOENT');
   });
 
-  it('kills ffmpeg and rejects if it does not finish within the timeout', async () => {
+  it('kills ffmpeg on timeout and rejects only once it has exited', async () => {
+    vi.useFakeTimers();
+    try {
+      const proc = makeFakeProcess();
+      vi.mocked(spawn).mockReturnValue(proc);
+      let settled = false;
+      const promise = transcodeToWebm('/in', '/out');
+      void promise.catch(() => {}).finally(() => { settled = true; });
+      await vi.advanceTimersByTimeAsync(WEBM_TRANSCODE_TIMEOUT_MS);
+      expect(proc.kill).toHaveBeenCalledWith('SIGKILL');
+      expect(settled).toBe(false);
+      proc.emit('close', null);
+      await expect(promise).rejects.toThrow(/timed out/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('gives up waiting for a killed ffmpeg to exit after the grace period', async () => {
     vi.useFakeTimers();
     try {
       const proc = makeFakeProcess();
       vi.mocked(spawn).mockReturnValue(proc);
       const promise = transcodeToWebm('/in', '/out');
       const assertion = expect(promise).rejects.toThrow(/timed out/);
-      await vi.advanceTimersByTimeAsync(WEBM_TRANSCODE_TIMEOUT_MS);
-      expect(proc.kill).toHaveBeenCalledWith('SIGKILL');
+      await vi.advanceTimersByTimeAsync(WEBM_TRANSCODE_TIMEOUT_MS + KILLED_FFMPEG_EXIT_GRACE_MS);
       await assertion;
-      proc.emit('close', null);
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('turns a conversion away without queueing it when too many are already pending', async () => {
+    const procs = Array.from({ length: MAX_PENDING_WEBM_TRANSCODES }, () => makeFakeProcess());
+    for (const proc of procs) vi.mocked(spawn).mockReturnValueOnce(proc);
+    const pending = procs.map((_, i) => transcodeToWebm(`/in${i}`, `/out${i}`));
+    await expect(transcodeToWebm('/extra', '/extra.webm')).rejects.toMatchObject({ code: 'transcode_busy' });
+    // Finishing one frees a slot for the next upload.
+    await spawnCalled(1);
+    procs[0].emit('close', 0);
+    await pending[0];
+    const next = makeFakeProcess();
+    vi.mocked(spawn).mockReturnValueOnce(next);
+    const accepted = transcodeToWebm('/next', '/next.webm');
+    for (let i = 1; i < procs.length; i++) {
+      await spawnCalled(i + 1);
+      procs[i].emit('close', 0);
+      await pending[i];
+    }
+    await spawnCalled(procs.length + 1);
+    next.emit('close', 0);
+    await expect(accepted).resolves.toBeUndefined();
   });
 
   it('runs one conversion at a time, starting the next once the previous finishes or fails', async () => {

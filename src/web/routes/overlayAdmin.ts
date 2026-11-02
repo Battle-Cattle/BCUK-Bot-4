@@ -26,7 +26,7 @@ export const statusConnections = new Map<number, Set<Response>>();
 const KNOWN_ERRORS = new Set([
   'not_a_streamer', 'invalid_file', 'upload_failed', 'delete_failed',
   'invalid_reward_id', 'no_videos_selected', 'save_failed', 'invalid_id', 'invalid_path',
-  'file_too_large', 'invalid_weight',
+  'file_too_large', 'invalid_weight', 'transcode_failed', 'transcode_busy',
 ]);
 const KNOWN_SUCCESSES = new Set([
   'video_uploaded', 'video_deleted', 'reward_saved', 'reward_deleted',
