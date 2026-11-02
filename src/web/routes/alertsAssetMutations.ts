@@ -114,12 +114,46 @@ async function deleteAsset(streamerId: number, eventType: AlertEventType, setAss
   await removeOldAsset(streamerId, previous);
 }
 
+/** What {@link makeAlertAssetHandler} needs to build one asset route's handler. */
+interface AlertAssetHandlerOptions {
+  /** Log label for a thrown error, e.g. `Alert image upload error:`. */
+  logLabel: string;
+  /** Error code the route redirects with when `handle` throws. */
+  errorCode: string;
+  /**
+   * Does the route's own work once the requester is confirmed as a streamer and `:eventType` is
+   * valid, and sends the response.
+   */
+  handle: (req: Request, res: Response, streamer: DbStreamerEventSub, eventType: AlertEventType) => Promise<void>;
+}
+
+/**
+ * Builds an alert-asset route handler: verifies the requester is a streamer, validates
+ * `:eventType` (redirecting with `invalid_event_type` if it isn't one), runs `handle`, and turns a
+ * thrown error into a logged `?error=` redirect. Shared by the upload and delete handlers.
+ * @param options - Log label, error code and the route-specific work; see {@link AlertAssetHandlerOptions}.
+ * @returns An Express route handler.
+ */
+function makeAlertAssetHandler({ logLabel, errorCode, handle }: AlertAssetHandlerOptions): (req: Request, res: Response) => Promise<void> {
+  return async (req, res) => {
+    try {
+      const streamer = await requireStreamer(req, res, NOT_A_STREAMER_REDIRECT);
+      if (!streamer) return;
+
+      const eventType = parseEventType(req.params.eventType);
+      if (!eventType) return res.redirect('/alerts/settings?error=invalid_event_type');
+
+      await handle(req, res, streamer, eventType);
+    } catch (err) {
+      logAndRedirectError({ res, log, logLabel, err, basePath: '/alerts/settings', errorCode });
+    }
+  };
+}
+
 /**
  * Builds the POST /settings/:eventType/<image|sound> route handler for one asset kind: verifies
  * the requester is a streamer, validates `:eventType`, delegates to {@link saveUploadedAsset},
- * and redirects based on the result. Shared by the image and sound upload routes, which
- * previously differed only in their detector/setter/field name — this collapses that remaining
- * boilerplate down to a single factory call per route.
+ * and redirects based on the result. Shared by the image and sound upload routes.
  * @param detect - Magic-byte detector for this asset kind.
  * @param setAsset - DB setter (`setAlertImage`/`setAlertSound`) for this asset kind.
  * @param assetLabel - `'image'` or `'sound'`, used for error/log labelling.
@@ -130,21 +164,15 @@ function makeUploadHandler(
   setAsset: AssetSetter,
   assetLabel: 'image' | 'sound',
 ): (req: Request, res: Response) => Promise<void> {
-  return async (req, res) => {
-    try {
-      const streamer = await requireStreamer(req, res, NOT_A_STREAMER_REDIRECT);
-      if (!streamer) return;
-
-      const eventType = parseEventType(req.params.eventType);
-      if (!eventType) return res.redirect('/alerts/settings?error=invalid_event_type');
-
+  return makeAlertAssetHandler({
+    logLabel: `Alert ${assetLabel} upload error:`,
+    errorCode: 'upload_failed',
+    handle: async (req, res, streamer, eventType) => {
       const result = await saveUploadedAsset({ streamer, eventType, file: req.file, detect, setAsset, assetLabel });
       if ('errorCode' in result) return res.redirect(`/alerts/settings?error=${result.errorCode}`);
       res.redirect(`/alerts/settings?success=${result.successCode}`);
-    } catch (err) {
-      logAndRedirectError({ res, log, logLabel: `Alert ${assetLabel} upload error:`, err, basePath: '/alerts/settings', errorCode: 'upload_failed' });
-    }
-  };
+    },
+  });
 }
 
 /**
@@ -159,20 +187,14 @@ function makeDeleteHandler(
   setAsset: AssetSetter,
   assetLabel: 'image' | 'sound',
 ): (req: Request, res: Response) => Promise<void> {
-  return async (req, res) => {
-    try {
-      const streamer = await requireStreamer(req, res, NOT_A_STREAMER_REDIRECT);
-      if (!streamer) return;
-
-      const eventType = parseEventType(req.params.eventType);
-      if (!eventType) return res.redirect('/alerts/settings?error=invalid_event_type');
-
+  return makeAlertAssetHandler({
+    logLabel: `Alert ${assetLabel} delete error:`,
+    errorCode: 'delete_failed',
+    handle: async (_req, res, streamer, eventType) => {
       await deleteAsset(streamer.id, eventType, setAsset);
       res.redirect(`/alerts/settings?success=${assetLabel}_deleted`);
-    } catch (err) {
-      logAndRedirectError({ res, log, logLabel: `Alert ${assetLabel} delete error:`, err, basePath: '/alerts/settings', errorCode: 'delete_failed' });
-    }
-  };
+    },
+  });
 }
 
 /**

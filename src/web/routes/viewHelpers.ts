@@ -73,15 +73,16 @@ const RESERVED_RENDER_DATA_KEYS = new Set([
  * render call.
  * @param res - Express response object.
  * @param view - Name of the view to render (without the `.ejs` extension).
- * @param data - Template data, forwarded to `res.render` unchanged once validated.
+ * @param data - Template data: a plain object of template variables, forwarded to `res.render`
+ *   unchanged once validated. Anything else (array, primitive, `null`) throws.
  */
-export function renderView(res: Response, view: string, data?: Record<string, unknown>): void {
+export function renderView(res: Response, view: string, data?: unknown): void {
   if (!getKnownViews().has(view)) {
     throw new Error(`renderView: unknown view "${view}"`);
   }
   if (data !== undefined) {
-    // Runtime guard for callers passing loosely-typed (`any`) data; the static type can't see that.
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+    // Typed `unknown` so this guard is a real check: it narrows `data` to a plain object and
+    // also catches a caller passing loosely-typed (`any`) data.
     if (typeof data !== 'object' || data === null || Array.isArray(data)) {
       throw new Error('renderView: data must be a plain object');
     }

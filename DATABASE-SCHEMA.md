@@ -691,35 +691,9 @@ Expected constraints and behavior:
 - Both command columns should store single-token commands including any prefix.
 - The admin panel (CRUD and manual reset of `current_value`) and runtime chat-command matching/increment are both guild-scoped by `guild_id`.
 
-Per-guild uniqueness:
+Per-guild uniqueness: `0001_baseline.sql` creates `uq_counter_guild_trigger UNIQUE (guild_id, trigger_command)` and `uq_counter_guild_check UNIQUE (guild_id, check_command)`, plus the indexes `idx_counter_trigger` and `idx_counter_check`, which speed up the per-message lookup that scans both command columns.
 
-```sql
-ALTER TABLE counter
-    ADD CONSTRAINT uq_counter_guild_trigger UNIQUE (guild_id, trigger_command),
-    ADD CONSTRAINT uq_counter_guild_check   UNIQUE (guild_id, check_command);
-
-CREATE INDEX idx_counter_trigger ON counter(trigger_command);
-CREATE INDEX idx_counter_check   ON counter(check_command);
-```
-
-The two indexes accelerate per-message trigger lookups that scan both command columns on every incoming chat message.
-
-Deployment note:
-
-- **Recommended (defense-in-depth):** Apply these UNIQUE constraints during deployment/bootstrap. They provide DB-level protection against duplicate `trigger_command` and duplicate `check_command` rows, especially for direct DB writes, manual SQL, or future regressions.
-- For current application requests, counter writes are already serialized through `runSerializedCommandWrite()` + MySQL named locks and guarded by `isAnyCommandTakenAcrossTables()` before writes, so concurrent app requests should not create duplicates even without these two column-level UNIQUE constraints.
-
-**Important limitation:** The column-level UNIQUE constraints do **not** prevent **cross-column collisions** within the same table — for example, one row's `trigger_command` could equal another row's `check_command`. Since the application treats the union of both columns as a shared command namespace with `custom_command.trigger_string`, this is a potential consistency gap.
-
-**Runtime protection:** The application layer mitigates this risk via `isAnyCommandTakenAcrossTables()` in `src/db.ts`. This function is called within `runSerializedCommandWrite()`, which acquires MySQL advisory locks and queries both `trigger_command` and `check_command` (as well as `custom_command.trigger_string`) in a single atomic check before writing. This prevents concurrent collisions across the entire command namespace. The DB-level UNIQUE constraints provide an additional fallback in case of application-layer bugs or direct DB access.
-
-**Optional DB-level enforcement:** For additional safety at the database level, you can:
-
-1. Add a database trigger that validates both `trigger_command` and `check_command` against the union of all command columns, or
-2. Create a separate `command_registry` table with a `UNIQUE KEY` on the command string, then add foreign keys from both `trigger_command` and `check_command` to that table, or
-3. Use a generated column approach (MySQL 8.0.13+): add a generated column that represents the command token and enforce uniqueness on it.
-
-For now, the recommended migration is the two separate UNIQUE constraints above; the application-layer atomic checks provide sufficient protection for typical operations.
+**Cross-column collisions:** the UNIQUE constraints don't stop one row's `trigger_command` matching another row's `check_command`, or either matching a `custom_command.trigger_string`, though the application treats all three as one command namespace. `isAnyCommandTakenAcrossTables()` (`src/db.ts`) closes that gap: it runs inside `runSerializedCommandWrite()`, under MySQL named locks, and checks all three columns before every counter or custom-command write.
 
 ## `counter_archive_run`
 

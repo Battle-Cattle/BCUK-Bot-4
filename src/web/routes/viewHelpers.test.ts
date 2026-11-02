@@ -92,7 +92,7 @@ describe('renderView', () => {
 
   it('throws when data is not a plain object', () => {
     const { res } = mockRes();
-    expect(() => renderView(res, 'error', [1, 2, 3] as unknown as Record<string, unknown>)).toThrow(
+    expect(() => renderView(res, 'error', [1, 2, 3])).toThrow(
       /plain object/,
     );
   });

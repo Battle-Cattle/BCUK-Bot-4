@@ -1,6 +1,6 @@
 import mysql from 'mysql2/promise';
 import { connectionOptions } from './pool';
-import { createdTables, loadMigrationFiles, MIGRATIONS_DIR, type MigrationFile } from './migrationFiles';
+import { createdTables, loadMigrationFiles, MIGRATIONS_DIR, type MigrationFile } from '../shared/migrationFiles';
 import { createLogger } from '../shared/logger';
 
 const log = createLogger('Migrations');
@@ -71,8 +71,8 @@ async function adoptExistingDatabase(conn: mysql.Connection, applied: Map<string
   const missing = createdTables(baseline.sql).filter((t) => !existing.has(t));
   if (missing.length > 0) {
     throw new Error(
-      `Existing database is missing baseline tables (${missing.join(', ')}). It predates the baseline: apply the legacy `
-      + `scripts first (README, "Upgrading a database from before the baseline"), then restart`,
+      `Existing database is missing baseline tables (${missing.join(', ')}). Refusing to adopt a partial schema: `
+      + `bring it in line with migrations/0001_baseline.sql, then restart`,
     );
   }
   await recordApplied(conn, baseline);
