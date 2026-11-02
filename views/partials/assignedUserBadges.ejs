@@ -1,0 +1,20 @@
+<%# Badge list of the streamers a command or timer is assigned to, highlighting the session user's own badge.
+    Locals: user (session user, may be null), assignedUsers — the row's assigned_users array,
+    emptyText — what to show when nobody is assigned. -%>
+<% if (assignedUsers.length > 0) { %>
+  <div class="badge-list-wrap">
+    <% assignedUsers.forEach(function(assignedUser) { %>
+      <% const isSelf = user && assignedUser.discord_id === user.discordId; %>
+      <span class="badge badge-user-hue<%= isSelf ? ' badge-user-self' : '' %>" data-user-hue="<%= assignedUser.discord_id %>">
+        <%= assignedUser.discord_name || assignedUser.discord_id %>
+        <% if (assignedUser.twitch_name) { %>
+          (<%= assignedUser.twitch_name %>)
+        <% } else if (assignedUser.is_orphaned_user) { %>
+          (missing user)
+        <% } %>
+      </span>
+    <% }) %>
+  </div>
+<% } else { %>
+  <span class="muted"><%= emptyText %></span>
+<% } %>

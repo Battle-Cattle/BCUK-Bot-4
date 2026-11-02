@@ -1,11 +1,4 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BCUK Bot — Streamdeck Keys</title>
-  <link rel="stylesheet" href="/style.css">
-  <%- include('partials/pwa-head') %>
+<%- include('partials/head', { pageTitle: 'BCUK Bot — Streamdeck Keys' }) %>
 </head>
 <body>
   <%- include('partials/nav') %>
@@ -48,18 +41,7 @@
                 </td>
                 <td><%= row.requested_at.toLocaleString() %></td>
                 <td>
-                  <div class="d-flex gap-04 flex-wrap">
-                    <form method="POST" action="/admin/streamdeck-keys/approve" class="inline-form-sm">
-                      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-                      <input type="hidden" name="discord_id" value="<%= row.discord_id %>">
-                      <button type="submit" class="btn btn-sm">Approve</button>
-                    </form>
-                    <form method="POST" action="/admin/streamdeck-keys/deny" class="inline-form-sm js-confirm-deny-key">
-                      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-                      <input type="hidden" name="discord_id" value="<%= row.discord_id %>">
-                      <button type="submit" class="btn btn-sm btn-ghost">Deny</button>
-                    </form>
-                  </div>
+                  <%- include('partials/streamdeckKeyApproveDeny', { discordId: row.discord_id }) %>
                 </td>
               </tr>
               <% }); %>
@@ -119,18 +101,7 @@
                 </td>
                 <td>
                   <% if (row.status === 'pending') { %>
-                  <div class="d-flex gap-04 flex-wrap">
-                    <form method="POST" action="/admin/streamdeck-keys/approve" class="inline-form-sm">
-                      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-                      <input type="hidden" name="discord_id" value="<%= row.discord_id %>">
-                      <button type="submit" class="btn btn-sm">Approve</button>
-                    </form>
-                    <form method="POST" action="/admin/streamdeck-keys/deny" class="inline-form-sm js-confirm-deny-key">
-                      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-                      <input type="hidden" name="discord_id" value="<%= row.discord_id %>">
-                      <button type="submit" class="btn btn-sm btn-ghost">Deny</button>
-                    </form>
-                  </div>
+                  <%- include('partials/streamdeckKeyApproveDeny', { discordId: row.discord_id }) %>
                   <% } else if (row.status === 'approved') { %>
                   <form method="POST" action="/admin/streamdeck-keys/revoke" class="inline-form-sm js-confirm-revoke-key-admin">
                     <input type="hidden" name="_csrf" value="<%= csrfToken %>">
@@ -150,9 +121,7 @@
       </div>
     </section>
   </main>
-  <%- include('partials/pwa-register') %>
-  <%- include('partials/footer') %>
-  <script src="/utils.js"></script>
+  <%- include('partials/page-end') %>
   <script src="/streamdeck-keys-admin.js"></script>
 </body>
 </html>

@@ -1,11 +1,4 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BCUK Bot — Health</title>
-  <link rel="stylesheet" href="/style.css">
-  <%- include('partials/pwa-head') %>
+<%- include('partials/head', { pageTitle: 'BCUK Bot — Health' }) %>
 <%
 /** JSON-stringifies `value` and HTML-escapes the result so it's safe to embed inside a double-quoted HTML attribute; returns the escaped string. */
 function htmlAttrJson(value) {
