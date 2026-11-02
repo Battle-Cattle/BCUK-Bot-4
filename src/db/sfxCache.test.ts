@@ -171,6 +171,25 @@ describe('findCachedSfxTrigger', () => {
     expect(result!.trigger.id).toBe(1n);
   });
 
+  it('skips a trigger whose command is blank after normalizing, without registering it', async () => {
+    vi.mocked(getAllSfxTriggers).mockResolvedValue([makeTriggerRow('1', '   '), makeTriggerRow('2', '!bang')]);
+
+    const result = await findCachedSfxTrigger('!bang');
+
+    expect(result!.trigger.id).toBe(2n);
+    expect(vi.mocked(registerFirstWinsWithWarning).mock.calls.map((call) => call[1])).toEqual(['!bang']);
+  });
+
+  it('keeps the first of two rows that share a trigger id (the sort leaves equal ids in order)', async () => {
+    const first = makeTriggerRow('5', '!bang', [{ id: 50, file: 'first.mp3', weight: 1, hidden: false }]);
+    const second = makeTriggerRow('5', '!BANG', [{ id: 51, file: 'second.mp3', weight: 1, hidden: false }]);
+    vi.mocked(getAllSfxTriggers).mockResolvedValue([first, second]);
+
+    const result = await findCachedSfxTrigger('!bang');
+
+    expect(result!.files.map((f) => f.file)).toEqual(['first.mp3']);
+  });
+
   it('returns null for any command when the trigger list is empty', async () => {
     vi.mocked(getAllSfxTriggers).mockResolvedValue([]);
 

@@ -516,6 +516,24 @@ describe('category routes', () => {
     expect(res.headers.location).toBe('/sfx?error=update_failed');
   });
 
+  it('redirects rename with invalid_id when category_id is not a positive integer', async () => {
+    const res = await supertest(buildApp()).post('/sfx/category/rename').send('category_id=abc&name=Alerts');
+    expect(res.headers.location).toBe('/sfx?error=invalid_id');
+    expect(vi.mocked(renameCategory)).not.toHaveBeenCalled();
+  });
+
+  it('redirects rename with missing_fields when the new name is blank', async () => {
+    const res = await supertest(buildApp()).post('/sfx/category/rename').send('category_id=3&name=%20%20');
+    expect(res.headers.location).toBe('/sfx?error=missing_fields');
+    expect(vi.mocked(renameCategory)).not.toHaveBeenCalled();
+  });
+
+  it('redirects remove with invalid_id when category_id is not a positive integer', async () => {
+    const res = await supertest(buildApp()).post('/sfx/category/remove').send('category_id=0');
+    expect(res.headers.location).toBe('/sfx?error=invalid_id');
+    expect(vi.mocked(deleteCategory)).not.toHaveBeenCalled();
+  });
+
   it('redirects with remove_failed when deleteCategory throws', async () => {
     vi.mocked(deleteCategory).mockRejectedValue(new Error('boom'));
     const res = await supertest(buildApp()).post('/sfx/category/remove').send('category_id=3');
