@@ -122,7 +122,7 @@ describe('getAllTimerCommandsWithAssignments', () => {
     expect(result[1]!.enabled).toBe(false);
   });
 
-  it('marks user as orphaned when user_discord_id is null, falling back access_level to USER', async () => {
+  it('marks user as orphaned when user_discord_id is null', async () => {
     const row = {
       id: 1, name: 'Plug', message: 'Join!', interval_seconds: 600, min_messages: 0,
       require_live: 1, enabled: 1, assigned_discord_id: 'orphan1', user_discord_id: null,
