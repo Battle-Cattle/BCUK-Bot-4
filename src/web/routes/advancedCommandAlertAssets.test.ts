@@ -91,6 +91,7 @@ describe('alert asset uploads', () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValueOnce({ id: 3, discord_id: '1', twitch_name: 's' } as any).mockResolvedValueOnce(null);
     const res = await supertest(app()).post('/advanced-commands/7/alert/image').attach('image', PNG, 'pic.png').expect(302);
     expect(res.headers.location).toBe('/advanced-commands?error=not_a_streamer');
+    expect(fs.promises.writeFile).not.toHaveBeenCalled();
     expect(setAdvancedCommandAlertAsset).not.toHaveBeenCalled();
   });
 

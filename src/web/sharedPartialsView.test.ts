@@ -19,9 +19,11 @@ describe('partials/head', () => {
 describe('partials/page-end', () => {
   it('renders the service-worker registration, the footer and utils.js, in that order', async () => {
     const html = await render('page-end', {});
+    const registration = html.indexOf('<script src="/pwa-register.js" defer></script>');
     const footer = html.indexOf('<footer');
     const utils = html.indexOf('<script src="/utils.js"></script>');
-    expect(footer).toBeGreaterThan(-1);
+    expect(registration).toBeGreaterThan(-1);
+    expect(footer).toBeGreaterThan(registration);
     expect(utils).toBeGreaterThan(footer);
   });
 });
@@ -32,6 +34,13 @@ describe('partials/obsBrowserSource', () => {
     expect(html).toContain('https://bot.example/alerts/streamerone</code>');
     expect(html).toContain('data-events-url="/alerts/settings/events"');
     expect(html).toContain('Checking…');
+  });
+
+  it('uses overlayPath for both the URL and the events stream on the overlay page', async () => {
+    const html = await render('obsBrowserSource', { streamer: { twitch_name: 'StreamerOne' }, baseUrl: 'https://bot.example', overlayPath: 'overlay' });
+    expect(html).toContain('https://bot.example/overlay/streamerone</code>');
+    expect(html).toContain('data-events-url="/overlay/settings/events"');
+    expect(html).not.toContain('/alerts/');
   });
 
   it('shows "Not connected" and loads no status scripts when the streamer has no Twitch login', async () => {

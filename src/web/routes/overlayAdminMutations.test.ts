@@ -170,6 +170,7 @@ describe('POST /settings/videos/upload', () => {
       .post('/settings/videos/upload')
       .attach('video', MP4_BUF, { filename: 'test.mp4', contentType: 'video/mp4' });
     expect(res.headers.location).toBe('/overlay/settings?error=not_a_streamer');
+    expect(vi.mocked(fs.promises.writeFile)).not.toHaveBeenCalled();
     expect(vi.mocked(addVideo)).not.toHaveBeenCalled();
   });
 
@@ -181,6 +182,9 @@ describe('POST /settings/videos/upload', () => {
       .field('name', 'Test Video')
       .attach('video', MP4_BUF, { filename: 'test.mp4', contentType: 'video/mp4' });
     expect(res.headers.location).toBe('/overlay/settings?error=upload_failed');
+    // The DB insert failed after the file was written, so the file is rolled back.
+    expect(vi.mocked(fs.promises.writeFile)).toHaveBeenCalledOnce();
+    expect(vi.mocked(fs.promises.rm)).toHaveBeenCalledWith(vi.mocked(fs.promises.writeFile).mock.calls[0]![0], { force: true });
   });
 
   it('successfully uploads a valid webm file', async () => {
