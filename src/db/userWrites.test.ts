@@ -26,25 +26,25 @@ beforeEach(() => {
 describe('upsertUser', () => {
   it('calls invalidateCustomCommandLookupCache when twitchName is a non-null string', async () => {
     vi.mocked(upsertUserRecord).mockResolvedValue(true);
-    await upsertUser('1', 'Alice', 0, 'alice_chan');
+    await upsertUser('1', 'Alice', 'alice_chan');
     expect(invalidateCustomCommandLookupCache).toHaveBeenCalledOnce();
   });
 
   it('calls invalidateCustomCommandLookupCache when twitchName is explicitly null', async () => {
     vi.mocked(upsertUserRecord).mockResolvedValue(true);
-    await upsertUser('1', 'Alice', 0, null);
+    await upsertUser('1', 'Alice', null);
     expect(invalidateCustomCommandLookupCache).toHaveBeenCalledOnce();
   });
 
   it('does NOT call invalidateCustomCommandLookupCache when twitchName is omitted (undefined)', async () => {
     vi.mocked(upsertUserRecord).mockResolvedValue(false);
-    await upsertUser('1', 'Alice', 0);
+    await upsertUser('1', 'Alice');
     expect(invalidateCustomCommandLookupCache).not.toHaveBeenCalled();
   });
 
   it('propagates errors from upsertUserRecord without calling invalidate', async () => {
     vi.mocked(upsertUserRecord).mockRejectedValue(new Error('DB error'));
-    await expect(upsertUser('1', 'Alice', 0, 'alice')).rejects.toThrow('DB error');
+    await expect(upsertUser('1', 'Alice', 'alice')).rejects.toThrow('DB error');
     expect(invalidateCustomCommandLookupCache).not.toHaveBeenCalled();
   });
 });
@@ -94,12 +94,12 @@ describe('updateTwitchBotEnabled', () => {
 describe('advanced command cache invalidation', () => {
   it('invalidates the advanced command cache alongside the custom command cache on a Twitch name change', async () => {
     vi.mocked(upsertUserRecord).mockResolvedValue(true);
-    await upsertUser('1', 'Alice', 0, 'alice_chan');
+    await upsertUser('1', 'Alice', 'alice_chan');
     expect(invalidateAdvancedCommandLookupCache).toHaveBeenCalledOnce();
   });
 
   it('does not invalidate the advanced command cache when the Twitch name is untouched', async () => {
-    await upsertUser('1', 'Alice', 0);
+    await upsertUser('1', 'Alice');
     expect(invalidateAdvancedCommandLookupCache).not.toHaveBeenCalled();
   });
 
@@ -114,13 +114,13 @@ describe('advanced command cache invalidation', () => {
 describe('timer command cache invalidation', () => {
   it('invalidates the timer command cache on a Twitch name change, including a Twitch unlink (null)', async () => {
     vi.mocked(upsertUserRecord).mockResolvedValue(true);
-    await upsertUser('1', 'Alice', 0, 'alice_chan');
-    await upsertUser('1', 'Alice', 0, null);
+    await upsertUser('1', 'Alice', 'alice_chan');
+    await upsertUser('1', 'Alice', null);
     expect(invalidateTimerCommandCache).toHaveBeenCalledTimes(2);
   });
 
   it('does not invalidate the timer command cache when the Twitch name is untouched', async () => {
-    await upsertUser('1', 'Alice', 0);
+    await upsertUser('1', 'Alice');
     expect(invalidateTimerCommandCache).not.toHaveBeenCalled();
   });
 

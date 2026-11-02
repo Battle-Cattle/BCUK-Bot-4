@@ -2,8 +2,6 @@ import mysql from 'mysql2/promise';
 import type { PoolConnection } from 'mysql2/promise';
 import { getPool, withTransaction } from './pool';
 import { fromBit, affectedOrExists, rowExists } from './utils';
-import { AccessLevel } from './users';
-import type { AccessLevelValue } from './users';
 import { normalizeTwitchChannelName } from '../twitch/twitchChannelName';
 import { getOrCreate } from '../shared/mapUtils';
 import { isTimerSelfManageableBy, isTimerUnclaimedBy } from './timerSelfService';
@@ -24,7 +22,6 @@ export interface DbTimerCommandAssignedUser {
   discord_id: string;
   discord_name: string | null;
   twitch_name: string | null;
-  access_level: AccessLevelValue;
   is_orphaned_user: boolean;
 }
 
@@ -107,7 +104,7 @@ export async function getAllTimerCommandsWithAssignments(): Promise<DbTimerComma
     `SELECT tc.id, tc.name, tc.message, tc.interval_seconds, tc.min_messages, tc.require_live, tc.enabled,
             tcs.discord_id AS assigned_discord_id,
             u.discord_id AS user_discord_id,
-            u.discord_name, u.twitch_name, u.access_level
+            u.discord_name, u.twitch_name
      FROM timer_command tc
      LEFT JOIN timer_command_streamer tcs ON tc.id = tcs.timer_id
      LEFT JOIN \`user\` u ON tcs.discord_id = u.discord_id
@@ -127,7 +124,6 @@ export async function getAllTimerCommandsWithAssignments(): Promise<DbTimerComma
         discord_id: String(row.assigned_discord_id),
         discord_name: row.discord_name ?? null,
         twitch_name: row.twitch_name ?? null,
-        access_level: row.access_level ?? AccessLevel.USER,
         is_orphaned_user: row.user_discord_id === null || row.user_discord_id === undefined,
       });
     }

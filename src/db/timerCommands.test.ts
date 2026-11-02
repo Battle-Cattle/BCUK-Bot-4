@@ -42,7 +42,6 @@ import {
   discardOwnNewTimerCommand,
   type TimerCommandInput,
 } from './timerCommands';
-import { AccessLevel } from './users';
 import { makeMockConnection, makeMockPool } from '../test-utils/mockMysqlPool';
 
 beforeEach(() => {
@@ -127,13 +126,12 @@ describe('getAllTimerCommandsWithAssignments', () => {
     const row = {
       id: 1, name: 'Plug', message: 'Join!', interval_seconds: 600, min_messages: 0,
       require_live: 1, enabled: 1, assigned_discord_id: 'orphan1', user_discord_id: null,
-      discord_name: null, twitch_name: null, access_level: null,
+      discord_name: null, twitch_name: null,
     };
     const pool = makeMockPool({ rows: [row] });
     vi.mocked(getPool).mockReturnValue(pool as any);
     const result = await getAllTimerCommandsWithAssignments();
     expect(result[0]!.assigned_users[0]!.is_orphaned_user).toBe(true);
-    expect(result[0]!.assigned_users[0]!.access_level).toBe(AccessLevel.USER);
   });
 
   it('marks user as not orphaned when user_discord_id matches', async () => {

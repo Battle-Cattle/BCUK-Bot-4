@@ -34,7 +34,7 @@ export {
   findUser, findUsersByIds, findUserByTwitchName, findOwnerUser, getGuildMemberUsers,
   updateDiscordName, getTwitchEnabledChannels, getAllTwitchLinkedUsers,
 } from './db/users';
-export type { AccessLevelValue, DbUser } from './db/users';
+export type { AccessLevelValue, DbUser, DbGuildMemberUser } from './db/users';
 export { upsertUser, updateTwitchBotEnabled, deleteUnlinkedUser } from './db/userWrites';
 
 // ─── Custom commands ────────────────────────────────────────────────────────

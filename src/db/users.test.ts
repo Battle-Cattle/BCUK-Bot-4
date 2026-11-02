@@ -42,6 +42,21 @@ beforeEach(() => {
 // ─── findUser ────────────────────────────────────────────────────────────────
 
 describe('findUser', () => {
+  it('does not select the dropped global access_level column', async () => {
+    const pool = makePool([[]]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await findUser('123');
+    const [sql] = pool.execute.mock.calls[0]! as [string];
+    expect(sql).not.toMatch(/access_level/);
+  });
+
+  it('returns a user without an access_level field (it lives in guild_member)', async () => {
+    const row = { discord_id: '123', discord_name: 'Alice', is_twitch_bot_enabled: 0, twitch_name: null, is_owner: 0 };
+    vi.mocked(getPool).mockReturnValue(makePool([[row]]) as any);
+    const user = await findUser('123');
+    expect(user).not.toHaveProperty('access_level');
+  });
+
   it('returns null when no rows found', async () => {
     vi.mocked(getPool).mockReturnValue(makePool([[]]  ) as any);
     const result = await findUser('123');
@@ -249,62 +264,58 @@ describe('getGuildMemberUsers', () => {
 // ─── upsertUserRecord ─────────────────────────────────────────────────────────
 
 describe('upsertUserRecord', () => {
-  it('throws for an invalid access level', async () => {
-    vi.mocked(getPool).mockReturnValue(makePool() as any);
-    await expect(upsertUserRecord('1', 'Alice', 99)).rejects.toThrow('Invalid accessLevel: 99');
-  });
-
-  it('accepts all valid access levels', async () => {
-    for (const level of Object.values(AccessLevel)) {
-      const pool = makePool();
-      vi.mocked(getPool).mockReturnValue(pool as any);
-      await expect(upsertUserRecord('1', 'Alice', level)).resolves.not.toThrow();
-    }
+  it('writes only the user columns, never an access level (that lives in guild_member)', async () => {
+    const pool = makePool();
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await upsertUserRecord('1', 'Alice');
+    const [sql, params] = pool._conn.execute.mock.calls[1]! as [string, unknown[]];
+    expect(sql).not.toMatch(/access_level/);
+    expect(params).toEqual(['1', 'Alice', null, 0]);
   });
 
   it('returns true when twitchName is provided (even if null)', async () => {
     vi.mocked(getPool).mockReturnValue(makePool() as any);
-    const result = await upsertUserRecord('1', 'Alice', 0, null);
+    const result = await upsertUserRecord('1', 'Alice', null);
     expect(result).toBe(true);
   });
 
   it('returns false when twitchName is not provided (undefined)', async () => {
     vi.mocked(getPool).mockReturnValue(makePool() as any);
-    const result = await upsertUserRecord('1', 'Alice', 0);
+    const result = await upsertUserRecord('1', 'Alice');
     expect(result).toBe(false);
   });
 
   it('throws when twitchName is an empty string', async () => {
     vi.mocked(getPool).mockReturnValue(makePool() as any);
-    await expect(upsertUserRecord('1', 'Alice', 0, '')).rejects.toThrow('Invalid twitchName');
+    await expect(upsertUserRecord('1', 'Alice', '')).rejects.toThrow('Invalid twitchName');
   });
 
   it('throws when twitchName is whitespace-only', async () => {
     vi.mocked(getPool).mockReturnValue(makePool() as any);
-    await expect(upsertUserRecord('1', 'Alice', 0, '   ')).rejects.toThrow('Invalid twitchName');
+    await expect(upsertUserRecord('1', 'Alice', '   ')).rejects.toThrow('Invalid twitchName');
   });
 
   it('throws when normalizeTwitchChannelName returns null for twitchName', async () => {
     vi.mocked(normalizeTwitchChannelName).mockReturnValue(null);
     vi.mocked(getPool).mockReturnValue(makePool() as any);
-    await expect(upsertUserRecord('1', 'Alice', 0, 'invalid!')).rejects.toThrow('Invalid twitchName');
+    await expect(upsertUserRecord('1', 'Alice', 'invalid!')).rejects.toThrow('Invalid twitchName');
   });
 
   it('trims and normalizes a valid twitchName before storing it', async () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
-    const result = await upsertUserRecord('1', 'Alice', 0, '  SomeChannel ');
+    const result = await upsertUserRecord('1', 'Alice', '  SomeChannel ');
     expect(result).toBe(true);
     expect(normalizeTwitchChannelName).toHaveBeenCalledWith('SomeChannel');
     const params = pool._conn.execute.mock.calls[1]![1] as unknown[];
-    expect(params[3]).toBe('somechannel');
-    expect(params[4]).toBe(1); // twitchNameProvided → overwrite the stored name
+    expect(params[2]).toBe('somechannel');
+    expect(params[3]).toBe(1); // twitchNameProvided → overwrite the stored name
   });
 
   it('trims discordName and passes null when blank', async () => {
     const pool = makePool();
     vi.mocked(getPool).mockReturnValue(pool as any);
-    await upsertUserRecord('1', '   ', 0);
+    await upsertUserRecord('1', '   ');
     const params = pool._conn.execute.mock.calls[1]![1] as unknown[];
     expect(params[1]).toBeNull();
   });

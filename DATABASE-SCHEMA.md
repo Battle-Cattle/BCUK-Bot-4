@@ -97,7 +97,7 @@ Registry of every Discord server the bot serves, plus per-guild configuration. P
 
 ## `guild_member`
 
-Per-guild access levels. Replaces the single global `user.access_level`. A user with no row in a given guild is treated as access level `0` (User).
+Per-guild access levels. Replaces the single global `user.access_level` column, which `0008_drop_user_access_level.sql` drops. A user with no row in a given guild is treated as access level `0` (User).
 
 | Column | Type | Notes |
 | --- | --- | --- |
@@ -121,7 +121,6 @@ Stores web/admin users plus Twitch bot participation state.
 | `is_twitch_bot_enabled` | `BIT(1)` or `TINYINT(1)` | Whether the Twitch bot should join this user's Twitch channel |
 | `twitch_name` | `VARCHAR(...)` nullable | Twitch channel name; should be unique when non-null |
 | `twitchoauth` | `VARCHAR(...)` nullable | Legacy/optional Twitch auth storage |
-| `access_level` | `INT` | `0=USER`, `1=MOD`, `2=MANAGER`, `3=ADMIN`. **Deprecated** — per-guild access lives in `guild_member`; this column is migrated into `guild_member` and dropped in a later migration |
 | `is_owner` | `TINYINT(1)` | Global super-admin flag. Set manually in the DB only; never settable through the web panel |
 
 Expected constraints and behavior:
