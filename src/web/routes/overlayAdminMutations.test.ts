@@ -145,6 +145,48 @@ describe('POST /settings/videos/upload', () => {
     expect(vi.mocked(addVideo)).toHaveBeenCalled();
   });
 
+  it('names the video after the uploaded file when no name field is sent', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    const res = await supertest(buildApp())
+      .post('/settings/videos/upload')
+      .attach('video', MP4_BUF, { filename: '  clip.mp4 ', contentType: 'video/mp4' });
+    expect(res.headers.location).toBe('/overlay/settings?success=video_uploaded');
+    expect(vi.mocked(addVideo)).toHaveBeenCalledWith(MOCK_STREAMER.id, 'clip.mp4', expect.any(String));
+  });
+
+  it('names the video after the uploaded file when the name field is blank', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    const res = await supertest(buildApp())
+      .post('/settings/videos/upload')
+      .field('name', '   ')
+      .attach('video', MP4_BUF, { filename: 'clip.mp4', contentType: 'video/mp4' });
+    expect(res.headers.location).toBe('/overlay/settings?success=video_uploaded');
+    expect(vi.mocked(addVideo)).toHaveBeenCalledWith(MOCK_STREAMER.id, 'clip.mp4', expect.any(String));
+  });
+
+  it('rejects the upload if the streamer is unlinked between the pre-upload check and the handler', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValueOnce(MOCK_STREAMER as any).mockResolvedValueOnce(null);
+    const res = await supertest(buildApp())
+      .post('/settings/videos/upload')
+      .attach('video', MP4_BUF, { filename: 'test.mp4', contentType: 'video/mp4' });
+    expect(res.headers.location).toBe('/overlay/settings?error=not_a_streamer');
+    expect(vi.mocked(fs.promises.writeFile)).not.toHaveBeenCalled();
+    expect(vi.mocked(addVideo)).not.toHaveBeenCalled();
+  });
+
+  it('redirects with upload_failed when something non-Error is thrown', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    vi.mocked(addVideo).mockRejectedValue('not an Error');
+    const res = await supertest(buildApp())
+      .post('/settings/videos/upload')
+      .field('name', 'Test Video')
+      .attach('video', MP4_BUF, { filename: 'test.mp4', contentType: 'video/mp4' });
+    expect(res.headers.location).toBe('/overlay/settings?error=upload_failed');
+    // The DB insert failed after the file was written, so the file is rolled back.
+    expect(vi.mocked(fs.promises.writeFile)).toHaveBeenCalledOnce();
+    expect(vi.mocked(fs.promises.rm)).toHaveBeenCalledWith(vi.mocked(fs.promises.writeFile).mock.calls[0]![0], { force: true });
+  });
+
   it('successfully uploads a valid webm file', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
     const res = await supertest(buildApp())
@@ -281,6 +323,14 @@ describe('POST /settings/videos/:id/delete', () => {
   it('skips rm when deleteVideo returns null', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
     vi.mocked(deleteVideo).mockResolvedValue(null);
+    const res = await supertest(buildApp()).post('/settings/videos/1/delete');
+    expect(res.headers.location).toBe('/overlay/settings?success=video_deleted');
+    expect(vi.mocked(fs.promises.rm)).not.toHaveBeenCalled();
+  });
+
+  it('skips rm when the deleted row names a file outside the streamer folder', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    vi.mocked(deleteVideo).mockResolvedValue('../../escape.mp4');
     const res = await supertest(buildApp()).post('/settings/videos/1/delete');
     expect(res.headers.location).toBe('/overlay/settings?success=video_deleted');
     expect(vi.mocked(fs.promises.rm)).not.toHaveBeenCalled();

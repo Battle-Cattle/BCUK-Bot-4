@@ -1,7 +1,4 @@
-// migrationFiles only reads files on disk (no DB writes to wrap), and going through db.ts would
-// load the env-dependent config this test helper must run without.
-// eslint-disable-next-line no-restricted-imports -- see above
-import { loadMigrationFiles, MIGRATIONS_DIR } from '../db/migrationFiles';
+import { loadMigrationFiles, MIGRATIONS_DIR } from '../shared/migrationFiles';
 
 /** A table as the migrations leave it. */
 export interface SchemaTable {

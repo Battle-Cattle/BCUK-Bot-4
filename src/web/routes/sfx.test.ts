@@ -78,6 +78,12 @@ describe('GET /sfx', () => {
     expect((res.body as any).locals.canManage).toBe(false);
   });
 
+  it('sets canManage=false and canSuggestDescriptions=false when the session has no user', async () => {
+    const res = await buildApp(null);
+    expect((res.body as any).locals.canManage).toBe(false);
+    expect((res.body as any).locals.canSuggestDescriptions).toBe(false);
+  });
+
   it('sets canManage=true for a Mod', async () => {
     const res = await buildApp({ discordId: '1', accessLevel: AccessLevel.MOD });
     expect((res.body as any).locals.canManage).toBe(true);
@@ -160,6 +166,14 @@ describe('GET /sfx/file/:id/audio', () => {
     const res = await supertest(buildAudioApp()).get('/sfx/file/1/audio');
     expect(res.status).toBe(200);
     expect(Buffer.isBuffer(res.body) ? res.body.toString() : res.text).toBe('fake-audio-bytes');
+  });
+
+  it('returns 404 when sending the resolved path fails (it is a directory, not a file)', async () => {
+    fs.mkdirSync(path.join(SFX_FOLDER_MOCK, 'not-a-file.mp3'), { recursive: true });
+    vi.mocked(getSfxFileById).mockResolvedValue({ file: 'not-a-file.mp3' });
+
+    const res = await supertest(buildAudioApp()).get('/sfx/file/1/audio');
+    expect(res.status).toBe(404);
   });
 
   it('returns 400 for a non-numeric id', async () => {

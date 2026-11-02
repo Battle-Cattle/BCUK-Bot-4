@@ -2,8 +2,6 @@ import mysql from 'mysql2/promise';
 import { getPool, runInTransaction } from './pool';
 import { fromBit, getRowCount, rowExists, type SqlExecutor } from './utils';
 import { getOrCreate } from '../shared/mapUtils';
-import { AccessLevel } from './users';
-import type { AccessLevelValue } from './users';
 import { assertNotReservedCommand } from './reservedCommands';
 import { requireTrimmedString } from './commandStringUtils';
 import { CommandNotFoundError, CommandSelfServiceDeniedError } from './commandErrors';
@@ -31,7 +29,6 @@ export interface DbCustomCommandAssignedUser {
   discord_id: string;
   discord_name: string | null;
   twitch_name: string | null;
-  access_level: AccessLevelValue;
   is_twitch_bot_enabled: boolean;
   is_orphaned_user: boolean;
 }
@@ -77,7 +74,7 @@ export async function getAllCustomCommandsWithAssignments(): Promise<DbCustomCom
     `SELECT c.command_id, c.trigger_string, c.output, c.is_discord_enabled, c.is_multi_twitch,
             tuc.discord_id AS assigned_discord_id,
             u.discord_id AS user_discord_id,
-            u.discord_name, u.twitch_name, u.access_level, u.is_twitch_bot_enabled
+            u.discord_name, u.twitch_name, u.is_twitch_bot_enabled
      FROM custom_command c
      LEFT JOIN twitch_user_commands tuc ON c.command_id = tuc.command_id
      LEFT JOIN \`user\` u ON tuc.discord_id = u.discord_id
@@ -97,7 +94,6 @@ export async function getAllCustomCommandsWithAssignments(): Promise<DbCustomCom
         discord_id: String(row.assigned_discord_id),
         discord_name: row.discord_name ?? null,
         twitch_name: row.twitch_name ?? null,
-        access_level: row.access_level ?? AccessLevel.USER,
         is_twitch_bot_enabled: fromBit(row.is_twitch_bot_enabled),
         is_orphaned_user: row.user_discord_id === null || row.user_discord_id === undefined,
       });

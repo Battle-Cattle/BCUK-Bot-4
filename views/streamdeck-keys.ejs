@@ -1,11 +1,4 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BCUK Bot — Streamdeck API Key</title>
-  <link rel="stylesheet" href="/style.css">
-  <%- include('partials/pwa-head') %>
+<%- include('partials/head', { pageTitle: 'BCUK Bot — Streamdeck API Key' }) %>
 </head>
 <body>
   <%- include('partials/nav') %>
@@ -153,9 +146,7 @@
       </div>
     </section>
   </main>
-  <%- include('partials/pwa-register') %>
-  <%- include('partials/footer') %>
-  <script src="/utils.js"></script>
+  <%- include('partials/page-end') %>
   <script src="/streamdeck-keys.js"></script>
 </body>
 </html>

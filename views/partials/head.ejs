@@ -1,0 +1,10 @@
+<%# Opening document boilerplate shared by every panel page, up to and including the PWA head tags.
+    Locals: pageTitle — the page's <title> text (plain text; escaped here). The caller closes </head>. -%>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><%= pageTitle %></title>
+  <link rel="stylesheet" href="/style.css">
+  <%- include('pwa-head') %>

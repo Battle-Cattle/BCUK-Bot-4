@@ -1,11 +1,4 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BCUK Bot — Channel Points</title>
-  <link rel="stylesheet" href="/style.css">
-  <%- include('partials/pwa-head') %>
+<%- include('partials/head', { pageTitle: 'BCUK Bot — Channel Points' }) %>
 </head>
 <body data-csrf-token="<%= csrfToken %>">
   <%- include('partials/nav') %>
@@ -47,13 +40,7 @@
     <% } %>
 
     <% if (!streamer) { %>
-    <section class="section">
-      <div class="card">
-        <div class="card-body">
-          <p class="hint">You are not configured as a monitored streamer. Contact a Manager or Admin.</p>
-        </div>
-      </div>
-    </section>
+    <%- include('partials/notStreamerCard') %>
     <% } else if (!isConnected || needsReconnect) { %>
     <section class="section">
       <div class="card card-alert-danger">

@@ -38,6 +38,32 @@ function maybeDecrypt(value: string | null): string | null {
 }
 
 /**
+ * Encrypts an OAuth access/refresh token pair for storage, refusing to go on if no
+ * `EVENTSUB_TOKEN_SECRET` is configured (so a token is never stored in plaintext).
+ * @param accessToken - Plaintext OAuth access token.
+ * @param refreshToken - Plaintext OAuth refresh token.
+ * @returns The encrypted access and refresh tokens, ready to write to `twitch_bot_chat_token`.
+ */
+function encryptTokenPair(accessToken: string, refreshToken: string): { storedAccess: string; storedRefresh: string } {
+  if (!EVENTSUB_TOKEN_SECRET) throw new Error('EVENTSUB_TOKEN_SECRET is not configured — refusing to persist plaintext OAuth tokens');
+  return {
+    storedAccess: encryptToken(accessToken, EVENTSUB_TOKEN_SECRET),
+    storedRefresh: encryptToken(refreshToken, EVENTSUB_TOKEN_SECRET),
+  };
+}
+
+/**
+ * Runs a conditional (compare-and-swap) `UPDATE` and reports whether it matched.
+ * @param sql - The `UPDATE` statement, with its condition in the `WHERE` clause.
+ * @param params - Values for the statement's `?` placeholders.
+ * @returns Whether at least one row was updated (false means the condition no longer held).
+ */
+async function updateIfAnyRowAffected(sql: string, params: (string | number | null)[]): Promise<boolean> {
+  const [result] = await getPool().execute<mysql.ResultSetHeader>(sql, params);
+  return result.affectedRows > 0;
+}
+
+/**
  * Reads the bot's own Twitch chat OAuth token from the singleton `twitch_bot_chat_token` row.
  * @returns The decrypted token, or null if no row exists, the row has no token yet, the secret
  *   is unset, or decryption fails.
@@ -97,9 +123,7 @@ export async function saveBotChatTokenIfLatestAttempt(
   refreshToken: string,
   expiryMs: number | null,
 ): Promise<number | null> {
-  if (!EVENTSUB_TOKEN_SECRET) throw new Error('EVENTSUB_TOKEN_SECRET is not configured — refusing to persist plaintext OAuth tokens');
-  const storedAccess = encryptToken(accessToken, EVENTSUB_TOKEN_SECRET);
-  const storedRefresh = encryptToken(refreshToken, EVENTSUB_TOKEN_SECRET);
+  const { storedAccess, storedRefresh } = encryptTokenPair(accessToken, refreshToken);
   // Existing-row columns must be qualified with the table name: with the `AS new_row` alias, a bare
   // column name is ambiguous between the existing row and `new_row`, and MySQL rejects it.
   // attempt_started_at is assigned last so every earlier IF() still compares against the old value.
@@ -151,16 +175,13 @@ export async function restoreBotChatTokenIfOwnedByConnection(
   refreshToken: string,
   expiryMs: number | null,
 ): Promise<boolean> {
-  if (!EVENTSUB_TOKEN_SECRET) throw new Error('EVENTSUB_TOKEN_SECRET is not configured — refusing to persist plaintext OAuth tokens');
-  const storedAccess = encryptToken(accessToken, EVENTSUB_TOKEN_SECRET);
-  const storedRefresh = encryptToken(refreshToken, EVENTSUB_TOKEN_SECRET);
-  const [result] = await getPool().execute<mysql.ResultSetHeader>(
+  const { storedAccess, storedRefresh } = encryptTokenPair(accessToken, refreshToken);
+  return updateIfAnyRowAffected(
     `UPDATE twitch_bot_chat_token
      SET twitch_user_id=?, access_token=?, refresh_token=?, token_expiry=?, connection_id=connection_id + 1
      WHERE id=1 AND connection_id=?`,
     [twitchUserId, storedAccess, storedRefresh, expiryMs, expectedConnectionId],
   );
-  return result.affectedRows > 0;
 }
 
 /**
@@ -189,16 +210,13 @@ export async function saveBotChatTokenIfOwnedBy(
   refreshToken: string,
   expiryMs: number | null,
 ): Promise<boolean> {
-  if (!EVENTSUB_TOKEN_SECRET) throw new Error('EVENTSUB_TOKEN_SECRET is not configured — refusing to persist plaintext OAuth tokens');
-  const storedAccess = encryptToken(accessToken, EVENTSUB_TOKEN_SECRET);
-  const storedRefresh = encryptToken(refreshToken, EVENTSUB_TOKEN_SECRET);
-  const [result] = await getPool().execute<mysql.ResultSetHeader>(
+  const { storedAccess, storedRefresh } = encryptTokenPair(accessToken, refreshToken);
+  return updateIfAnyRowAffected(
     `UPDATE twitch_bot_chat_token
      SET access_token=?, refresh_token=?, token_expiry=?
      WHERE id=1 AND connection_id=?`,
     [storedAccess, storedRefresh, expiryMs, expectedConnectionId],
   );
-  return result.affectedRows > 0;
 }
 
 /**
@@ -215,12 +233,11 @@ export async function saveBotChatTokenIfOwnedBy(
  * @returns Whether a row was actually cleared (false means a reconnect superseded it first).
  */
 export async function clearBotChatTokenIfOwnedBy(expectedConnectionId: number): Promise<boolean> {
-  const [result] = await getPool().execute<mysql.ResultSetHeader>(
+  return updateIfAnyRowAffected(
     `UPDATE twitch_bot_chat_token
      SET twitch_user_id=NULL, access_token=NULL, refresh_token=NULL, token_expiry=NULL,
          connection_id=connection_id + 1
      WHERE id=1 AND connection_id=?`,
     [expectedConnectionId],
   );
-  return result.affectedRows > 0;
 }

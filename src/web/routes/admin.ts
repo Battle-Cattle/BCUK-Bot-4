@@ -168,7 +168,6 @@ router.post('/users/add', requireManager, csrfProtection, async (req, res) => {
       await addOrUpdateUserMutation({
         discordId: trimmedDiscordId,
         discordName: trimmedDiscordName,
-        level,
         normalizedTwitchName,
         shouldClearTwitchName,
       });

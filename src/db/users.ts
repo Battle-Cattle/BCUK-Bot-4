@@ -27,12 +27,11 @@ export interface DbUser {
   discord_name: string | null;
   is_twitch_bot_enabled: boolean;
   twitch_name: string | null;
-  access_level: number;
   /** Bot-owner flag (global super-admin). Set only via direct DB access, never the web panel. */
   is_owner: boolean;
 }
 
-const USER_SELECT = 'discord_id, discord_name, is_twitch_bot_enabled, twitch_name, access_level, is_owner';
+const USER_SELECT = 'discord_id, discord_name, is_twitch_bot_enabled, twitch_name, is_owner';
 
 /**
  * Maps a raw `user` table row to a {@link DbUser}.
@@ -45,7 +44,6 @@ function mapUser(r: mysql.RowDataPacket): DbUser {
     discord_name: r.discord_name,
     is_twitch_bot_enabled: fromBit(r.is_twitch_bot_enabled),
     twitch_name: r.twitch_name,
-    access_level: r.access_level,
     is_owner: fromBit(r.is_owner),
   };
 }
@@ -122,15 +120,21 @@ export async function findOwnerUser(): Promise<DbUser | null> {
   return rows[0] ? mapUser(rows[0]) : null;
 }
 
+/** A user together with their access level in one guild (from `guild_member`). */
+export interface DbGuildMemberUser extends DbUser {
+  /** Access level in the guild the user was listed for; one of `AccessLevel`'s values. */
+  access_level: number;
+}
+
 /**
- * Returns the members of one guild as user records, with `access_level` sourced
- * from the per-guild `guild_member` row (not the legacy global column). Backs the
- * admin user list, which manages membership of the currently-selected guild.
+ * Returns the members of one guild as user records, each with its `access_level` from the
+ * per-guild `guild_member` row. Backs the admin user list, which manages membership of the
+ * currently-selected guild.
  *
  * @param guildId Guild snowflake as a string.
  * @returns The guild's members, highest access level first.
  */
-export async function getGuildMemberUsers(guildId: string): Promise<DbUser[]> {
+export async function getGuildMemberUsers(guildId: string): Promise<DbGuildMemberUser[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
     `SELECT u.discord_id, u.discord_name, u.is_twitch_bot_enabled, u.twitch_name,
             gm.access_level AS access_level, u.is_owner
@@ -140,7 +144,7 @@ export async function getGuildMemberUsers(guildId: string): Promise<DbUser[]> {
      ORDER BY gm.access_level DESC, u.discord_name ASC`,
     [guildId],
   );
-  return rows.map(mapUser);
+  return rows.map((r) => ({ ...mapUser(r), access_level: r.access_level as number }));
 }
 
 /**
@@ -191,7 +195,6 @@ function requireValidTwitchName(twitchName: string): string {
  * affects custom-command resolution needs the same treatment there.
  * @param discordId - Discord snowflake as a string.
  * @param discordName - Display name to store; blank after trimming is stored as null.
- * @param accessLevel - Legacy global access level; must be one of `AccessLevel`'s values.
  * @param twitchName - Twitch channel name to set, or null to clear it; omit to leave unchanged.
  * @returns True when the twitchName field was included in the call (even if null), so the
  *   caller can decide whether to invalidate any caches that depend on Twitch channel assignments.
@@ -199,22 +202,18 @@ function requireValidTwitchName(twitchName: string): string {
 export async function upsertUserRecord(
   discordId: string,
   discordName: string,
-  accessLevel: number,
   twitchName?: string | null,
 ): Promise<boolean> {
-  if (!(Object.values(AccessLevel) as number[]).includes(accessLevel)) {
-    throw new Error(`Invalid accessLevel: ${accessLevel}`);
-  }
   const trimmedDiscordName = discordName.trim() || null;
   const twitchNameProvided = twitchName !== undefined;
   // Omitted (undefined) and explicitly cleared (null) both store NULL; twitchNameProvided
   // decides below whether that NULL overwrites the existing value.
   const normalizedTwitchName = twitchName == null ? null : requireValidTwitchName(twitchName);
   await withShortLockTimeout((conn) => conn.execute(
-    `INSERT INTO \`user\` (discord_id, discord_name, access_level, twitch_name, is_twitch_bot_enabled)
-     VALUES (?, ?, ?, ?, 0) AS new_user
-     ON DUPLICATE KEY UPDATE discord_name = new_user.discord_name, access_level = new_user.access_level, twitch_name = IF(?, new_user.twitch_name, \`user\`.twitch_name)`,
-    [discordId, trimmedDiscordName, accessLevel, normalizedTwitchName, twitchNameProvided ? 1 : 0],
+    `INSERT INTO \`user\` (discord_id, discord_name, twitch_name, is_twitch_bot_enabled)
+     VALUES (?, ?, ?, 0) AS new_user
+     ON DUPLICATE KEY UPDATE discord_name = new_user.discord_name, twitch_name = IF(?, new_user.twitch_name, \`user\`.twitch_name)`,
+    [discordId, trimmedDiscordName, normalizedTwitchName, twitchNameProvided ? 1 : 0],
   ));
   return twitchNameProvided;
 }

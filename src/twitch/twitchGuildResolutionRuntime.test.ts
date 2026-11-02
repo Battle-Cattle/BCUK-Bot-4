@@ -21,4 +21,11 @@ describe('resolveGuildIdForDiscordId', () => {
     expect(resolveGuildIdForDiscordId('user-1')).toBe('guild-1');
     expect(runtimeResolve).toHaveBeenCalledWith('user-1');
   });
+
+  it('returns null when no runtime has been registered yet', async () => {
+    vi.resetModules();
+    const fresh = await import('./twitchGuildResolutionRuntime.js');
+
+    expect(fresh.resolveGuildIdForDiscordId('user-1')).toBeNull();
+  });
 });

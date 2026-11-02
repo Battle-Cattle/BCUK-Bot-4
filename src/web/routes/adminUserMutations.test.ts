@@ -37,12 +37,10 @@ import {
 } from '../../db';
 import { joinTwitchChannel, partTwitchChannel } from '../../twitch/twitchChannelMembership';
 import { normalizeTwitchChannelName } from '../../twitch/twitchChannelName';
-import { AccessLevel } from '../../db';
 
 type MockDbUser = {
   discord_id: string;
   discord_name: string;
-  access_level: number;
   twitch_name: string | null;
   is_twitch_bot_enabled: boolean;
 };
@@ -50,7 +48,6 @@ type MockDbUser = {
 const BASE_USER: MockDbUser = {
   discord_id: '111',
   discord_name: 'TestUser',
-  access_level: AccessLevel.USER,
   twitch_name: null,
   is_twitch_bot_enabled: false,
 };
@@ -74,12 +71,11 @@ describe('addOrUpdateUserMutation — shouldClearTwitchName', () => {
     await addOrUpdateUserMutation({
       discordId: '111',
       discordName: 'TestUser',
-      level: 0,
       normalizedTwitchName: null,
       shouldClearTwitchName: true,
     });
 
-    expect(vi.mocked(upsertUser)).toHaveBeenCalledWith('111', 'TestUser', 0, null);
+    expect(vi.mocked(upsertUser)).toHaveBeenCalledWith('111', 'TestUser', null);
   });
 });
 
@@ -101,7 +97,6 @@ describe('addOrUpdateUserMutation — handleClearTwitchChannel rollback', () => 
       addOrUpdateUserMutation({
         discordId: '111',
         discordName: 'TestUser',
-        level: 0,
         normalizedTwitchName: null,
         shouldClearTwitchName: true,
       }),
@@ -111,7 +106,7 @@ describe('addOrUpdateUserMutation — handleClearTwitchChannel rollback', () => 
     // First call: the main upsert (null to clear); second call: rollback (restores channel)
     expect(upsertCalls.length).toBeGreaterThanOrEqual(2);
     const rollbackCall = upsertCalls[upsertCalls.length - 1];
-    expect(rollbackCall![3]).toBe('streamerchan');
+    expect(rollbackCall![2]).toBe('streamerchan');
   });
 });
 
@@ -140,7 +135,6 @@ describe('addOrUpdateUserMutation — handleChangeTwitchChannel rollback', () =>
       addOrUpdateUserMutation({
         discordId: '111',
         discordName: 'TestUser',
-        level: 0,
         normalizedTwitchName: 'newchan',
         shouldClearTwitchName: false,
       }),
@@ -149,7 +143,7 @@ describe('addOrUpdateUserMutation — handleChangeTwitchChannel rollback', () =>
     const upsertCalls = vi.mocked(upsertUser).mock.calls;
     const rollbackCall = upsertCalls[upsertCalls.length - 1];
     // previousChannel was null — rollback must use null, not ''
-    expect(rollbackCall![3]).toBeNull();
+    expect(rollbackCall![2]).toBeNull();
   });
 });
 
@@ -258,7 +252,6 @@ describe('addOrUpdateUserMutation — DuplicateTwitchNameError', () => {
       addOrUpdateUserMutation({
         discordId: '111',
         discordName: 'TestUser',
-        level: AccessLevel.USER,
         normalizedTwitchName: 'taken_chan',
         shouldClearTwitchName: false,
       }),
@@ -286,7 +279,6 @@ describe('addOrUpdateUserMutation — upsertUser throws', () => {
       addOrUpdateUserMutation({
         discordId: '111',
         discordName: 'TestUser',
-        level: AccessLevel.USER,
         normalizedTwitchName: 'new_chan',
         shouldClearTwitchName: false,
       }),
@@ -360,7 +352,6 @@ describe('addOrUpdateUserMutation — successful Twitch channel clear (no rollba
       addOrUpdateUserMutation({
         discordId: '111',
         discordName: 'TestUser',
-        level: AccessLevel.USER,
         normalizedTwitchName: null,
         shouldClearTwitchName: true,
       }),
@@ -383,7 +374,6 @@ describe('addOrUpdateUserMutation — brand new user with a Twitch channel', () 
       addOrUpdateUserMutation({
         discordId: '111',
         discordName: 'TestUser',
-        level: AccessLevel.USER,
         normalizedTwitchName: 'newchan',
         shouldClearTwitchName: false,
       }),
@@ -409,13 +399,12 @@ describe('addOrUpdateUserMutation — updating a user without touching the Twitc
       addOrUpdateUserMutation({
         discordId: '111',
         discordName: 'TestUser',
-        level: AccessLevel.MOD,
         normalizedTwitchName: null,
         shouldClearTwitchName: false,
       }),
     ).resolves.toBeUndefined();
 
-    expect(vi.mocked(upsertUser)).toHaveBeenCalledWith('111', 'TestUser', AccessLevel.MOD, undefined);
+    expect(vi.mocked(upsertUser)).toHaveBeenCalledWith('111', 'TestUser', undefined);
     expect(vi.mocked(joinTwitchChannel)).not.toHaveBeenCalled();
     expect(vi.mocked(partTwitchChannel)).not.toHaveBeenCalled();
   });
@@ -444,7 +433,6 @@ describe('addOrUpdateUserMutation — successful Twitch channel change (no rollb
       addOrUpdateUserMutation({
         discordId: '111',
         discordName: 'TestUser',
-        level: AccessLevel.USER,
         normalizedTwitchName: 'newchan',
         shouldClearTwitchName: false,
       }),
@@ -476,7 +464,6 @@ describe('addOrUpdateUserMutation — successful Twitch channel change (no rollb
       addOrUpdateUserMutation({
         discordId: '111',
         discordName: 'TestUser',
-        level: AccessLevel.USER,
         normalizedTwitchName: 'newchan',
         shouldClearTwitchName: false,
       }),
@@ -519,7 +506,6 @@ describe('addOrUpdateUserMutation — handleChangeTwitchChannel rollback also fa
       addOrUpdateUserMutation({
         discordId: '111',
         discordName: 'TestUser',
-        level: AccessLevel.USER,
         normalizedTwitchName: 'newchan',
         shouldClearTwitchName: false,
       }),
@@ -554,7 +540,6 @@ describe('addOrUpdateUserMutation — rollback failure does not mask original er
       addOrUpdateUserMutation({
         discordId: '111',
         discordName: 'TestUser',
-        level: AccessLevel.USER,
         normalizedTwitchName: null,
         shouldClearTwitchName: true,
       }),
@@ -566,7 +551,6 @@ describe('addOrUpdateUserMutation — new-user rollback deletes the inserted row
   const NEW_USER_PARAMS = {
     discordId: '111',
     discordName: 'TestUser',
-    level: AccessLevel.USER,
     normalizedTwitchName: 'newchan',
     shouldClearTwitchName: false,
   };
@@ -605,7 +589,7 @@ describe('addOrUpdateUserMutation — new-user rollback deletes the inserted row
 
     expect(deleteUnlinkedUser).toHaveBeenCalledWith('111');
     const rollbackCall = vi.mocked(upsertUser).mock.calls[1];
-    expect(rollbackCall![3]).toBeNull();
+    expect(rollbackCall![2]).toBeNull();
     expect(updateTwitchBotEnabled).toHaveBeenCalledWith('111', false);
   });
 
@@ -630,7 +614,7 @@ describe('addOrUpdateUserMutation — new-user rollback deletes the inserted row
     await expect(addOrUpdateUserMutation(NEW_USER_PARAMS)).rejects.toThrow('DB unavailable');
 
     expect(deleteUnlinkedUser).not.toHaveBeenCalled();
-    expect(vi.mocked(upsertUser).mock.calls[1]![3]).toBeNull();
+    expect(vi.mocked(upsertUser).mock.calls[1]![2]).toBeNull();
     expect(updateTwitchBotEnabled).toHaveBeenCalledWith('111', true);
   });
 });

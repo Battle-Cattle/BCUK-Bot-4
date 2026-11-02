@@ -9,12 +9,17 @@ vi.mock('../../shared/config', () => ({
 vi.mock('../csrf', () => ({ csrfProtection: (_req: any, _res: any, next: any) => next() }));
 vi.mock('../middleware', () => ({ requireAuth: (_req: any, _res: any, next: any) => next(), requireMod: (_req: any, _res: any, next: any) => next() }));
 vi.mock('fs', () => ({ default: { promises: { mkdir: vi.fn(), writeFile: vi.fn(), rm: vi.fn() } } }));
+vi.mock('../../shared/pathUtils', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../shared/pathUtils')>();
+  return { ...actual, safeResolve: vi.fn(actual.safeResolve) };
+});
 
 import supertest from 'supertest';
 import fs from 'fs';
 import { router, removeAlertAssetFiles } from './advancedCommandAlertAssets';
 import { getStreamerByDiscordId, setAdvancedCommandAlertAsset } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
+import { safeResolve } from '../../shared/pathUtils';
 
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00]);
 const MP3 = Buffer.from([0x49, 0x44, 0x33, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
@@ -68,6 +73,28 @@ describe('alert asset uploads', () => {
     expect(fs.promises.rm).toHaveBeenCalledOnce();
   });
 
+  it('rejects a request with no file attached', async () => {
+    const res = await supertest(app()).post('/advanced-commands/7/alert/image').expect(302);
+    expect(res.headers.location).toBe('/advanced-commands?error=invalid_file');
+    expect(setAdvancedCommandAlertAsset).not.toHaveBeenCalled();
+  });
+
+  it('rejects the upload without writing anything when the target path does not resolve', async () => {
+    vi.mocked(safeResolve).mockReturnValueOnce(null);
+    const res = await supertest(app()).post('/advanced-commands/7/alert/image').attach('image', PNG, 'pic.png').expect(302);
+    expect(res.headers.location).toBe('/advanced-commands?error=invalid_path');
+    expect(fs.promises.writeFile).not.toHaveBeenCalled();
+    expect(setAdvancedCommandAlertAsset).not.toHaveBeenCalled();
+  });
+
+  it('rejects the upload if the streamer is unlinked between the pre-upload check and the handler', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValueOnce({ id: 3, discord_id: '1', twitch_name: 's' } as any).mockResolvedValueOnce(null);
+    const res = await supertest(app()).post('/advanced-commands/7/alert/image').attach('image', PNG, 'pic.png').expect(302);
+    expect(res.headers.location).toBe('/advanced-commands?error=not_a_streamer');
+    expect(fs.promises.writeFile).not.toHaveBeenCalled();
+    expect(setAdvancedCommandAlertAsset).not.toHaveBeenCalled();
+  });
+
   it('rejects a bad command id and a non-streamer', async () => {
     let res = await supertest(app()).post('/advanced-commands/x/alert/image').attach('image', PNG, 'pic.png').expect(302);
     expect(res.headers.location).toBe('/advanced-commands?error=not_found');
@@ -83,6 +110,20 @@ describe('alert asset deletes', () => {
     expect(res.headers.location).toBe('/advanced-commands?success=sound_deleted');
     expect(setAdvancedCommandAlertAsset).toHaveBeenCalledWith(3, 7, 'sound', null);
     expect(fs.promises.rm).toHaveBeenCalledWith('/app/alert-assets/3/old.png', { force: true });
+  });
+
+  it('deletes no file when the alert had no asset of that kind', async () => {
+    vi.mocked(setAdvancedCommandAlertAsset).mockResolvedValue({ previous: null });
+    const res = await supertest(app()).post('/advanced-commands/7/alert/image/delete').expect(302);
+    expect(res.headers.location).toBe('/advanced-commands?success=image_deleted');
+    expect(fs.promises.rm).not.toHaveBeenCalled();
+  });
+
+  it('turns away a non-streamer without touching the alert', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(null);
+    const res = await supertest(app()).post('/advanced-commands/7/alert/image/delete').expect(302);
+    expect(res.headers.location).toBe('/advanced-commands?error=not_a_streamer');
+    expect(setAdvancedCommandAlertAsset).not.toHaveBeenCalled();
   });
 
   it('reports a command with no alert, and a failed write', async () => {

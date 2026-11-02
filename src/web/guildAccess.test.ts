@@ -18,7 +18,6 @@ function makeDbUser(overrides: Partial<DbUser> = {}): DbUser {
     discord_name: 'Test User',
     is_twitch_bot_enabled: false,
     twitch_name: null,
-    access_level: AccessLevel.USER,
     is_owner: false,
     ...overrides,
   };

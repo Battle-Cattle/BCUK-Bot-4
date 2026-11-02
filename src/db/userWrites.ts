@@ -22,17 +22,15 @@ function invalidateTwitchChannelCaches(): void {
  * the `twitchName` field is provided (including explicit null to clear it).
  * @param discordId - Discord snowflake as a string.
  * @param discordName - Display name to store; blank after trimming is stored as null.
- * @param accessLevel - Legacy global access level; must be one of `AccessLevel`'s values.
  * @param twitchName - Twitch channel name to set, or null to clear it; omit to leave unchanged.
  * @returns Resolves once the upsert (and any cache invalidation) completes.
  */
 export async function upsertUser(
   discordId: string,
   discordName: string,
-  accessLevel: number,
   twitchName?: string | null,
 ): Promise<void> {
-  const twitchNameProvided = await upsertUserRecord(discordId, discordName, accessLevel, twitchName);
+  const twitchNameProvided = await upsertUserRecord(discordId, discordName, twitchName);
   if (twitchNameProvided) {
     invalidateTwitchChannelCaches();
   }
