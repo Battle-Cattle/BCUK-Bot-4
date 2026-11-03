@@ -3,6 +3,7 @@ import path from 'path';
 import { createLogger } from '../../shared/logger';
 import { transcodeToWebm, type ProgressListener } from './overlayVideoTranscode';
 import { detectVideoType } from './uploadFileTypes';
+import { readFileHeader, sweepStaleTempFiles } from './overlayFiles';
 
 const log = createLogger('OverlayMovConversion');
 
@@ -11,12 +12,6 @@ const SOURCE_SUFFIX = '.mov.upload';
 
 /** Suffix of a WebM while ffmpeg is still writing it; renamed to `.webm` once it's complete. */
 const PARTIAL_SUFFIX = '.webm.part';
-
-/**
- * A temporary conversion file older than this is a leftover whose removal failed, never one an
- * upload is still using: it is well past the longest a conversion can wait for its turn and run.
- */
-export const STALE_CONVERSION_FILE_MS = 60 * 60_000;
 
 /**
  * Best-effort removal of a file, logging rather than throwing on failure so the error that
@@ -43,36 +38,13 @@ function isConversionTempFile(name: string): boolean {
 }
 
 /**
- * Removes a temporary conversion file if it's older than {@link STALE_CONVERSION_FILE_MS}.
- * @param fullPath - Absolute path of the temporary file.
- * @param now - Current time in epoch milliseconds.
- * @returns Resolves once the file has been checked; never rejects.
- */
-async function removeIfStale(fullPath: string, now: number): Promise<void> {
-  try {
-    const { mtimeMs } = await fs.promises.stat(fullPath);
-    if (now - mtimeMs > STALE_CONVERSION_FILE_MS) await fs.promises.rm(fullPath, { force: true });
-  } catch (err) {
-    log.warn(`Failed to sweep stale overlay conversion file ${fullPath}:`, err);
-  }
-}
-
-/**
- * Removes temporary conversion files left in `dir` by earlier uploads whose own cleanup failed,
- * so a failed removal can't leave them there for good. Runs before each MOV conversion.
+ * Removes temporary conversion files left in `dir` by earlier uploads whose own cleanup failed
+ * (see `sweepStaleTempFiles`). Runs before each MOV conversion.
  * @param dir - Absolute path of the streamer's overlay folder.
  * @returns Resolves once the sweep has finished; never rejects.
  */
-export async function sweepStaleConversionFiles(dir: string): Promise<void> {
-  let names: string[];
-  try {
-    names = await fs.promises.readdir(dir);
-  } catch (err) {
-    log.warn(`Failed to list ${dir} for stale overlay conversion files:`, err);
-    return;
-  }
-  const now = Date.now();
-  await Promise.all(names.filter(isConversionTempFile).map((name) => removeIfStale(path.join(dir, name), now)));
+export function sweepStaleConversionFiles(dir: string): Promise<void> {
+  return sweepStaleTempFiles(dir, isConversionTempFile);
 }
 
 /** Bytes read from the start of a converted file to check it's a WebM. */
@@ -87,15 +59,9 @@ const HEADER_BYTES = 16;
  * @throws If the file is missing, empty, or doesn't start with a WebM (EBML) header.
  */
 async function assertWebmOutput(fullPath: string): Promise<void> {
-  const handle = await fs.promises.open(fullPath, 'r');
-  try {
-    const header = Buffer.alloc(HEADER_BYTES);
-    const { bytesRead } = await handle.read(header, 0, HEADER_BYTES, 0);
-    if (detectVideoType(header.subarray(0, bytesRead)) !== 'webm') {
-      throw new Error(`Conversion output ${path.basename(fullPath)} is not a WebM (${bytesRead} header bytes)`);
-    }
-  } finally {
-    await handle.close();
+  const header = await readFileHeader(fullPath, HEADER_BYTES);
+  if (detectVideoType(header) !== 'webm') {
+    throw new Error(`Conversion output ${path.basename(fullPath)} is not a WebM (${header.length} header bytes)`);
   }
 }
 
@@ -113,27 +79,34 @@ function conversionError(err: unknown): Error {
 }
 
 /**
- * Converts an uploaded QuickTime video to `<baseName>.webm` in `dir`, via a temporary copy of
- * the upload (ffmpeg needs a seekable file: a MOV's index is often at the end). ffmpeg writes to
- * a `.webm.part` file that's checked (see {@link assertWebmOutput}) and renamed once complete,
- * so a half-written or unusable WebM never has a servable name. Both temporary files are removed afterwards; any whose removal fails is picked up by
- * {@link sweepStaleConversionFiles} on a later upload.
+ * Converts an uploaded QuickTime video to `<baseName>.webm` in `dir`. The upload is first put at
+ * a temporary `.mov.upload` path in `dir`, which ffmpeg reads (it needs a seekable file: a MOV's
+ * index is often at the end). ffmpeg writes to a `.webm.part` file that's checked (see
+ * {@link assertWebmOutput}) and renamed once complete, so a half-written or unusable WebM never
+ * has a servable name. Both temporary files are removed afterwards; any whose removal fails is
+ * picked up by {@link sweepStaleConversionFiles} on a later upload.
  * @param dir - Absolute path of the streamer's overlay folder (already safe-resolved and created).
  * @param baseName - Random base name (no extension) for the stored file.
- * @param buffer - The uploaded MOV's bytes.
+ * @param placeSource - Puts the uploaded MOV at the path it's given (the temporary copy ffmpeg
+ *   reads), e.g. by moving the file Multer stored.
  * @param onProgress - Told the conversion's stage and percentage as it goes (optional).
  * @returns The stored WebM's filename.
  * @throws With `code: 'transcode_busy'` if too many conversions are pending, or
- *   `code: 'transcode_failed'` if ffmpeg can't convert the file or its output isn't a WebM; or the error from writing the
- *   temporary copy (after removing any partial copy).
+ *   `code: 'transcode_failed'` if ffmpeg can't convert the file or its output isn't a WebM; or
+ *   the error from `placeSource` (after removing anything it left at the temporary path).
  */
-export async function storeMovAsWebm(dir: string, baseName: string, buffer: Buffer, onProgress?: ProgressListener): Promise<string> {
+export async function storeMovAsWebm(
+  dir: string,
+  baseName: string,
+  placeSource: (sourcePath: string) => Promise<void>,
+  onProgress?: ProgressListener,
+): Promise<string> {
   await sweepStaleConversionFiles(dir);
   const sourcePath = path.join(dir, `${baseName}${SOURCE_SUFFIX}`);
   const partialPath = path.join(dir, `${baseName}${PARTIAL_SUFFIX}`);
   const filename = `${baseName}.webm`;
   try {
-    await fs.promises.writeFile(sourcePath, buffer);
+    await placeSource(sourcePath);
   } catch (err) {
     await removeQuietly(sourcePath);
     throw err;

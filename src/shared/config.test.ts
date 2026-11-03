@@ -140,9 +140,9 @@ describe('config — parsePositiveIntEnv-backed values', () => {
     expect(config.SFX_MAX_FILE_MB).toBe(10);
   });
 
-  it('defaults OVERLAY_MAX_FILE_MB to 100 when unset', async () => {
+  it('defaults OVERLAY_MAX_FILE_MB to 500 when unset', async () => {
     const config = await loadConfig({ OVERLAY_MAX_FILE_MB: undefined });
-    expect(config.OVERLAY_MAX_FILE_MB).toBe(100);
+    expect(config.OVERLAY_MAX_FILE_MB).toBe(500);
   });
 
   it('defaults COMPANION_MAX_SSE_PER_TOKEN to 3 when unset', async () => {

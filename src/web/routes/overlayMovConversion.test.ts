@@ -8,12 +8,15 @@ vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 vi.mock('./overlayVideoTranscode', () => ({ transcodeToWebm: vi.fn() }));
 
 import { transcodeToWebm } from './overlayVideoTranscode';
-import { storeMovAsWebm, sweepStaleConversionFiles, STALE_CONVERSION_FILE_MS } from './overlayMovConversion';
+import { storeMovAsWebm, sweepStaleConversionFiles } from './overlayMovConversion';
+import { STALE_TEMP_FILE_MS } from './overlayFiles';
 
 const MOV_BYTES = Buffer.from('fake mov bytes');
 /** A converted file that starts with a WebM (EBML) header. */
 const WEBM_BYTES = Buffer.concat([Buffer.from([0x1a, 0x45, 0xdf, 0xa3]), Buffer.from('rest of the webm')]);
 let dir: string;
+/** Puts the uploaded MOV at the path the conversion gives it, as moving Multer's file would. */
+const writeMov = (sourcePath: string) => fs.promises.writeFile(sourcePath, MOV_BYTES);
 /** What the most recent conversion read from its input file. */
 let convertedInput: Buffer | undefined;
 
@@ -48,7 +51,7 @@ afterEach(async () => {
 
 describe('storeMovAsWebm', () => {
   it('converts the upload and leaves only the finished WebM', async () => {
-    await expect(storeMovAsWebm(dir, 'abc', MOV_BYTES)).resolves.toBe('abc.webm');
+    await expect(storeMovAsWebm(dir, 'abc', writeMov)).resolves.toBe('abc.webm');
     expect(vi.mocked(transcodeToWebm)).toHaveBeenCalledWith(path.join(dir, 'abc.mov.upload'), path.join(dir, 'abc.webm.part'), undefined);
     expect(convertedInput).toEqual(MOV_BYTES);
     expect(await files()).toEqual(['abc.webm']);
@@ -57,7 +60,7 @@ describe('storeMovAsWebm', () => {
 
   it('passes the progress listener through to the conversion', async () => {
     const onProgress = vi.fn();
-    await storeMovAsWebm(dir, 'abc', MOV_BYTES, onProgress);
+    await storeMovAsWebm(dir, 'abc', writeMov, onProgress);
     expect(vi.mocked(transcodeToWebm)).toHaveBeenCalledWith(expect.any(String), expect.any(String), onProgress);
   });
 
@@ -66,7 +69,7 @@ describe('storeMovAsWebm', () => {
       await fs.promises.writeFile(outputPath, 'half a webm');
       throw new Error('ffmpeg exited with code 1');
     });
-    await expect(storeMovAsWebm(dir, 'abc', MOV_BYTES)).rejects.toMatchObject({ code: 'transcode_failed' });
+    await expect(storeMovAsWebm(dir, 'abc', writeMov)).rejects.toMatchObject({ code: 'transcode_failed' });
     expect(await files()).toEqual([]);
   });
 
@@ -77,51 +80,51 @@ describe('storeMovAsWebm', () => {
     vi.mocked(transcodeToWebm).mockImplementation(async (_inputPath, outputPath) => {
       await fs.promises.writeFile(outputPath, output);
     });
-    await expect(storeMovAsWebm(dir, 'abc', MOV_BYTES)).rejects.toMatchObject({ code: 'transcode_failed' });
+    await expect(storeMovAsWebm(dir, 'abc', writeMov)).rejects.toMatchObject({ code: 'transcode_failed' });
     expect(await files()).toEqual([]);
   });
 
   it('rejects with transcode_failed when ffmpeg exits cleanly without writing any output', async () => {
     vi.mocked(transcodeToWebm).mockResolvedValue(undefined);
-    await expect(storeMovAsWebm(dir, 'abc', MOV_BYTES)).rejects.toMatchObject({ code: 'transcode_failed' });
+    await expect(storeMovAsWebm(dir, 'abc', writeMov)).rejects.toMatchObject({ code: 'transcode_failed' });
     expect(await files()).toEqual([]);
   });
 
   it('reports transcode_busy when the conversion queue is full', async () => {
     vi.mocked(transcodeToWebm).mockRejectedValue(Object.assign(new Error('full'), { code: 'transcode_busy' }));
-    await expect(storeMovAsWebm(dir, 'abc', MOV_BYTES)).rejects.toMatchObject({ code: 'transcode_busy' });
+    await expect(storeMovAsWebm(dir, 'abc', writeMov)).rejects.toMatchObject({ code: 'transcode_busy' });
     expect(await files()).toEqual([]);
   });
 
   it('reports transcode_failed when something other than an Error is thrown', async () => {
     vi.mocked(transcodeToWebm).mockRejectedValue('not an Error');
-    await expect(storeMovAsWebm(dir, 'abc', MOV_BYTES)).rejects.toMatchObject({ code: 'transcode_failed' });
+    await expect(storeMovAsWebm(dir, 'abc', writeMov)).rejects.toMatchObject({ code: 'transcode_failed' });
   });
 
   it('still reports the conversion failure when removing the temporary files also fails', async () => {
     vi.mocked(transcodeToWebm).mockRejectedValue(new Error('ffmpeg exited with code 1'));
     vi.spyOn(fs.promises, 'rm').mockRejectedValue(Object.assign(new Error('denied'), { code: 'EACCES' }));
-    await expect(storeMovAsWebm(dir, 'abc', MOV_BYTES)).rejects.toMatchObject({ code: 'transcode_failed' });
+    await expect(storeMovAsWebm(dir, 'abc', writeMov)).rejects.toMatchObject({ code: 'transcode_failed' });
   });
 
-  it('removes a partial temporary copy and rethrows when writing it fails', async () => {
+  it('removes a partial temporary copy and rethrows when putting the upload in place fails', async () => {
     vi.spyOn(fs.promises, 'writeFile').mockRejectedValueOnce(Object.assign(new Error('no space'), { code: 'ENOSPC' }));
-    await expect(storeMovAsWebm(dir, 'abc', MOV_BYTES)).rejects.toMatchObject({ code: 'ENOSPC' });
+    await expect(storeMovAsWebm(dir, 'abc', writeMov)).rejects.toMatchObject({ code: 'ENOSPC' });
     expect(vi.mocked(transcodeToWebm)).not.toHaveBeenCalled();
     expect(await files()).toEqual([]);
   });
 
   it('sweeps stale temporary files from earlier uploads before converting', async () => {
-    await writeAged('old.mov.upload', STALE_CONVERSION_FILE_MS + 60_000);
-    await storeMovAsWebm(dir, 'abc', MOV_BYTES);
+    await writeAged('old.mov.upload', STALE_TEMP_FILE_MS + 60_000);
+    await storeMovAsWebm(dir, 'abc', writeMov);
     expect(await files()).toEqual(['abc.webm']);
   });
 });
 
 describe('sweepStaleConversionFiles', () => {
   it('removes stale temporary MOV copies and partial WebMs', async () => {
-    await writeAged('a.mov.upload', STALE_CONVERSION_FILE_MS + 60_000);
-    await writeAged('b.webm.part', STALE_CONVERSION_FILE_MS + 60_000);
+    await writeAged('a.mov.upload', STALE_TEMP_FILE_MS + 60_000);
+    await writeAged('b.webm.part', STALE_TEMP_FILE_MS + 60_000);
     await sweepStaleConversionFiles(dir);
     expect(await files()).toEqual([]);
   });
@@ -134,8 +137,8 @@ describe('sweepStaleConversionFiles', () => {
   });
 
   it('never touches stored videos, however old', async () => {
-    await writeAged('a.webm', STALE_CONVERSION_FILE_MS * 10);
-    await writeAged('b.mp4', STALE_CONVERSION_FILE_MS * 10);
+    await writeAged('a.webm', STALE_TEMP_FILE_MS * 10);
+    await writeAged('b.mp4', STALE_TEMP_FILE_MS * 10);
     await sweepStaleConversionFiles(dir);
     expect(await files()).toEqual(['a.webm', 'b.mp4']);
   });
@@ -145,7 +148,7 @@ describe('sweepStaleConversionFiles', () => {
   });
 
   it('keeps going when one file cannot be checked', async () => {
-    await writeAged('a.mov.upload', STALE_CONVERSION_FILE_MS + 60_000);
+    await writeAged('a.mov.upload', STALE_TEMP_FILE_MS + 60_000);
     vi.spyOn(fs.promises, 'stat').mockRejectedValue(Object.assign(new Error('gone'), { code: 'ENOENT' }));
     await expect(sweepStaleConversionFiles(dir)).resolves.toBeUndefined();
   });

@@ -1,5 +1,5 @@
 import { createLogger } from '../../shared/logger';
-import { Router, type Response } from 'express';
+import { Router, type Request, type Response } from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
@@ -12,13 +12,15 @@ import { OVERLAY_FOLDER, OVERLAY_MAX_FILE_MB } from '../../shared/config';
 import { parsePositiveIntId } from './validation';
 import { requireStreamer } from './viewHelpers';
 import { logAndRedirectError } from './errorHandling';
-import { createMulterErrorRedirectHandler, makeUploadMiddleware, makeRequireStreamerBeforeUpload, writeFileOrCleanup } from './uploadMiddleware';
+import { createMulterErrorRedirectHandler, makeUploadMiddleware, makeRequireStreamerBeforeUpload } from './uploadMiddleware';
 import { safeResolve } from '../../shared/pathUtils';
-import { detectVideoType } from './uploadFileTypes';
 import { NOT_A_STREAMER_REDIRECT } from './overlayAdminShared';
 import { storeMovAsWebm } from './overlayMovConversion';
 import { isWebmTranscodeQueueFull, type ProgressListener } from './overlayVideoTranscode';
 import { parseUploadId, setConversionProgress, clearConversionProgress } from './overlayConversionProgress';
+import {
+  overlayUploadStorage, detectUploadedVideoType, placeUpload, discardUpload, sweepStaleIncomingUploads, type OverlayVideoType,
+} from './overlayUploadStorage';
 
 const log = createLogger('OverlayAdmin');
 
@@ -42,8 +44,8 @@ function declaresMov(file: Express.Multer.File): boolean {
 
 /**
  * Multer `fileFilter`: refuses a declared MOV with `transcode_busy` when the conversion queue is
- * already full, before Multer buffers it into memory. Every other upload (and a MOV sent under
- * another name) is let through; `detectVideoType()` still validates the bytes, and
+ * already full, before Multer stores any of it. Every other upload (and a MOV sent under
+ * another name) is let through; `detectUploadedVideoType()` still validates the bytes, and
  * `transcodeToWebm` still enforces the limit for a MOV this check didn't recognise.
  * @param _req - Express request (unused).
  * @param file - Multer's description of the incoming file.
@@ -57,28 +59,30 @@ function admitUpload(_req: Express.Request, file: Express.Multer.File, cb: multe
   cb(null, true);
 }
 
+// Overlay videos stream to disk (see overlayUploadStorage.ts) rather than memory: a transparent
+// MOV can be hundreds of megabytes.
 const upload = multer({
-  storage: multer.memoryStorage(),
+  storage: overlayUploadStorage,
   limits: { fileSize: MAX_FILE_BYTES },
   fileFilter: admitUpload,
 });
 
 /**
- * Writes an uploaded overlay video into `dir` under a random name: WebM and MP4 as uploaded,
- * MOV converted to WebM first (see `storeMovAsWebm`).
+ * Moves an uploaded overlay video into `dir` under a random name: WebM and MP4 as uploaded, MOV
+ * converted to WebM first (see `storeMovAsWebm`).
  * @param dir - Absolute path of the streamer's overlay folder (already safe-resolved).
- * @param buffer - The uploaded file's bytes.
- * @param type - The upload's format, from `detectVideoType`.
+ * @param file - The Multer upload, stored on disk by `overlayUploadStorage`.
+ * @param type - The upload's format, from `detectUploadedVideoType`.
  * @param onProgress - Told a MOV conversion's stage and percentage as it goes (optional).
  * @returns The stored file's name within `dir`.
  * @throws With `code: 'transcode_busy'`/`'transcode_failed'` if a MOV can't be converted now
- *   or at all, or the write error.
+ *   or at all, or the error from moving the file.
  */
-async function storeVideoFile(dir: string, buffer: Buffer, type: 'webm' | 'mp4' | 'mov', onProgress?: ProgressListener): Promise<string> {
+async function storeVideoFile(dir: string, file: Express.Multer.File, type: OverlayVideoType, onProgress?: ProgressListener): Promise<string> {
   const baseName = randomUUID();
-  if (type === 'mov') return storeMovAsWebm(dir, baseName, buffer, onProgress);
+  if (type === 'mov') return storeMovAsWebm(dir, baseName, (sourcePath) => placeUpload(file, sourcePath), onProgress);
   const filename = `${baseName}.${type}`;
-  await writeFileOrCleanup(path.join(dir, filename), buffer, log);
+  await placeUpload(file, path.join(dir, filename));
   return filename;
 }
 
@@ -87,7 +91,7 @@ async function storeVideoFile(dir: string, buffer: Buffer, type: 'webm' | 'mp4' 
  * under `uploadId` for the settings page to poll while it runs, and clearing it afterwards.
  * @param streamer - Owning streamer.
  * @param dir - Absolute path of the streamer's overlay folder (already safe-resolved).
- * @param file - The Multer upload (in-memory buffer).
+ * @param file - The Multer upload, stored on disk by `overlayUploadStorage`.
  * @param details - The upload's detected format and, when the page sent one, its upload ID.
  * @returns The stored file's name within `dir`.
  * @throws Whatever {@link storeVideoFile} throws.
@@ -96,12 +100,12 @@ async function storeWithProgress(
   streamer: DbStreamerEventSub,
   dir: string,
   file: Express.Multer.File,
-  details: { type: 'webm' | 'mp4' | 'mov'; uploadId: string | null },
+  details: { type: OverlayVideoType; uploadId: string | null },
 ): Promise<string> {
   const { type, uploadId } = details;
-  if (!uploadId) return storeVideoFile(dir, file.buffer, type);
+  if (!uploadId) return storeVideoFile(dir, file, type);
   try {
-    return await storeVideoFile(dir, file.buffer, type, (progress) => setConversionProgress(streamer.id, uploadId, progress));
+    return await storeVideoFile(dir, file, type, (progress) => setConversionProgress(streamer.id, uploadId, progress));
   } finally {
     clearConversionProgress(streamer.id, uploadId);
   }
@@ -111,7 +115,7 @@ async function storeWithProgress(
  * Stores an uploaded overlay video in the streamer's folder (see {@link storeVideoFile}) and
  * records it in the DB, deleting the file again if the DB insert fails.
  * @param streamer - Owning streamer.
- * @param file - The Multer upload (in-memory buffer).
+ * @param file - The Multer upload, stored on disk by `overlayUploadStorage`.
  * @param name - Display name for the video.
  * @param uploadId - The page's ID for this upload (`X-Upload-Id`), or null when it sent none.
  * @returns Resolves once the file is saved and recorded.
@@ -121,7 +125,7 @@ async function storeWithProgress(
 async function saveVideoFile(streamer: DbStreamerEventSub, file: Express.Multer.File, name: string, uploadId: string | null): Promise<void> {
   const dir = safeResolve(OVERLAY_FOLDER, String(streamer.id));
   if (!dir) throw Object.assign(new Error('Path traversal blocked'), { code: 'invalid_path' });
-  const type = detectVideoType(file.buffer);
+  const type = await detectUploadedVideoType(file);
   if (!type) throw Object.assign(new Error('Invalid file type'), { code: 'invalid_file' });
   await fs.promises.mkdir(dir, { recursive: true });
   const filename = await storeWithProgress(streamer, dir, file, { type, uploadId });
@@ -167,13 +171,36 @@ const requireStreamerBeforeUpload = makeRequireStreamerBeforeUpload({
 });
 
 /**
+ * Handles one overlay video upload once Multer has stored it: stores and records it, and
+ * redirects with the outcome (see the route below for the redirect codes).
+ * @param req - Express request; reads `name`, the `video` file and the `X-Upload-Id` header.
+ * @param res - Express response, redirected to `/overlay/settings` with the outcome.
+ * @returns Resolves once the response has been sent.
+ */
+async function handleVideoUpload(req: Request, res: Response): Promise<void> {
+  try {
+    const streamer = await requireStreamer(req, res, NOT_A_STREAMER_REDIRECT);
+    if (!streamer) return;
+    if (!req.file) return res.redirect('/overlay/settings?error=invalid_file');
+    const name = (typeof req.body?.name === 'string' ? req.body.name.trim().slice(0, 100) : '') || req.file.originalname.trim().slice(0, 100);
+    await saveVideoFile(streamer, req.file, name, parseUploadId(req.get('x-upload-id')));
+    res.redirect('/overlay/settings?success=video_uploaded');
+  } catch (err: unknown) {
+    const code = err instanceof Error ? (err as NodeJS.ErrnoException).code : undefined;
+    if (code && UPLOAD_ERROR_CODES.has(code)) return res.redirect(`/overlay/settings?error=${code}`);
+    logAndRedirectError({ res, log, logLabel: 'Overlay video upload error:', err, basePath: '/overlay/settings', errorCode: 'upload_failed' });
+  }
+}
+
+/**
  * POST /overlay/settings/videos/upload — uploads a video file (webm/mp4/mov,
  * validated by magic bytes; a mov is converted to webm) for the requesting streamer. An
  * `X-Upload-Id` header (32 lowercase hex characters) lets the page poll a MOV's conversion
- * progress at `GET /overlay/settings/videos/progress/:uploadId` while this request runs. csrfProtection and
- * requireStreamerBeforeUpload run BEFORE uploadVideo so a bad token or a
- * non-streamer is rejected before Multer buffers the file; the client (overlayAdmin.js) sends the token in an X-CSRF-Token
- * header — available before body parsing and never placed in the URL.
+ * progress at `GET /overlay/settings/videos/progress/:uploadId` while this request runs.
+ * csrfProtection and requireStreamerBeforeUpload run BEFORE uploadVideo so a bad token or a
+ * non-streamer is rejected before Multer stores the file; the client (utils.js) sends the token
+ * in an X-CSRF-Token header — available before body parsing and never placed in the URL. The
+ * upload is streamed to disk and always removed from the incoming folder afterwards.
  * @param req - Express request; reads `name` and the `video` file from
  *   `req.body`/`req.file`.
  * @param res - Express response; redirects to `/overlay/settings?success=video_uploaded`
@@ -187,16 +214,12 @@ const requireStreamerBeforeUpload = makeRequireStreamerBeforeUpload({
  */
 router.post('/settings/videos/upload', requireAuth, csrfProtection, requireStreamerBeforeUpload, uploadVideo, async (req, res) => {
   try {
-    const streamer = await requireStreamer(req, res, NOT_A_STREAMER_REDIRECT);
-    if (!streamer) return;
-    if (!req.file) return res.redirect('/overlay/settings?error=invalid_file');
-    const name = (typeof req.body?.name === 'string' ? req.body.name.trim().slice(0, 100) : '') || req.file.originalname.trim().slice(0, 100);
-    await saveVideoFile(streamer, req.file, name, parseUploadId(req.get('x-upload-id')));
-    res.redirect('/overlay/settings?success=video_uploaded');
-  } catch (err: unknown) {
-    const code = err instanceof Error ? (err as NodeJS.ErrnoException).code : undefined;
-    if (code && UPLOAD_ERROR_CODES.has(code)) return res.redirect(`/overlay/settings?error=${code}`);
-    logAndRedirectError({ res, log, logLabel: 'Overlay video upload error:', err, basePath: '/overlay/settings', errorCode: 'upload_failed' });
+    await handleVideoUpload(req, res);
+  } finally {
+    // Whatever happened, nothing is left in the incoming folder: a stored upload was moved out
+    // already, and anything else (rejected, failed) is removed here.
+    if (req.file) await discardUpload(req.file);
+    await sweepStaleIncomingUploads();
   }
 });
 
