@@ -11,6 +11,8 @@ import { AccessLevel } from '../db/users';
 import {
   ipKey,
   generalLimiterSkip,
+  isSessionStoreBusyError,
+  preSessionLimiterSkip,
   sessionLimiterKey,
   sessionLimiterSkip,
   streamdeckLimiterKey,
@@ -92,6 +94,27 @@ describe('generalLimiterSkip', () => {
 // ---------------------------------------------------------------------------
 // sessionLimiterSkip
 // ---------------------------------------------------------------------------
+describe('preSessionLimiterSkip', () => {
+  it('skips the Streamdeck API', () => {
+    expect(preSessionLimiterSkip(makeReq({ path: '/api/streamdeck/sfx' }))).toBe(true);
+  });
+
+  it('counts every other request, authenticated or not', () => {
+    expect(preSessionLimiterSkip(makeReq({ path: '/dashboard' }))).toBe(false);
+    expect(preSessionLimiterSkip(makeReq({ path: '/dashboard', sessionUser: authedUser }))).toBe(false);
+  });
+});
+
+describe('isSessionStoreBusyError', () => {
+  it("recognises mysql2's full-queue rejection", () => {
+    expect(isSessionStoreBusyError(new Error('Queue limit reached.'))).toBe(true);
+  });
+
+  it.each([new Error('connect ECONNREFUSED'), 'Queue limit reached.', null, undefined])('ignores %s', (err) => {
+    expect(isSessionStoreBusyError(err)).toBe(false);
+  });
+});
+
 describe('sessionLimiterSkip', () => {
   it('skips (true) for /api/streamdeck path even when authenticated', () => {
     expect(sessionLimiterSkip(makeReq({ path: '/api/streamdeck/sfx', sessionUser: authedUser }))).toBe(true);

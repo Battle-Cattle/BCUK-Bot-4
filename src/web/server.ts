@@ -21,6 +21,8 @@ import { renderView } from './routes/viewHelpers';
 import {
   ipKey,
   generalLimiterSkip,
+  isSessionStoreBusyError,
+  preSessionLimiterSkip,
   sessionLimiterKey,
   sessionLimiterSkip,
   streamdeckLimiterKey,
@@ -142,6 +144,20 @@ const sessionLimiter = rateLimit({
   keyGenerator: sessionLimiterKey,
   skip: sessionLimiterSkip,
 });
+// Coarse per-IP cap that runs ahead of the session middleware. The limiters above run after it
+// (sessionLimiter's key needs req.session), so without this, a replayed validly signed cookie
+// (an unauthenticated visitor can get one from /auth/*) would cost a session-store SELECT on every
+// request with nothing limiting how often. Set well above what any legitimate client sends (the
+// session limiter caps one account at 600 per 15 min) so dashboard polling, SSE reconnects and
+// several users behind one NAT never reach it.
+const preSessionLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 2000,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  keyGenerator: ipKey,
+  skip: preSessionLimiterSkip,
+});
 // Body parsers
 app.use(express.urlencoded({ extended: false }));
 app.use(express.json());
@@ -150,8 +166,11 @@ app.use(express.json());
 // Always trust exactly one proxy hop (Caddy). Without this, req.ip resolves to
 // Caddy's loopback address and all users share a single rate-limit bucket.
 app.set('trust proxy', 1);
+app.use(preSessionLimiter);
 // Runs on its own pool (getSessionPool), kept apart from the bot's: session lookups happen on every
-// cookie-carrying request ahead of the rate limiters, and must not be able to queue out bot queries.
+// cookie-carrying request ahead of the general/session limiters (only preSessionLimiter is in front),
+// and must not be able to queue out bot queries. That pool's wait queue is bounded; a full queue
+// reaches the error handler below as a 503.
 // The store takes mysql2's callback API, so it gets the callback pool the promise pool wraps
 // (`.pool`). Handed a pool, the store leaves it open on close(); closePool() ends it at shutdown.
 // The table comes from migrations/0007_sessions_table.sql, which startup applies before the panel
@@ -268,15 +287,20 @@ app.use(csrfErrorHandler);
 
 /**
  * Centralised error handler — catches anything unhandled by earlier middleware/routes.
- * Client errors (a 4xx `status`, e.g. a corrupt or unsupported-encoding request body from
- * body-parser) get that status and a one-line warning; anything else is logged as an error
- * and answered with a 500.
+ * A full session-store queue gets a 503 and a warning. Client errors (a 4xx `status`, e.g. a
+ * corrupt or unsupported-encoding request body from body-parser) get that status and a one-line
+ * warning; anything else is logged as an error and answered with a 500.
  * @param err - The unhandled error.
  * @param req - Express request; reads `req.session.user` if present.
- * @param res - Express response; renders the `error` view with the client-error status or 500.
+ * @param res - Express response; renders the `error` view with a 503, the client-error status or 500.
  * @param _next - Unused, but required for Express to recognize this as an error handler.
  */
 app.use((err: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  if (isSessionStoreBusyError(err)) {
+    log.warn(`Session store busy; answered ${req.method} ${req.path} with 503`);
+    renderErrorPage(req, res, 503, 'The panel is busy right now. Please try again in a moment.');
+    return;
+  }
   const status = clientErrorStatus(err);
   if (status !== undefined) {
     // `status` is only set on objects, so `err` is one here.
@@ -297,7 +321,7 @@ export { app };
 // that each got paired with the correct keyGenerator/skip function and that hitting the
 // threshold actually enforces a 429 — without looping enough real requests through the
 // entire app to reach the 100/600 thresholds via every other mounted route.
-export { generalLimiter, sessionLimiter };
+export { generalLimiter, preSessionLimiter, sessionLimiter };
 
 /** The panel's listening server, kept so {@link stopWebPanel} can close it on shutdown. */
 let webServer: Server | null = null;

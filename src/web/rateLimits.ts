@@ -50,6 +50,27 @@ export function generalLimiterSkip(req: Request): boolean {
 }
 
 /**
+ * Determines whether to skip the coarse IP-keyed limiter that runs ahead of the session middleware.
+ * Only the Streamdeck API is skipped: it carries no session cookie and has its own limiters.
+ * @param req - Express request object
+ * @returns true if the pre-session limiter should be skipped
+ */
+export function preSessionLimiterSkip(req: Request): boolean {
+  return req.path.startsWith('/api/streamdeck');
+}
+
+/**
+ * Tells whether an error means the session store is overloaded rather than broken: mysql2 rejects a
+ * lookup straight away once the session pool's wait queue is full. express-session passes that to
+ * `next()`, and the panel answers it with a 503 instead of a 500.
+ * @param err - The error handed to the error handler.
+ * @returns true for mysql2's "Queue limit reached." rejection.
+ */
+export function isSessionStoreBusyError(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && (err as { message?: unknown }).message === 'Queue limit reached.';
+}
+
+/**
  * Generates a per-account rate-limit key using the Discord ID.
  * Each authenticated account gets its own bucket regardless of IP sharing.
  * The fallback is never reached in practice because sessionLimiterSkip

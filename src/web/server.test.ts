@@ -21,9 +21,10 @@ vi.mock('../shared/config', () => ({
 }));
 
 // The session pool server.ts hands the session store, and the store's constructor args/close calls.
-const { mockPool, storeCtorArgs, storeClose, storeClearExpired } = vi.hoisted(() => ({
+const { mockPool, storeCtorArgs, storeClose, storeClearExpired, storeGet } = vi.hoisted(() => ({
   mockPool: { pool: { marker: 'session-callback-pool' } },
   storeCtorArgs: [] as unknown[][],
+  storeGet: vi.fn((_id: string, cb: (err: unknown, session?: unknown) => void) => cb(null, undefined)),
   storeClose: vi.fn().mockResolvedValue(undefined),
   storeClearExpired: vi.fn().mockResolvedValue(undefined),
 }));
@@ -42,8 +43,8 @@ vi.mock('express-mysql-session', () => ({
       clearExpiredSessions() {
         return storeClearExpired();
       }
-      get(_id: string, cb: (err: unknown, session?: unknown) => void) {
-        cb(null, undefined);
+      get(id: string, cb: (err: unknown, session?: unknown) => void) {
+        storeGet(id, cb);
       }
       set(_id: string, _session: unknown, cb?: (err?: unknown) => void) {
         cb?.();
@@ -149,7 +150,8 @@ vi.mock('./routes/serviceWorker', () => ({ default: emptyRouter() }));
 vi.mock('./routes/health', () => ({ default: markerRouter('health') }));
 vi.mock('./routes/healthStatusEvents', () => ({ default: emptyRouter() }));
 
-import { app, generalLimiter, sessionLimiter, startWebPanel, stopWebPanel } from './server';
+import { app, generalLimiter, preSessionLimiter, sessionLimiter, startWebPanel, stopWebPanel } from './server';
+import { createHmac } from 'crypto';
 import { requireAuth, requireGuildContext } from './middleware';
 
 describe('server route wiring', () => {
@@ -617,6 +619,94 @@ describe('expired-session cleanup', () => {
     await stopWebPanel();
     await vi.advanceTimersByTimeAsync(FIFTEEN_MINUTES * 2);
     expect(storeClearExpired).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * A validly signed `connect.sid` cookie for session id `sid` (signed the way express-session's
+ * cookie-signature does it), so express-session looks it up in the store.
+ */
+function signedSessionCookie(sid: string): string {
+  const mac = createHmac('sha256', 'x'.repeat(32)).update(sid).digest('base64').replace(/=+$/, '');
+  return `connect.sid=${encodeURIComponent(`s:${sid}.${mac}`)}`;
+}
+
+describe('preSessionLimiter (server.ts)', () => {
+  const CLIENT_IP = '203.0.113.9';
+
+  beforeEach(async () => {
+    await preSessionLimiter.resetKey(CLIENT_IP);
+    storeGet.mockClear();
+  });
+
+  it('cuts off a flood of replayed session cookies from one IP before the store is queried', async () => {
+    const server = http.createServer(app);
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address() as AddressInfo;
+    const agent = new http.Agent({ keepAlive: true, maxSockets: 1 });
+    const headers = { cookie: signedSessionCookie('replayed-session'), 'x-forwarded-for': CLIENT_IP };
+    /** Sends one cookie-carrying request as CLIENT_IP and resolves with its status. */
+    const send = (): Promise<number> => new Promise((resolve, reject) => {
+      http.get({ host: '127.0.0.1', port, path: '/__pre_session_probe', agent, headers }, (res) => {
+        res.resume();
+        res.on('end', () => resolve(res.statusCode ?? 0));
+      }).on('error', reject);
+    });
+    try {
+      for (let i = 0; i < 2000; i++) {
+        expect(await send()).not.toBe(503);
+      }
+      expect(storeGet).toHaveBeenCalledTimes(2000);
+      expect(await send()).toBe(429);
+      expect(storeGet).toHaveBeenCalledTimes(2000);
+    } finally {
+      agent.destroy();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it('leaves the Streamdeck API to its own limiters', async () => {
+    const testApp = express();
+    testApp.use(preSessionLimiter);
+    testApp.get('/api/streamdeck/ping', (_req, res) => res.json({ ok: true }));
+    await preSessionLimiter.resetKey('::ffff:127.0.0.1');
+    for (let i = 0; i < 3; i++) {
+      await request(testApp).get('/api/streamdeck/ping').expect(200);
+    }
+    // Skipped requests never touch the bucket, so the IP still has its full budget.
+    const res = await request(testApp).get('/api/streamdeck/ping');
+    expect(res.headers['ratelimit']).toBeUndefined();
+  });
+});
+
+describe('session store overload', () => {
+  beforeEach(() => {
+    mockLog.warn.mockClear();
+    mockLog.error.mockClear();
+  });
+
+  afterEach(() => {
+    storeGet.mockImplementation((_id, cb) => cb(null, undefined));
+  });
+
+  it('answers a full session-pool queue with a 503 instead of a 500', async () => {
+    storeGet.mockImplementation((_id, cb) => cb(new Error('Queue limit reached.')));
+    const res = await request(app)
+      .get('/anything')
+      .set('Cookie', signedSessionCookie('busy-session'))
+      .set('X-Forwarded-For', '198.51.100.7');
+    expect(res.status).toBe(503);
+    expect(mockLog.warn).toHaveBeenCalledWith(expect.stringContaining('Session store busy'));
+    expect(mockLog.error).not.toHaveBeenCalled();
+  });
+
+  it('still answers any other store failure with a 500', async () => {
+    storeGet.mockImplementation((_id, cb) => cb(new Error('connect ECONNREFUSED')));
+    const res = await request(app)
+      .get('/anything')
+      .set('Cookie', signedSessionCookie('broken-session'))
+      .set('X-Forwarded-For', '198.51.100.8');
+    expect(res.status).toBe(500);
   });
 });
 
