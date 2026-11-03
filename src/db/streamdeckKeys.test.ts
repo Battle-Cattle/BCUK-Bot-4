@@ -38,7 +38,6 @@ import {
   requestGuildAccessForExistingKey,
   rotateApiKey,
   keyVersionFromHash,
-  keyVersionFromPlaintext,
   getApiKeyVersion,
   findKeyByHash,
   isKeyApprovedForGuild,
@@ -102,6 +101,7 @@ describe('createApiKeyAndRequestGuildAccess', () => {
     const [identitySql, identityParams] = pool._conn.execute.mock.calls[0] as [string, unknown[]];
     expect(identitySql).toContain('INSERT INTO streamdeck_api_keys');
     expect(identityParams[0]).toBe('1');
+    expect(result.version).toBe(keyVersionFromHash(identityParams[1] as string));
     const [statusSql, statusParams] = pool._conn.execute.mock.calls[1] as [string, unknown[]];
     expect(statusSql).toContain('INSERT INTO streamdeck_key_guild_status');
     expect(statusParams).toEqual(['1', 'g1', 'pending', expect.any(Date), null, null]);
@@ -184,7 +184,7 @@ describe('requestGuildAccessForExistingKey', () => {
 
 // ─── key version markers ─────────────────────────────────────────────────────────
 
-describe('keyVersionFromHash / keyVersionFromPlaintext', () => {
+describe('keyVersionFromHash', () => {
   it('gives a stable 32-char hex marker that differs per key and never equals the stored hash', () => {
     const hashA = createHash('sha256').update('key-a').digest('hex');
     const hashB = createHash('sha256').update('key-b').digest('hex');
@@ -193,11 +193,6 @@ describe('keyVersionFromHash / keyVersionFromPlaintext', () => {
     expect(keyVersionFromHash(hashA)).toBe(keyVersionFromHash(hashA));
     expect(keyVersionFromHash(hashA)).not.toBe(keyVersionFromHash(hashB));
     expect(hashA.startsWith(keyVersionFromHash(hashA))).toBe(false);
-  });
-
-  it('derives the same marker from the plaintext as from its stored hash', () => {
-    const hash = createHash('sha256').update('plain-key').digest('hex');
-    expect(keyVersionFromPlaintext('plain-key')).toBe(keyVersionFromHash(hash));
   });
 });
 
@@ -233,6 +228,7 @@ describe('rotateApiKey', () => {
     expect(sql).toContain('UPDATE streamdeck_api_keys');
     expect(sql).toContain('key_hash = ?');
     expect(params[2]).toBe('1');
+    expect(result.version).toBe(keyVersionFromHash(params[0] as string));
   });
 });
 

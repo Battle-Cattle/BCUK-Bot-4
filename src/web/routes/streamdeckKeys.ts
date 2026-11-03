@@ -6,7 +6,6 @@ import {
   requestGuildAccessForExistingKey,
   rotateApiKey,
   getApiKeyVersion,
-  keyVersionFromPlaintext,
   getGuildStatusForKey,
   revokeApiKey,
   approveApiKey,
@@ -89,8 +88,16 @@ router.get('/streamdeck-key', csrfProtection, async (req, res) => {
   }
 });
 
-interface RecentRotation {
+/** A freshly issued key: its plaintext, shown once, and its marker for the rotate form. */
+interface IssuedKey {
+  /** The plaintext key; only its hash is stored. */
   plain: string;
+  /** The key's `keyVersionFromHash` marker. */
+  version: string;
+}
+
+interface RecentRotation {
+  key: IssuedKey;
   rotatedAt: number;
 }
 
@@ -118,34 +125,33 @@ export function __resetRecentRotationsForTests(): void {
 }
 
 /**
- * The plaintext of this user's rotation within the dedupe window, if there was one.
+ * The key from this user's rotation within the dedupe window, if there was one.
  * @param discordId - Key owner's Discord snowflake.
- * @returns The plaintext key from a rotation within `ROTATE_DEDUPE_WINDOW_MS`, or null when there is none.
+ * @returns The key from a rotation within `ROTATE_DEDUPE_WINDOW_MS`, or null when there is none.
  */
-function recentRotationPlain(discordId: string): string | null {
+function recentRotationKey(discordId: string): IssuedKey | null {
   const recent = recentRotations.get(discordId);
-  return recent && Date.now() - recent.rotatedAt < ROTATE_DEDUPE_WINDOW_MS ? recent.plain : null;
+  return recent && Date.now() - recent.rotatedAt < ROTATE_DEDUPE_WINDOW_MS ? recent.key : null;
 }
 
 /**
- * Rotates the user's key and remembers the plaintext for the dedupe window. Call only inside
+ * Rotates the user's key and remembers it for the dedupe window. Call only inside
  * `runUserMutation` for this user.
  * @param discordId - Key owner's Discord snowflake; must already have a key.
- * @returns The new plaintext key.
+ * @returns The new key's plaintext and marker.
  */
-async function rotateAndRemember(discordId: string): Promise<string> {
-  const { plain } = await rotateApiKey(discordId);
-  const result: RecentRotation = { plain, rotatedAt: Date.now() };
+async function rotateAndRemember(discordId: string): Promise<IssuedKey> {
+  const { plain, version } = await rotateApiKey(discordId);
+  const result: RecentRotation = { key: { plain, version }, rotatedAt: Date.now() };
   recentRotations.set(discordId, result);
   setTimeout(() => {
     if (recentRotations.get(discordId) === result) recentRotations.delete(discordId);
   }, ROTATE_DEDUPE_WINDOW_MS).unref();
-  return plain;
+  return result.key;
 }
 
 /**
- * Applies a request for Streamdeck access in `guildId` and returns the plaintext key to show,
- * if any. Call only inside `runUserMutation` for this user.
+ * Applies a request for Streamdeck access in `guildId` and returns the key to show, if any. Call only inside `runUserMutation` for this user.
  * - No key yet: mints one (shown once).
  * - Key from another guild, no row here: requests access with that key (no plaintext to show,
  *   since only its hash is stored).
@@ -157,9 +163,9 @@ async function rotateAndRemember(discordId: string): Promise<string> {
  * @param discordId - Requesting user's Discord snowflake.
  * @param accessLevel - The user's access level in `guildId`, for auto-approval.
  * @param guildId - The guild to request access for.
- * @returns The plaintext key to show (a new or rotated key, or one re-shown from the dedupe window), or null when there is none to show.
+ * @returns The key to show (a new or rotated key, or one re-shown from the dedupe window), or null when there is none to show.
  */
-async function applyKeyRequest(discordId: string, accessLevel: number, guildId: string): Promise<string | null> {
+async function applyKeyRequest(discordId: string, accessLevel: number, guildId: string): Promise<IssuedKey | null> {
   const existing = await getGuildStatusForKey(discordId, guildId);
   if (existing?.status === 'denied') {
     throw new RequestDeniedError('API key request rejected: previous request was denied');
@@ -167,16 +173,17 @@ async function applyKeyRequest(discordId: string, accessLevel: number, guildId: 
   if (existing?.status === 'revoked') {
     // Rotate first: if re-requesting then fails, this guild stays revoked and the old key is
     // already dead, rather than the old (possibly leaked) key being re-enabled unrotated.
-    const plain = await rotateAndRemember(discordId);
+    const key = await rotateAndRemember(discordId);
     await requestGuildAccessForExistingKey(discordId, accessLevel, guildId);
-    return plain;
+    return key;
   }
-  if (existing) return recentRotationPlain(discordId);
+  if (existing) return recentRotationKey(discordId);
   if (await hasApiKey(discordId)) {
     await requestGuildAccessForExistingKey(discordId, accessLevel, guildId);
     return null;
   }
-  return (await createApiKeyAndRequestGuildAccess(discordId, accessLevel, guildId)).plain;
+  const { plain, version } = await createApiKeyAndRequestGuildAccess(discordId, accessLevel, guildId);
+  return { plain, version };
 }
 
 /**
@@ -197,12 +204,12 @@ router.post('/streamdeck-key/request', csrfProtection, async (req, res) => {
   const { discordId, accessLevel } = getSessionUser(req);
   const guildId = getCurrentGuildId(req);
   try {
-    const plain = await runUserMutation(discordId, () => applyKeyRequest(discordId, accessLevel, guildId));
+    const key = await runUserMutation(discordId, () => applyKeyRequest(discordId, accessLevel, guildId));
     const [keyRow, keyVersion] = await Promise.all([
       getGuildStatusForKey(discordId, guildId),
-      plain ? keyVersionFromPlaintext(plain) : getApiKeyVersion(discordId),
+      key ? key.version : getApiKeyVersion(discordId),
     ]);
-    renderKeyStatus(req, res, { keyRow, newKey: plain, keyVersion });
+    renderKeyStatus(req, res, { keyRow, newKey: key?.plain ?? null, keyVersion });
   } catch (err) {
     const errorCode = err instanceof RequestDeniedError ? 'request_denied' : 'request_failed';
     logAndRedirectError({ res, log, logLabel: 'Streamdeck key request error:', err, basePath: '/streamdeck-key', errorCode });
@@ -215,12 +222,12 @@ router.post('/streamdeck-key/request', csrfProtection, async (req, res) => {
  * @param discordId - Key owner's Discord snowflake.
  * @param submittedVersion - The key marker the rotate form was rendered with, or null if the
  *   form didn't carry one (e.g. a page cached from before markers existed).
- * @returns The new plaintext key, or the one from a rotation still within the dedupe window.
+ * @returns The new key, or the one from a rotation still within the dedupe window.
  * @throws {KeyAlreadyRotatedError} when the form was rendered for a key that has since been
  *   replaced, so a resubmitted form can't rotate a second time.
  */
-async function rotateForForm(discordId: string, submittedVersion: string | null): Promise<string> {
-  const recent = recentRotationPlain(discordId);
+async function rotateForForm(discordId: string, submittedVersion: string | null): Promise<IssuedKey> {
+  const recent = recentRotationKey(discordId);
   if (recent) return recent;
   if (!(await hasApiKey(discordId))) {
     throw new Error('Cannot rotate: no existing Streamdeck API key');
@@ -262,8 +269,8 @@ router.post('/streamdeck-key/rotate', csrfProtection, async (req, res) => {
   const submittedVersion = typeof rawVersion === 'string' && rawVersion ? rawVersion : null;
   try {
     const keyRow = await getGuildStatusForKey(discordId, guildId);
-    const plain = await runUserMutation(discordId, () => rotateForForm(discordId, submittedVersion));
-    renderKeyStatus(req, res, { keyRow, newKey: plain, keyVersion: keyVersionFromPlaintext(plain) });
+    const key = await runUserMutation(discordId, () => rotateForForm(discordId, submittedVersion));
+    renderKeyStatus(req, res, { keyRow, newKey: key.plain, keyVersion: key.version });
   } catch (err) {
     const errorCode = err instanceof KeyAlreadyRotatedError ? 'already_rotated' : 'rotate_failed';
     logAndRedirectError({ res, log, logLabel: 'Streamdeck key rotate error:', err, basePath: '/streamdeck-key', errorCode });

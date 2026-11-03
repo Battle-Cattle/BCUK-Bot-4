@@ -229,7 +229,6 @@ export {
   requestGuildAccessForExistingKey,
   rotateApiKey,
   keyVersionFromHash,
-  keyVersionFromPlaintext,
   getApiKeyVersion,
   findKeyByHash,
   isKeyApprovedForGuild,

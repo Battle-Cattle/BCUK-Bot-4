@@ -5,11 +5,10 @@ import { ACCESS_LEVEL_MOCK } from '../../test-utils/accessLevelMock';
 
 vi.mock('../../db', () => ({
   hasApiKey: vi.fn().mockResolvedValue(false),
-  createApiKeyAndRequestGuildAccess: vi.fn().mockResolvedValue({ plain: 'a'.repeat(64), status: 'pending' }),
+  createApiKeyAndRequestGuildAccess: vi.fn().mockResolvedValue({ plain: 'a'.repeat(64), version: 'version-of-aaaa', status: 'pending' }),
   requestGuildAccessForExistingKey: vi.fn().mockResolvedValue({ status: 'pending' }),
-  rotateApiKey: vi.fn().mockResolvedValue({ plain: 'b'.repeat(64) }),
+  rotateApiKey: vi.fn().mockResolvedValue({ plain: 'b'.repeat(64), version: 'version-of-bbbb' }),
   getApiKeyVersion: vi.fn().mockResolvedValue('current-version'),
-  keyVersionFromPlaintext: vi.fn((plain: string) => `version-of-${plain.slice(0, 4)}`),
   getGuildStatusForKey: vi.fn().mockResolvedValue(null),
   revokeApiKey: vi.fn().mockResolvedValue(undefined),
   approveApiKey: vi.fn().mockResolvedValue(undefined),
@@ -65,9 +64,9 @@ function buildApp(sessionUser = SESSION_USER) {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(hasApiKey).mockResolvedValue(false);
-  vi.mocked(createApiKeyAndRequestGuildAccess).mockResolvedValue({ plain: 'a'.repeat(64), status: 'pending' } as any);
+  vi.mocked(createApiKeyAndRequestGuildAccess).mockResolvedValue({ plain: 'a'.repeat(64), version: 'version-of-aaaa', status: 'pending' } as any);
   vi.mocked(requestGuildAccessForExistingKey).mockResolvedValue({ status: 'pending' } as any);
-  vi.mocked(rotateApiKey).mockResolvedValue({ plain: 'b'.repeat(64) } as any);
+  vi.mocked(rotateApiKey).mockResolvedValue({ plain: 'b'.repeat(64), version: 'version-of-bbbb' } as any);
   vi.mocked(getApiKeyVersion).mockResolvedValue('current-version');
   vi.mocked(getGuildStatusForKey).mockResolvedValue(null);
   vi.mocked(getAllApiKeys).mockResolvedValue([]);
@@ -118,7 +117,9 @@ describe('POST /streamdeck-key/request', () => {
     const res = await supertest(buildApp()).post('/streamdeck-key/request');
 
     expect(res.status).toBe(200);
-    expect((res.body as any).locals.newKey).toBeTruthy();
+    expect((res.body as any).locals.newKey).toBe('a'.repeat(64));
+    expect((res.body as any).locals.keyVersion).toBe('version-of-aaaa');
+    expect(getApiKeyVersion).not.toHaveBeenCalled();
     expect(createApiKeyAndRequestGuildAccess).toHaveBeenCalledWith(SESSION_USER.discordId, SESSION_USER.accessLevel, GUILD_ID);
     expect(requestGuildAccessForExistingKey).not.toHaveBeenCalled();
     expect(rotateApiKey).not.toHaveBeenCalled();
@@ -243,7 +244,7 @@ describe('POST /streamdeck-key/request', () => {
     vi.mocked(createApiKeyAndRequestGuildAccess).mockImplementation(async () => {
       callOrder.push('create');
       persistedGuildStatus = { status: 'pending' };
-      return { plain: 'a'.repeat(64), status: 'pending' };
+      return { plain: 'a'.repeat(64), version: 'version-of-aaaa', status: 'pending' };
     });
     const app = buildApp();
     // supertest/superagent requests are thenable but lazy — chaining .then()
@@ -346,7 +347,7 @@ describe('POST /streamdeck-key/rotate', () => {
     });
     vi.mocked(rotateApiKey).mockImplementation(async () => {
       callOrder.push('rotate');
-      return { plain: 'b'.repeat(64) };
+      return { plain: 'b'.repeat(64), version: 'version-of-bbbb' };
     });
 
     await supertest(buildApp()).post('/streamdeck-key/rotate');
@@ -366,7 +367,7 @@ describe('POST /streamdeck-key/rotate', () => {
 
   it('a rapid duplicate rotate within the dedupe window reuses the first rotation instead of rotating again', async () => {
     vi.mocked(hasApiKey).mockResolvedValue(true);
-    vi.mocked(rotateApiKey).mockResolvedValue({ plain: 'first-plain-key' } as any);
+    vi.mocked(rotateApiKey).mockResolvedValue({ plain: 'first-plain-key', version: 'version-of-firs' } as any);
 
     const app = buildApp();
     const first = await supertest(app).post('/streamdeck-key/rotate');
@@ -387,7 +388,7 @@ describe('POST /streamdeck-key/rotate', () => {
     const sessionInGuildB = { ...SESSION_USER, currentGuildId: OTHER_GUILD_ID };
 
     vi.mocked(hasApiKey).mockResolvedValue(true);
-    vi.mocked(rotateApiKey).mockResolvedValue({ plain: 'shared-plain-key' } as any);
+    vi.mocked(rotateApiKey).mockResolvedValue({ plain: 'shared-plain-key', version: 'version-of-shar' } as any);
     vi.mocked(getGuildStatusForKey).mockImplementation(async (_discordId, guildId) => ({
       discord_id: SESSION_USER.discordId,
       guild_id: guildId,
@@ -407,6 +408,7 @@ describe('POST /streamdeck-key/rotate', () => {
     const appB = buildApp(sessionInGuildB);
     const firstInB = await supertest(appB).post('/streamdeck-key/rotate');
     expect((firstInB.body as any).locals.newKey).toBe('shared-plain-key');
+    expect((firstInB.body as any).locals.keyVersion).toBe('version-of-shar');
     expect((firstInB.body as any).locals.keyRow).toMatchObject({ guild_id: OTHER_GUILD_ID, status: 'pending' });
     expect(rotateApiKey).toHaveBeenCalledOnce();
   });
@@ -418,14 +420,14 @@ describe('POST /streamdeck-key/rotate', () => {
     const dateNowSpy = vi.spyOn(Date, 'now');
     try {
       vi.mocked(hasApiKey).mockResolvedValue(true);
-      vi.mocked(rotateApiKey).mockResolvedValueOnce({ plain: 'first-plain-key' } as any);
+      vi.mocked(rotateApiKey).mockResolvedValueOnce({ plain: 'first-plain-key', version: 'version-of-firs' } as any);
       dateNowSpy.mockReturnValue(1_000_000);
 
       const app = buildApp();
       const first = await supertest(app).post('/streamdeck-key/rotate');
       expect((first.body as any).locals.newKey).toBe('first-plain-key');
 
-      vi.mocked(rotateApiKey).mockResolvedValueOnce({ plain: 'second-plain-key' } as any);
+      vi.mocked(rotateApiKey).mockResolvedValueOnce({ plain: 'second-plain-key', version: 'version-of-seco' } as any);
       dateNowSpy.mockReturnValue(1_000_000 + 10_000 + 1);
 
       const second = await supertest(app).post('/streamdeck-key/rotate');
@@ -446,7 +448,7 @@ describe('POST /streamdeck-key/rotate', () => {
     const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
     try {
       vi.mocked(hasApiKey).mockResolvedValue(true);
-      vi.mocked(rotateApiKey).mockResolvedValueOnce({ plain: 'first-plain-key' } as any);
+      vi.mocked(rotateApiKey).mockResolvedValueOnce({ plain: 'first-plain-key', version: 'version-of-firs' } as any);
 
       const app = buildApp();
       await supertest(app).post('/streamdeck-key/rotate');
@@ -455,7 +457,7 @@ describe('POST /streamdeck-key/rotate', () => {
       expect(delay).toBe(10_000);
       (callback as () => void)();
 
-      vi.mocked(rotateApiKey).mockResolvedValueOnce({ plain: 'second-plain-key' } as any);
+      vi.mocked(rotateApiKey).mockResolvedValueOnce({ plain: 'second-plain-key', version: 'version-of-seco' } as any);
       const second = await supertest(app).post('/streamdeck-key/rotate');
 
       expect((second.body as any).locals.newKey).toBe('second-plain-key');
