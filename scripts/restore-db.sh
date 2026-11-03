@@ -7,7 +7,8 @@
 #             created if it doesn't exist.
 #
 # Restoring over the live database replaces everything in it, so it refuses while the bot's
-# service is running (stop it first) and asks you to type the database name to confirm. Any
+# service is running (stop it first), asks you to type the database name to confirm, and saves the
+# current data with backup-db.sh (label "pre-restore") before changing anything. Any
 # other target that already has tables (a mistyped name, say) asks for the same confirmation,
 # since every table in it is dropped first; an empty or new scratch database doesn't ask.
 set -euo pipefail
@@ -67,15 +68,35 @@ if [ "$TARGET" = "$DB_NAME" ]; then
 fi
 
 CREDENTIALS="$(write_mysql_credentials)"
-trap 'rm -f "$CREDENTIALS"' EXIT
+RESTORE_SOURCE="$DUMP"
+PRIVATE_COPY=""
+trap 'rm -f "$CREDENTIALS" ${PRIVATE_COPY:+"$PRIVATE_COPY"}' EXIT
+
+if [ "$TARGET" = "$DB_NAME" ]; then
+    # Tables are dropped before the import, and an import can still fail (a dump that is valid
+    # gzip but not valid SQL), so save what's there first; a failed backup stops here, unchanged.
+    # backup-db.sh prunes the oldest dumps, which could include $DUMP itself, so the import reads
+    # a private copy taken beforehand.
+    PRIVATE_COPY="$(umask 077 && mktemp)"
+    cp "$DUMP" "$PRIVATE_COPY"
+    RESTORE_SOURCE="$PRIVATE_COPY"
+    echo "==> Saving the current contents of '$TARGET' first..."
+    if ! PRE_RESTORE_OUTPUT="$(bash "$REPO_DIR/scripts/backup-db.sh" pre-restore)"; then
+        echo "ERROR: Couldn't back up '$TARGET' before restoring; nothing was changed." >&2
+        exit 1
+    fi
+    echo "==> Saved the current data to $(printf '%s\n' "$PRE_RESTORE_OUTPUT" | tail -n 1)"
+    echo "    (restore that file the same way to undo this restore)."
+fi
 
 # The query-only calls read nothing from stdin, which stays free for the confirmation prompt.
 mysql --defaults-extra-file="$CREDENTIALS" -e "CREATE DATABASE IF NOT EXISTS \`$TARGET\`" < /dev/null
 # The dump only drops and recreates the tables it contains, so a table created after the backup (by a
 # later migration, say) would otherwise survive with newer data and leave the result unlike the dump.
-# Drop every table first; foreign-key checks are off so the order doesn't matter.
+# Drop every table and view first; foreign-key checks are off so the order doesn't matter. A
+# backtick inside a name is doubled, as MySQL's quoting needs.
 DROPS="$(mysql --defaults-extra-file="$CREDENTIALS" -N -B "$TARGET" -e \
-    "SELECT CONCAT('DROP TABLE IF EXISTS \`', table_name, '\`;') FROM information_schema.tables WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE'" < /dev/null)"
+    "SELECT CONCAT(IF(table_type = 'VIEW', 'DROP VIEW IF EXISTS \`', 'DROP TABLE IF EXISTS \`'), REPLACE(table_name, '\`', '\`\`'), '\`;') FROM information_schema.tables WHERE table_schema = DATABASE()" < /dev/null)"
 if [ -n "$DROPS" ]; then
     # The live database was confirmed above. Any other target is normally an empty scratch
     # database, so existing tables mean a reused or mistyped name: confirm before dropping them.
@@ -87,5 +108,5 @@ if [ -n "$DROPS" ]; then
     printf 'SET FOREIGN_KEY_CHECKS=0;\n%s\n' "$DROPS" | mysql --defaults-extra-file="$CREDENTIALS" "$TARGET"
 fi
 echo "==> Restoring into '$TARGET'..."
-gzip -dc "$DUMP" | mysql --defaults-extra-file="$CREDENTIALS" "$TARGET"
+gzip -dc "$RESTORE_SOURCE" | mysql --defaults-extra-file="$CREDENTIALS" "$TARGET"
 echo "==> Restored $DUMP into '$TARGET'."

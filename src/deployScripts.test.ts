@@ -89,8 +89,15 @@ case "$*" in
     [ -f "$STATE/migration-lock" ] && echo __migration_lock_held__
     exit 0 ;;
   *"information_schema"*)
-    # The restore's "which tables exist?" query: one DROP statement per table in existing-tables.
-    while read -r table; do [ -n "$table" ] && echo "DROP TABLE IF EXISTS \\\`$table\\\`;"; done < "$STATE/existing-tables" 2>/dev/null
+    # The restore's "what exists?" query: one DROP statement per line of existing-tables, where a
+    # "view:" prefix marks a view. The query itself is kept for the tests to check.
+    printf '%s\\n' "$*" > "$STATE/drops-query"
+    while read -r table; do
+      case "$table" in
+        view:*) echo "DROP VIEW IF EXISTS \\\`\${table#view:}\\\`;" ;;
+        ?*) echo "DROP TABLE IF EXISTS \\\`$table\\\`;" ;;
+      esac
+    done < "$STATE/existing-tables" 2>/dev/null
     exit 0 ;;
 esac
 printf '%s\\n' "$*" >> "$STATE/mysql-calls"
@@ -538,6 +545,61 @@ describe.skipIf(onWindows)('restore-db.sh', { timeout: SCRIPT_TEST_TIMEOUT_MS },
     expect(result.stdout).toContain("'other_app_db' already has tables");
     expect(result.stderr).toContain('Not confirmed; nothing was changed.');
     expect(read(path.join(sandbox.state, 'mysql-input'))).toBe('');
+  });
+
+  it('drops views too, and doubles backticks in names, when clearing the target', () => {
+    write(path.join(sandbox.state, 'existing-tables'), 'view:recent_users\n');
+    expect(restore([dump, 'bcuk_restore_test'], 'bcuk_restore_test\n').status).toBe(0);
+
+    // A database holding only a view still counts as non-empty, and the view is dropped as one.
+    expect(read(path.join(sandbox.state, 'mysql-input'))).toContain('DROP VIEW IF EXISTS `recent_users`;');
+    const query = read(path.join(sandbox.state, 'drops-query'));
+    expect(query).toContain("IF(table_type = 'VIEW', 'DROP VIEW IF EXISTS `', 'DROP TABLE IF EXISTS `')");
+    expect(query).toContain("REPLACE(table_name, '`', '``')");
+    expect(query).not.toContain('BASE TABLE');
+  });
+
+  it('saves the live database before replacing it, and skips that for a scratch database', () => {
+    expect(restore([dump, 'bcuk_restore_test']).status).toBe(0);
+    expect(fs.existsSync(path.join(sandbox.state, 'mysqldump-args'))).toBe(false);
+
+    write(path.join(sandbox.state, 'existing-tables'), 'sessions\n');
+    const result = restore([dump], 'bcuk\n');
+
+    expect(result.status).toBe(0);
+    const saved = fs.readdirSync(sandbox.backups).filter((f) => f.endsWith('-pre-restore.sql.gz'));
+    expect(saved).toHaveLength(1);
+    expect(result.stdout).toContain(`Saved the current data to ${path.join(sandbox.backups, saved[0]!)}`);
+    expect(read(path.join(sandbox.state, 'mysqldump-args'))).toContain('bcuk');
+    // The save ran before anything was dropped, and the import still followed.
+    expect(result.stdout.indexOf('Saved the current data')).toBeLessThan(result.stdout.indexOf('Clearing the existing tables'));
+    expect(read(path.join(sandbox.state, 'mysql-input'))).toContain('CREATE TABLE t');
+  });
+
+  it('changes nothing when the live database cannot be saved first', () => {
+    write(path.join(sandbox.state, 'existing-tables'), 'sessions\n');
+    const result = spawnSync('bash', ['scripts/restore-db.sh', dump], {
+      cwd: sandbox.work, env: { ...sandbox.env, MYSQLDUMP_EXIT: '2' }, encoding: 'utf8', input: 'bcuk\n',
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("Couldn't back up 'bcuk' before restoring; nothing was changed.");
+    expect(read(path.join(sandbox.state, 'mysql-input'))).toBe('');
+    expect(read(path.join(sandbox.state, 'mysql-calls'))).toBe('');
+  });
+
+  it('restores the chosen dump even when saving the live database prunes it', () => {
+    // BACKUP_KEEP=1: the pre-restore save leaves only itself, deleting the older dump being restored.
+    write(path.join(sandbox.work, '.env'), `DB_USER=bot\nDB_NAME=bcuk\nBACKUP_DIR=${sandbox.backups}\nBACKUP_KEEP=1\n`);
+    const chosen = path.join(sandbox.backups, 'bcuk-20200101T000000Z-1.sql.gz');
+    fs.mkdirSync(sandbox.backups, { recursive: true });
+    fs.copyFileSync(dump, chosen);
+
+    const result = restore([chosen], 'bcuk\n');
+
+    expect(result.status).toBe(0);
+    expect(fs.existsSync(chosen)).toBe(false);
+    expect(read(path.join(sandbox.state, 'mysql-input'))).toContain('CREATE TABLE t');
   });
 
   it('needs the database name typed before replacing the live database', () => {
