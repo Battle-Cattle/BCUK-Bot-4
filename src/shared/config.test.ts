@@ -327,6 +327,28 @@ describe('config — Twitch EventSub / encryption settings', () => {
       'EVENTSUB_TOKEN_SECRET must be exactly 64 hex characters (32 bytes)',
     );
   });
+
+  it('defaults EVENTSUB_TOKEN_SECRET_PREVIOUS to an empty string when unset', async () => {
+    const config = await loadConfig({ EVENTSUB_TOKEN_SECRET_PREVIOUS: undefined });
+    expect(config.EVENTSUB_TOKEN_SECRET_PREVIOUS).toBe('');
+  });
+
+  it('passes through EVENTSUB_TOKEN_SECRET_PREVIOUS alongside the active key', async () => {
+    const config = await loadConfig({ EVENTSUB_TOKEN_SECRET: 'f'.repeat(64), EVENTSUB_TOKEN_SECRET_PREVIOUS: 'e'.repeat(64) });
+    expect(config.EVENTSUB_TOKEN_SECRET_PREVIOUS).toBe('e'.repeat(64));
+  });
+
+  it('throws at startup when EVENTSUB_TOKEN_SECRET_PREVIOUS is malformed', async () => {
+    await expect(
+      loadConfig({ EVENTSUB_TOKEN_SECRET: 'f'.repeat(64), EVENTSUB_TOKEN_SECRET_PREVIOUS: 'e'.repeat(63) }),
+    ).rejects.toThrow('EVENTSUB_TOKEN_SECRET_PREVIOUS must be exactly 64 hex characters (32 bytes)');
+  });
+
+  it('throws at startup when EVENTSUB_TOKEN_SECRET_PREVIOUS is set without an active key', async () => {
+    await expect(
+      loadConfig({ EVENTSUB_TOKEN_SECRET: undefined, EVENTSUB_TOKEN_SECRET_PREVIOUS: 'e'.repeat(64) }),
+    ).rejects.toThrow('EVENTSUB_TOKEN_SECRET_PREVIOUS is set but EVENTSUB_TOKEN_SECRET is not');
+  });
 });
 
 describe('config — SFX/OVERLAY folder defaults', () => {

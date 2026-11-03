@@ -6,6 +6,7 @@ vi.mock('mysql2/promise', () => ({ default: {} }));
 let mockSecret: string | undefined = 'a'.repeat(64);
 vi.mock('../shared/config', () => ({
   get EVENTSUB_TOKEN_SECRET() { return mockSecret; },
+  EVENTSUB_TOKEN_SECRET_PREVIOUS: 'b'.repeat(64),
 }));
 vi.mock('../shared/crypto', () => ({
   encryptToken: vi.fn((value: string) => `enc:${value}`),
@@ -117,6 +118,8 @@ describe('getAllEventSubStreamers', () => {
     const [s] = await getAllEventSubStreamers();
     expect(s!.eventsub_access_token).toBe('accessabc');
     expect(s!.eventsub_refresh_token).toBe('refreshxyz');
+    // Both keys go to decryptToken, so tokens from before a key rotation still decrypt.
+    expect(decryptToken).toHaveBeenCalledWith('enc:accessabc', 'a'.repeat(64), 'b'.repeat(64));
   });
 
   it('returns null tokens when decryptToken throws', async () => {

@@ -1,5 +1,5 @@
 import 'mediaplex'; // Must be imported first to register as Opus provider
-import { getPool, closePool, pingDb, runMigrations } from './db';
+import { getPool, closePool, pingDb, runMigrations, reencryptStoredTokens } from './db';
 import { recordDbPing } from './shared/healthStore';
 import { registerOwnerAlertRuntime, primeOwnerAlertBaseline, startOwnerAlertWatcher, stopOwnerAlertWatcher, announceShutdown, announceStartup } from './discord/ownerAlerts';
 import { startTwitchBot, stopTwitchBot, sayInChannel } from './twitch/twitchBot';
@@ -306,6 +306,15 @@ async function main(): Promise<void> {
   } catch (err) {
     log.error('Database migration failed:', err);
     process.exit(1);
+  }
+
+  // Rewrite any OAuth token not yet under the active EVENTSUB_TOKEN_SECRET (legacy tokens, or ones
+  // from before a key rotation) before anything reads them. Not fatal: until it succeeds, tokens
+  // under the previous key still decrypt while EVENTSUB_TOKEN_SECRET_PREVIOUS is set.
+  try {
+    await reencryptStoredTokens();
+  } catch (err) {
+    log.warn('Re-encrypting stored tokens under the active key failed; will retry on the next start:', err);
   }
 
   // Wire Twitch send/channel helpers before the bot connects so the first

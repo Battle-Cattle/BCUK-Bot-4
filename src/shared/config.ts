@@ -122,6 +122,18 @@ export const EVENTSUB_TOKEN_SECRET = process.env.EVENTSUB_TOKEN_SECRET ?? '';
 if (EVENTSUB_TOKEN_SECRET !== '' && !/^[0-9a-fA-F]{64}$/.test(EVENTSUB_TOKEN_SECRET)) {
   throw new Error('EVENTSUB_TOKEN_SECRET must be exactly 64 hex characters (32 bytes)');
 }
+// The key EVENTSUB_TOKEN_SECRET replaced, kept only during a rotation: tokens written under it still
+// decrypt, and startup re-encrypts them under the active key (see the README's "Rotating
+// EVENTSUB_TOKEN_SECRET"). Never used to encrypt. Remove it once startup reports nothing left.
+export const EVENTSUB_TOKEN_SECRET_PREVIOUS = process.env.EVENTSUB_TOKEN_SECRET_PREVIOUS ?? '';
+if (EVENTSUB_TOKEN_SECRET_PREVIOUS !== '') {
+  if (!/^[0-9a-fA-F]{64}$/.test(EVENTSUB_TOKEN_SECRET_PREVIOUS)) {
+    throw new Error('EVENTSUB_TOKEN_SECRET_PREVIOUS must be exactly 64 hex characters (32 bytes)');
+  }
+  if (EVENTSUB_TOKEN_SECRET === '') {
+    throw new Error('EVENTSUB_TOKEN_SECRET_PREVIOUS is set but EVENTSUB_TOKEN_SECRET is not — set the new key as EVENTSUB_TOKEN_SECRET');
+  }
+}
 
 // OpenAI API key, used only for the owner-only "Suggest description" SFX feature.
 // Leave unset to keep that feature disabled — everything else works without it.

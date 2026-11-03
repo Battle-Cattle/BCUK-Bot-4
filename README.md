@@ -93,6 +93,17 @@ The web panel serves uploaded files straight from disk: overlay videos from `OVE
 
 The web panel must only be reachable through the reverse proxy. It trusts exactly one `X-Forwarded-For` hop (`trust proxy: 1`, for Caddy), so a client that can reach `WEB_PORT` directly can set that header itself, pick its own `req.ip` and get round the IP-keyed rate limiters. The panel binds to `WEB_HOST`, which defaults to `127.0.0.1`; if Caddy runs on another host or in a container, set `WEB_HOST` to the private interface it connects through, and keep `WEB_PORT` firewalled from the internet either way.
 
+### Rotating EVENTSUB_TOKEN_SECRET
+
+`EVENTSUB_TOKEN_SECRET` encrypts every stored Twitch OAuth token (the streamers' EventSub tokens and the chat bot's own). Each token records which key wrote it, so the key can be changed without anyone reconnecting:
+
+1. Generate a new key: `openssl rand -hex 32`.
+2. In `.env`, move the current value to `EVENTSUB_TOKEN_SECRET_PREVIOUS` and put the new one in `EVENTSUB_TOKEN_SECRET`.
+3. Restart the bot. On startup it re-encrypts every stored token under the new key and logs `Every stored token is under the active key; EVENTSUB_TOKEN_SECRET_PREVIOUS can now be removed`. Until then, tokens under the previous key keep working.
+4. Remove `EVENTSUB_TOKEN_SECRET_PREVIOUS` from `.env` and restart again.
+
+If startup instead warns that some tokens can't be decrypted with any configured key, those were written under a key that is no longer in `.env`; the affected streamers (or the bot account, via `/admin/bot-auth`) must reconnect. Never put a key or a decrypted token in a log, an issue or a chat.
+
 ### SFX file format
 
 Any format ffmpeg reads will play, but each play of most formats starts an ffmpeg process to decode and re-encode it, which adds a short delay before the sound is heard. A file that's already **48kHz stereo Opus in an `.ogg`, `.opus` or `.webm` file** goes to Discord as it is, with no ffmpeg step, so it starts fastest. To convert one (any other kind of `.ogg`, such as Vorbis or mono Opus, still plays through ffmpeg):
