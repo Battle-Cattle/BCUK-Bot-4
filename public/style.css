@@ -353,6 +353,9 @@ textarea.input, .stream-textarea { width: 100%; resize: vertical; font-family: v
 .empty-msg  { color: var(--muted); font-size: .85rem; text-align: center; padding: .75rem; }
 .is-hidden  { display: none; }
 
+/* Upload progress bar (registerUploadFormHandler in utils.js); no `value` = indeterminate. */
+.upload-progress-bar { display: block; width: 100%; height: .6rem; accent-color: var(--primary); }
+
 /* ── Login page ────────────────────────────────────────── */
 .login-page { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; }
 .login-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 2.5rem; width: min(360px, calc(100vw - 2rem)); text-align: center; }

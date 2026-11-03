@@ -1,8 +1,11 @@
-import { spawn, type ChildProcess } from 'child_process';
+import { spawn, type ChildProcess, type ChildProcessByStdio } from 'child_process';
+import type { Readable } from 'stream';
 import ffmpegPath from 'ffmpeg-static';
 import path from 'path';
 import { createLogger } from '../../shared/logger';
 import { createMutationQueue } from '../../shared/mutationQueue';
+import { createFfmpegProgressTracker } from './ffmpegProgress';
+import type { ConversionProgress } from './overlayConversionProgress';
 
 const log = createLogger('OverlayVideoTranscode');
 
@@ -35,6 +38,9 @@ const STDERR_TAIL_CHARS = 500;
  * process that also has to keep chat and voice responsive, so uploads convert one at a time.
  */
 const transcodeQueue = createMutationQueue<'webm'>();
+
+/** Receives a conversion's progress: queued, then converting with a rising percentage. */
+export type ProgressListener = (progress: ConversionProgress) => void;
 
 /** Number of conversions currently queued or running (see {@link MAX_PENDING_WEBM_TRANSCODES}). */
 let pendingTranscodes = 0;
@@ -74,14 +80,16 @@ export function stopWebmTranscodes(): void {
  * `-auto-alt-ref 0` is needed because libvpx drops alpha when alt-ref frames are on. Only the
  * first video stream and, if there is one, the first audio stream are kept, and metadata is
  * dropped (`-map_metadata -1` stops both global and per-stream tags being copied) so nothing
- * from the uploader's machine ends up in the served file.
+ * from the uploader's machine ends up in the served file. `-loglevel info` makes ffmpeg print the
+ * source's length (`Duration:`) and `-progress pipe:1` reports how far it has encoded on stdout,
+ * which together give the conversion's percentage (see `createFfmpegProgressTracker`).
  * @param inputPath - Absolute path of the uploaded source video.
  * @param outputPath - Absolute path to write the WebM to.
  * @returns The argument list to pass to ffmpeg.
  */
 export function buildWebmTranscodeArgs(inputPath: string, outputPath: string): string[] {
   return [
-    '-hide_banner', '-nostdin', '-loglevel', 'error', '-y',
+    '-hide_banner', '-nostdin', '-loglevel', 'info', '-nostats', '-progress', 'pipe:1', '-y',
     '-i', inputPath,
     '-map', '0:v:0', '-map', '0:a:0?', '-map_metadata', '-1',
     '-c:v', 'libvpx-vp9', '-pix_fmt', 'yuva420p', '-auto-alt-ref', '0',
@@ -110,24 +118,45 @@ function exitError(code: number | null, stderrTail: string): Error {
 }
 
 /**
+ * Wires up ffmpeg's output: stderr is kept as a bounded tail for failure messages, and both
+ * streams feed the progress tracker, which calls `onPercent` as the percentage rises.
+ * @param proc - The running ffmpeg process (stdout and stderr piped).
+ * @param onPercent - Called with each new whole-number percentage.
+ * @returns A function returning the last characters ffmpeg wrote to stderr.
+ */
+function watchOutput(proc: ChildProcessByStdio<null, Readable, Readable>, onPercent: (percent: number) => void): () => string {
+  const tracker = createFfmpegProgressTracker(onPercent);
+  let stderrTail = '';
+  proc.stderr.setEncoding('utf8');
+  proc.stderr.on('data', (chunk: string) => {
+    stderrTail = (stderrTail + chunk).slice(-STDERR_TAIL_CHARS);
+    tracker.onStderr(chunk);
+  });
+  proc.stdout.setEncoding('utf8');
+  proc.stdout.on('data', (chunk: string) => tracker.onStdout(chunk));
+  return () => stderrTail;
+}
+
+/**
  * Runs the bundled ffmpeg with `args`. If it hasn't exited within
  * {@link WEBM_TRANSCODE_TIMEOUT_MS} it's killed, and the promise rejects once it has actually
  * exited (or after {@link KILLED_FFMPEG_EXIT_GRACE_MS}, with a warning that it may still be
  * running), so the caller never removes files or starts the next conversion while it's running.
  * @param args - Arguments to pass to ffmpeg.
+ * @param onPercent - Called with each new whole-number percentage of the conversion.
  * @returns Resolves once ffmpeg exits with code 0.
  * @throws If ffmpeg can't be started, exits non-zero (the message carries the end of its
  *   stderr) or times out.
  */
-function runFfmpeg(args: string[]): Promise<void> {
+function runFfmpeg(args: string[], onPercent: (percent: number) => void): Promise<void> {
   return new Promise((resolve, reject) => {
     if (!ffmpegPath) {
       reject(new Error('ffmpeg-static returned no path'));
       return;
     }
-    const proc = spawn(ffmpegPath, args, { stdio: ['ignore', 'ignore', 'pipe'] });
+    const proc = spawn(ffmpegPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
     activeProcess = proc;
-    let stderrTail = '';
+    const stderrTail = watchOutput(proc, onPercent);
     let timedOut = false;
     let exitGrace: NodeJS.Timeout | undefined;
     const settle = (err?: Error): void => {
@@ -145,14 +174,10 @@ function runFfmpeg(args: string[]): Promise<void> {
         settle(timeoutError());
       }, KILLED_FFMPEG_EXIT_GRACE_MS);
     }, WEBM_TRANSCODE_TIMEOUT_MS);
-    proc.stderr.setEncoding('utf8');
-    proc.stderr.on('data', (chunk: string) => {
-      stderrTail = (stderrTail + chunk).slice(-STDERR_TAIL_CHARS);
-    });
     proc.on('error', (err) => settle(err));
     proc.on('close', (code) => {
       if (timedOut) settle(timeoutError());
-      else settle(code === 0 ? undefined : exitError(code, stderrTail));
+      else settle(code === 0 ? undefined : exitError(code, stderrTail()));
     });
   });
 }
@@ -161,15 +186,17 @@ function runFfmpeg(args: string[]): Promise<void> {
  * Runs one queued conversion, logging how long it took and how it ended.
  * @param inputPath - Absolute path of the uploaded source video.
  * @param outputPath - Absolute path to write the WebM to.
+ * @param onProgress - Told when encoding starts and as its percentage rises.
  * @returns Resolves once the WebM has been written.
  * @throws If the bot is shutting down, or ffmpeg fails or times out.
  */
-async function runConversion(inputPath: string, outputPath: string): Promise<void> {
+async function runConversion(inputPath: string, outputPath: string, onProgress: ProgressListener): Promise<void> {
   if (stopped) throw new Error('Overlay video conversion stopped for shutdown');
   const started = Date.now();
   log.info(`Converting ${path.basename(inputPath)} to WebM`);
+  onProgress({ stage: 'converting', percent: null });
   try {
-    await runFfmpeg(buildWebmTranscodeArgs(inputPath, outputPath));
+    await runFfmpeg(buildWebmTranscodeArgs(inputPath, outputPath), (percent) => onProgress({ stage: 'converting', percent }));
   } catch (err) {
     log.warn(`Converting ${path.basename(inputPath)} to WebM failed after ${Date.now() - started}ms`);
     throw err;
@@ -183,18 +210,21 @@ async function runConversion(inputPath: string, outputPath: string): Promise<voi
  * removing a partial `outputPath` if this rejects.
  * @param inputPath - Absolute path of the uploaded source video.
  * @param outputPath - Absolute path to write the WebM to.
+ * @param onProgress - Told the conversion is queued, then that it's converting and its rising
+ *   percentage. Defaults to ignoring progress.
  * @returns Resolves once the WebM has been written.
  * @throws With `code: 'transcode_busy'`, without queueing, when
  *   {@link MAX_PENDING_WEBM_TRANSCODES} conversions are already queued or running; otherwise if
  *   the bot is shutting down, or ffmpeg fails or times out.
  */
-export async function transcodeToWebm(inputPath: string, outputPath: string): Promise<void> {
+export async function transcodeToWebm(inputPath: string, outputPath: string, onProgress: ProgressListener = () => {}): Promise<void> {
   if (isWebmTranscodeQueueFull()) {
     throw Object.assign(new Error('Too many WebM conversions pending'), { code: 'transcode_busy' });
   }
   pendingTranscodes++;
+  onProgress({ stage: 'queued', percent: null });
   try {
-    await transcodeQueue.run('webm', () => runConversion(inputPath, outputPath));
+    await transcodeQueue.run('webm', () => runConversion(inputPath, outputPath, onProgress));
   } finally {
     pendingTranscodes--;
   }

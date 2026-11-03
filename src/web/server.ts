@@ -299,6 +299,15 @@ export { app };
 // entire app to reach the 100/600 thresholds via every other mounted route.
 export { generalLimiter, sessionLimiter };
 
+/**
+ * Longest a request may take to arrive in full (Node's `server.requestTimeout`, 5 minutes by
+ * default). Overlay video uploads can be hundreds of megabytes (a 500 MB file needs about 14 Mbps
+ * to arrive within 5 minutes), so this allows 30 minutes: about 2.3 Mbps for the largest upload.
+ * Request headers still have to arrive within Node's 60-second `headersTimeout`. Chunked uploads
+ * would make this unnecessary (tracked as a separate issue).
+ */
+export const WEB_REQUEST_TIMEOUT_MS = 30 * 60_000;
+
 /** The panel's listening server, kept so {@link stopWebPanel} can close it on shutdown. */
 let webServer: Server | null = null;
 
@@ -337,7 +346,8 @@ function stopSessionCleanup(): void {
 }
 
 /**
- * Starts the Express app listening on {@link WEB_PORT}.
+ * Starts the Express app listening on {@link WEB_PORT}, allowing requests up to
+ * {@link WEB_REQUEST_TIMEOUT_MS} to arrive.
  * @param port - Port to listen on; defaults to {@link WEB_PORT} (tests pass 0 for a free port).
  * @returns Resolves with the listening server. Rejects with the listen error (e.g.
  *   `EADDRINUSE`) instead — Express 5 hands that error to the listen callback, so ignoring the
@@ -350,6 +360,7 @@ export function startWebPanel(port: number = WEB_PORT): Promise<Server> {
         reject(err);
         return;
       }
+      server.requestTimeout = WEB_REQUEST_TIMEOUT_MS;
       webServer = server;
       startSessionCleanup();
       log.info(`Panel available at http://localhost:${port}`);

@@ -14,6 +14,7 @@ import { router as rewardMutationsRouter } from './overlayAdminRewardMutations';
 import { MAX_OVERLAY_VIDEO_WEIGHT } from './overlayAdminShared';
 import { connections as overlaySourceConnections } from './overlaySource';
 import { createOverlayStatusEventsHandler } from './sseEventsHandlers';
+import { parseUploadId, getConversionProgress } from './overlayConversionProgress';
 
 const log = createLogger('OverlayAdmin');
 const router = Router();
@@ -26,7 +27,7 @@ export const statusConnections = new Map<number, Set<Response>>();
 const KNOWN_ERRORS = new Set([
   'not_a_streamer', 'invalid_file', 'upload_failed', 'delete_failed',
   'invalid_reward_id', 'no_videos_selected', 'save_failed', 'invalid_id', 'invalid_path',
-  'file_too_large', 'invalid_weight', 'transcode_failed', 'transcode_busy',
+  'file_too_large', 'invalid_weight', 'transcode_failed', 'transcode_busy', 'upload_busy',
 ]);
 const KNOWN_SUCCESSES = new Set([
   'video_uploaded', 'video_deleted', 'reward_saved', 'reward_deleted',
@@ -68,6 +69,29 @@ router.get('/settings', requireAuth, csrfProtection, async (req, res) => {
   } catch (err) {
     log.error('Overlay settings page error:', err);
     renderError(res, 500, 'Failed to load overlay settings.', req.session.user);
+  }
+});
+
+/**
+ * GET /overlay/settings/videos/progress/:uploadId — reports how far the requesting streamer's MOV
+ * upload with that ID has got converting, for the settings page to show while the upload request
+ * is still running. Polled every couple of seconds, so it never caches and never errors loudly.
+ * @param req - Express request; reads the `uploadId` route param and the session user.
+ * @param res - Express response; JSON `{ stage, percent }`, where `stage` is `queued`,
+ *   `converting`, or `none` when the streamer has no conversion running under that ID (an
+ *   unknown or malformed ID, a WebM/MP4 upload, a non-streamer, or a conversion already done).
+ */
+router.get('/settings/videos/progress/:uploadId', requireAuth, async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const none = { stage: 'none', percent: null };
+  try {
+    const uploadId = parseUploadId(req.params.uploadId);
+    if (!uploadId) return res.json(none);
+    const streamer = await getStreamerByDiscordId(getSessionUser(req).discordId);
+    res.json((streamer && getConversionProgress(streamer.id, uploadId)) ?? none);
+  } catch (err) {
+    log.error('Overlay conversion progress error:', err);
+    res.status(500).json(none);
   }
 });
 
