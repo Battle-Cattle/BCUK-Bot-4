@@ -152,21 +152,37 @@ describe('discardUpload', () => {
     await expect(discardUpload(fileAt(res.body.path))).resolves.toBeUndefined();
   });
 
-  it('logs instead of throwing when the upload cannot be removed', async () => {
+  it('logs instead of throwing when the upload cannot be removed, and can still remove it later', async () => {
+    const res = await supertest(buildApp()).post('/upload').attach('video', MOV_BYTES, 'clip.mov');
     vi.spyOn(fs.promises, 'rm').mockRejectedValueOnce(new Error('denied'));
-    await expect(discardUpload(fileAt(path.join(INCOMING_DIR, '00000000-0000-0000-0000-000000000000.incoming')))).resolves.toBeUndefined();
+    await expect(discardUpload(fileAt(res.body.path))).resolves.toBeUndefined();
+    expect(await incoming()).toHaveLength(1);
+    await discardUpload(fileAt(res.body.path));
+    expect(await incoming()).toEqual([]);
+  });
+
+  it('does nothing once the upload has been moved into place', async () => {
+    const res = await supertest(buildApp()).post('/upload').attach('video', MOV_BYTES, 'clip.mov');
+    const dest = path.join(overlayFolder, `placed-${Date.now()}.webm`);
+    await placeUpload(fileAt(res.body.path), dest);
+    const rm = vi.spyOn(fs.promises, 'rm');
+    await discardUpload(fileAt(res.body.path));
+    expect(rm).not.toHaveBeenCalled();
+    expect(await fs.promises.readFile(dest)).toEqual(MOV_BYTES);
   });
 });
 
-describe('uploads whose file record names a path the storage engine never generates', () => {
+describe('uploads this process did not store', () => {
   const outside = { path: '/etc/passwd', filename: '../../etc/passwd', originalname: 'clip.mov' } as Express.Multer.File;
 
-  it('are refused rather than read, moved or removed', async () => {
+  it('are refused rather than read, moved or removed, whatever path their record names', async () => {
     const rm = vi.spyOn(fs.promises, 'rm');
-    await expect(detectUploadedVideoType(outside)).rejects.toThrow('Unexpected overlay upload filename');
-    await expect(placeUpload(outside, path.join(overlayFolder, 'dest'))).rejects.toThrow('Unexpected overlay upload filename');
+    const rename = vi.spyOn(fs.promises, 'rename');
+    await expect(detectUploadedVideoType(outside)).rejects.toThrow('Unknown overlay upload');
+    await expect(placeUpload(outside, path.join(overlayFolder, 'dest'))).rejects.toThrow('Unknown overlay upload');
     await expect(discardUpload(outside)).resolves.toBeUndefined();
     expect(rm).not.toHaveBeenCalled();
+    expect(rename).not.toHaveBeenCalled();
   });
 });
 

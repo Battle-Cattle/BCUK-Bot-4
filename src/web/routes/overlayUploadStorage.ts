@@ -21,8 +21,13 @@ export const INCOMING_DIR = path.join(OVERLAY_FOLDER, '.incoming');
 /** Suffix of an upload Multer is writing (or has written) to {@link INCOMING_DIR}. */
 const INCOMING_SUFFIX = '.incoming';
 
-/** The name {@link overlayUploadStorage} gives an upload: a random UUID plus {@link INCOMING_SUFFIX}. */
-const INCOMING_NAME_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.incoming$/;
+/**
+ * Paths of the uploads {@link overlayUploadStorage} has stored and not yet moved or removed,
+ * keyed by the name it gave each one. The functions below find an upload's file through this
+ * map rather than building a path from the request's file record, so only a path this process
+ * created can ever be read, moved or removed.
+ */
+const storedUploads = new Map<string, string>();
 
 /** Bytes read from the start of an upload to detect its type. */
 const HEADER_BYTES = 16;
@@ -32,8 +37,9 @@ export type OverlayVideoType = 'webm' | 'mp4' | 'mov';
 
 /**
  * Multer storage engine for overlay uploads: streams each file to a random `.incoming` name in
- * {@link INCOMING_DIR}, creating the folder when needed. Multer itself removes the file if the
- * upload fails partway (e.g. it's too large); the route removes it after handling it.
+ * {@link INCOMING_DIR}, creating the folder when needed, and records its path in
+ * {@link storedUploads}. Multer itself removes the file if the upload fails partway (e.g. it's
+ * too large), which also forgets it; the route removes it after handling it.
  */
 export const overlayUploadStorage = multer.diskStorage({
   destination: (_req, _file, cb) => {
@@ -42,29 +48,36 @@ export const overlayUploadStorage = multer.diskStorage({
       (err: unknown) => cb(err instanceof Error ? err : new Error(String(err)), INCOMING_DIR),
     );
   },
-  filename: (_req, _file, cb) => cb(null, `${randomUUID()}${INCOMING_SUFFIX}`),
+  filename: (_req, _file, cb) => {
+    const name = `${randomUUID()}${INCOMING_SUFFIX}`;
+    storedUploads.set(name, path.join(INCOMING_DIR, name));
+    cb(null, name);
+  },
 });
+const removeStoredFile = overlayUploadStorage._removeFile.bind(overlayUploadStorage);
+overlayUploadStorage._removeFile = (req, file, cb) => {
+  storedUploads.delete(file.filename);
+  removeStoredFile(req, file, cb);
+};
 
 /**
- * Works out where an upload is on disk from its stored name, rather than trusting the path on the
- * request's file record: the name must be one {@link overlayUploadStorage} generates, so the path
- * is always directly inside {@link INCOMING_DIR}.
+ * Finds where an upload is on disk: the path {@link overlayUploadStorage} recorded when it stored
+ * the file, looked up by the file's stored name.
  * @param file - The Multer upload, stored by {@link overlayUploadStorage}.
  * @returns Absolute path of the stored upload.
- * @throws If the file record's name isn't one the storage engine generates.
+ * @throws If this process didn't store (or has already moved or removed) a file by that name.
  */
 function incomingPath(file: Express.Multer.File): string {
-  const name = file.filename;
-  if (!INCOMING_NAME_RE.test(name)) throw new Error('Unexpected overlay upload filename');
-  return path.join(INCOMING_DIR, name);
+  const storedPath = storedUploads.get(file.filename);
+  if (storedPath === undefined) throw new Error('Unknown overlay upload');
+  return storedPath;
 }
 
 /**
  * Detects an uploaded video's type from its first bytes on disk (see `detectVideoType`).
  * @param file - The Multer upload, stored by {@link overlayUploadStorage}.
  * @returns The detected format, or null when it isn't a WebM, MP4 or MOV.
- * @throws If the uploaded file can't be read, or its file record's name isn't one
- *   {@link overlayUploadStorage} generates.
+ * @throws If the uploaded file can't be read, or this process has no stored upload by that name.
  */
 export async function detectUploadedVideoType(file: Express.Multer.File): Promise<OverlayVideoType | null> {
   return detectVideoType(await readFileHeader(incomingPath(file), HEADER_BYTES));
@@ -77,13 +90,14 @@ export async function detectUploadedVideoType(file: Express.Multer.File): Promis
  * @param file - The Multer upload, stored by {@link overlayUploadStorage}.
  * @param destPath - Absolute path to move it to.
  * @returns Resolves once the file is at `destPath`.
- * @throws If it can't be moved (a partial copy at `destPath` is removed first), or its file
- *   record's name isn't one {@link overlayUploadStorage} generates.
+ * @throws If it can't be moved (a partial copy at `destPath` is removed first), or this process
+ *   has no stored upload by that name.
  */
 export async function placeUpload(file: Express.Multer.File, destPath: string): Promise<void> {
   const sourcePath = incomingPath(file);
   try {
     await fs.promises.rename(sourcePath, destPath);
+    storedUploads.delete(file.filename);
     return;
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'EXDEV') throw err;
@@ -98,14 +112,18 @@ export async function placeUpload(file: Express.Multer.File, destPath: string): 
 }
 
 /**
- * Removes an upload from {@link INCOMING_DIR}, if it's still there, logging instead of throwing
- * on failure (a leftover is picked up by {@link sweepStaleIncomingUploads}).
+ * Removes an upload from {@link INCOMING_DIR} if it's still there (it does nothing once the
+ * upload has been moved into place), logging instead of throwing on failure (a leftover is
+ * picked up by {@link sweepStaleIncomingUploads}).
  * @param file - The Multer upload, stored by {@link overlayUploadStorage}.
  * @returns Resolves once removal has been attempted; never rejects.
  */
 export async function discardUpload(file: Express.Multer.File): Promise<void> {
+  const storedPath = storedUploads.get(file.filename);
+  if (storedPath === undefined) return;
   try {
-    await fs.promises.rm(incomingPath(file), { force: true });
+    await fs.promises.rm(storedPath, { force: true });
+    storedUploads.delete(file.filename);
   } catch (err) {
     log.error(`Failed to remove overlay upload ${file.filename}:`, err);
   }
