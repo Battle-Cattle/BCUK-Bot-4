@@ -38,9 +38,9 @@ function buildApp(maxBytes = 1024 * 1024) {
   return app;
 }
 
-/** A Multer file record for a file already on disk. */
+/** A Multer file record for a file the storage engine stored at `fullPath`. */
 function fileAt(fullPath: string): Express.Multer.File {
-  return { path: fullPath, originalname: path.basename(fullPath) } as Express.Multer.File;
+  return { path: fullPath, filename: path.basename(fullPath), originalname: 'clip.mov' } as Express.Multer.File;
 }
 
 /** Files currently in the incoming folder, sorted. */
@@ -154,7 +154,19 @@ describe('discardUpload', () => {
 
   it('logs instead of throwing when the upload cannot be removed', async () => {
     vi.spyOn(fs.promises, 'rm').mockRejectedValueOnce(new Error('denied'));
-    await expect(discardUpload(fileAt('/nowhere.incoming'))).resolves.toBeUndefined();
+    await expect(discardUpload(fileAt(path.join(INCOMING_DIR, '00000000-0000-0000-0000-000000000000.incoming')))).resolves.toBeUndefined();
+  });
+});
+
+describe('uploads whose file record names a path the storage engine never generates', () => {
+  const outside = { path: '/etc/passwd', filename: '../../etc/passwd', originalname: 'clip.mov' } as Express.Multer.File;
+
+  it('are refused rather than read, moved or removed', async () => {
+    const rm = vi.spyOn(fs.promises, 'rm');
+    await expect(detectUploadedVideoType(outside)).rejects.toThrow('Unexpected overlay upload filename');
+    await expect(placeUpload(outside, path.join(overlayFolder, 'dest'))).rejects.toThrow('Unexpected overlay upload filename');
+    await expect(discardUpload(outside)).resolves.toBeUndefined();
+    expect(rm).not.toHaveBeenCalled();
   });
 });
 

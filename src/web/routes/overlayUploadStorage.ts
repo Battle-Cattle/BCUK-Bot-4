@@ -21,6 +21,9 @@ export const INCOMING_DIR = path.join(OVERLAY_FOLDER, '.incoming');
 /** Suffix of an upload Multer is writing (or has written) to {@link INCOMING_DIR}. */
 const INCOMING_SUFFIX = '.incoming';
 
+/** The name {@link overlayUploadStorage} gives an upload: a random UUID plus {@link INCOMING_SUFFIX}. */
+const INCOMING_NAME_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.incoming$/;
+
 /** Bytes read from the start of an upload to detect its type. */
 const HEADER_BYTES = 16;
 
@@ -43,13 +46,28 @@ export const overlayUploadStorage = multer.diskStorage({
 });
 
 /**
+ * Works out where an upload is on disk from its stored name, rather than trusting the path on the
+ * request's file record: the name must be one {@link overlayUploadStorage} generates, so the path
+ * is always directly inside {@link INCOMING_DIR}.
+ * @param file - The Multer upload, stored by {@link overlayUploadStorage}.
+ * @returns Absolute path of the stored upload.
+ * @throws If the file record's name isn't one the storage engine generates.
+ */
+function incomingPath(file: Express.Multer.File): string {
+  const name = file.filename;
+  if (!INCOMING_NAME_RE.test(name)) throw new Error('Unexpected overlay upload filename');
+  return path.join(INCOMING_DIR, name);
+}
+
+/**
  * Detects an uploaded video's type from its first bytes on disk (see `detectVideoType`).
  * @param file - The Multer upload, stored by {@link overlayUploadStorage}.
  * @returns The detected format, or null when it isn't a WebM, MP4 or MOV.
- * @throws If the uploaded file can't be read.
+ * @throws If the uploaded file can't be read, or its file record's name isn't one
+ *   {@link overlayUploadStorage} generates.
  */
 export async function detectUploadedVideoType(file: Express.Multer.File): Promise<OverlayVideoType | null> {
-  return detectVideoType(await readFileHeader(file.path, HEADER_BYTES));
+  return detectVideoType(await readFileHeader(incomingPath(file), HEADER_BYTES));
 }
 
 /**
@@ -59,17 +77,19 @@ export async function detectUploadedVideoType(file: Express.Multer.File): Promis
  * @param file - The Multer upload, stored by {@link overlayUploadStorage}.
  * @param destPath - Absolute path to move it to.
  * @returns Resolves once the file is at `destPath`.
- * @throws If it can't be moved; a partial copy at `destPath` is removed first.
+ * @throws If it can't be moved (a partial copy at `destPath` is removed first), or its file
+ *   record's name isn't one {@link overlayUploadStorage} generates.
  */
 export async function placeUpload(file: Express.Multer.File, destPath: string): Promise<void> {
+  const sourcePath = incomingPath(file);
   try {
-    await fs.promises.rename(file.path, destPath);
+    await fs.promises.rename(sourcePath, destPath);
     return;
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'EXDEV') throw err;
   }
   try {
-    await fs.promises.copyFile(file.path, destPath);
+    await fs.promises.copyFile(sourcePath, destPath);
   } catch (err) {
     await fs.promises.rm(destPath, { force: true });
     throw err;
@@ -85,9 +105,9 @@ export async function placeUpload(file: Express.Multer.File, destPath: string): 
  */
 export async function discardUpload(file: Express.Multer.File): Promise<void> {
   try {
-    await fs.promises.rm(file.path, { force: true });
+    await fs.promises.rm(incomingPath(file), { force: true });
   } catch (err) {
-    log.error(`Failed to remove overlay upload ${file.path}:`, err);
+    log.error(`Failed to remove overlay upload ${file.filename}:`, err);
   }
 }
 
