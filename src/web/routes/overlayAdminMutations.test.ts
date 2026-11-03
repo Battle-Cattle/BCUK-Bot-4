@@ -40,6 +40,9 @@ vi.mock('fs', () => ({
   },
 }));
 
+vi.mock('./overlayMovConversion', () => ({ storeMovAsWebm: vi.fn() }));
+vi.mock('./overlayVideoTranscode', () => ({ isWebmTranscodeQueueFull: vi.fn() }));
+
 import supertest from 'supertest';
 import multer from 'multer';
 import { router, handleUploadError } from './overlayAdminMutations';
@@ -47,12 +50,15 @@ import { getStreamerByDiscordId, addVideo, deleteVideo } from '../../db';
 import { AccessLevel } from '../../db';
 import fs from 'fs';
 import { csrfProtection } from '../csrf';
+import { storeMovAsWebm } from './overlayMovConversion';
+import { isWebmTranscodeQueueFull } from './overlayVideoTranscode';
 import type { RequestHandler } from 'express';
 import { buildTestApp, drainBodyBeforeRedirect } from '../../test-utils/expressTestApp';
 
 // Minimal buffers with correct magic bytes for each format
 const WEBM_BUF = Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 0x00, 0x00, 0x00, 0x00]);
 const MP4_BUF  = Buffer.from([0x00, 0x00, 0x00, 0x1c, 0x66, 0x74, 0x79, 0x70]);
+const MOV_BUF  = Buffer.from([0x00, 0x00, 0x00, 0x14, ...Buffer.from('ftypqt  ', 'ascii')]);
 
 type SessionUser = { discordId: string; discordName: string; discordAvatar: string | null; accessLevel: 0 | 1 | 2 | 3 };
 const USER: SessionUser = { discordId: '100000000000000001', discordName: 'TestUser', discordAvatar: null, accessLevel: AccessLevel.USER };
@@ -77,6 +83,8 @@ beforeEach(() => {
   vi.mocked(fs.promises.mkdir).mockResolvedValue(undefined);
   vi.mocked(fs.promises.writeFile).mockResolvedValue(undefined);
   vi.mocked(fs.promises.rm).mockResolvedValue(undefined);
+  vi.mocked(isWebmTranscodeQueueFull).mockReturnValue(false);
+  vi.mocked(storeMovAsWebm).mockImplementation(async (_dir, baseName) => `${baseName}.webm`);
 });
 
 // --- POST /settings/videos/upload ---
@@ -195,6 +203,74 @@ describe('POST /settings/videos/upload', () => {
       .attach('video', WEBM_BUF, { filename: 'test.webm', contentType: 'video/webm' });
     expect(res.headers.location).toBe('/overlay/settings?success=video_uploaded');
     expect(vi.mocked(addVideo)).toHaveBeenCalled();
+  });
+
+  it('stores a MOV through the WebM conversion and records the converted file', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    const res = await supertest(buildApp())
+      .post('/settings/videos/upload')
+      .field('name', 'Transparent Clip')
+      .attach('video', MOV_BUF, { filename: 'clip.mov', contentType: 'video/quicktime' });
+    expect(res.headers.location).toBe('/overlay/settings?success=video_uploaded');
+    const [dir, baseName, buffer] = vi.mocked(storeMovAsWebm).mock.calls[0]!;
+    // path.resolve uses the platform's separator, so accept either.
+    expect(dir).toMatch(/[\\/]app[\\/]overlay-videos[\\/]123$/);
+    expect(baseName).toMatch(/^[0-9a-f-]{36}$/);
+    expect(buffer).toEqual(MOV_BUF);
+    expect(vi.mocked(fs.promises.writeFile)).not.toHaveBeenCalled();
+    expect(vi.mocked(addVideo)).toHaveBeenCalledWith(MOCK_STREAMER.id, 'Transparent Clip', `${baseName}.webm`);
+  });
+
+  it.each(['transcode_failed', 'transcode_busy'])('redirects with %s when the MOV cannot be stored', async (code) => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    vi.mocked(storeMovAsWebm).mockRejectedValue(Object.assign(new Error('conversion'), { code }));
+    const res = await supertest(buildApp())
+      .post('/settings/videos/upload')
+      .attach('video', MOV_BUF, { filename: 'clip.mov', contentType: 'video/quicktime' });
+    expect(res.headers.location).toBe(`/overlay/settings?error=${code}`);
+    expect(vi.mocked(addVideo)).not.toHaveBeenCalled();
+  });
+
+  it('removes the converted WebM when the DB insert fails after a MOV conversion', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    vi.mocked(addVideo).mockRejectedValue(new Error('DB error'));
+    const res = await supertest(buildApp())
+      .post('/settings/videos/upload')
+      .attach('video', MOV_BUF, { filename: 'clip.mov', contentType: 'video/quicktime' });
+    expect(res.headers.location).toBe('/overlay/settings?error=upload_failed');
+    const baseName = vi.mocked(storeMovAsWebm).mock.calls[0]![1];
+    expect(vi.mocked(fs.promises.rm)).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`${baseName}\\.webm$`)), { force: true });
+  });
+
+  it.each([
+    ['a .mov name', { filename: 'clip.mov', contentType: 'application/octet-stream' }],
+    ['a video/quicktime type', { filename: 'clip', contentType: 'video/quicktime' }],
+  ])('turns away an upload declared as MOV by %s before buffering it when the conversion queue is full', async (_label, attach) => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    vi.mocked(isWebmTranscodeQueueFull).mockReturnValue(true);
+    const res = await supertest(buildApp())
+      .post('/settings/videos/upload')
+      .attach('video', MOV_BUF, attach);
+    expect(res.headers.location).toBe('/overlay/settings?error=transcode_busy');
+    expect(vi.mocked(storeMovAsWebm)).not.toHaveBeenCalled();
+    expect(vi.mocked(addVideo)).not.toHaveBeenCalled();
+  });
+
+  it('still accepts WebM and MP4 uploads while the conversion queue is full', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    vi.mocked(isWebmTranscodeQueueFull).mockReturnValue(true);
+    const res = await supertest(buildApp())
+      .post('/settings/videos/upload')
+      .attach('video', WEBM_BUF, { filename: 'clip.webm', contentType: 'video/webm' });
+    expect(res.headers.location).toBe('/overlay/settings?success=video_uploaded');
+  });
+
+  it('does not convert WebM or MP4 uploads', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    await supertest(buildApp())
+      .post('/settings/videos/upload')
+      .attach('video', MP4_BUF, { filename: 'test.mp4', contentType: 'video/mp4' });
+    expect(vi.mocked(storeMovAsWebm)).not.toHaveBeenCalled();
   });
 
   it('rejects a file with no recognised magic bytes even if MIME type is correct', async () => {
@@ -359,6 +435,12 @@ describe('handleUploadError', () => {
     const res = makeRes();
     expect(handleUploadError(null, res)).toBe(false);
     expect(res.redirect).not.toHaveBeenCalled();
+  });
+
+  it('redirects a full conversion queue to transcode_busy', () => {
+    const res = makeRes();
+    expect(handleUploadError(Object.assign(new Error('busy'), { code: 'transcode_busy' }), res)).toBe(true);
+    expect(res.redirect).toHaveBeenCalledWith('/overlay/settings?error=transcode_busy');
   });
 
   it('redirects oversized files to file_too_large', () => {

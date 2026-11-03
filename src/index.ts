@@ -14,6 +14,7 @@ import { startTwitchMonitor, stopTwitchMonitor, getMultiTwitchDataForChannel } f
 import { startEventSub, stopEventSub, reloadEventSubSubscriptions } from './twitch/eventsub/twitchEventSub';
 import { startEventSubReconciliation, stopEventSubReconciliation } from './twitch/eventsub/twitchEventSubReconciliation';
 import { startWebPanel, stopWebPanel } from './web/server';
+import { stopWebmTranscodes } from './web/routes/overlayVideoTranscode';
 import { disconnect } from './audio/audioPlayer';
 import { registerTwitchChatRuntime } from './commands/customCommandHandler';
 import { registerCounterTwitchRuntime } from './commands/counterHandler';
@@ -148,6 +149,9 @@ async function shutdown(signal: string): Promise<void> {
   await safeStop('owner alert shutdown announcement', announceShutdown);
   // Stop taking web requests before the components they'd act on start disconnecting.
   await safeStop('web panel', stopWebPanel);
+  // With no more uploads coming in, kill any overlay video conversion still running, so an ffmpeg
+  // child isn't left encoding after the bot exits.
+  stopWebmTranscodes();
   stopDbHealthCheck();
   stopEventLoopMonitor();
   stopDebugLogPruning();

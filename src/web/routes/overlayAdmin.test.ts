@@ -125,6 +125,12 @@ describe('GET /settings — query param filtering', () => {
     expect(res.body.error).toBe('upload_failed');
   });
 
+  it.each(['transcode_failed', 'transcode_busy'])('passes the MOV conversion error %s to the template', async (code) => {
+    const res = await supertest(buildApp()).get(`/settings?error=${code}`);
+    expect(res.status).toBe(200);
+    expect(res.body.error).toBe(code);
+  });
+
   it('filters an unknown error to null', async () => {
     const res = await supertest(buildApp()).get('/settings?error=arbitrary_injection');
     expect(res.status).toBe(200);
