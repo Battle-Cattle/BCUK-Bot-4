@@ -130,7 +130,13 @@ service_log_since_restart() {
     fi
 }
 
-# Prints the migration versions the database records as applied (schema_migrations), one per line.
+# Marker line applied_migration_versions prints when a migration is still running: the migration
+# runner (src/db/migrations.ts) holds this named lock for as long as it migrates.
+MIGRATION_LOCK_MARKER="__migration_lock_held__"
+
+# Prints the migration versions the database records as applied (schema_migrations), one per line,
+# then MIGRATION_LOCK_MARKER if a migration is still in progress. A version is only recorded once its
+# SQL finishes, so the lock is what shows a long migration that is still running.
 # Runs in a subshell, so a missing setting can't exit deploy.sh itself. Fails if the query does.
 applied_migration_versions() {
     (
@@ -141,19 +147,25 @@ applied_migration_versions() {
         load_db_settings
         credentials="$(write_mysql_credentials)"
         trap 'rm -f "$credentials"' EXIT
-        mysql --defaults-extra-file="$credentials" -N -B -e 'SELECT version FROM schema_migrations' "$DB_NAME"
+        mysql --defaults-extra-file="$credentials" -N -B "$DB_NAME" -e "SELECT version FROM schema_migrations;
+            SELECT '$MIGRATION_LOCK_MARKER' FROM DUAL WHERE IS_USED_LOCK('bcuk_bot_migrations') IS NOT NULL;"
     )
 }
 
-# True if the database records any of this deploy's new migrations as applied: the previous build
-# would then refuse to start. Asks the database itself, not the bot's log (LOG_LEVEL can hide the
-# runner's lines). When it can't ask, it assumes they were applied (the safe answer) and says so.
+# True if the database records any of this deploy's new migrations as applied (the previous build
+# would then refuse to start), or a migration is still running (restarting now would cut it off part
+# way, leaving some of its DDL applied but unrecorded). Asks the database itself, not the bot's log
+# (LOG_LEVEL can hide the runner's lines). When it can't ask, it assumes the worst and says so.
 MIGRATION_CHECK_NOTE=""
 new_migrations_were_applied() {
     local applied version
     [ -n "$NEW_MIGRATIONS" ] || return 1
     if ! applied="$(applied_migration_versions 2>&1)"; then
         MIGRATION_CHECK_NOTE="Couldn't read schema_migrations to check (${applied:-no output}), so assuming they were applied."
+        return 0
+    fi
+    if printf '%s\n' "$applied" | grep -qxF "$MIGRATION_LOCK_MARKER"; then
+        MIGRATION_CHECK_NOTE="A migration is still running (the bcuk_bot_migrations lock is held). Let it finish, or check the bot's log for it, before doing anything below; stopping the service now would cut it off part way."
         return 0
     fi
     for version in $NEW_MIGRATIONS; do
@@ -167,7 +179,7 @@ new_migrations_were_applied() {
 # migration it has no file for, so restoring its code alone would leave the bot down.
 stop_without_rollback() {
     report ""
-    report "NOT rolling back automatically: the new build already applied database migration(s):"
+    report "NOT rolling back automatically: the new build has applied, or is still applying, database migration(s):"
     for version in $NEW_MIGRATIONS; do report "    $version"; done
     if [ -n "$MIGRATION_CHECK_NOTE" ]; then report "($MIGRATION_CHECK_NOTE)"; fi
     report "The previous build ($PREVIOUS_SHORT) refuses to start on a database that records migrations it"

@@ -62,6 +62,15 @@ CREDENTIALS="$(write_mysql_credentials)"
 trap 'rm -f "$CREDENTIALS"' EXIT
 
 mysql --defaults-extra-file="$CREDENTIALS" -e "CREATE DATABASE IF NOT EXISTS \`$TARGET\`"
+# The dump only drops and recreates the tables it contains, so a table created after the backup (by a
+# later migration, say) would otherwise survive with newer data and leave the result unlike the dump.
+# Drop every table first; foreign-key checks are off so the order doesn't matter.
+DROPS="$(mysql --defaults-extra-file="$CREDENTIALS" -N -B "$TARGET" -e \
+    "SELECT CONCAT('DROP TABLE IF EXISTS \`', table_name, '\`;') FROM information_schema.tables WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE'")"
+if [ -n "$DROPS" ]; then
+    echo "==> Clearing the existing tables in '$TARGET'..."
+    printf 'SET FOREIGN_KEY_CHECKS=0;\n%s\n' "$DROPS" | mysql --defaults-extra-file="$CREDENTIALS" "$TARGET"
+fi
 echo "==> Restoring into '$TARGET'..."
 gzip -dc "$DUMP" | mysql --defaults-extra-file="$CREDENTIALS" "$TARGET"
 echo "==> Restored $DUMP into '$TARGET'."

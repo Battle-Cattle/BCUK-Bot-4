@@ -85,7 +85,13 @@ echo "-- dump of $STATE"
 case "$*" in
   *"FROM schema_migrations"*)
     [ "\${MYSQL_QUERY_EXIT:-0}" = 0 ] || { echo "ERROR 2003: Can't connect" >&2; exit "$MYSQL_QUERY_EXIT"; }
-    cat "$STATE/applied-migrations" 2>/dev/null; exit 0 ;;
+    cat "$STATE/applied-migrations" 2>/dev/null
+    [ -f "$STATE/migration-lock" ] && echo __migration_lock_held__
+    exit 0 ;;
+  *"information_schema"*)
+    # The restore's "which tables exist?" query: one DROP statement per table in existing-tables.
+    while read -r table; do [ -n "$table" ] && echo "DROP TABLE IF EXISTS \\\`$table\\\`;"; done < "$STATE/existing-tables" 2>/dev/null
+    exit 0 ;;
 esac
 printf '%s\\n' "$*" >> "$STATE/mysql-calls"
 cat >> "$STATE/mysql-input"
@@ -299,6 +305,19 @@ describe.skipIf(onWindows)('deploy.sh', { timeout: SCRIPT_TEST_TIMEOUT_MS }, () 
     expect(failureReport()).toContain('Rolled back');
   });
 
+  it('stops instead of rolling back while a migration is still running', () => {
+    pushV2({ migration: true });
+    // Nothing recorded yet, but the runner still holds its lock: restarting would cut it off.
+    write(path.join(sandbox.state, 'applied-migrations'), '0001_baseline\n');
+    write(path.join(sandbox.state, 'migration-lock'), '');
+    const result = deploy({ UNHEALTHY_BUILDS: 'v2' });
+
+    expect(result.status).toBe(1);
+    expect(restarts()).toEqual(['v2']);
+    expect(failureReport()).toContain('NOT rolling back automatically');
+    expect(failureReport()).toContain('A migration is still running');
+  });
+
   it("assumes a new migration was applied when it can't query schema_migrations, and stops", () => {
     pushV2({ migration: true });
     const result = deploy({ UNHEALTHY_BUILDS: 'v2', MYSQL_QUERY_EXIT: '1' });
@@ -494,6 +513,21 @@ describe.skipIf(onWindows)('restore-db.sh', { timeout: SCRIPT_TEST_TIMEOUT_MS },
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("Couldn't tell whether bcuk-bot is running");
     expect(read(path.join(sandbox.state, 'mysql-input'))).toBe('');
+  });
+
+  it('drops tables the dump does not contain before importing it', () => {
+    write(path.join(sandbox.state, 'existing-tables'), 'sessions\nt\n');
+    const result = restore([dump, 'bcuk_restore_test']);
+
+    expect(result.status).toBe(0);
+    const input = read(path.join(sandbox.state, 'mysql-input'));
+    expect(input.indexOf('SET FOREIGN_KEY_CHECKS=0;')).toBe(0);
+    expect(input).toContain('DROP TABLE IF EXISTS `sessions`;');
+    // The drops run before the import, against the target database.
+    expect(input.indexOf('DROP TABLE IF EXISTS `sessions`;')).toBeLessThan(input.indexOf('CREATE TABLE t'));
+    const calls = read(path.join(sandbox.state, 'mysql-calls')).split('\n');
+    expect(calls[1]).toMatch(/^--defaults-extra-file=\S+ bcuk_restore_test$/);
+    expect(calls[2]).toMatch(/^--defaults-extra-file=\S+ bcuk_restore_test$/);
   });
 
   it('needs the database name typed before replacing the live database', () => {
