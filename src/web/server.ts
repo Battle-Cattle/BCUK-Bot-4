@@ -148,9 +148,10 @@ const sessionLimiter = rateLimit({
 // Coarse per-IP cap that runs ahead of the session middleware. The limiters above run after it
 // (sessionLimiter's key needs req.session), so without this, a replayed validly signed cookie
 // (an unauthenticated visitor can get one from /auth/*) would cost a session-store SELECT on every
-// request with nothing limiting how often. Set well above what any legitimate client sends (the
-// session limiter caps one account at 600 per 15 min) so dashboard polling, SSE reconnects and
-// several users behind one NAT never reach it.
+// request with nothing limiting how often. Set well above what any legitimate client sends: the
+// session limiter caps one account at 600 per 15 min, so three accounts behind one NAT can each
+// poll up to that cap and still leave headroom (server.test.ts holds this in place). A fourth
+// account at full cap would share the IP's 2000; normal dashboard polling is a few hundred.
 const preSessionLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 2000,

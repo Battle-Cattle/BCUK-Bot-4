@@ -31,8 +31,10 @@ const { mockPool, storeCtorArgs, storeClose, storeClearExpired, storeGet } = vi.
 vi.mock('../db', () => ({ getSessionPool: () => mockPool }));
 
 vi.mock('express-mysql-session', () => ({
-  default: () =>
-    class MockStore extends EventEmitter {
+  // Built on the express-session module server.ts passes in, like the real factory, so a session
+  // the store returns is inflated (Store#createSession) into a working req.session.
+  default: (session: { Store: new () => EventEmitter }) =>
+    class MockStore extends session.Store {
       constructor(...args: unknown[]) {
         super();
         storeCtorArgs.push(args);
@@ -679,6 +681,31 @@ describe('preSessionLimiter (server.ts)', () => {
     expect(res.status).toBe(429);
     expect(storeGet).not.toHaveBeenCalled();
   }, 30_000);
+
+  it("lets three signed-in accounts behind one IP poll the whole app up to each account's own cap", async () => {
+    // Through the full middleware chain (session lookup included): the per-account sessionLimiter
+    // (600) is what stops a busy account, and three accounts at that cap still leave the shared
+    // IP under preSessionLimiter's 2000.
+    const accounts = ['poll-a', 'poll-b', 'poll-c'];
+    await Promise.all(accounts.map((discordId) => sessionLimiter.resetKey(discordId)));
+    storeGet.mockImplementation((sid, cb) =>
+      cb(null, { cookie: { originalMaxAge: 60_000, expires: new Date(Date.now() + 60_000).toISOString() }, user: { discordId: sid } }));
+    try {
+      for (const discordId of accounts) {
+        await withListeningServer(app, async (probe) => {
+          // The probe path has no route, so 404 means every limiter and the session lookup let it through.
+          await expectProbeStatuses(probe, 600, 404);
+          expect(await probe()).toBe(429); // the account's own cap, not the IP's
+        }, { cookie: signedSessionCookie(discordId), 'x-forwarded-for': CLIENT_IP });
+      }
+      // 1803 requests from the IP so far: under 2000, so a visitor without a session still gets in.
+      const res = await request(app).get('/__limiter_probe').set('X-Forwarded-For', CLIENT_IP);
+      expect(res.status).toBe(404);
+    } finally {
+      storeGet.mockImplementation((_id, cb) => cb(null, undefined));
+      await Promise.all(accounts.map((discordId) => sessionLimiter.resetKey(discordId)));
+    }
+  }, 60_000);
 
   it('leaves the Streamdeck API to its own limiters', async () => {
     const testApp = express();
