@@ -517,7 +517,7 @@ describe.skipIf(onWindows)('restore-db.sh', { timeout: SCRIPT_TEST_TIMEOUT_MS },
 
   it('drops tables the dump does not contain before importing it', () => {
     write(path.join(sandbox.state, 'existing-tables'), 'sessions\nt\n');
-    const result = restore([dump, 'bcuk_restore_test']);
+    const result = restore([dump, 'bcuk_restore_test'], 'bcuk_restore_test\n');
 
     expect(result.status).toBe(0);
     const input = read(path.join(sandbox.state, 'mysql-input'));
@@ -528,6 +528,16 @@ describe.skipIf(onWindows)('restore-db.sh', { timeout: SCRIPT_TEST_TIMEOUT_MS },
     const calls = read(path.join(sandbox.state, 'mysql-calls')).split('\n');
     expect(calls[1]).toMatch(/^--defaults-extra-file=\S+ bcuk_restore_test$/);
     expect(calls[2]).toMatch(/^--defaults-extra-file=\S+ bcuk_restore_test$/);
+  });
+
+  it('needs the name typed before wiping a non-live database that already has tables', () => {
+    write(path.join(sandbox.state, 'existing-tables'), 'sessions\n');
+    const result = restore([dump, 'other_app_db'], 'nope\n');
+
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain("'other_app_db' already has tables");
+    expect(result.stderr).toContain('Not confirmed; nothing was changed.');
+    expect(read(path.join(sandbox.state, 'mysql-input'))).toBe('');
   });
 
   it('needs the database name typed before replacing the live database', () => {

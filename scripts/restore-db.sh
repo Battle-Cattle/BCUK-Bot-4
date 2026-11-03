@@ -7,7 +7,9 @@
 #             created if it doesn't exist.
 #
 # Restoring over the live database replaces everything in it, so it refuses while the bot's
-# service is running (stop it first) and asks you to type the database name to confirm.
+# service is running (stop it first) and asks you to type the database name to confirm. Any
+# other target that already has tables (a mistyped name, say) asks for the same confirmation,
+# since every table in it is dropped first; an empty or new scratch database doesn't ask.
 set -euo pipefail
 
 SERVICE_NAME="bcuk-bot"
@@ -20,6 +22,16 @@ if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
 fi
 DUMP="$1"
 [ -f "$DUMP" ] || { echo "ERROR: $DUMP doesn't exist." >&2; exit 1; }
+
+# Asks the operator to type the target database's name, and exits without changing anything
+# unless they do.
+confirm_target() {
+    read -r -p "Type the database name to confirm: " CONFIRM
+    if [ "$CONFIRM" != "$TARGET" ]; then
+        echo "Not confirmed; nothing was changed." >&2
+        exit 1
+    fi
+}
 
 # shellcheck source=lib/dotenv.sh
 source "$REPO_DIR/scripts/lib/dotenv.sh"
@@ -51,23 +63,26 @@ if [ "$TARGET" = "$DB_NAME" ]; then
     fi
     echo "This replaces everything in the live database '$TARGET' with the contents of:"
     echo "    $DUMP"
-    read -r -p "Type the database name to confirm: " CONFIRM
-    if [ "$CONFIRM" != "$TARGET" ]; then
-        echo "Not confirmed; nothing was changed." >&2
-        exit 1
-    fi
+    confirm_target
 fi
 
 CREDENTIALS="$(write_mysql_credentials)"
 trap 'rm -f "$CREDENTIALS"' EXIT
 
-mysql --defaults-extra-file="$CREDENTIALS" -e "CREATE DATABASE IF NOT EXISTS \`$TARGET\`"
+# The query-only calls read nothing from stdin, which stays free for the confirmation prompt.
+mysql --defaults-extra-file="$CREDENTIALS" -e "CREATE DATABASE IF NOT EXISTS \`$TARGET\`" < /dev/null
 # The dump only drops and recreates the tables it contains, so a table created after the backup (by a
 # later migration, say) would otherwise survive with newer data and leave the result unlike the dump.
 # Drop every table first; foreign-key checks are off so the order doesn't matter.
 DROPS="$(mysql --defaults-extra-file="$CREDENTIALS" -N -B "$TARGET" -e \
-    "SELECT CONCAT('DROP TABLE IF EXISTS \`', table_name, '\`;') FROM information_schema.tables WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE'")"
+    "SELECT CONCAT('DROP TABLE IF EXISTS \`', table_name, '\`;') FROM information_schema.tables WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE'" < /dev/null)"
 if [ -n "$DROPS" ]; then
+    # The live database was confirmed above. Any other target is normally an empty scratch
+    # database, so existing tables mean a reused or mistyped name: confirm before dropping them.
+    if [ "$TARGET" != "$DB_NAME" ]; then
+        echo "'$TARGET' already has tables; restoring drops all of them first."
+        confirm_target
+    fi
     echo "==> Clearing the existing tables in '$TARGET'..."
     printf 'SET FOREIGN_KEY_CHECKS=0;\n%s\n' "$DROPS" | mysql --defaults-extra-file="$CREDENTIALS" "$TARGET"
 fi
