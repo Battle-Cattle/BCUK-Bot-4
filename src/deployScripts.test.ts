@@ -31,7 +31,10 @@ case "$1" in
       NRestarts) echo 0 ;;
     esac ;;
   is-failed) exit 1 ;;
-  is-active) [ -f "$STATE/active" ] ;;
+  is-active)
+    state="$(cat "$STATE/service-state" 2>/dev/null || echo inactive)"
+    [ "$state" = error ] && exit 1
+    echo "$state"; [ "$state" = active ] ;;
   status) echo "bcuk-bot.service - stub (running $(cat "$STATE/running" 2>/dev/null))" ;;
   restart)
     cat dist/marker > "$STATE/running"
@@ -44,12 +47,14 @@ for arg in "$@"; do [ "$arg" = "-l" ] && exit 0; done
 exec "$@"
 `,
   curl: `#!/usr/bin/env bash
+calls=$(( $(cat "$STATE/curl-calls" 2>/dev/null || echo 0) + 1 )); echo "$calls" > "$STATE/curl-calls"
+[ "$calls" = "\${CURL_FAIL_CALL:-}" ] && exit 7
 running="$(cat "$STATE/running" 2>/dev/null)"
 for bad in $UNHEALTHY_BUILDS; do [ "$running" = "$bad" ] && exit 7; done
 exit 0
 `,
   ss: `#!/usr/bin/env bash
-echo 'LISTEN 0 511 127.0.0.1:3000 0.0.0.0:* users:(("node",pid=4242,fd=20))'
+echo 'LISTEN 0 511 127.0.0.1:3000 0.0.0.0:* users:(("node",pid='"\${SS_PID:-4242}"',fd=20))'
 `,
   journalctl: `#!/usr/bin/env bash
 running="$(cat "$STATE/running" 2>/dev/null)"
@@ -60,7 +65,9 @@ version="$(cat VERSION)"
 case "$1" in
   ci) mkdir -p node_modules && echo "$version" > node_modules/marker ;;
   install|audit|prune) exit 0 ;;
-  test) exit "\${NPM_TEST_EXIT:-0}" ;;
+  test)
+    if [ -n "\${NPM_TEST_SIGNAL:-}" ]; then kill -TERM "$PPID"; sleep 1; fi
+    exit "\${NPM_TEST_EXIT:-0}" ;;
   run)
     out="$5"
     mkdir -p "$out" && echo "$version" > "$out/marker" ;;
@@ -75,6 +82,11 @@ done
 echo "-- dump of $STATE"
 `,
   mysql: `#!/usr/bin/env bash
+case "$*" in
+  *"FROM schema_migrations"*)
+    [ "\${MYSQL_QUERY_EXIT:-0}" = 0 ] || { echo "ERROR 2003: Can't connect" >&2; exit "$MYSQL_QUERY_EXIT"; }
+    cat "$STATE/applied-migrations" 2>/dev/null; exit 0 ;;
+esac
 printf '%s\\n' "$*" >> "$STATE/mysql-calls"
 cat >> "$STATE/mysql-input"
 `,
@@ -260,7 +272,8 @@ describe.skipIf(onWindows)('deploy.sh', { timeout: SCRIPT_TEST_TIMEOUT_MS }, () 
 
   it('stops and explains instead of rolling back when the failed build already applied a new migration', () => {
     pushV2({ migration: true });
-    write(path.join(sandbox.state, 'journal-v2'), '2026-11-03 12:00:00 [info] [Migrations] Applying migration 0002_add_thing...\n');
+    // Recorded in the database, which is what counts, even though the bot logged nothing about it.
+    write(path.join(sandbox.state, 'applied-migrations'), '0001_baseline\n0002_add_thing\n');
     const result = deploy({ UNHEALTHY_BUILDS: 'v2' });
 
     expect(result.status).toBe(1);
@@ -277,7 +290,7 @@ describe.skipIf(onWindows)('deploy.sh', { timeout: SCRIPT_TEST_TIMEOUT_MS }, () 
   it('still rolls back when the deploy adds a migration that the failed build never applied', () => {
     const before = workHead();
     pushV2({ migration: true });
-    write(path.join(sandbox.state, 'journal-v2'), '2026-11-03 12:00:00 [error] [Discord] Login failed\n');
+    write(path.join(sandbox.state, 'applied-migrations'), '0001_baseline\n');
     const result = deploy({ UNHEALTHY_BUILDS: 'v2' });
 
     expect(result.status).toBe(1);
@@ -286,25 +299,58 @@ describe.skipIf(onWindows)('deploy.sh', { timeout: SCRIPT_TEST_TIMEOUT_MS }, () 
     expect(failureReport()).toContain('Rolled back');
   });
 
-  it("assumes a new migration was applied when it can't read the bot's log, and stops", () => {
+  it("assumes a new migration was applied when it can't query schema_migrations, and stops", () => {
     pushV2({ migration: true });
-    const result = deploy({ UNHEALTHY_BUILDS: 'v2' });
+    const result = deploy({ UNHEALTHY_BUILDS: 'v2', MYSQL_QUERY_EXIT: '1' });
 
     expect(result.status).toBe(1);
     expect(restarts()).toEqual(['v2']);
     expect(failureReport()).toContain('NOT rolling back automatically');
+    expect(failureReport()).toContain("Couldn't read schema_migrations to check");
   });
 
-  it("reads the bot's own log for applied migrations when the journal is unreadable", () => {
-    const before = workHead();
-    pushV2({ migration: true });
-    // Timestamps before the restart are ignored, so this old line doesn't count as applied now.
-    write(path.join(sandbox.work, 'logs/combined-2026-11-03.log'), '2000-01-01 00:00:00 [info] [Migrations] Applying migration 0002_add_thing...\n');
+  it('counts a renamed migration file as new', () => {
+    commitVersion('v1b', (dev) => write(path.join(dev, 'migrations/0002_old_name.sql'), 'SELECT 2;\n'));
+    run('git', ['pull', '-q', 'origin', 'main'], sandbox.work);
+    commitVersion('v2', (dev) => run('git', ['mv', 'migrations/0002_old_name.sql', 'migrations/0002_new_name.sql'], dev));
+    write(path.join(sandbox.state, 'applied-migrations'), '0002_new_name\n');
     const result = deploy({ UNHEALTHY_BUILDS: 'v2' });
 
     expect(result.status).toBe(1);
-    expect(workHead()).toBe(before);
+    expect(failureReport()).toContain('0002_new_name');
+    expect(failureReport()).toContain('NOT rolling back automatically');
+  });
+
+  it('fails and rolls back when another process holds the web port', () => {
+    pushV2();
+    const result = deploy({ SS_PID: '999' });
+
+    expect(result.status).toBe(1);
+    expect(failureReport()).toContain('port 3000 is held by PID 999, not bcuk-bot (MainPID 4242)');
+    expect(read(path.join(sandbox.work, 'dist/marker'))).toBe('v1');
+  });
+
+  it('catches an outage inside the stability window, not just at its end', () => {
+    pushV2();
+    // Call 1 is the first health check; call 2 is the stability loop's first probe.
+    const result = deploy({ DEPLOY_STABILITY_SECONDS: '3', CURL_FAIL_CALL: '2' });
+
+    expect(result.status).toBe(1);
+    expect(failureReport()).toContain('stopped answering within 3s');
     expect(restarts()).toEqual(['v2', 'v1']);
+    expect(failureReport()).toContain('Rolled back');
+  });
+
+  it('rolls back when the deploy is interrupted', () => {
+    const before = workHead();
+    pushV2();
+    const result = deploy({ NPM_TEST_SIGNAL: '1' });
+
+    expect(result.status).toBe(1);
+    expect(workHead()).toBe(before);
+    expect(read(path.join(sandbox.work, 'node_modules/marker'))).toBe('v1');
+    expect(fs.existsSync(path.join(sandbox.work, 'node_modules.old'))).toBe(false);
+    expect(failureReport()).toContain('the deploy was interrupted');
   });
 
   it("won't restart onto new migrations without a backup", () => {
@@ -348,7 +394,7 @@ describe.skipIf(onWindows)('backup-db.sh', { timeout: SCRIPT_TEST_TIMEOUT_MS }, 
 
     expect(result.status).toBe(0);
     const file = result.stdout.trim().split('\n').pop()!; // the script's last line is the path
-    expect(path.basename(file)).toMatch(/^bcuk-\d{8}T\d{6}Z-nightly\.sql\.gz$/);
+    expect(path.basename(file)).toMatch(/^bcuk-\d{8}T\d{6}Z-\d+-nightly\.sql\.gz$/);
     expect(zlib.gunzipSync(fs.readFileSync(file)).toString()).toContain('-- dump of');
     expect(fs.statSync(file).mode & 0o777).toBe(0o600);
     expect(fs.statSync(sandbox.backups).mode & 0o777).toBe(0o700);
@@ -386,6 +432,15 @@ describe.skipIf(onWindows)('backup-db.sh', { timeout: SCRIPT_TEST_TIMEOUT_MS }, 
     expect(fs.readdirSync(sandbox.backups)).toEqual([]);
   });
 
+  it("reads .env lines the way dotenv does, including `export` and spaces around '='", () => {
+    write(path.join(sandbox.work, '.env'), `export DB_USER=bot\nDB_NAME = bcuk_alt # comment\nBACKUP_DIR=${sandbox.backups}\n`);
+    const result = backup();
+
+    expect(result.status).toBe(0);
+    expect(path.basename(result.stdout.trim())).toMatch(/^bcuk_alt-/);
+    expect(read(path.join(sandbox.state, 'mysqldump-credentials'))).toContain('user="bot"');
+  });
+
   it('rejects a label that could escape the file name', () => {
     const result = backup(['../x']);
 
@@ -421,11 +476,20 @@ describe.skipIf(onWindows)('restore-db.sh', { timeout: SCRIPT_TEST_TIMEOUT_MS },
   });
 
   it('refuses to restore over the live database while the service is running', () => {
-    write(path.join(sandbox.state, 'active'), '');
+    write(path.join(sandbox.state, 'service-state'), 'active');
     const result = restore([dump], 'bcuk\n');
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('is running. Stop it first');
+    expect(read(path.join(sandbox.state, 'mysql-input'))).toBe('');
+  });
+
+  it("refuses when it can't tell whether the service is running", () => {
+    write(path.join(sandbox.state, 'service-state'), 'error');
+    const result = restore([dump], 'bcuk\n');
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("Couldn't tell whether bcuk-bot is running");
     expect(read(path.join(sandbox.state, 'mysql-input'))).toBe('');
   });
 

@@ -130,16 +130,34 @@ service_log_since_restart() {
     fi
 }
 
-# True if the new build applied any of this deploy's new migrations since the restart. The runner
-# logs "Applying migration <version>..." before running each one. When neither the journal nor the
-# bot's log can be read, it can't tell, so it assumes they were (the safe answer).
+# Prints the migration versions the database records as applied (schema_migrations), one per line.
+# Runs in a subshell, so a missing setting can't exit deploy.sh itself. Fails if the query does.
+applied_migration_versions() {
+    (
+        set -euo pipefail
+        ENV_FILE=.env
+        # shellcheck source=scripts/lib/dotenv.sh
+        source scripts/lib/dotenv.sh
+        load_db_settings
+        credentials="$(write_mysql_credentials)"
+        trap 'rm -f "$credentials"' EXIT
+        mysql --defaults-extra-file="$credentials" -N -B -e 'SELECT version FROM schema_migrations' "$DB_NAME"
+    )
+}
+
+# True if the database records any of this deploy's new migrations as applied: the previous build
+# would then refuse to start. Asks the database itself, not the bot's log (LOG_LEVEL can hide the
+# runner's lines). When it can't ask, it assumes they were applied (the safe answer) and says so.
+MIGRATION_CHECK_NOTE=""
 new_migrations_were_applied() {
-    local log version
+    local applied version
     [ -n "$NEW_MIGRATIONS" ] || return 1
-    log="$(service_log_since_restart)"
-    if printf '%s' "$log" | grep -q '^(no log available'; then return 0; fi
+    if ! applied="$(applied_migration_versions 2>&1)"; then
+        MIGRATION_CHECK_NOTE="Couldn't read schema_migrations to check (${applied:-no output}), so assuming they were applied."
+        return 0
+    fi
     for version in $NEW_MIGRATIONS; do
-        if printf '%s' "$log" | grep -qF "Applying migration $version"; then return 0; fi
+        if printf '%s\n' "$applied" | grep -qxF "$version"; then return 0; fi
     done
     return 1
 }
@@ -151,6 +169,7 @@ stop_without_rollback() {
     report ""
     report "NOT rolling back automatically: the new build already applied database migration(s):"
     for version in $NEW_MIGRATIONS; do report "    $version"; done
+    if [ -n "$MIGRATION_CHECK_NOTE" ]; then report "($MIGRATION_CHECK_NOTE)"; fi
     report "The previous build ($PREVIOUS_SHORT) refuses to start on a database that records migrations it"
     report "doesn't have, so putting its code back alone would leave the bot down. The new build"
     report "($NEW_SHORT) is still in place."
@@ -170,11 +189,20 @@ stop_without_rollback() {
     report "  sudo systemctl start $SERVICE_NAME"
 }
 
+# Runs one rollback restore step, recording it in RESTORE_FAILURES if it fails (rollback runs with
+# errexit off, so a failed step must not pass silently).
+RESTORE_FAILURES=""
+restore_step() {
+    if ! "$@"; then
+        RESTORE_FAILURES="${RESTORE_FAILURES:+$RESTORE_FAILURES; }$*"
+    fi
+}
+
 # Puts the previous code, build and dependencies back. If the service was already restarted onto the
 # new build, restarts it onto the previous one and checks that it comes up. Always writes a failure
 # report (printed and saved to FAILURE_LOG) and exits 1.
 rollback() {
-    trap - ERR
+    trap - ERR INT TERM
     set +e
     mkdir -p logs
     : > "$FAILURE_LOG"
@@ -197,20 +225,29 @@ rollback() {
 
     report ""
     report "==> Rolling back to $PREVIOUS_SHORT..."
-    rm -rf "$BUILD_DIR"
+    restore_step rm -rf "$BUILD_DIR"
     # Past the swap, dist/ holds this deploy's build and dist.old the previous one (if there was
     # one) until the deploy succeeds — put the previous build back.
     if [ "$SWAPPED" -eq 1 ]; then
-        rm -rf dist
-        if [ -d dist.old ]; then mv dist.old dist; fi
+        restore_step rm -rf dist
+        if [ -d dist.old ]; then restore_step mv dist.old dist; fi
     fi
     if [ "$MOVED_NODE_MODULES" -eq 1 ]; then
-        rm -rf node_modules
-        if [ -d node_modules.old ]; then mv node_modules.old node_modules; fi
+        restore_step rm -rf node_modules
+        if [ -d node_modules.old ]; then restore_step mv node_modules.old node_modules; fi
     fi
-    git reset -q --hard "$PREVIOUS_SHA"
+    restore_step git reset -q --hard "$PREVIOUS_SHA"
 
     local outcome="The service wasn't restarted, so the bot is still running the previous build ($PREVIOUS_SHORT)."
+    if [ -n "$RESTORE_FAILURES" ]; then
+        # Restarting onto a half-restored checkout would only make things worse; leave it for a person.
+        report ""
+        report "ROLLBACK INCOMPLETE: these restore steps failed: $RESTORE_FAILURES"
+        report "dist/, node_modules/ or the checkout may not match $PREVIOUS_SHORT. Fix them by hand before the"
+        report "next restart; the service was not restarted by the rollback."
+        report "Report saved to $FAILURE_LOG"
+        exit 1
+    fi
     if [ "$RESTARTED" -eq 1 ]; then
         report "==> Restarting $SERVICE_NAME on the previous build..."
         RESTART_TIME="$(date '+%Y-%m-%d %H:%M:%S')"
@@ -255,14 +292,17 @@ if ! git diff-index --quiet HEAD --; then
 fi
 git pull origin main
 NEW_SHORT=$(git rev-parse --short HEAD)
-# Migration versions (file names without .sql) this deploy adds, if any. Decides whether the database
+# Migration versions (file names without .sql) this deploy adds (or renames), if any. Decides whether the database
 # backup before the restart is required, and whether a failed restart can still be rolled back.
-NEW_MIGRATIONS="$(git diff --name-only --diff-filter=A "$PREVIOUS_SHA" HEAD -- 'migrations/*.sql' \
+NEW_MIGRATIONS="$(git diff --name-only --diff-filter=AR "$PREVIOUS_SHA" HEAD -- 'migrations/*.sql' \
     | sed -e 's|^migrations/||' -e 's|\.sql$||' | tr '\n' ' ')"
 NEW_MIGRATIONS="${NEW_MIGRATIONS% }"
 
 # Any failing command from here on rolls the deploy back (see rollback), recording which one failed.
+# So does Ctrl-C or a TERM: an interrupted deploy must not leave a half-swapped checkout behind
+# (with, say, the only complete dependency tree sitting in node_modules.old).
 trap 'FAILED_COMMAND=$BASH_COMMAND; rollback' ERR
+trap 'FAILURE_REASON="the deploy was interrupted"; rollback' INT TERM
 
 # The previous deploy left node_modules holding exactly the lockfile's production dependencies
 # (`npm prune --omit=dev` below). When neither package.json nor the lockfile changed since then,
@@ -427,19 +467,24 @@ wait_for_health() {
     return 1
 }
 
-# After the first healthy answer, checks the bot stays up for STABILITY_SECONDS: the same process,
-# no restarts, still answering. Returns 1 with HEALTH_PROBLEM set when it doesn't.
+# After the first healthy answer, checks every second for STABILITY_SECONDS that the bot stays up:
+# the same process, no restarts, still answering. Returns 1 with HEALTH_PROBLEM set when it doesn't.
 wait_for_stability() {
-    local main_pid restarts
+    local main_pid restarts deadline
     main_pid="$("$SYSTEMCTL_BIN" show -p MainPID --value "$SERVICE_NAME")"
     restarts="$("$SYSTEMCTL_BIN" show -p NRestarts --value "$SERVICE_NAME")"
-    sleep "$STABILITY_SECONDS"
-    if [ "$("$SYSTEMCTL_BIN" show -p MainPID --value "$SERVICE_NAME")" != "$main_pid" ] \
-        || [ "$("$SYSTEMCTL_BIN" show -p NRestarts --value "$SERVICE_NAME")" != "$restarts" ] \
-        || ! curl -fsS --max-time 2 "$HEALTH_URL" > /dev/null 2>&1; then
-        HEALTH_PROBLEM="it came up but crashed, restarted or stopped answering within ${STABILITY_SECONDS}s"
-        return 1
-    fi
+    # Checked every second, not just at the end, so an outage that comes and goes inside the window
+    # still counts.
+    deadline=$((SECONDS + STABILITY_SECONDS))
+    while [ "$SECONDS" -lt "$deadline" ]; do
+        sleep 1
+        if [ "$("$SYSTEMCTL_BIN" show -p MainPID --value "$SERVICE_NAME")" != "$main_pid" ] \
+            || [ "$("$SYSTEMCTL_BIN" show -p NRestarts --value "$SERVICE_NAME")" != "$restarts" ] \
+            || ! curl -fsS --max-time 2 "$HEALTH_URL" > /dev/null 2>&1; then
+            HEALTH_PROBLEM="it came up but crashed, restarted or stopped answering within ${STABILITY_SECONDS}s"
+            return 1
+        fi
+    done
 }
 
 # The bot reads this at startup (restoreDebugLogging), so the new process starts with debug logging
@@ -483,7 +528,7 @@ if ! wait_for_health || ! wait_for_stability; then
     rollback
 fi
 
-trap - ERR  # The new build is up and stayed up: nothing left to roll back.
+trap - ERR INT TERM  # The new build is up and stayed up: nothing left to roll back.
 rm -rf dist.old node_modules.old
 echo "==> $SERVICE_NAME is up."
 echo "==> Deploy complete."

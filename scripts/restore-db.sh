@@ -34,9 +34,20 @@ command -v mysql > /dev/null || { echo "ERROR: mysql (the client) is not install
 gzip -t "$DUMP" || { echo "ERROR: $DUMP is not a complete gzip file." >&2; exit 1; }
 
 if [ "$TARGET" = "$DB_NAME" ]; then
-    if command -v systemctl > /dev/null && systemctl is-active --quiet "$SERVICE_NAME"; then
-        echo "ERROR: $SERVICE_NAME is running. Stop it first: sudo systemctl stop $SERVICE_NAME" >&2
-        exit 1
+    # Only a definite "not running" lets the restore go ahead: an error asking systemd counts as
+    # "can't tell", which refuses too. A host without systemd at all has no service to check.
+    if command -v systemctl > /dev/null; then
+        SERVICE_STATE="$(systemctl is-active "$SERVICE_NAME" 2>/dev/null || true)"
+        case "$SERVICE_STATE" in
+            inactive|failed) ;;
+            active|activating|reloading|deactivating|refreshing)
+                echo "ERROR: $SERVICE_NAME is running. Stop it first: sudo systemctl stop $SERVICE_NAME" >&2
+                exit 1 ;;
+            *)
+                echo "ERROR: Couldn't tell whether $SERVICE_NAME is running (systemctl said '${SERVICE_STATE:-nothing}')." >&2
+                echo "       Stop it (sudo systemctl stop $SERVICE_NAME) and check: systemctl is-active $SERVICE_NAME" >&2
+                exit 1 ;;
+        esac
     fi
     echo "This replaces everything in the live database '$TARGET' with the contents of:"
     echo "    $DUMP"

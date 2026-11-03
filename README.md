@@ -51,7 +51,7 @@ If any step fails, the deploy rolls back: the previous code, build and dependenc
 
 One case doesn't roll back automatically: when the failed build had already applied a new database migration. The previous build refuses to start against a database that records migrations it doesn't know, so the deploy leaves the new build in place and prints the commands to go back by hand, starting with restoring the backup it took just before the restart. Fixing forward is usually quicker.
 
-The backup is required when a deploy adds migrations; otherwise a failed backup only warns. The health check needs `curl` and `ss` (from iproute2), and the backup `mysqldump`.
+The backup is required when a deploy adds migrations; otherwise a failed backup only warns. The health check needs `curl` and `ss` (from iproute2); the backup needs `mysqldump`, and the migration check `mysql` (both from `mysql-client`).
 
 Day to day:
 

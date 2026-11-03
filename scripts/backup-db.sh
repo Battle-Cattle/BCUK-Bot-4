@@ -45,7 +45,8 @@ CREDENTIALS="$(write_mysql_credentials)"
 PARTIAL=""
 trap 'rm -f "$CREDENTIALS" ${PARTIAL:+"$PARTIAL"}' EXIT
 
-STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+# The process ID keeps two runs in the same second (a manual backup during a deploy, say) apart.
+STAMP="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 FILE="$BACKUP_DIR/${DB_NAME}-${STAMP}${LABEL:+-$LABEL}.sql.gz"
 # Written under a temporary name and renamed once complete, so a failed or interrupted dump never
 # looks like a usable backup (and is never counted when pruning).
