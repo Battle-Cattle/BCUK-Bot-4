@@ -22,6 +22,7 @@ import {
   ipKey,
   generalLimiterSkip,
   isSessionStoreBusyError,
+  markSessionStoreError,
   preSessionLimiterSkip,
   sessionLimiterKey,
   sessionLimiterSkip,
@@ -184,15 +185,26 @@ const sessionStore = new (MySQLStore(session))(
   },
   getSessionPool().pool,
 );
-app.use(
-  session({
-    secret: SESSION_SECRET,
-    resave: false,
-    saveUninitialized: false,
-    store: sessionStore,
-    cookie: { secure: isProduction, httpOnly: true, sameSite: 'lax', maxAge: 24 * 60 * 60 * 1000 },
-  }),
-);
+const sessionMiddleware = session({
+  secret: SESSION_SECRET,
+  resave: false,
+  saveUninitialized: false,
+  store: sessionStore,
+  cookie: { secure: isProduction, httpOnly: true, sameSite: 'lax', maxAge: 24 * 60 * 60 * 1000 },
+});
+/**
+ * Runs the session middleware, marking any error it passes on as a session-store failure so the
+ * error handler can answer a full session-pool queue with a 503 (and only that queue).
+ * @param req - Express request.
+ * @param res - Express response.
+ * @param next - Continues the chain, with the marked error if the session lookup failed.
+ */
+app.use((req, res, next) => {
+  sessionMiddleware(req, res, (err?: unknown) => {
+    if (err) next(markSessionStoreError(err));
+    else next();
+  });
+});
 
 // Rate limiters — placed after session middleware so req.session is populated
 app.use(generalLimiter);
@@ -297,7 +309,7 @@ app.use(csrfErrorHandler);
  */
 app.use((err: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
   if (isSessionStoreBusyError(err)) {
-    log.warn(`Session store busy; answered ${req.method} ${req.path} with 503`);
+    log.warn(`Session store busy; answered ${req.method} ${req.path} with 503:`, err);
     renderErrorPage(req, res, 503, 'The panel is busy right now. Please try again in a moment.');
     return;
   }

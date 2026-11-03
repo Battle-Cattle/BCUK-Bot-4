@@ -6,6 +6,13 @@ import { createLogger } from '../shared/logger';
 
 const log = createLogger('TokenKeys');
 
+/**
+ * Per-query timeout. This runs during startup, ahead of the bot and the panel, so a database that
+ * stops answering on a live connection must not hang startup: the query fails, startup logs it and
+ * carries on, and the next start retries.
+ */
+const QUERY_TIMEOUT_MS = 10_000;
+
 /** A table holding an encrypted OAuth access/refresh token pair, keyed by `id`. */
 interface TokenTable {
   table: string;
@@ -26,8 +33,10 @@ const TOKEN_TABLES: readonly TokenTable[] = [
 export interface TokenReencryptionResult {
   /** Rows rewritten under the active key. */
   reencrypted: number;
-  /** Token values no configured key could decrypt; left as they were. */
+  /** Token values no configured key could decrypt (including damaged ones); left as they were. */
   unreadable: number;
+  /** Rows changed by something else between the read and the write; retried on the next start. */
+  pending: number;
 }
 
 /** A stored token's value after a re-encryption attempt. */
@@ -35,44 +44,50 @@ type Rewritten = { value: string | null; changed: boolean; unreadable: boolean }
 
 /**
  * Re-encrypts one stored token under the active key when it isn't already, leaving it untouched
- * when it's null, already current, or can't be decrypted with any configured key.
+ * when it's null, already current, or can't be decrypted with any configured key. A token that is
+ * already current is still decrypted, so a damaged one is reported as unreadable.
  * @param stored - The column's current value.
  * @returns The value to store, and whether it changed or was unreadable.
  */
 function rewriteToken(stored: string | null): Rewritten {
-  if (stored === null || !needsReencryption(stored, EVENTSUB_TOKEN_SECRET)) {
-    return { value: stored, changed: false, unreadable: false };
-  }
+  if (stored === null) return { value: stored, changed: false, unreadable: false };
+  let plaintext: string;
   try {
-    const plaintext = decryptToken(stored, EVENTSUB_TOKEN_SECRET, EVENTSUB_TOKEN_SECRET_PREVIOUS);
-    return { value: encryptToken(plaintext, EVENTSUB_TOKEN_SECRET), changed: true, unreadable: false };
+    plaintext = decryptToken(stored, EVENTSUB_TOKEN_SECRET, EVENTSUB_TOKEN_SECRET_PREVIOUS);
   } catch {
     return { value: stored, changed: false, unreadable: true };
   }
+  if (!needsReencryption(stored, EVENTSUB_TOKEN_SECRET)) return { value: stored, changed: false, unreadable: false };
+  return { value: encryptToken(plaintext, EVENTSUB_TOKEN_SECRET), changed: true, unreadable: false };
 }
 
 /**
  * Re-encrypts every token pair in one table. Each update is a compare-and-swap on the values just
  * read, so a token saved in the meantime (a refresh or reconnect) is never overwritten with a stale one.
  * @param spec - The table and its token columns.
- * @returns How many rows were rewritten and how many values were unreadable.
+ * @returns How many rows were rewritten or missed, and how many values were unreadable.
  */
 async function reencryptTable(spec: TokenTable): Promise<TokenReencryptionResult> {
   const { table, access, refresh } = spec;
-  const [rows] = await getPool().query<mysql.RowDataPacket[]>(
-    `SELECT id, ${access} AS access, ${refresh} AS refresh FROM ${table} WHERE ${access} IS NOT NULL OR ${refresh} IS NOT NULL`,
-  );
-  const result: TokenReencryptionResult = { reencrypted: 0, unreadable: 0 };
+  const [rows] = await getPool().query<mysql.RowDataPacket[]>({
+    sql: `SELECT id, ${access} AS access, ${refresh} AS refresh FROM ${table} WHERE ${access} IS NOT NULL OR ${refresh} IS NOT NULL`,
+    timeout: QUERY_TIMEOUT_MS,
+  });
+  const result: TokenReencryptionResult = { reencrypted: 0, unreadable: 0, pending: 0 };
   for (const row of rows) {
     const newAccess = rewriteToken(row.access as string | null);
     const newRefresh = rewriteToken(row.refresh as string | null);
     result.unreadable += Number(newAccess.unreadable) + Number(newRefresh.unreadable);
     if (!newAccess.changed && !newRefresh.changed) continue;
     const [update] = await getPool().execute<mysql.ResultSetHeader>(
-      `UPDATE ${table} SET ${access} = ?, ${refresh} = ? WHERE id = ? AND ${access} <=> ? AND ${refresh} <=> ?`,
+      {
+        sql: `UPDATE ${table} SET ${access} = ?, ${refresh} = ? WHERE id = ? AND ${access} <=> ? AND ${refresh} <=> ?`,
+        timeout: QUERY_TIMEOUT_MS,
+      },
       [newAccess.value, newRefresh.value, row.id, row.access, row.refresh],
     );
-    result.reencrypted += update.affectedRows;
+    if (update.affectedRows > 0) result.reencrypted += 1;
+    else result.pending += 1;
   }
   return result;
 }
@@ -83,21 +98,36 @@ async function reencryptTable(spec: TokenTable): Promise<TokenReencryptionResult
  * `EVENTSUB_TOKEN_SECRET_PREVIOUS` — so the previous key can be removed afterwards. Run once at
  * startup, before anything else reads the tokens. Logs what it did, never a key or a token.
  * A no-op when no `EVENTSUB_TOKEN_SECRET` is configured.
- * @returns How many rows were rewritten and how many token values no configured key could decrypt.
+ * @returns How many rows were rewritten, how many changed underneath the pass (left for the next
+ *   start), and how many token values no configured key could decrypt.
  */
 export async function reencryptStoredTokens(): Promise<TokenReencryptionResult> {
-  const total: TokenReencryptionResult = { reencrypted: 0, unreadable: 0 };
+  const total: TokenReencryptionResult = { reencrypted: 0, unreadable: 0, pending: 0 };
   if (!EVENTSUB_TOKEN_SECRET) return total;
   for (const spec of TOKEN_TABLES) {
-    const { reencrypted, unreadable } = await reencryptTable(spec);
+    const { reencrypted, unreadable, pending } = await reencryptTable(spec);
     total.reencrypted += reencrypted;
     total.unreadable += unreadable;
+    total.pending += pending;
   }
+  logResult(total);
+  return total;
+}
+
+/**
+ * Logs what a re-encryption pass did. Says the previous key can go only when nothing is left
+ * unreadable or pending, so an operator never removes a key some row still needs.
+ * @param total - The pass's counts.
+ */
+function logResult(total: TokenReencryptionResult): void {
   if (total.reencrypted > 0) log.info(`Re-encrypted ${total.reencrypted} stored token row(s) under the active key`);
+  if (total.pending > 0) {
+    log.warn(`${total.pending} token row(s) changed during re-encryption; they will be re-checked on the next start`);
+  }
   if (total.unreadable > 0) {
     log.warn(`${total.unreadable} stored token(s) can't be decrypted with any configured key; those accounts must reconnect`);
-  } else if (EVENTSUB_TOKEN_SECRET_PREVIOUS) {
+  }
+  if (total.pending === 0 && total.unreadable === 0 && EVENTSUB_TOKEN_SECRET_PREVIOUS) {
     log.info('Every stored token is under the active key; EVENTSUB_TOKEN_SECRET_PREVIOUS can now be removed');
   }
-  return total;
 }

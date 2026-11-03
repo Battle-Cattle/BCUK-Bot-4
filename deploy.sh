@@ -222,12 +222,20 @@ mv "$BUILD_DIR" dist
 trap - ERR  # Rollback no longer needed — code is good.
 rm -rf dist.old
 
-# Prints a setting from .env (the bot's own source of truth for it) the way dotenv reads it: last
-# entry wins, an inline ` # comment` is dropped, surrounding quotes and spaces are stripped. Prints
-# nothing for no entry (grep finding nothing must not trip pipefail) or a blank one.
+# Prints a setting from .env the way dotenv reads it: last entry wins; a quoted value is taken up
+# to its closing quote (so a `#` inside it stays); an unquoted one ends at the first `#` and loses
+# surrounding spaces. Prints nothing for no entry (grep finding nothing must not trip pipefail) or a
+# blank one.
 env_setting() {
-    { grep -E "^[[:space:]]*$1=" .env 2>/dev/null || true; } \
-        | tail -n 1 | cut -d= -f2- | sed -E 's/[[:space:]]+#.*$//' | tr -d "[:space:]\"'"
+    local value
+    value="$( { grep -E "^[[:space:]]*$1=" .env 2>/dev/null || true; } | tail -n 1 | cut -d= -f2-)"
+    value="${value#"${value%%[![:space:]]*}"}"
+    case "$value" in
+        \"*) value="${value#\"}"; value="${value%%\"*}" ;;
+        \'*) value="${value#\'}"; value="${value%%\'*}" ;;
+        *) value="${value%%#*}"; value="${value%"${value##*[![:space:]]}"}" ;;
+    esac
+    printf '%s' "$value"
 }
 
 # Blank or missing values fall back to the same defaults as config.ts.

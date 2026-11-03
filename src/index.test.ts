@@ -15,7 +15,7 @@ vi.mock('./db', () => ({
   closePool: vi.fn().mockResolvedValue(undefined),
   pingDb: vi.fn().mockResolvedValue(true),
   runMigrations: vi.fn().mockResolvedValue(undefined),
-  reencryptStoredTokens: vi.fn().mockResolvedValue({ reencrypted: 0, unreadable: 0 }),
+  reencryptStoredTokens: vi.fn().mockResolvedValue({ reencrypted: 0, unreadable: 0, pending: 0 }),
 }));
 vi.mock('./shared/healthStore', () => ({
   recordDbPing: vi.fn(),

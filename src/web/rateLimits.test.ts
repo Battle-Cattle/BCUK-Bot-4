@@ -12,6 +12,7 @@ import {
   ipKey,
   generalLimiterSkip,
   isSessionStoreBusyError,
+  markSessionStoreError,
   preSessionLimiterSkip,
   sessionLimiterKey,
   sessionLimiterSkip,
@@ -95,8 +96,14 @@ describe('generalLimiterSkip', () => {
 // sessionLimiterSkip
 // ---------------------------------------------------------------------------
 describe('preSessionLimiterSkip', () => {
-  it('skips the Streamdeck API', () => {
+  it('skips a Streamdeck API call that carries no session cookie', () => {
     expect(preSessionLimiterSkip(makeReq({ path: '/api/streamdeck/sfx' }))).toBe(true);
+  });
+
+  it('counts a Streamdeck API call that carries a session cookie, since it still hits the store', () => {
+    const req = makeReq({ path: '/api/streamdeck/sfx' });
+    req.headers.cookie = 'theme=dark; connect.sid=s%3Aabc.def';
+    expect(preSessionLimiterSkip(req)).toBe(false);
   });
 
   it('counts every other request, authenticated or not', () => {
@@ -106,12 +113,20 @@ describe('preSessionLimiterSkip', () => {
 });
 
 describe('isSessionStoreBusyError', () => {
-  it("recognises mysql2's full-queue rejection", () => {
-    expect(isSessionStoreBusyError(new Error('Queue limit reached.'))).toBe(true);
+  it("recognises mysql2's full-queue rejection from the session store", () => {
+    expect(isSessionStoreBusyError(markSessionStoreError(new Error('Queue limit reached.')))).toBe(true);
   });
 
-  it.each([new Error('connect ECONNREFUSED'), 'Queue limit reached.', null, undefined])('ignores %s', (err) => {
+  it('ignores the same rejection from any other pool (e.g. the bot pool)', () => {
+    expect(isSessionStoreBusyError(new Error('Queue limit reached.'))).toBe(false);
+  });
+
+  it.each([markSessionStoreError(new Error('connect ECONNREFUSED')), 'Queue limit reached.', null, undefined])('ignores %s', (err) => {
     expect(isSessionStoreBusyError(err)).toBe(false);
+  });
+
+  it('leaves a non-object error as it is', () => {
+    expect(markSessionStoreError('boom')).toBe('boom');
   });
 });
 

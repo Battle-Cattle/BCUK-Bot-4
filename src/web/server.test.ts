@@ -101,6 +101,9 @@ function errorTriggerRouter() {
   router.get('/__trigger_error', (_req, _res, next) => {
     next(new Error('boom'));
   });
+  router.get('/__trigger_bot_pool_queue_error', (_req, _res, next) => {
+    next(new Error('Queue limit reached.'));
+  });
   return router;
 }
 
@@ -708,8 +711,14 @@ describe('session store overload', () => {
       .set('Cookie', signedSessionCookie('busy-session'))
       .set('X-Forwarded-For', '198.51.100.7');
     expect(res.status).toBe(503);
-    expect(mockLog.warn).toHaveBeenCalledWith(expect.stringContaining('Session store busy'));
+    expect(mockLog.warn).toHaveBeenCalledWith(expect.stringContaining('Session store busy'), expect.objectContaining({ message: 'Queue limit reached.' }));
     expect(mockLog.error).not.toHaveBeenCalled();
+  });
+
+  it("answers the bot pool's full queue with a 500, not the session-store 503", async () => {
+    const res = await request(app).get('/__trigger_bot_pool_queue_error').set('X-Forwarded-For', '198.51.100.9');
+    expect(res.status).toBe(500);
+    expect(mockLog.warn).not.toHaveBeenCalledWith(expect.stringContaining('Session store busy'), expect.anything());
   });
 
   it('still answers any other store failure with a 500', async () => {

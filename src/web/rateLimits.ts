@@ -50,24 +50,53 @@ export function generalLimiterSkip(req: Request): boolean {
 }
 
 /**
+ * Tells whether a request carries an express-session cookie (`connect.sid`), i.e. whether the
+ * session middleware will look it up in the store.
+ * @param req - Express request object
+ * @returns true if the Cookie header names `connect.sid`
+ */
+function hasSessionCookie(req: Request): boolean {
+  return /(?:^|;)\s*connect\.sid=/.test(req.headers.cookie ?? '');
+}
+
+/**
  * Determines whether to skip the coarse IP-keyed limiter that runs ahead of the session middleware.
- * Only the Streamdeck API is skipped: it carries no session cookie and has its own limiters.
+ * Only Streamdeck API calls without a session cookie are skipped: those never touch the session
+ * store and have their own limiters. One that carries a cookie still costs a store lookup (the
+ * session middleware runs on every path), so it is counted like any other request.
  * @param req - Express request object
  * @returns true if the pre-session limiter should be skipped
  */
 export function preSessionLimiterSkip(req: Request): boolean {
-  return req.path.startsWith('/api/streamdeck');
+  return req.path.startsWith('/api/streamdeck') && !hasSessionCookie(req);
+}
+
+/** Marks an error as coming from the session store, so the error handler can tell it apart. */
+const SESSION_STORE_ERROR = Symbol('sessionStoreError');
+
+/**
+ * Marks an error the session middleware passed on as a session-store failure. Only errors marked
+ * this way can become the 503 below; the bot's own pool raises the same mysql2 message when its
+ * queue is full, and that must stay a 500.
+ * @param err - The error express-session handed to `next()`.
+ * @returns The same error, marked when it is an object.
+ */
+export function markSessionStoreError(err: unknown): unknown {
+  if (typeof err === 'object' && err !== null) Object.assign(err, { [SESSION_STORE_ERROR]: true });
+  return err;
 }
 
 /**
  * Tells whether an error means the session store is overloaded rather than broken: mysql2 rejects a
- * lookup straight away once the session pool's wait queue is full. express-session passes that to
- * `next()`, and the panel answers it with a 503 instead of a 500.
+ * lookup straight away once the session pool's wait queue is full. The panel answers that with a
+ * 503 instead of a 500.
  * @param err - The error handed to the error handler.
- * @returns true for mysql2's "Queue limit reached." rejection.
+ * @returns true for mysql2's "Queue limit reached." rejection, marked by {@link markSessionStoreError}.
  */
 export function isSessionStoreBusyError(err: unknown): boolean {
-  return typeof err === 'object' && err !== null && (err as { message?: unknown }).message === 'Queue limit reached.';
+  if (typeof err !== 'object' || err === null) return false;
+  const marked = (err as { [SESSION_STORE_ERROR]?: unknown })[SESSION_STORE_ERROR] === true;
+  return marked && (err as { message?: unknown }).message === 'Queue limit reached.';
 }
 
 /**

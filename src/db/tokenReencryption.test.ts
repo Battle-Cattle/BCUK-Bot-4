@@ -38,8 +38,8 @@ type Row = { id: number; access: string | null; refresh: string | null };
 function fakePool(tables: Record<string, Row[]>) {
   const tableOf = (sql: string) => Object.keys(tables).find((t) => new RegExp(`\\b(FROM|UPDATE) ${t}\\b`).test(sql))!;
   return {
-    query: vi.fn(async (sql: string) => [tables[tableOf(sql)]!.map((r) => ({ ...r }))]),
-    execute: vi.fn(async (sql: string, [access, refresh, id, oldAccess, oldRefresh]: unknown[]) => {
+    query: vi.fn(async ({ sql }: { sql: string }) => [tables[tableOf(sql)]!.map((r) => ({ ...r }))]),
+    execute: vi.fn(async ({ sql }: { sql: string }, [access, refresh, id, oldAccess, oldRefresh]: unknown[]) => {
       const row = tables[tableOf(sql)]!.find((r) => r.id === id && r.access === oldAccess && r.refresh === oldRefresh);
       if (row) Object.assign(row, { access, refresh });
       return [{ affectedRows: row ? 1 : 0 }];
@@ -66,7 +66,7 @@ describe('reencryptStoredTokens', () => {
     };
     vi.mocked(getPool).mockReturnValue(fakePool(tables) as never);
 
-    await expect(reencryptStoredTokens()).resolves.toEqual({ reencrypted: 3, unreadable: 0 });
+    await expect(reencryptStoredTokens()).resolves.toEqual({ reencrypted: 3, unreadable: 0, pending: 0 });
 
     const plain = Object.values(tables).flat().flatMap((r) => [r.access, r.refresh]).map((v) => decryptToken(v, NEW_KEY));
     expect(plain).toEqual(['s1-access', 's1-refresh', 's2-access', 's2-refresh', 'bot-access', 'bot-refresh']);
@@ -82,7 +82,7 @@ describe('reencryptStoredTokens', () => {
     const pool = fakePool(tables);
     vi.mocked(getPool).mockReturnValue(pool as never);
 
-    await expect(reencryptStoredTokens()).resolves.toEqual({ reencrypted: 0, unreadable: 0 });
+    await expect(reencryptStoredTokens()).resolves.toEqual({ reencrypted: 0, unreadable: 0, pending: 0 });
     expect(pool.execute).not.toHaveBeenCalled();
     expect(tables.streamer[0]).toEqual({ id: 1, access: current, refresh: null });
   });
@@ -104,7 +104,7 @@ describe('reencryptStoredTokens', () => {
     const pool = fakePool(tables);
     vi.mocked(getPool).mockReturnValue(pool as never);
 
-    await expect(reencryptStoredTokens()).resolves.toEqual({ reencrypted: 0, unreadable: 2 });
+    await expect(reencryptStoredTokens()).resolves.toEqual({ reencrypted: 0, unreadable: 2, pending: 0 });
     expect(pool.execute).not.toHaveBeenCalled();
     expect(tables.streamer[0]!.access).toBe(stranded);
     expect(mockLog.warn).toHaveBeenCalledWith(expect.stringContaining('must reconnect'));
@@ -121,14 +121,42 @@ describe('reencryptStoredTokens', () => {
     });
     vi.mocked(getPool).mockReturnValue(pool as never);
 
-    await expect(reencryptStoredTokens()).resolves.toEqual({ reencrypted: 0, unreadable: 0 });
+    await expect(reencryptStoredTokens()).resolves.toEqual({ reencrypted: 0, unreadable: 0, pending: 1 });
     expect(tables.streamer[0]!.access).toBe(fresh);
+    // The missed row may still hold a previous-key token, so the pass mustn't call the key removable.
+    expect(mockLog.warn).toHaveBeenCalledWith(expect.stringContaining('re-checked on the next start'));
+    expect(mockLog.info).not.toHaveBeenCalledWith(expect.stringContaining('can now be removed'));
+  });
+
+  it('reports a damaged token under the active key as unreadable', async () => {
+    const good = encryptToken('ok', NEW_KEY);
+    const damaged = `${good.slice(0, -4)}AAAA`;
+    const tables = { streamer: [{ id: 1, access: damaged, refresh: good }], twitch_bot_chat_token: [] };
+    const pool = fakePool(tables);
+    vi.mocked(getPool).mockReturnValue(pool as never);
+
+    await expect(reencryptStoredTokens()).resolves.toEqual({ reencrypted: 0, unreadable: 1, pending: 0 });
+    expect(pool.execute).not.toHaveBeenCalled();
+    expect(mockLog.warn).toHaveBeenCalledWith(expect.stringContaining('must reconnect'));
+    expect(mockLog.info).not.toHaveBeenCalledWith(expect.stringContaining('can now be removed'));
+  });
+
+  it('bounds every query with a timeout so a silent database cannot hang startup', async () => {
+    const tables = { streamer: [{ id: 1, access: encryptToken('a', OLD_KEY), refresh: null }], twitch_bot_chat_token: [] };
+    const pool = fakePool(tables);
+    vi.mocked(getPool).mockReturnValue(pool as never);
+
+    await reencryptStoredTokens();
+
+    for (const [options] of [...pool.query.mock.calls, ...pool.execute.mock.calls]) {
+      expect(options).toMatchObject({ timeout: 10_000 });
+    }
   });
 
   it('does nothing when no EVENTSUB_TOKEN_SECRET is configured', async () => {
     keys.active = '';
     keys.previous = '';
-    await expect(reencryptStoredTokens()).resolves.toEqual({ reencrypted: 0, unreadable: 0 });
+    await expect(reencryptStoredTokens()).resolves.toEqual({ reencrypted: 0, unreadable: 0, pending: 0 });
     expect(getPool).not.toHaveBeenCalled();
   });
 

@@ -36,7 +36,7 @@ bash scripts/install-systemd-service.sh
 
 This installs and enables the unit from `deploy/bcuk-bot.service`, filled in with your user, this checkout's path and your `node`. It also adds a sudoers rule allowing that user to run `systemctl restart bcuk-bot` and nothing else. It doesn't start the service: stop any copy still running elsewhere first (for example in an old `screen` session), then run `sudo systemctl start bcuk-bot`.
 
-The unit is sandboxed (`ProtectSystem=strict`, `ProtectHome=read-only`, `NoNewPrivileges` and friends; see `deploy/bcuk-bot.service`): the bot can only write to `logs/` and the three upload folders (`OVERLAY_FOLDER`, `ALERT_ASSETS_FOLDER`, `SFX_FOLDER`). The installer reads those from `.env`, creates them, and writes them into the unit's `ReadWritePaths`, so re-run it after changing any of them, or the bot will fail its writes there with `EROFS`. `systemd-analyze security bcuk-bot` shows what the sandbox covers.
+The unit is sandboxed (`ProtectSystem=strict`, `ProtectHome=read-only`, `NoNewPrivileges` and friends; see `deploy/bcuk-bot.service`): the bot can only write to `logs/`, the three upload folders (`OVERLAY_FOLDER`, `ALERT_ASSETS_FOLDER`, `SFX_FOLDER`), and its own private `/tmp` and `/var/tmp` (`PrivateTmp`, emptied when the service stops). The installer reads those from `.env` (set them there, not in a systemd drop-in, which the installer can't see), creates them, and writes them into the unit's `ReadWritePaths`, so re-run it after changing any of them, or the bot will fail its writes there with `EROFS`. `systemd-analyze security bcuk-bot` shows what the sandbox covers.
 
 The unit keeps running the `node` it was installed with, so after upgrading Node, re-run `bash scripts/install-systemd-service.sh` (it rewrites the unit with the `node` now on your `PATH`) and then deploy. `deploy.sh` checks that the service's `node` meets `engines` in `package.json` and stops before installing anything if it doesn't.
 
@@ -99,10 +99,12 @@ The web panel must only be reachable through the reverse proxy. It trusts exactl
 
 1. Generate a new key: `openssl rand -hex 32`.
 2. In `.env`, move the current value to `EVENTSUB_TOKEN_SECRET_PREVIOUS` and put the new one in `EVENTSUB_TOKEN_SECRET`.
-3. Restart the bot. On startup it re-encrypts every stored token under the new key and logs `Every stored token is under the active key; EVENTSUB_TOKEN_SECRET_PREVIOUS can now be removed`. Until then, tokens under the previous key keep working.
+3. Make sure no other copy of the bot is running against the database (an old `screen` session, say): one still on the previous key would keep writing tokens under it after this pass. Then restart the bot. On startup it re-encrypts every stored token under the new key and logs `Every stored token is under the active key; EVENTSUB_TOKEN_SECRET_PREVIOUS can now be removed`. Until then, tokens under the previous key keep working.
 4. Remove `EVENTSUB_TOKEN_SECRET_PREVIOUS` from `.env` and restart again.
 
-If startup instead warns that some tokens can't be decrypted with any configured key, those were written under a key that is no longer in `.env`; the affected streamers (or the bot account, via `/admin/bot-auth`) must reconnect. Never put a key or a decrypted token in a log, an issue or a chat.
+If startup warns that some token rows changed during re-encryption, restart once more before step 4; don't remove the previous key until the "can now be removed" line appears. If it warns that some tokens can't be decrypted with any configured key, those were written under a key that is no longer in `.env`; the affected streamers (or the bot account, via `/admin/bot-auth`) must reconnect. Never put a key or a decrypted token in a log, an issue or a chat.
+
+**Rolling back past this feature:** builds from before key-id tokens (`enc:v2:`) can only read the older `enc:` format, and the first start of a newer build rewrites every stored token into `enc:v2:`. Rolling back to such a build therefore leaves every streamer (and the bot account) needing to reconnect. If you must roll back, expect that, or restore the database from a backup taken before the upgrade.
 
 ### SFX file format
 
