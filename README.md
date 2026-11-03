@@ -116,7 +116,7 @@ bash scripts/restore-db.sh ~/bcuk-bot-backups/<file>.sql.gz
 sudo systemctl start bcuk-bot
 ```
 
-**Test a backup** now and then by restoring it into a scratch database, which leaves the live one alone: `bash scripts/restore-db.sh <file> bcuk_restore_test`. Then check it looks right (`mysql bcuk_restore_test -e 'SELECT COUNT(*) FROM user; SELECT version FROM schema_migrations'`) and drop it (`DROP DATABASE bcuk_restore_test`). The bot's MySQL user needs permission to create that database.
+**Test a backup** now and then by restoring it into a scratch database, which leaves the live one alone: `bash scripts/restore-db.sh <file> bcuk_restore_test`. Then check it looks right, logging in as the bot's database user (`DB_USER` in `.env`; `-p` asks for `DB_PASSWORD`): `mysql -u <DB_USER> -p bcuk_restore_test -e 'SELECT COUNT(*) FROM user; SELECT version FROM schema_migrations'`. Drop it afterwards the same way: `mysql -u <DB_USER> -p -e 'DROP DATABASE bcuk_restore_test'`. The bot's MySQL user needs permission to create that database.
 
 ### SFX file format
 

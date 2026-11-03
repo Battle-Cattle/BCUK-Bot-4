@@ -471,7 +471,10 @@ describe.skipIf(onWindows)('restore-db.sh', { timeout: SCRIPT_TEST_TIMEOUT_MS },
     const result = restore([dump, 'bcuk_restore_test']);
 
     expect(result.status).toBe(0);
-    expect(read(path.join(sandbox.state, 'mysql-calls'))).toContain('CREATE DATABASE IF NOT EXISTS `bcuk_restore_test`');
+    const calls = read(path.join(sandbox.state, 'mysql-calls')).split('\n');
+    expect(calls[0]).toContain('CREATE DATABASE IF NOT EXISTS `bcuk_restore_test`');
+    // The import itself must target the scratch database, not the live one.
+    expect(calls[1]).toMatch(/^--defaults-extra-file=\S+ bcuk_restore_test$/);
     expect(read(path.join(sandbox.state, 'mysql-input'))).toContain('CREATE TABLE t');
   });
 
@@ -499,5 +502,6 @@ describe.skipIf(onWindows)('restore-db.sh', { timeout: SCRIPT_TEST_TIMEOUT_MS },
 
     expect(restore([dump], 'bcuk\n').status).toBe(0);
     expect(read(path.join(sandbox.state, 'mysql-input'))).toContain('CREATE TABLE t');
+    expect(read(path.join(sandbox.state, 'mysql-calls')).split('\n')[1]).toMatch(/^--defaults-extra-file=\S+ bcuk$/);
   });
 });
