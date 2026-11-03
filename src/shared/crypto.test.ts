@@ -3,8 +3,8 @@ import { mockLogger } from '../test-utils/loggerMock';
 
 vi.mock('./logger', () => ({ createLogger: mockLogger }));
 
-import { encryptToken, decryptToken, generateSecretAndHash, needsReencryption, tokenKeyId } from './crypto';
-import { createCipheriv, createHash, randomBytes } from 'node:crypto';
+import { encryptToken, decryptToken, generateSecretAndHash } from './crypto';
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 
 const VALID_SECRET = 'a'.repeat(64); // 64 hex chars = 32 bytes
 
@@ -14,10 +14,9 @@ describe('encryptToken', () => {
     expect(token).toMatch(/^enc:/);
   });
 
-  it("writes the v2 format: the key's id, then three dot-separated base64 segments", () => {
+  it('produces three dot-separated base64 segments after the prefix (no key id, so every build reads it)', () => {
     const token = encryptToken('hello', VALID_SECRET);
-    expect(token.startsWith(`enc:v2:${tokenKeyId(VALID_SECRET)}.`)).toBe(true);
-    const parts = token.slice(`enc:v2:${tokenKeyId(VALID_SECRET)}.`.length).split('.');
+    const parts = token.slice('enc:'.length).split('.');
     expect(parts).toHaveLength(3);
     parts.forEach((p) => expect(p.length).toBeGreaterThan(0));
   });
@@ -55,8 +54,7 @@ describe('decryptToken', () => {
 
   it('throws on malformed encrypted token (missing parts)', () => {
     expect(() => decryptToken('enc:onlyonepart', VALID_SECRET)).toThrow('Invalid encrypted token format');
-    expect(() => decryptToken('enc:v2:nodots', VALID_SECRET)).toThrow('Invalid encrypted token format');
-    expect(() => decryptToken(`enc:v2:${tokenKeyId(VALID_SECRET)}.a.b`, VALID_SECRET)).toThrow('Invalid encrypted token format');
+    expect(() => decryptToken('enc:a.b.c.d', VALID_SECRET)).toThrow('Invalid encrypted token format');
   });
 
   it('throws when decrypting with the wrong key (auth tag mismatch)', () => {
@@ -74,65 +72,59 @@ describe('decryptToken', () => {
   });
   it('rejects a truncated auth tag instead of verifying only its prefix', () => {
     const token = encryptToken('hello', VALID_SECRET);
-    const [keyId, iv, tag, data] = token.slice('enc:v2:'.length).split('.');
+    const [iv, tag, data] = token.slice('enc:'.length).split('.');
     const shortTag = Buffer.from(tag!, 'base64').subarray(0, 4).toString('base64');
-    expect(() => decryptToken(`enc:v2:${keyId}.${iv}.${shortTag}.${data}`, VALID_SECRET)).toThrow();
-    const legacy = legacyEncrypt('hello', VALID_SECRET);
-    const [lIv, lTag, lData] = legacy.slice('enc:'.length).split('.');
-    const lShort = Buffer.from(lTag!, 'base64').subarray(0, 4).toString('base64');
-    expect(() => decryptToken(`enc:${lIv}.${lShort}.${lData}`, VALID_SECRET)).toThrow();
+    expect(() => decryptToken(`enc:${iv}.${shortTag}.${data}`, VALID_SECRET)).toThrow();
+    // Still rejected when a previous key is configured too.
+    expect(() => decryptToken(`enc:${iv}.${shortTag}.${data}`, VALID_SECRET, 'b'.repeat(64))).toThrow();
   });
 });
 
-/** Encrypts in the legacy `enc:<iv>.<tag>.<data>` format, written before tokens carried a key id. */
-function legacyEncrypt(plaintext: string, secret: string): string {
+/**
+ * Encrypts the way the code before key rotation did, to pin that its tokens still decrypt (and
+ * that what is written now is the same format, so an older build can read it after a rollback).
+ */
+function preRotationEncrypt(plaintext: string, secret: string): string {
   const iv = randomBytes(12);
   const cipher = createCipheriv('aes-256-gcm', Buffer.from(secret, 'hex'), iv);
   const data = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
   return `enc:${iv.toString('base64')}.${cipher.getAuthTag().toString('base64')}.${data.toString('base64')}`;
 }
 
+/** Decrypts the way the code before key rotation did: one key, no fallback. */
+function preRotationDecrypt(stored: string, secret: string): string {
+  const [iv, tag, data] = stored.slice('enc:'.length).split('.');
+  const decipher = createDecipheriv('aes-256-gcm', Buffer.from(secret, 'hex'), Buffer.from(iv!, 'base64'), { authTagLength: 16 });
+  decipher.setAuthTag(Buffer.from(tag!, 'base64'));
+  return Buffer.concat([decipher.update(Buffer.from(data!, 'base64')), decipher.final()]).toString('utf8');
+}
+
 describe('key rotation', () => {
   const OLD_KEY = 'b'.repeat(64);
   const NEW_KEY = 'c'.repeat(64);
 
-  it('still decrypts a legacy enc: token with the key that wrote it', () => {
-    expect(decryptToken(legacyEncrypt('legacy', NEW_KEY), NEW_KEY)).toBe('legacy');
+  it('still decrypts a token written before key rotation existed', () => {
+    expect(decryptToken(preRotationEncrypt('legacy', NEW_KEY), NEW_KEY)).toBe('legacy');
   });
 
-  it('decrypts a legacy token written under the previous key while it is configured', () => {
-    expect(decryptToken(legacyEncrypt('legacy', OLD_KEY), NEW_KEY, OLD_KEY)).toBe('legacy');
-    expect(() => decryptToken(legacyEncrypt('legacy', OLD_KEY), NEW_KEY)).toThrow();
+  it('writes tokens an older build can still read, so a rollback keeps them usable', () => {
+    expect(preRotationDecrypt(encryptToken('current', NEW_KEY), NEW_KEY)).toBe('current');
   });
 
   it('decrypts a token written under the previous key while it is configured', () => {
+    expect(decryptToken(encryptToken('rotated', OLD_KEY), NEW_KEY, OLD_KEY)).toBe('rotated');
+  });
+
+  it('prefers the active key when both are configured', () => {
+    expect(decryptToken(encryptToken('current', NEW_KEY), NEW_KEY, OLD_KEY)).toBe('current');
+  });
+
+  it('fails clearly once the previous key is removed or when neither key fits', () => {
     const token = encryptToken('rotated', OLD_KEY);
-    expect(decryptToken(token, NEW_KEY, OLD_KEY)).toBe('rotated');
-  });
-
-  it("fails clearly once the previous key is removed, naming the token's key id", () => {
-    const token = encryptToken('rotated', OLD_KEY);
-    expect(() => decryptToken(token, NEW_KEY)).toThrow(`unknown key (id ${tokenKeyId(OLD_KEY)})`);
-  });
-
-  it('picks the key by id rather than trying each one', () => {
-    const token = encryptToken('current', NEW_KEY);
-    expect(decryptToken(token, NEW_KEY, OLD_KEY)).toBe('current');
-    // Listing the keys the other way round still finds the right one.
-    expect(decryptToken(token, OLD_KEY, NEW_KEY)).toBe('current');
-  });
-
-  it('gives each key a distinct, stable, short id that is not the key itself', () => {
-    expect(tokenKeyId(OLD_KEY)).toBe(tokenKeyId(OLD_KEY));
-    expect(tokenKeyId(OLD_KEY)).not.toBe(tokenKeyId(NEW_KEY));
-    expect(tokenKeyId(OLD_KEY)).toMatch(/^[0-9a-f]{16}$/);
-    expect(OLD_KEY).not.toContain(tokenKeyId(OLD_KEY));
-  });
-
-  it('flags legacy tokens and tokens under another key for re-encryption, not current ones', () => {
-    expect(needsReencryption(encryptToken('x', NEW_KEY), NEW_KEY)).toBe(false);
-    expect(needsReencryption(encryptToken('x', OLD_KEY), NEW_KEY)).toBe(true);
-    expect(needsReencryption(legacyEncrypt('x', NEW_KEY), NEW_KEY)).toBe(true);
+    expect(() => decryptToken(token, NEW_KEY)).toThrow();
+    expect(() => decryptToken(token, NEW_KEY, 'd'.repeat(64))).toThrow(
+      'Token could not be decrypted with EVENTSUB_TOKEN_SECRET or EVENTSUB_TOKEN_SECRET_PREVIOUS',
+    );
   });
 });
 

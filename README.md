@@ -95,7 +95,7 @@ The web panel must only be reachable through the reverse proxy. It trusts exactl
 
 ### Rotating EVENTSUB_TOKEN_SECRET
 
-`EVENTSUB_TOKEN_SECRET` encrypts every stored Twitch OAuth token (the streamers' EventSub tokens and the chat bot's own). Each token records which key wrote it, so the key can be changed without anyone reconnecting:
+`EVENTSUB_TOKEN_SECRET` encrypts every stored Twitch OAuth token (the streamers' EventSub tokens and the chat bot's own). While both the new and the previous key are configured, a token is read with the new key and falls back to the previous one, so the key can be changed without anyone reconnecting:
 
 1. Generate a new key: `openssl rand -hex 32`.
 2. In `.env`, move the current value to `EVENTSUB_TOKEN_SECRET_PREVIOUS` and put the new one in `EVENTSUB_TOKEN_SECRET`.
@@ -104,7 +104,7 @@ The web panel must only be reachable through the reverse proxy. It trusts exactl
 
 If startup warns that some token rows changed during re-encryption, restart once more before step 4; don't remove the previous key until the "can now be removed" line appears. If it warns that some tokens can't be decrypted with any configured key, those were written under a key that is no longer in `.env`; the affected streamers (or the bot account, via `/admin/bot-auth`) must reconnect. Never put a key or a decrypted token in a log, an issue or a chat.
 
-**Rolling back past this feature:** builds from before key-id tokens (`enc:v2:`) can only read the older `enc:` format, and the first start of a newer build rewrites every stored token into `enc:v2:`. Rolling back to such a build therefore leaves every streamer (and the bot account) needing to reconnect. If you must roll back, expect that, or restore the database from a backup taken before the upgrade.
+Stored tokens keep the same `enc:` format whichever key wrote them, and outside a rotation startup leaves them untouched, so a deploy can always be rolled back without breaking tokens.
 
 ### SFX file format
 

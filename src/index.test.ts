@@ -338,11 +338,16 @@ describe('startup — guild registry preload', () => {
   it('keeps starting when re-encrypting stored tokens fails', async () => {
     const db = await import('./db.js');
     const { startDiscordBot } = await import('./discord/discordBot.js');
-    vi.mocked(db.reencryptStoredTokens).mockRejectedValueOnce(new Error('DB hiccup'));
+    const failure = new Error('DB hiccup');
+    vi.mocked(db.reencryptStoredTokens).mockRejectedValueOnce(failure);
 
     await runMain();
 
     expect(exitSpy).not.toHaveBeenCalled();
+    expect(lastBotLogger!.warn).toHaveBeenCalledWith(
+      'Re-encrypting stored tokens under the active key failed; will retry on the next start:',
+      failure,
+    );
     expect(vi.mocked(startDiscordBot)).toHaveBeenCalledOnce();
   });
 

@@ -15,14 +15,14 @@ vi.mock('../shared/config', () => ({
 }));
 
 import { getPool } from './pool';
-import { decryptToken, encryptToken, needsReencryption } from '../shared/crypto';
+import { decryptToken, encryptToken } from '../shared/crypto';
 import { reencryptStoredTokens } from './tokenReencryption';
 
 const OLD_KEY = 'b'.repeat(64);
 const NEW_KEY = 'c'.repeat(64);
 
-/** Encrypts in the legacy `enc:<iv>.<tag>.<data>` format, written before tokens carried a key id. */
-function legacyEncrypt(plaintext: string, secret: string): string {
+/** Encrypts the way the code before key rotation did. */
+function preRotationEncrypt(plaintext: string, secret: string): string {
   const iv = randomBytes(12);
   const cipher = createCipheriv('aes-256-gcm', Buffer.from(secret, 'hex'), iv);
   const data = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
@@ -54,11 +54,11 @@ beforeEach(() => {
 });
 
 describe('reencryptStoredTokens', () => {
-  it('rewrites tokens under the previous key and legacy tokens so only the new key is needed', async () => {
+  it('rewrites tokens under the previous key (old and new code alike) so only the new key is needed', async () => {
     const tables = {
       streamer: [
         { id: 1, access: encryptToken('s1-access', OLD_KEY), refresh: encryptToken('s1-refresh', OLD_KEY) },
-        { id: 2, access: legacyEncrypt('s2-access', OLD_KEY), refresh: legacyEncrypt('s2-refresh', OLD_KEY) },
+        { id: 2, access: preRotationEncrypt('s2-access', OLD_KEY), refresh: preRotationEncrypt('s2-refresh', OLD_KEY) },
       ],
       twitch_bot_chat_token: [
         { id: 1, access: encryptToken('bot-access', OLD_KEY), refresh: encryptToken('bot-refresh', OLD_KEY) },
@@ -73,11 +73,12 @@ describe('reencryptStoredTokens', () => {
     expect(mockLog.info).toHaveBeenCalledWith(expect.stringContaining('EVENTSUB_TOKEN_SECRET_PREVIOUS can now be removed'));
   });
 
-  it('leaves tokens already under the active key, and null columns, alone', async () => {
+  it('leaves tokens the active key reads (including ones from before rotation existed), and null columns, alone', async () => {
     const current = encryptToken('current', NEW_KEY);
+    const older = preRotationEncrypt('older', NEW_KEY);
     const tables = {
       streamer: [{ id: 1, access: current, refresh: null }],
-      twitch_bot_chat_token: [],
+      twitch_bot_chat_token: [{ id: 1, access: older, refresh: older }],
     };
     const pool = fakePool(tables);
     vi.mocked(getPool).mockReturnValue(pool as never);
@@ -85,6 +86,17 @@ describe('reencryptStoredTokens', () => {
     await expect(reencryptStoredTokens()).resolves.toEqual({ reencrypted: 0, unreadable: 0, pending: 0 });
     expect(pool.execute).not.toHaveBeenCalled();
     expect(tables.streamer[0]).toEqual({ id: 1, access: current, refresh: null });
+    expect(tables.twitch_bot_chat_token[0]).toEqual({ id: 1, access: older, refresh: older });
+  });
+
+  it('changes nothing outside a key rotation, so a deploy can be rolled back', async () => {
+    keys.previous = '';
+    const tables = { streamer: [{ id: 1, access: encryptToken('a', NEW_KEY), refresh: preRotationEncrypt('r', NEW_KEY) }], twitch_bot_chat_token: [] };
+    const pool = fakePool(tables);
+    vi.mocked(getPool).mockReturnValue(pool as never);
+
+    await expect(reencryptStoredTokens()).resolves.toEqual({ reencrypted: 0, unreadable: 0, pending: 0 });
+    expect(pool.execute).not.toHaveBeenCalled();
   });
 
   it('rewrites only the stale half of a pair, keeping the current half byte-for-byte', async () => {
@@ -95,7 +107,7 @@ describe('reencryptStoredTokens', () => {
     await reencryptStoredTokens();
 
     expect(tables.streamer[0]!.access).toBe(current);
-    expect(needsReencryption(tables.streamer[0]!.refresh, NEW_KEY)).toBe(false);
+    expect(decryptToken(tables.streamer[0]!.refresh, NEW_KEY)).toBe('refresh');
   });
 
   it('counts and keeps a token no configured key can decrypt, and warns', async () => {

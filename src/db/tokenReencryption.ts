@@ -1,7 +1,7 @@
 import mysql from 'mysql2/promise';
 import { getPool } from './pool';
 import { EVENTSUB_TOKEN_SECRET, EVENTSUB_TOKEN_SECRET_PREVIOUS } from '../shared/config';
-import { decryptToken, encryptToken, needsReencryption } from '../shared/crypto';
+import { decryptToken, encryptToken } from '../shared/crypto';
 import { createLogger } from '../shared/logger';
 
 const log = createLogger('TokenKeys');
@@ -43,21 +43,32 @@ export interface TokenReencryptionResult {
 type Rewritten = { value: string | null; changed: boolean; unreadable: boolean };
 
 /**
- * Re-encrypts one stored token under the active key when it isn't already, leaving it untouched
- * when it's null, already current, or can't be decrypted with any configured key. A token that is
- * already current is still decrypted, so a damaged one is reported as unreadable.
+ * Decrypts a token with exactly one key.
+ * @param stored - The column's value.
+ * @param secret - 64-character hex AES-256 key.
+ * @returns The plaintext, or undefined when this key doesn't decrypt it.
+ */
+function tryDecrypt(stored: string, secret: string): string | undefined {
+  try {
+    return decryptToken(stored, secret);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Re-encrypts one stored token under the active key when only the previous key can decrypt it,
+ * leaving it untouched when it's null, already readable with the active key, or readable with
+ * neither (a damaged token, or one from a key that is no longer configured).
  * @param stored - The column's current value.
  * @returns The value to store, and whether it changed or was unreadable.
  */
 function rewriteToken(stored: string | null): Rewritten {
-  if (stored === null) return { value: stored, changed: false, unreadable: false };
-  let plaintext: string;
-  try {
-    plaintext = decryptToken(stored, EVENTSUB_TOKEN_SECRET, EVENTSUB_TOKEN_SECRET_PREVIOUS);
-  } catch {
-    return { value: stored, changed: false, unreadable: true };
+  if (stored === null || tryDecrypt(stored, EVENTSUB_TOKEN_SECRET) !== undefined) {
+    return { value: stored, changed: false, unreadable: false };
   }
-  if (!needsReencryption(stored, EVENTSUB_TOKEN_SECRET)) return { value: stored, changed: false, unreadable: false };
+  const plaintext = EVENTSUB_TOKEN_SECRET_PREVIOUS ? tryDecrypt(stored, EVENTSUB_TOKEN_SECRET_PREVIOUS) : undefined;
+  if (plaintext === undefined) return { value: stored, changed: false, unreadable: true };
   return { value: encryptToken(plaintext, EVENTSUB_TOKEN_SECRET), changed: true, unreadable: false };
 }
 
@@ -93,9 +104,9 @@ async function reencryptTable(spec: TokenTable): Promise<TokenReencryptionResult
 }
 
 /**
- * Rewrites every stored OAuth token that isn't already encrypted under the active
- * `EVENTSUB_TOKEN_SECRET` — legacy `enc:` tokens and tokens written under
- * `EVENTSUB_TOKEN_SECRET_PREVIOUS` — so the previous key can be removed afterwards. Run once at
+ * Rewrites every stored OAuth token that only `EVENTSUB_TOKEN_SECRET_PREVIOUS` can decrypt under
+ * the active `EVENTSUB_TOKEN_SECRET`, so the previous key can be removed afterwards. Outside a key
+ * rotation it changes nothing, so a deploy stays safe to roll back. Run once at
  * startup, before anything else reads the tokens. Logs what it did, never a key or a token.
  * A no-op when no `EVENTSUB_TOKEN_SECRET` is configured.
  * @returns How many rows were rewritten, how many changed underneath the pass (left for the next
