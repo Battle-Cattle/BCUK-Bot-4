@@ -8,7 +8,7 @@ const sonarjs = require('eslint-plugin-sonarjs');
 
 module.exports = tseslint.config(
   {
-    ignores: ['dist/**', 'dist.new/**', 'dist.old/**', 'node_modules/**', 'coverage/**', '.vitest-cache/**', 'eslint.config.js', 'public/vendor/**'],
+    ignores: ['dist/**', 'dist.new/**', 'dist.old/**', 'node_modules/**', 'node_modules.old/**', 'coverage/**', '.vitest-cache/**', 'eslint.config.js', 'public/vendor/**'],
   },
   js.configs.recommended,
   {

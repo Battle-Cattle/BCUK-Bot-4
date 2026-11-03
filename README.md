@@ -42,11 +42,16 @@ The unit keeps running the `node` it was installed with, so after upgrading Node
 
 1. Pulls the latest code.
 2. Builds and tests it.
-3. Swaps the new build in.
-4. Restarts the service.
-5. Waits up to 90 seconds for `GET /healthz` on the web panel to answer from the service's own process.
+3. Swaps the new build in, keeping the previous one (and, if the dependencies changed, the previous `node_modules`) beside it.
+4. Backs up the database (see [Backups](#backups)).
+5. Restarts the service.
+6. Waits up to 90 seconds for `GET /healthz` on the web panel to answer from the service's own process, then 30 more to check it stays up: the same process, no restarts, still answering.
 
-If the bot doesn't come back up, the deploy fails and prints the service status and its last 50 log lines. It also fails straight away if another process holds the web port, such as a copy still running in an old `screen` session. The health check needs `curl` and `ss` (from iproute2).
+If any step fails, the deploy rolls back: the previous code, build and dependencies go back in place and, if the service had already restarted, it restarts onto the previous build and checks that comes up. It then prints a report, also saved to `logs/last-deploy-failure.log`: what failed, the command, both commits, the service status and its log since the restart, and whether the rolled-back bot is healthy. A failed rollback says so in capitals: the bot is down.
+
+One case doesn't roll back automatically: when the failed build had already applied a new database migration. The previous build refuses to start against a database that records migrations it doesn't know, so the deploy leaves the new build in place and prints the commands to go back by hand, starting with restoring the backup it took just before the restart. Fixing forward is usually quicker.
+
+The backup is required when a deploy adds migrations; otherwise a failed backup only warns. The health check needs `curl` and `ss` (from iproute2), and the backup `mysqldump`.
 
 Day to day:
 
@@ -88,6 +93,30 @@ The web panel serves uploaded files straight from disk: overlay videos from `OVE
 - Make these folders owned and writable **only** by the user the bot runs as (e.g. `chown -R bot:bot <folder> && chmod -R go-w <folder>`). Anyone else who can write there could plant a symlink to a file outside the folder and race the check.
 - Don't point them at a shared or world-writable location (e.g. `/tmp`), and don't nest one inside a directory other users can write to.
 - Keep them outside the repo checkout and away from `.env` and other secrets.
+
+### Backups
+
+`bash scripts/backup-db.sh [label]` dumps the database (`mysqldump --single-transaction`, which doesn't lock the running bot out) to a gzipped file in `BACKUP_DIR` (default `~/bcuk-bot-backups`) and deletes the oldest beyond `BACKUP_KEEP` (default 14). `deploy.sh` runs it with the label `pre-deploy` before every restart. For a nightly backup too, add a cron entry for the bot's user (`crontab -e`):
+
+```
+17 4 * * * cd /path/to/BCUK-Bot-4 && bash scripts/backup-db.sh nightly > /dev/null
+```
+
+Treat dumps as secrets: they hold every stored OAuth token, encrypted with `EVENTSUB_TOKEN_SECRET`, and the directory and files are created readable by the bot's user only. Back up separately, and somewhere other than this server:
+
+- **`.env`**, above all `EVENTSUB_TOKEN_SECRET` (without it, restored tokens can't be decrypted and every streamer has to reconnect) and `SESSION_SECRET`.
+- **The upload folders** (`OVERLAY_FOLDER`, `ALERT_ASSETS_FOLDER`, `SFX_FOLDER`), which the database rows point at, e.g. `tar czf uploads-$(date +%F).tar.gz <folders>`.
+- **The dumps themselves**: a copy on the same disk doesn't survive losing the disk.
+
+**Restoring.** `bash scripts/restore-db.sh <dump.sql.gz>` replaces the live database. It refuses while the service is running and asks you to type the database name to confirm:
+
+```bash
+sudo systemctl stop bcuk-bot
+bash scripts/restore-db.sh ~/bcuk-bot-backups/<file>.sql.gz
+sudo systemctl start bcuk-bot
+```
+
+**Test a backup** now and then by restoring it into a scratch database, which leaves the live one alone: `bash scripts/restore-db.sh <file> bcuk_restore_test`. Then check it looks right (`mysql bcuk_restore_test -e 'SELECT COUNT(*) FROM user; SELECT version FROM schema_migrations'`) and drop it (`DROP DATABASE bcuk_restore_test`). The bot's MySQL user needs permission to create that database.
 
 ### SFX file format
 
