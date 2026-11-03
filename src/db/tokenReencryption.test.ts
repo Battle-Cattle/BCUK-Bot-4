@@ -32,20 +32,26 @@ function preRotationEncrypt(plaintext: string, secret: string): string {
 type Row = { id: number; access: string | null; refresh: string | null };
 
 /**
- * A fake pool over two in-memory tables keyed by name; `query` returns the table the SQL names and
- * `execute` applies the compare-and-swap UPDATE the way MySQL would.
+ * A fake pool over two in-memory tables keyed by name. `query` returns the table a SELECT names and
+ * applies the compare-and-swap UPDATE the way MySQL would. It has no `execute`, whose prepare step
+ * has no timeout, so a call to it fails the test.
  */
 function fakePool(tables: Record<string, Row[]>) {
   const tableOf = (sql: string) => Object.keys(tables).find((t) => new RegExp(`\\b(FROM|UPDATE) ${t}\\b`).test(sql))!;
   return {
-    query: vi.fn(async ({ sql }: { sql: string }) => [tables[tableOf(sql)]!.map((r) => ({ ...r }))]),
-    execute: vi.fn(async ({ sql }: { sql: string }, [access, refresh, id, oldAccess, oldRefresh]: unknown[]) => {
+    query: vi.fn(async ({ sql }: { sql: string }, params?: unknown[]) => {
+      if (!sql.startsWith('UPDATE')) return [tables[tableOf(sql)]!.map((r) => ({ ...r }))];
+      const [access, refresh, id, oldAccess, oldRefresh] = params!;
       const row = tables[tableOf(sql)]!.find((r) => r.id === id && r.access === oldAccess && r.refresh === oldRefresh);
       if (row) Object.assign(row, { access, refresh });
       return [{ affectedRows: row ? 1 : 0 }];
     }),
   };
 }
+
+/** The UPDATE statements the pass sent through the fake pool. */
+const updateCalls = (pool: ReturnType<typeof fakePool>) =>
+  pool.query.mock.calls.filter(([options]) => options.sql.startsWith('UPDATE'));
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -84,7 +90,7 @@ describe('reencryptStoredTokens', () => {
     vi.mocked(getPool).mockReturnValue(pool as never);
 
     await expect(reencryptStoredTokens()).resolves.toEqual({ reencrypted: 0, unreadable: 0, pending: 0 });
-    expect(pool.execute).not.toHaveBeenCalled();
+    expect(updateCalls(pool)).toHaveLength(0);
     expect(tables.streamer[0]).toEqual({ id: 1, access: current, refresh: null });
     expect(tables.twitch_bot_chat_token[0]).toEqual({ id: 1, access: older, refresh: older });
   });
@@ -96,7 +102,7 @@ describe('reencryptStoredTokens', () => {
     vi.mocked(getPool).mockReturnValue(pool as never);
 
     await expect(reencryptStoredTokens()).resolves.toEqual({ reencrypted: 0, unreadable: 0, pending: 0 });
-    expect(pool.execute).not.toHaveBeenCalled();
+    expect(updateCalls(pool)).toHaveLength(0);
   });
 
   it('rewrites only the stale half of a pair, keeping the current half byte-for-byte', async () => {
@@ -117,7 +123,7 @@ describe('reencryptStoredTokens', () => {
     vi.mocked(getPool).mockReturnValue(pool as never);
 
     await expect(reencryptStoredTokens()).resolves.toEqual({ reencrypted: 0, unreadable: 2, pending: 0 });
-    expect(pool.execute).not.toHaveBeenCalled();
+    expect(updateCalls(pool)).toHaveLength(0);
     expect(tables.streamer[0]!.access).toBe(stranded);
     expect(mockLog.warn).toHaveBeenCalledWith(expect.stringContaining('must reconnect'));
   });
@@ -148,7 +154,7 @@ describe('reencryptStoredTokens', () => {
     vi.mocked(getPool).mockReturnValue(pool as never);
 
     await expect(reencryptStoredTokens()).resolves.toEqual({ reencrypted: 0, unreadable: 1, pending: 0 });
-    expect(pool.execute).not.toHaveBeenCalled();
+    expect(updateCalls(pool)).toHaveLength(0);
     expect(mockLog.warn).toHaveBeenCalledWith(expect.stringContaining('must reconnect'));
     expect(mockLog.info).not.toHaveBeenCalledWith(expect.stringContaining('can now be removed'));
   });
@@ -160,7 +166,8 @@ describe('reencryptStoredTokens', () => {
 
     await reencryptStoredTokens();
 
-    for (const [options] of [...pool.query.mock.calls, ...pool.execute.mock.calls]) {
+    expect(updateCalls(pool)).toHaveLength(1);
+    for (const [options] of pool.query.mock.calls) {
       expect(options).toMatchObject({ timeout: 10_000 });
     }
   });

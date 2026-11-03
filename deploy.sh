@@ -222,13 +222,13 @@ mv "$BUILD_DIR" dist
 trap - ERR  # Rollback no longer needed — code is good.
 rm -rf dist.old
 
-# Prints a setting from .env the way dotenv reads it: last entry wins; a quoted value is taken up
-# to its closing quote (so a `#` inside it stays); an unquoted one ends at the first `#` and loses
-# surrounding spaces. Prints nothing for no entry (grep finding nothing must not trip pipefail) or a
+# Prints a setting from .env the way dotenv reads it: an optional `export ` prefix and spaces
+# around `=` are allowed; last entry wins; a quoted value is taken up to its closing quote (so a `#`
+# inside it stays); an unquoted one ends at the first `#` and loses surrounding spaces. Prints nothing for no entry (grep finding nothing must not trip pipefail) or a
 # blank one.
 env_setting() {
     local value
-    value="$( { grep -E "^[[:space:]]*$1=" .env 2>/dev/null || true; } | tail -n 1 | cut -d= -f2-)"
+    value="$( { grep -E "^[[:space:]]*(export[[:space:]]+)?$1[[:space:]]*=" .env 2>/dev/null || true; } | tail -n 1 | cut -d= -f2-)"
     value="${value#"${value%%[![:space:]]*}"}"
     case "$value" in
         \"*) value="${value#\"}"; value="${value%%\"*}" ;;
@@ -238,10 +238,13 @@ env_setting() {
     printf '%s' "$value"
 }
 
-# Blank or missing values fall back to the same defaults as config.ts.
+# Blank or missing values fall back to the same defaults as config.ts, which also trims WEB_HOST
+# (spaces inside quotes survive env_setting, but not the bot's bind).
 WEB_PORT_SETTING="$(env_setting WEB_PORT)"
 WEB_PORT="${WEB_PORT_SETTING:-3000}"
 WEB_HOST_SETTING="$(env_setting WEB_HOST)"
+WEB_HOST_SETTING="${WEB_HOST_SETTING#"${WEB_HOST_SETTING%%[![:space:]]*}"}"
+WEB_HOST_SETTING="${WEB_HOST_SETTING%"${WEB_HOST_SETTING##*[![:space:]]}"}"
 WEB_HOST="${WEB_HOST_SETTING:-127.0.0.1}"
 # A wildcard bind is reachable on loopback; an IPv6 literal needs brackets in a URL.
 case "$WEB_HOST" in

@@ -106,6 +106,21 @@ describe('preSessionLimiterSkip', () => {
     expect(preSessionLimiterSkip(req)).toBe(false);
   });
 
+  it.each(['connect.sid =s%3Aabc.def', 'theme=dark;connect.sid\t= s%3Aabc.def'])(
+    'counts a Streamdeck API call whose session cookie has spaces around its name (%s)',
+    (cookie) => {
+      const req = makeReq({ path: '/api/streamdeck/sfx' });
+      req.headers.cookie = cookie;
+      expect(preSessionLimiterSkip(req)).toBe(false);
+    },
+  );
+
+  it('still skips a Streamdeck API call whose only cookie merely ends in connect.sid', () => {
+    const req = makeReq({ path: '/api/streamdeck/sfx' });
+    req.headers.cookie = 'xconnect.sid=1';
+    expect(preSessionLimiterSkip(req)).toBe(true);
+  });
+
   it('counts every other request, authenticated or not', () => {
     expect(preSessionLimiterSkip(makeReq({ path: '/dashboard' }))).toBe(false);
     expect(preSessionLimiterSkip(makeReq({ path: '/dashboard', sessionUser: authedUser }))).toBe(false);

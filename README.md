@@ -106,6 +106,8 @@ If startup warns that some token rows changed during re-encryption, restart once
 
 Stored tokens keep the same `enc:` format whichever key wrote them, and outside a rotation startup leaves them untouched, so a deploy can always be rolled back without breaking tokens.
 
+During a rotation, avoid rolling back to a build from before `EVENTSUB_TOKEN_SECRET_PREVIOUS` existed. Such a build reads tokens only with `EVENTSUB_TOKEN_SECRET`, so any token not yet re-encrypted under the new key stops working until this build runs again (the previous key is still in `.env`, so nothing is lost). Finish the rotation, up to the "can now be removed" line, before deploying such a build.
+
 ### SFX file format
 
 Any format ffmpeg reads will play, but each play of most formats starts an ffmpeg process to decode and re-encode it, which adds a short delay before the sound is heard. A file that's already **48kHz stereo Opus in an `.ogg`, `.opus` or `.webm` file** goes to Discord as it is, with no ffmpeg step, so it starts fastest. To convert one (any other kind of `.ogg`, such as Vorbis or mono Opus, still plays through ffmpeg):

@@ -38,13 +38,13 @@ if [ -z "$SYSTEMCTL_BIN" ]; then
     exit 1
 fi
 
-# Prints a setting from .env the way dotenv reads it: last entry wins; a quoted value is taken up
-# to its closing quote (so a `#` inside it stays); an unquoted one ends at the first `#` and loses
-# surrounding spaces. Prints nothing for no entry (grep finding nothing must not trip pipefail) or a
+# Prints a setting from .env the way dotenv reads it: an optional `export ` prefix and spaces
+# around `=` are allowed; last entry wins; a quoted value is taken up to its closing quote (so a `#`
+# inside it stays); an unquoted one ends at the first `#` and loses surrounding spaces. Prints nothing for no entry (grep finding nothing must not trip pipefail) or a
 # blank one.
 env_setting() {
     local value
-    value="$( { grep -E "^[[:space:]]*$1=" "$REPO_DIR/.env" 2>/dev/null || true; } | tail -n 1 | cut -d= -f2-)"
+    value="$( { grep -E "^[[:space:]]*(export[[:space:]]+)?$1[[:space:]]*=" "$REPO_DIR/.env" 2>/dev/null || true; } | tail -n 1 | cut -d= -f2-)"
     value="${value#"${value%%[![:space:]]*}"}"
     case "$value" in
         \"*) value="${value#\"}"; value="${value%%\"*}" ;;

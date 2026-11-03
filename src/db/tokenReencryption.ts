@@ -9,7 +9,8 @@ const log = createLogger('TokenKeys');
 /**
  * Per-query timeout. This runs during startup, ahead of the bot and the panel, so a database that
  * stops answering on a live connection must not hang startup: the query fails, startup logs it and
- * carries on, and the next start retries.
+ * carries on, and the next start retries. Every statement here goes through `query`, whose timeout
+ * covers the whole exchange: `execute` first prepares the statement, and that step has no timer.
  */
 const QUERY_TIMEOUT_MS = 10_000;
 
@@ -90,7 +91,7 @@ async function reencryptTable(spec: TokenTable): Promise<TokenReencryptionResult
     const newRefresh = rewriteToken(row.refresh as string | null);
     result.unreadable += Number(newAccess.unreadable) + Number(newRefresh.unreadable);
     if (!newAccess.changed && !newRefresh.changed) continue;
-    const [update] = await getPool().execute<mysql.ResultSetHeader>(
+    const [update] = await getPool().query<mysql.ResultSetHeader>(
       {
         sql: `UPDATE ${table} SET ${access} = ?, ${refresh} = ? WHERE id = ? AND ${access} <=> ? AND ${refresh} <=> ?`,
         timeout: QUERY_TIMEOUT_MS,

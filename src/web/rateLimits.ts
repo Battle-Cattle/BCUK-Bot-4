@@ -53,10 +53,11 @@ export function generalLimiterSkip(req: Request): boolean {
  * Tells whether a request carries an express-session cookie (`connect.sid`), i.e. whether the
  * session middleware will look it up in the store.
  * @param req - Express request object
- * @returns true if the Cookie header names `connect.sid`
+ * @returns true if the Cookie header names `connect.sid` (spaces around the name are allowed, as
+ *   the cookie parser express-session uses trims them)
  */
 function hasSessionCookie(req: Request): boolean {
-  return /(?:^|;)\s*connect\.sid=/.test(req.headers.cookie ?? '');
+  return /(?:^|;)\s*connect\.sid\s*=/.test(req.headers.cookie ?? '');
 }
 
 /**
