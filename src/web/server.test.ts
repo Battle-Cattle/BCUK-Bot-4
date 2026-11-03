@@ -445,9 +445,14 @@ async function expectExactThreshold(testApp: express.Express, limit: number): Pr
  *
  * @param testApp - App built by {@link buildLimiterTestApp}.
  * @param fn - Receives a function that sends one probe request and resolves with its status.
+ * @param headers - Extra headers sent with every probe (e.g. `X-Forwarded-For`).
  * @returns Resolves once `fn` has finished and the server has closed.
  */
-async function withListeningServer(testApp: express.Express, fn: (probe: () => Promise<number>) => Promise<void>): Promise<void> {
+async function withListeningServer(
+  testApp: express.Express,
+  fn: (probe: () => Promise<number>) => Promise<void>,
+  headers: http.OutgoingHttpHeaders = {},
+): Promise<void> {
   const server = http.createServer(testApp);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const { port } = server.address() as AddressInfo;
@@ -458,7 +463,7 @@ async function withListeningServer(testApp: express.Express, fn: (probe: () => P
    * so a broken probe fails the test at once instead of hanging the loop until the timeout.
    */
   const probe = (): Promise<number> => new Promise((resolve, reject) => {
-    http.get({ host: '127.0.0.1', port, path: '/__limiter_probe', agent }, (res) => {
+    http.get({ host: '127.0.0.1', port, path: '/__limiter_probe', agent, headers }, (res) => {
       res.resume();
       res.on('end', () => resolve(res.statusCode ?? 0));
       res.on('error', reject);
@@ -639,31 +644,36 @@ describe('preSessionLimiter (server.ts)', () => {
     storeGet.mockClear();
   });
 
-  it('cuts off a flood of replayed session cookies from one IP before the store is queried', async () => {
-    const server = http.createServer(app);
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-    const { port } = server.address() as AddressInfo;
-    const agent = new http.Agent({ keepAlive: true, maxSockets: 1 });
-    const headers = { cookie: signedSessionCookie('replayed-session'), 'x-forwarded-for': CLIENT_IP };
-    /** Sends one cookie-carrying request as CLIENT_IP and resolves with its status. */
-    const send = (): Promise<number> => new Promise((resolve, reject) => {
-      http.get({ host: '127.0.0.1', port, path: '/__pre_session_probe', agent, headers }, (res) => {
-        res.resume();
-        res.on('end', () => resolve(res.statusCode ?? 0));
-      }).on('error', reject);
-    });
-    try {
-      for (let i = 0; i < 2000; i++) {
-        expect(await send()).not.toBe(503);
-      }
-      expect(storeGet).toHaveBeenCalledTimes(2000);
-      expect(await send()).toBe(429);
-      expect(storeGet).toHaveBeenCalledTimes(2000);
-    } finally {
-      agent.destroy();
-      await new Promise<void>((resolve) => server.close(() => resolve()));
-    }
-  });
+  it('allows exactly 2000 requests per IP, then cuts the client off', async () => {
+    // A bare app around the same limiter instance (so the same counters) keeps the 2000-request
+    // loop cheap; trust proxy matches server.ts, so the key is the X-Forwarded-For client.
+    const testApp = express();
+    testApp.set('trust proxy', 1);
+    testApp.use(preSessionLimiter);
+    testApp.get('/__limiter_probe', (_req, res) => res.json({ ok: true }));
+    await withListeningServer(testApp, async (probe) => {
+      await expectProbeStatuses(probe, 2000, 200);
+      await expectProbeStatuses(probe, 1, 429);
+    }, { 'x-forwarded-for': CLIENT_IP });
+  }, 30_000);
+
+  it('turns a cut-off IP away before its replayed session cookie reaches the store', async () => {
+    const cookie = signedSessionCookie('replayed-session');
+    await request(app).get('/__pre_session_probe').set('Cookie', cookie).set('X-Forwarded-For', CLIENT_IP);
+    expect(storeGet).toHaveBeenCalledOnce();
+
+    // Use up the rest of the IP's budget through a bare app sharing the limiter's counters.
+    const testApp = express();
+    testApp.set('trust proxy', 1);
+    testApp.use(preSessionLimiter);
+    testApp.get('/__limiter_probe', (_req, res) => res.json({ ok: true }));
+    await withListeningServer(testApp, (probe) => expectProbeStatuses(probe, 1999, 200), { 'x-forwarded-for': CLIENT_IP });
+
+    storeGet.mockClear();
+    const res = await request(app).get('/__pre_session_probe').set('Cookie', cookie).set('X-Forwarded-For', CLIENT_IP);
+    expect(res.status).toBe(429);
+    expect(storeGet).not.toHaveBeenCalled();
+  }, 30_000);
 
   it('leaves the Streamdeck API to its own limiters', async () => {
     const testApp = express();
