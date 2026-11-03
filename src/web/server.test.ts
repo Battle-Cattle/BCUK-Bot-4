@@ -533,7 +533,9 @@ describe('startWebPanel / stopWebPanel', () => {
 
   it('rejects with the listen error instead of reporting success when the port is taken', async () => {
     const blocker = http.createServer();
-    await new Promise<void>((resolve) => blocker.listen(0, resolve));
+    // Same address the panel binds by default: Windows lets a specific-address bind share a port
+    // with a wildcard listener, so a wildcard blocker wouldn't make the panel's listen fail there.
+    await new Promise<void>((resolve) => blocker.listen(0, '127.0.0.1', resolve));
     const { port } = blocker.address() as AddressInfo;
     try {
       await expect(startWebPanel(port)).rejects.toMatchObject({ code: 'EADDRINUSE' });
