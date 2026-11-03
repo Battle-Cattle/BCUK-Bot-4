@@ -76,6 +76,30 @@ describe('overlayUploadStorage', () => {
     expect(await incoming()).toEqual([]);
   });
 
+  it('removes a partly written upload when the write fails, before reporting the error', async () => {
+    const realCreate = fs.createWriteStream.bind(fs);
+    vi.spyOn(fs, 'createWriteStream').mockImplementationOnce(((target: fs.PathLike) => {
+      const stream = realCreate(target);
+      stream.once('open', () => stream.destroy(Object.assign(new Error('disk full'), { code: 'ENOSPC' })));
+      return stream;
+    }) as typeof fs.createWriteStream);
+    const res = await supertest(buildApp()).post('/upload').attach('video', MOV_BYTES, 'clip.mov');
+    expect(res.body.error).toBe('ENOSPC');
+    expect(await incoming()).toEqual([]);
+  });
+
+  it('still reports a failed write when removing the partial upload also fails', async () => {
+    const realCreate = fs.createWriteStream.bind(fs);
+    vi.spyOn(fs, 'createWriteStream').mockImplementationOnce(((target: fs.PathLike) => {
+      const stream = realCreate(target);
+      stream.once('open', () => stream.destroy(Object.assign(new Error('disk full'), { code: 'ENOSPC' })));
+      return stream;
+    }) as typeof fs.createWriteStream);
+    vi.spyOn(fs.promises, 'rm').mockRejectedValueOnce(new Error('denied'));
+    const res = await supertest(buildApp()).post('/upload').attach('video', MOV_BYTES, 'clip.mov');
+    expect(res.body.error).toBe('ENOSPC');
+  });
+
   it('fails the upload when the incoming folder cannot be created', async () => {
     vi.spyOn(fs.promises, 'mkdir').mockRejectedValueOnce(Object.assign(new Error('denied'), { code: 'EACCES' }));
     const res = await supertest(buildApp()).post('/upload').attach('video', MOV_BYTES, 'clip.mov');

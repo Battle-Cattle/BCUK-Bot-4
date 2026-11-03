@@ -1,5 +1,5 @@
 import { createLogger } from '../../shared/logger';
-import { Router, type Request, type Response } from 'express';
+import { Router, type NextFunction, type Request, type Response } from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
@@ -17,12 +17,22 @@ import { safeResolve } from '../../shared/pathUtils';
 import { NOT_A_STREAMER_REDIRECT } from './overlayAdminShared';
 import { storeMovAsWebm } from './overlayMovConversion';
 import { isWebmTranscodeQueueFull, type ProgressListener } from './overlayVideoTranscode';
-import { parseUploadId, setConversionProgress, clearConversionProgress } from './overlayConversionProgress';
+import { parseUploadId, claimConversionProgress, setConversionProgress, releaseConversionProgress } from './overlayConversionProgress';
 import {
   overlayUploadStorage, detectUploadedVideoType, placeUpload, discardUpload, sweepStaleIncomingUploads, type OverlayVideoType,
 } from './overlayUploadStorage';
 
 const log = createLogger('OverlayAdmin');
+
+/**
+ * Most overlay uploads in progress at once. Each can stream up to the size limit into
+ * `OVERLAY_FOLDER/.incoming`, so this bounds the disk a burst of uploads can take before any of
+ * them is checked.
+ */
+export const MAX_CONCURRENT_OVERLAY_UPLOADS = 3;
+
+/** Number of overlay uploads in progress (see {@link MAX_CONCURRENT_OVERLAY_UPLOADS}). */
+let activeUploads = 0;
 
 /** Error codes `saveVideoFile` throws that the upload route reports as themselves. */
 const UPLOAD_ERROR_CODES = new Set(['invalid_path', 'invalid_file', 'transcode_failed', 'transcode_busy']);
@@ -88,7 +98,8 @@ async function storeVideoFile(dir: string, file: Express.Multer.File, type: Over
 
 /**
  * Stores an uploaded video (see {@link storeVideoFile}), publishing a MOV conversion's progress
- * under `uploadId` for the settings page to poll while it runs, and clearing it afterwards.
+ * under `uploadId` for the settings page to poll while it runs, and clearing it afterwards. If
+ * another request is already using the same upload ID, this one just isn't tracked.
  * @param streamer - Owning streamer.
  * @param dir - Absolute path of the streamer's overlay folder (already safe-resolved).
  * @param file - The Multer upload, stored on disk by `overlayUploadStorage`.
@@ -103,11 +114,12 @@ async function storeWithProgress(
   details: { type: OverlayVideoType; uploadId: string | null },
 ): Promise<string> {
   const { type, uploadId } = details;
-  if (!uploadId) return storeVideoFile(dir, file, type);
+  const owner = uploadId && type === 'mov' ? claimConversionProgress(streamer.id, uploadId) : null;
+  if (!uploadId || !owner) return storeVideoFile(dir, file, type);
   try {
-    return await storeVideoFile(dir, file, type, (progress) => setConversionProgress(streamer.id, uploadId, progress));
+    return await storeVideoFile(dir, file, type, (progress) => setConversionProgress(streamer.id, uploadId, owner, progress));
   } finally {
-    clearConversionProgress(streamer.id, uploadId);
+    releaseConversionProgress(streamer.id, uploadId, owner);
   }
 }
 
@@ -145,18 +157,47 @@ const redirectMulterError = createMulterErrorRedirectHandler('/overlay/settings'
 /**
  * Translate an upload-middleware error into a user-facing redirect, instead of letting it reach
  * the centralised 500 handler: `transcode_busy` from {@link admitUpload}, `file_too_large` for an
- * oversized file, and `upload_failed` for anything else.
+ * oversized file, and `upload_failed` for anything else. Also starts a sweep of stale incoming
+ * uploads, since a rejected upload never reaches the route handler that normally runs it.
  * @param err - The error passed by Multer's callback, or null/undefined if none.
  * @param res - Express response used to issue the redirect when an error occurred.
  * @returns true when `err` was an error and a redirect was sent (caller should stop); false when
  *   there was no error (caller should continue).
  */
 export function handleUploadError(err: unknown, res: Response): boolean {
+  // A rejected upload never reaches the route handler, so sweep leftovers from here too.
+  if (err) void sweepStaleIncomingUploads();
   if (err instanceof Error && (err as NodeJS.ErrnoException).code === 'transcode_busy') {
     res.redirect('/overlay/settings?error=transcode_busy');
     return true;
   }
   return redirectMulterError(err, res);
+}
+
+/**
+ * Express middleware admitting an upload only while fewer than
+ * {@link MAX_CONCURRENT_OVERLAY_UPLOADS} are in progress, before Multer stores any of it; a
+ * further one is turned away with `upload_busy`. The slot is released once the response has
+ * been sent or the connection closes, whichever comes first.
+ * @param _req - Express request (unused).
+ * @param res - Express response; redirected when the limit is reached.
+ * @param next - Continues to Multer when the upload is admitted.
+ */
+export function limitConcurrentUploads(_req: Request, res: Response, next: NextFunction): void {
+  if (activeUploads >= MAX_CONCURRENT_OVERLAY_UPLOADS) {
+    res.redirect('/overlay/settings?error=upload_busy');
+    return;
+  }
+  activeUploads++;
+  let released = false;
+  const release = (): void => {
+    if (released) return;
+    released = true;
+    activeUploads--;
+  };
+  res.once('finish', release);
+  res.once('close', release);
+  next();
 }
 
 /** Express middleware running Multer's single-file (`video`) parser, redirecting on error. */
@@ -207,12 +248,13 @@ async function handleVideoUpload(req: Request, res: Response): Promise<void> {
  *   on success, or to `/overlay/settings?error=<code>` if the requester isn't a
  *   streamer (`not_a_streamer`), no file was uploaded or it failed magic-byte
  *   validation (`invalid_file`), a mov couldn't be converted (`transcode_failed`) or
- *   too many are already converting (`transcode_busy`),
+ *   too many are already converting (`transcode_busy`), too many uploads are already in
+ *   progress (`upload_busy`, redirected by `limitConcurrentUploads` before Multer runs),
  *   the resolved storage path is unsafe
  *   (`invalid_path`), the file exceeds the size limit (`file_too_large`,
  *   redirected by `handleUploadError`), or saving fails (`upload_failed`).
  */
-router.post('/settings/videos/upload', requireAuth, csrfProtection, requireStreamerBeforeUpload, uploadVideo, async (req, res) => {
+router.post('/settings/videos/upload', requireAuth, csrfProtection, requireStreamerBeforeUpload, limitConcurrentUploads, uploadVideo, async (req, res) => {
   try {
     await handleVideoUpload(req, res);
   } finally {

@@ -57,7 +57,7 @@ import { buildTestApp } from '../../test-utils/expressTestApp';
 import { makeSessionUser, type SessionUserFixture } from '../../test-utils/fixtures';
 import { attachSseConnection } from './sseChannel';
 import { connections as overlaySourceConnections } from './overlaySource';
-import { setConversionProgress, clearConversionProgress } from './overlayConversionProgress';
+import { claimConversionProgress, setConversionProgress, releaseConversionProgress } from './overlayConversionProgress';
 
 type SessionUser = SessionUserFixture;
 const USER: SessionUser = makeSessionUser({ accessLevel: AccessLevel.MOD });
@@ -333,14 +333,15 @@ describe('GET /settings/videos/progress/:uploadId', () => {
 
   it('reports the requesting streamer\'s conversion progress without caching', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(STREAMER as any);
-    setConversionProgress(STREAMER.id, UPLOAD_ID, { stage: 'converting', percent: 63 });
+    const owner = claimConversionProgress(STREAMER.id, UPLOAD_ID)!;
+    setConversionProgress(STREAMER.id, UPLOAD_ID, owner, { stage: 'converting', percent: 63 });
     try {
       const res = await supertest(buildApp()).get(`/settings/videos/progress/${UPLOAD_ID}`);
       expect(res.status).toBe(200);
       expect(res.headers['cache-control']).toBe('no-store');
       expect(res.body).toEqual({ stage: 'converting', percent: 63 });
     } finally {
-      clearConversionProgress(STREAMER.id, UPLOAD_ID);
+      releaseConversionProgress(STREAMER.id, UPLOAD_ID, owner);
     }
   });
 
@@ -352,12 +353,13 @@ describe('GET /settings/videos/progress/:uploadId', () => {
 
   it('never reports another streamer\'s conversion', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue({ id: 78 } as any);
-    setConversionProgress(STREAMER.id, UPLOAD_ID, { stage: 'converting', percent: 63 });
+    const owner = claimConversionProgress(STREAMER.id, UPLOAD_ID)!;
+    setConversionProgress(STREAMER.id, UPLOAD_ID, owner, { stage: 'converting', percent: 63 });
     try {
       const res = await supertest(buildApp()).get(`/settings/videos/progress/${UPLOAD_ID}`);
       expect(res.body).toEqual({ stage: 'none', percent: null });
     } finally {
-      clearConversionProgress(STREAMER.id, UPLOAD_ID);
+      releaseConversionProgress(STREAMER.id, UPLOAD_ID, owner);
     }
   });
 

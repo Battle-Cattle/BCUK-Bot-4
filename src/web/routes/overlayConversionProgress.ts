@@ -41,14 +41,35 @@ function progressKey(streamerId: number, uploadId: string): string {
   return `${streamerId}:${uploadId}`;
 }
 
+/** The request that owns each upload's progress entry, keyed by {@link progressKey}. */
+const ownerByUpload = new Map<string, symbol>();
+
 /**
- * Records an upload's latest conversion progress.
+ * Claims an upload's progress entry for the calling request. Synchronous, so two requests sending
+ * the same upload ID can't both claim it; the one that doesn't get it simply isn't tracked.
  * @param streamerId - DB row ID of the uploading streamer.
  * @param uploadId - The upload's ID.
+ * @returns The owner token to pass to {@link setConversionProgress} and
+ *   {@link releaseConversionProgress}, or null when another request already holds the entry.
+ */
+export function claimConversionProgress(streamerId: number, uploadId: string): symbol | null {
+  const key = progressKey(streamerId, uploadId);
+  if (ownerByUpload.has(key)) return null;
+  const owner = Symbol(key);
+  ownerByUpload.set(key, owner);
+  return owner;
+}
+
+/**
+ * Records an upload's latest conversion progress, if `owner` holds its entry.
+ * @param streamerId - DB row ID of the uploading streamer.
+ * @param uploadId - The upload's ID.
+ * @param owner - The token from {@link claimConversionProgress}.
  * @param progress - Its stage and percentage.
  */
-export function setConversionProgress(streamerId: number, uploadId: string, progress: ConversionProgress): void {
-  progressByUpload.set(progressKey(streamerId, uploadId), progress);
+export function setConversionProgress(streamerId: number, uploadId: string, owner: symbol, progress: ConversionProgress): void {
+  const key = progressKey(streamerId, uploadId);
+  if (ownerByUpload.get(key) === owner) progressByUpload.set(key, progress);
 }
 
 /**
@@ -62,10 +83,15 @@ export function getConversionProgress(streamerId: number, uploadId: string): Con
 }
 
 /**
- * Forgets an upload's progress once its conversion has finished, either way.
+ * Forgets an upload's progress once its conversion has finished, either way. Does nothing unless
+ * `owner` still holds the entry.
  * @param streamerId - DB row ID of the uploading streamer.
  * @param uploadId - The upload's ID.
+ * @param owner - The token from {@link claimConversionProgress}.
  */
-export function clearConversionProgress(streamerId: number, uploadId: string): void {
-  progressByUpload.delete(progressKey(streamerId, uploadId));
+export function releaseConversionProgress(streamerId: number, uploadId: string, owner: symbol): void {
+  const key = progressKey(streamerId, uploadId);
+  if (ownerByUpload.get(key) !== owner) return;
+  ownerByUpload.delete(key);
+  progressByUpload.delete(key);
 }

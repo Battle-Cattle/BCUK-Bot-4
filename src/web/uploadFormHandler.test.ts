@@ -47,7 +47,13 @@ class FakeXhr extends FakeTarget {
 
 /** The form's progress display: a box, a `<progress>` bar and a label. */
 function makeProgressDisplay() {
-  const bar = { value: -1, hasValue: true, removeAttribute: vi.fn(function (this: any) { this.hasValue = false; }) };
+  const bar = {
+    value: -1,
+    hasValue: true,
+    ariaLabel: '',
+    removeAttribute: vi.fn(function (this: any) { this.hasValue = false; }),
+    setAttribute: vi.fn(function (this: any, name: string, value: string) { if (name === 'aria-label') this.ariaLabel = value; }),
+  };
   const label = { textContent: '' };
   const box = {
     hidden: true,
@@ -82,6 +88,7 @@ function setup(options: { withProgress?: boolean; dataset?: Record<string, strin
     XMLHttpRequest: FakeXhr,
     FormData: class { constructor(public form: unknown) {} },
     fetch,
+    AbortController,
     setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms),
     clearTimeout: (id: ReturnType<typeof setTimeout>) => clearTimeout(id),
     window: { location: { assign }, crypto: { getRandomValues: (a: Uint8Array) => a.fill(171) } },
@@ -131,6 +138,33 @@ describe('registerUploadFormHandler', () => {
     expect(display.label.textContent).toBe('Uploading… 0%');
   });
 
+  it('names the bar after the stage it is showing', () => {
+    const { display, fetch, submit } = setup();
+    fetch.mockImplementation(() => new Promise(() => {}));
+    submit();
+    expect(display.bar.ariaLabel).toBe('Upload progress');
+    FakeXhr.last!.upload.fire('load');
+    expect(display.bar.ariaLabel).toBe('Processing progress');
+  });
+
+  it('abandons a poll that never answers and carries on polling', async () => {
+    vi.useFakeTimers();
+    const { display, fetch, submit } = setup();
+    let signal: AbortSignal | undefined;
+    fetch.mockImplementationOnce((_url: string, init: { signal: AbortSignal }) => {
+      signal = init.signal;
+      return new Promise((_resolve, reject) => init.signal.addEventListener('abort', () => reject(new Error('aborted'))));
+    }).mockImplementationOnce(() => jsonResponse({ stage: 'converting', percent: 55 }));
+    submit();
+    FakeXhr.last!.upload.fire('load');
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(signal?.aborted).toBe(true);
+    await vi.advanceTimersByTimeAsync(2000);
+    await flush();
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(display.label.textContent).toBe('Converting… 55%');
+  });
+
   it('ignores a second submit while the first is still pending', () => {
     const { submit } = setup();
     submit();
@@ -157,7 +191,10 @@ describe('registerUploadFormHandler', () => {
     submit();
     FakeXhr.last!.upload.fire('load');
     expect(display.bar.hasValue).toBe(false);
-    expect(fetch).toHaveBeenCalledWith(`/overlay/settings/videos/progress/${'ab'.repeat(16)}`, { headers: { Accept: 'application/json' } });
+    expect(fetch).toHaveBeenCalledWith(
+      `/overlay/settings/videos/progress/${'ab'.repeat(16)}`,
+      expect.objectContaining({ headers: { Accept: 'application/json' }, signal: expect.any(AbortSignal) }),
+    );
     await flush();
     expect(display.label.textContent).toBe('Waiting for another conversion to finish…');
     await vi.advanceTimersByTimeAsync(2000);

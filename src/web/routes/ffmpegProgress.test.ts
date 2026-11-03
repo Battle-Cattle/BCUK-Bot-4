@@ -57,6 +57,16 @@ describe('createFfmpegProgressTracker', () => {
     expect(onPercent).toHaveBeenCalledWith(10);
   });
 
+  it('waits for the whole Duration timestamp when a chunk ends mid-way through it', () => {
+    const onPercent = vi.fn();
+    const tracker = createFfmpegProgressTracker(onPercent);
+    tracker.onStderr('  Duration: 00:00:20');
+    tracker.onStderr('.04, start: 0.000000\n');
+    tracker.onStdout('out_time_us=5000000\n');
+    // 5 s of 20.04 s, not of 20 s.
+    expect(onPercent).toHaveBeenCalledWith(24);
+  });
+
   it('joins a progress line split across stdout chunks', () => {
     const onPercent = vi.fn();
     const tracker = createFfmpegProgressTracker(onPercent);

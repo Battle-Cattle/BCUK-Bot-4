@@ -29,6 +29,12 @@ const INCOMING_SUFFIX = '.incoming';
  */
 const storedUploads = new Map<string, string>();
 
+/**
+ * The stored name of each upload Multer is still writing, by its file object, so a write that
+ * fails partway can be cleaned up: Multer itself only removes files whose write completed.
+ */
+const writingUploads = new WeakMap<object, string>();
+
 /** Bytes read from the start of an upload to detect its type. */
 const HEADER_BYTES = 16;
 
@@ -38,8 +44,9 @@ export type OverlayVideoType = 'webm' | 'mp4' | 'mov';
 /**
  * Multer storage engine for overlay uploads: streams each file to a random `.incoming` name in
  * {@link INCOMING_DIR}, creating the folder when needed, and records its path in
- * {@link storedUploads}. Multer itself removes the file if the upload fails partway (e.g. it's
- * too large), which also forgets it; the route removes it after handling it.
+ * {@link storedUploads}. A file whose write fails partway (e.g. the disk is full) is removed
+ * here; Multer removes one that's too large, which also forgets it; the route removes the rest
+ * after handling them.
  */
 export const overlayUploadStorage = multer.diskStorage({
   destination: (_req, _file, cb) => {
@@ -48,9 +55,10 @@ export const overlayUploadStorage = multer.diskStorage({
       (err: unknown) => cb(err instanceof Error ? err : new Error(String(err)), INCOMING_DIR),
     );
   },
-  filename: (_req, _file, cb) => {
+  filename: (_req, file, cb) => {
     const name = `${randomUUID()}${INCOMING_SUFFIX}`;
     storedUploads.set(name, path.join(INCOMING_DIR, name));
+    writingUploads.set(file, name);
     cb(null, name);
   },
 });
@@ -59,6 +67,34 @@ overlayUploadStorage._removeFile = (req, file, cb) => {
   storedUploads.delete(file.filename);
   removeStoredFile(req, file, cb);
 };
+const handleStoredFile = overlayUploadStorage._handleFile.bind(overlayUploadStorage);
+overlayUploadStorage._handleFile = (req, file, cb) => {
+  handleStoredFile(req, file, (err, info) => {
+    const name = writingUploads.get(file);
+    writingUploads.delete(file);
+    if (!err || name === undefined) {
+      cb(err, info);
+      return;
+    }
+    // The write failed partway (e.g. ENOSPC): remove what was written before reporting it.
+    void removeFailedWrite(name).then(() => cb(err));
+  });
+};
+
+/**
+ * Removes an upload whose write failed partway, and forgets it.
+ * @param name - The stored name {@link overlayUploadStorage} generated for it (never one taken
+ *   from the request).
+ * @returns Resolves once removal has been attempted; never rejects.
+ */
+async function removeFailedWrite(name: string): Promise<void> {
+  storedUploads.delete(name);
+  try {
+    await fs.promises.rm(path.join(INCOMING_DIR, name), { force: true });
+  } catch (err) {
+    log.error(`Failed to remove partially written overlay upload ${name}:`, err);
+  }
+}
 
 /**
  * Finds where an upload is on disk: the path {@link overlayUploadStorage} recorded when it stored

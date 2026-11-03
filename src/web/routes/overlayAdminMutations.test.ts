@@ -58,14 +58,14 @@ vi.mock('./overlayVideoTranscode', () => ({ isWebmTranscodeQueueFull: vi.fn() })
 
 import supertest from 'supertest';
 import multer from 'multer';
-import { router, handleUploadError } from './overlayAdminMutations';
+import { router, handleUploadError, limitConcurrentUploads, MAX_CONCURRENT_OVERLAY_UPLOADS } from './overlayAdminMutations';
 import { getStreamerByDiscordId, addVideo, deleteVideo } from '../../db';
 import { AccessLevel } from '../../db';
 import fs from 'fs';
 import { csrfProtection } from '../csrf';
 import { storeMovAsWebm } from './overlayMovConversion';
 import { isWebmTranscodeQueueFull } from './overlayVideoTranscode';
-import { getConversionProgress } from './overlayConversionProgress';
+import { getConversionProgress, claimConversionProgress, releaseConversionProgress } from './overlayConversionProgress';
 import { placeUpload, discardUpload, sweepStaleIncomingUploads } from './overlayUploadStorage';
 import type { RequestHandler } from 'express';
 import { buildTestApp, drainBodyBeforeRedirect } from '../../test-utils/expressTestApp';
@@ -289,6 +289,22 @@ describe('POST /settings/videos/upload', () => {
     expect(getConversionProgress(MOCK_STREAMER.id, uploadId)).toBeUndefined();
   });
 
+  it('converts without tracking progress when another request already holds the upload ID', async () => {
+    const uploadId = 'd'.repeat(32);
+    const otherRequest = claimConversionProgress(MOCK_STREAMER.id, uploadId)!;
+    try {
+      vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+      const res = await supertest(buildApp())
+        .post('/settings/videos/upload')
+        .set('X-Upload-Id', uploadId)
+        .attach('video', MOV_BUF, { filename: 'clip.mov', contentType: 'video/quicktime' });
+      expect(res.headers.location).toBe('/overlay/settings?success=video_uploaded');
+      expect(vi.mocked(storeMovAsWebm).mock.calls[0]![3]).toBeUndefined();
+    } finally {
+      releaseConversionProgress(MOCK_STREAMER.id, uploadId, otherRequest);
+    }
+  });
+
   it('converts without publishing progress when the upload ID is missing or malformed', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
     await supertest(buildApp())
@@ -492,6 +508,42 @@ describe('POST /settings/videos/:id/delete', () => {
 
 // --- handleUploadError unit tests ---
 
+describe('limitConcurrentUploads', () => {
+  /** A response stub whose `finish`/`close` listeners can be fired. */
+  function makeTrackedRes() {
+    const listeners: Record<string, () => void> = {};
+    return {
+      redirect: vi.fn(),
+      once: vi.fn((event: string, cb: () => void) => { listeners[event] = cb; }),
+      fire: (event: string) => listeners[event]?.(),
+    };
+  }
+
+  it('turns away an upload once the limit is reached, until one of them finishes', () => {
+    const admitted = Array.from({ length: MAX_CONCURRENT_OVERLAY_UPLOADS }, () => makeTrackedRes());
+    const next = vi.fn();
+    for (const res of admitted) limitConcurrentUploads({} as any, res as any, next);
+    expect(next).toHaveBeenCalledTimes(MAX_CONCURRENT_OVERLAY_UPLOADS);
+
+    const refused = makeTrackedRes();
+    limitConcurrentUploads({} as any, refused as any, next);
+    expect(refused.redirect).toHaveBeenCalledWith('/overlay/settings?error=upload_busy');
+    expect(next).toHaveBeenCalledTimes(MAX_CONCURRENT_OVERLAY_UPLOADS);
+
+    // Both events firing for one response frees only its own slot.
+    admitted[0]!.fire('finish');
+    admitted[0]!.fire('close');
+    const nextOne = makeTrackedRes();
+    limitConcurrentUploads({} as any, nextOne as any, next);
+    expect(nextOne.redirect).not.toHaveBeenCalled();
+    const overLimit = makeTrackedRes();
+    limitConcurrentUploads({} as any, overLimit as any, next);
+    expect(overLimit.redirect).toHaveBeenCalledWith('/overlay/settings?error=upload_busy');
+
+    for (const res of [...admitted.slice(1), nextOne]) res.fire('close');
+  });
+});
+
 describe('handleUploadError', () => {
   /** Minimal Express response stub capturing the redirect target. */
   function makeRes() {
@@ -502,6 +554,13 @@ describe('handleUploadError', () => {
     const res = makeRes();
     expect(handleUploadError(null, res)).toBe(false);
     expect(res.redirect).not.toHaveBeenCalled();
+  });
+
+  it('sweeps stale incoming uploads after a rejected upload, but not when there was no error', () => {
+    handleUploadError(null, makeRes());
+    expect(vi.mocked(sweepStaleIncomingUploads)).not.toHaveBeenCalled();
+    handleUploadError(new Error('boom'), makeRes());
+    expect(vi.mocked(sweepStaleIncomingUploads)).toHaveBeenCalledOnce();
   });
 
   it('redirects a full conversion queue to transcode_busy', () => {

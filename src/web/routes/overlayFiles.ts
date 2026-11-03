@@ -63,5 +63,6 @@ export async function sweepStaleTempFiles(dir: string, isTempFile: (name: string
     return;
   }
   const now = Date.now();
-  await Promise.all(names.filter(isTempFile).map((name) => removeIfStale(path.join(dir, name), now)));
+  // One at a time, so a large backlog can't crowd other filesystem work out of the threadpool.
+  for (const name of names.filter(isTempFile)) await removeIfStale(path.join(dir, name), now);
 }

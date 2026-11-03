@@ -44,6 +44,9 @@ function registerCopyToClipboardHandler(buttonId, sourceId, idleLabel) {
 /** Milliseconds between polls of a form's processing-progress endpoint while the server works. */
 var UPLOAD_PROGRESS_POLL_MS = 2000;
 
+/** Milliseconds before a progress poll that hasn't answered is abandoned, so polling carries on. */
+var UPLOAD_PROGRESS_FETCH_TIMEOUT_MS = 10000;
+
 /**
  * Generates an ID for one upload, sent as `X-Upload-Id` so the page can ask the server how the
  * upload's processing is going. `crypto.getRandomValues` works on plain-HTTP pages too, unlike
@@ -88,6 +91,18 @@ function showUploadProgress(progress, percent, text) {
 }
 
 /**
+ * Names the progress bar for assistive technology after the stage it's showing, since the same
+ * bar shows the upload and then the server's processing.
+ * @param {{box: HTMLElement, bar: HTMLProgressElement|null, label: HTMLElement|null}|null} progress -
+ *   The display from {@link findUploadProgress}, or null to do nothing.
+ * @param {string} name - The bar's accessible name, e.g. 'Upload progress'.
+ * @returns {void}
+ */
+function nameUploadProgress(progress, name) {
+  if (progress && progress.bar) progress.bar.setAttribute('aria-label', name);
+}
+
+/**
  * Turns the server's processing state for an upload into what the progress display shows.
  * @param {{stage: string, percent: (number|null)}|null} state - The progress endpoint's JSON
  *   (`queued`, `converting` or `none`), or null when it couldn't be read.
@@ -106,7 +121,8 @@ function describeProcessing(state, fallbackText) {
 /**
  * Once the file has been sent, polls the form's `data-progress-url` endpoint (with the upload's
  * ID appended) every {@link UPLOAD_PROGRESS_POLL_MS} and shows what the server reports, until
- * the returned function is called. Does nothing for a form without that attribute or without a
+ * the returned function is called. A poll that hasn't answered within
+ * {@link UPLOAD_PROGRESS_FETCH_TIMEOUT_MS} is abandoned so the next one still runs. Does nothing for a form without that attribute or without a
  * progress display.
  * @param {HTMLFormElement} form - The upload form.
  * @param {string} uploadId - The upload's ID, as sent in `X-Upload-Id`.
@@ -125,10 +141,13 @@ function pollProcessingProgress(form, uploadId, progress) {
    * @returns {void}
    */
   function tick() {
-    fetch(url + '/' + uploadId, { headers: { Accept: 'application/json' } })
+    var controller = new AbortController();
+    var deadline = setTimeout(function () { controller.abort(); }, UPLOAD_PROGRESS_FETCH_TIMEOUT_MS);
+    fetch(url + '/' + uploadId, { headers: { Accept: 'application/json' }, signal: controller.signal })
       .then(function (res) { return res.ok ? res.json() : null; })
       .catch(function () { return null; })
       .then(function (state) {
+        clearTimeout(deadline);
         if (stopped) return;
         var shown = describeProcessing(state, fallbackText);
         showUploadProgress(progress, shown.percent, shown.text);
@@ -184,6 +203,7 @@ function submitUploadForm(form, fallbackPath) {
     showUploadProgress(progress, percent, 'Uploading… ' + percent + '%');
   });
   xhr.upload.addEventListener('load', function () {
+    nameUploadProgress(progress, 'Processing progress');
     showUploadProgress(progress, null, form.dataset.processingLabel || 'Processing…');
     stopPolling = pollProcessingProgress(form, uploadId, progress);
   });
@@ -193,6 +213,7 @@ function submitUploadForm(form, fallbackPath) {
     stopPolling();
     delete form.dataset.submitting;
   });
+  nameUploadProgress(progress, 'Upload progress');
   showUploadProgress(progress, 0, 'Uploading… 0%');
   xhr.send(new FormData(form));
 }
