@@ -36,6 +36,8 @@ bash scripts/install-systemd-service.sh
 
 This installs and enables the unit from `deploy/bcuk-bot.service`, filled in with your user, this checkout's path and your `node`. It also adds a sudoers rule allowing that user to run `systemctl restart bcuk-bot` and nothing else. It doesn't start the service: stop any copy still running elsewhere first (for example in an old `screen` session), then run `sudo systemctl start bcuk-bot`.
 
+The unit is sandboxed (`ProtectSystem=strict`, `ProtectHome=read-only`, `NoNewPrivileges` and friends; see `deploy/bcuk-bot.service`): the bot can only write to `logs/` and the three upload folders (`OVERLAY_FOLDER`, `ALERT_ASSETS_FOLDER`, `SFX_FOLDER`). The installer reads those from `.env`, creates them, and writes them into the unit's `ReadWritePaths`, so re-run it after changing any of them, or the bot will fail its writes there with `EROFS`. `systemd-analyze security bcuk-bot` shows what the sandbox covers.
+
 The unit keeps running the `node` it was installed with, so after upgrading Node, re-run `bash scripts/install-systemd-service.sh` (it rewrites the unit with the `node` now on your `PATH`) and then deploy. `deploy.sh` checks that the service's `node` meets `engines` in `package.json` and stops before installing anything if it doesn't.
 
 `bash deploy.sh` (or `npm run deploy`) then:

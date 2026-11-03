@@ -38,10 +38,49 @@ if [ -z "$SYSTEMCTL_BIN" ]; then
     exit 1
 fi
 
+# Prints a setting from .env the way dotenv reads it: last entry wins, an inline ` # comment` is
+# dropped, surrounding quotes and spaces are stripped. Prints nothing for no entry or a blank one.
+env_setting() {
+    { grep -E "^[[:space:]]*$1=" "$REPO_DIR/.env" 2>/dev/null || true; } \
+        | tail -n 1 | cut -d= -f2- | sed -E 's/[[:space:]]+#.*$//' | sed -E "s/^[[:space:]\"']+|[[:space:]\"']+$//g"
+}
+
+# Prints the absolute path of an upload folder setting, falling back to config.ts's default. A
+# relative path is relative to the checkout, which is the unit's WorkingDirectory.
+folder_path() {
+    local value
+    value="$(env_setting "$1")"
+    value="${value:-$2}"
+    case "$value" in
+        /*) ;;
+        *) value="$REPO_DIR/$value" ;;
+    esac
+    realpath -m "$value"
+}
+
+# The unit's filesystem is read-only apart from these (ReadWritePaths): logs/ and the upload
+# folders. Created now, as this user, so the bot never has to create one under a read-only parent.
+WRITABLE_DIRS=(
+    "$REPO_DIR/logs"
+    "$(folder_path OVERLAY_FOLDER ./overlay-videos)"
+    "$(folder_path ALERT_ASSETS_FOLDER ./alert-assets)"
+    "$(folder_path SFX_FOLDER ./sfx)"
+)
+WRITABLE_PATHS=""
+for dir in "${WRITABLE_DIRS[@]}"; do
+    if [[ "$dir" == *'"'* || "$dir" == *'\'* || "$dir" == *%* ]]; then
+        echo "ERROR: $dir contains a quote, backslash or %, which the unit can't express." >&2
+        exit 1
+    fi
+    mkdir -p "$dir"
+    WRITABLE_PATHS+="${WRITABLE_PATHS:+ }\"-${dir}\""
+done
+
 echo "==> Installing /etc/systemd/system/${SERVICE_NAME}.service"
 echo "    user:      $RUN_USER"
 echo "    directory: $REPO_DIR"
 echo "    node:      $NODE_BIN (v$("$NODE_BIN" -v | tr -d v))"
+echo "    writable:  ${WRITABLE_DIRS[*]}"
 UNIT_TMP="$(mktemp)"
 trap 'rm -f "$UNIT_TMP" "${SUDOERS_TMP:-}"' EXIT
 # Escapes a value for the replacement side of `s|...|...|`: backslash, the `|` delimiter and `&`
@@ -50,6 +89,7 @@ sed_escape() { printf '%s' "$1" | sed -e 's/[\\|&]/\\&/g'; }
 sed -e "s|__USER__|$(sed_escape "$RUN_USER")|" \
     -e "s|__REPO_DIR__|$(sed_escape "$REPO_DIR")|" \
     -e "s|__NODE_BIN__|$(sed_escape "$NODE_BIN")|" \
+    -e "s|__WRITABLE_PATHS__|$(sed_escape "$WRITABLE_PATHS")|" \
     "$REPO_DIR/deploy/bcuk-bot.service" > "$UNIT_TMP"
 sudo install -m 644 "$UNIT_TMP" "/etc/systemd/system/${SERVICE_NAME}.service"
 sudo "$SYSTEMCTL_BIN" daemon-reload

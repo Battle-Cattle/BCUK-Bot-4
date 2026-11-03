@@ -29,5 +29,28 @@ KillSignal=SIGTERM
 # shutdown() announces itself to the owner and closes Discord/Twitch/DB cleanly first.
 TimeoutStopSec=30
 
+# Sandboxing (defence in depth): limits what a compromised Node process (a dependency, or ffmpeg
+# parsing an upload) could reach. Check with `systemd-analyze security bcuk-bot`.
+NoNewPrivileges=true
+PrivateTmp=true
+# The whole filesystem is read-only to the bot except the paths below. /home stays readable, not
+# hidden, because the checkout and an nvm-installed node usually live there.
+ProtectSystem=strict
+ProtectHome=read-only
+# Everywhere the bot writes at runtime: logs/ (log files and the debug-logging state file) and the
+# three upload folders (MOV-to-WebM conversion writes its temporary files there too). The installer
+# fills these in from .env and creates them; `-` keeps a missing one from stopping the service.
+ReadWritePaths=__WRITABLE_PATHS__
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+# Not MemoryDenyWriteExecute=true: V8's JIT needs writable+executable memory, and node would crash.
+
 [Install]
 WantedBy=multi-user.target
