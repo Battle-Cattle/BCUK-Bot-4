@@ -18,6 +18,8 @@ function makeFakeProcess() {
   const proc = new EventEmitter() as any;
   proc.stderr = new EventEmitter();
   proc.stderr.setEncoding = vi.fn();
+  proc.stdout = new EventEmitter();
+  proc.stdout.setEncoding = vi.fn();
   proc.kill = vi.fn();
   return proc;
 }
@@ -54,6 +56,48 @@ describe('buildWebmTranscodeArgs', () => {
     expect(mapped).toEqual(['0:v:0', '0:a:0?']);
     expect(args[args.indexOf('-map_metadata') + 1]).toBe('-1');
     expect(args).toContain('-nostdin');
+  });
+});
+
+describe('buildWebmTranscodeArgs progress reporting', () => {
+  it('has ffmpeg print the source length and write its progress to stdout', () => {
+    const args = buildWebmTranscodeArgs('/in', '/out');
+    expect(args[args.indexOf('-loglevel') + 1]).toBe('info');
+    expect(args[args.indexOf('-progress') + 1]).toBe('pipe:1');
+    expect(args).toContain('-nostats');
+  });
+});
+
+describe('transcodeToWebm progress', () => {
+  it('reports queued, then converting, then the rising percentage', async () => {
+    const proc = makeFakeProcess();
+    vi.mocked(spawn).mockReturnValue(proc);
+    const onProgress = vi.fn();
+    const promise = transcodeToWebm('/in', '/out', onProgress);
+    expect(onProgress).toHaveBeenNthCalledWith(1, { stage: 'queued', percent: null });
+    await spawnCalled();
+    expect(vi.mocked(spawn).mock.calls[0]![2]).toEqual({ stdio: ['ignore', 'pipe', 'pipe'] });
+    expect(onProgress).toHaveBeenNthCalledWith(2, { stage: 'converting', percent: null });
+    proc.stderr.emit('data', '  Duration: 00:00:10.00, start: 0.000000\n');
+    proc.stdout.emit('data', 'out_time_us=2500000\nprogress=continue\n');
+    proc.stdout.emit('data', 'out_time_us=5000000\n');
+    proc.emit('close', 0);
+    await promise;
+    expect(onProgress.mock.calls.slice(2)).toEqual([
+      [{ stage: 'converting', percent: 25 }],
+      [{ stage: 'converting', percent: 50 }],
+    ]);
+  });
+
+  it('works without a progress listener', async () => {
+    const proc = makeFakeProcess();
+    vi.mocked(spawn).mockReturnValue(proc);
+    const promise = transcodeToWebm('/in', '/out');
+    await spawnCalled();
+    proc.stderr.emit('data', '  Duration: 00:00:10.00, start: 0.000000\n');
+    proc.stdout.emit('data', 'out_time_us=5000000\n');
+    proc.emit('close', 0);
+    await expect(promise).resolves.toBeUndefined();
   });
 });
 

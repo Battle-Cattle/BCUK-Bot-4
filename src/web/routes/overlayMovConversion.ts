@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { createLogger } from '../../shared/logger';
-import { transcodeToWebm } from './overlayVideoTranscode';
+import { transcodeToWebm, type ProgressListener } from './overlayVideoTranscode';
 import { detectVideoType } from './uploadFileTypes';
 
 const log = createLogger('OverlayMovConversion');
@@ -121,12 +121,13 @@ function conversionError(err: unknown): Error {
  * @param dir - Absolute path of the streamer's overlay folder (already safe-resolved and created).
  * @param baseName - Random base name (no extension) for the stored file.
  * @param buffer - The uploaded MOV's bytes.
+ * @param onProgress - Told the conversion's stage and percentage as it goes (optional).
  * @returns The stored WebM's filename.
  * @throws With `code: 'transcode_busy'` if too many conversions are pending, or
  *   `code: 'transcode_failed'` if ffmpeg can't convert the file or its output isn't a WebM; or the error from writing the
  *   temporary copy (after removing any partial copy).
  */
-export async function storeMovAsWebm(dir: string, baseName: string, buffer: Buffer): Promise<string> {
+export async function storeMovAsWebm(dir: string, baseName: string, buffer: Buffer, onProgress?: ProgressListener): Promise<string> {
   await sweepStaleConversionFiles(dir);
   const sourcePath = path.join(dir, `${baseName}${SOURCE_SUFFIX}`);
   const partialPath = path.join(dir, `${baseName}${PARTIAL_SUFFIX}`);
@@ -138,7 +139,7 @@ export async function storeMovAsWebm(dir: string, baseName: string, buffer: Buff
     throw err;
   }
   try {
-    await transcodeToWebm(sourcePath, partialPath);
+    await transcodeToWebm(sourcePath, partialPath, onProgress);
     await assertWebmOutput(partialPath);
     await fs.promises.rename(partialPath, path.join(dir, filename));
   } catch (err) {

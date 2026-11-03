@@ -57,6 +57,7 @@ import { buildTestApp } from '../../test-utils/expressTestApp';
 import { makeSessionUser, type SessionUserFixture } from '../../test-utils/fixtures';
 import { attachSseConnection } from './sseChannel';
 import { connections as overlaySourceConnections } from './overlaySource';
+import { setConversionProgress, clearConversionProgress } from './overlayConversionProgress';
 
 type SessionUser = SessionUserFixture;
 const USER: SessionUser = makeSessionUser({ accessLevel: AccessLevel.MOD });
@@ -323,5 +324,58 @@ describe('GET /settings/events', () => {
     openOverlayConnection(overlaySourceConnections, 'somestreamer').close();
 
     expect(res.write).not.toHaveBeenCalled();
+  });
+});
+
+describe('GET /settings/videos/progress/:uploadId', () => {
+  const UPLOAD_ID = 'c'.repeat(32);
+  const STREAMER = { id: 77, twitch_name: 'streamer' };
+
+  it('reports the requesting streamer\'s conversion progress without caching', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(STREAMER as any);
+    setConversionProgress(STREAMER.id, UPLOAD_ID, { stage: 'converting', percent: 63 });
+    try {
+      const res = await supertest(buildApp()).get(`/settings/videos/progress/${UPLOAD_ID}`);
+      expect(res.status).toBe(200);
+      expect(res.headers['cache-control']).toBe('no-store');
+      expect(res.body).toEqual({ stage: 'converting', percent: 63 });
+    } finally {
+      clearConversionProgress(STREAMER.id, UPLOAD_ID);
+    }
+  });
+
+  it('reports none when the streamer has no conversion under that ID', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(STREAMER as any);
+    const res = await supertest(buildApp()).get(`/settings/videos/progress/${UPLOAD_ID}`);
+    expect(res.body).toEqual({ stage: 'none', percent: null });
+  });
+
+  it('never reports another streamer\'s conversion', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue({ id: 78 } as any);
+    setConversionProgress(STREAMER.id, UPLOAD_ID, { stage: 'converting', percent: 63 });
+    try {
+      const res = await supertest(buildApp()).get(`/settings/videos/progress/${UPLOAD_ID}`);
+      expect(res.body).toEqual({ stage: 'none', percent: null });
+    } finally {
+      clearConversionProgress(STREAMER.id, UPLOAD_ID);
+    }
+  });
+
+  it('reports none for a non-streamer', async () => {
+    const res = await supertest(buildApp()).get(`/settings/videos/progress/${UPLOAD_ID}`);
+    expect(res.body).toEqual({ stage: 'none', percent: null });
+  });
+
+  it('reports none for a malformed ID without looking up the streamer', async () => {
+    const res = await supertest(buildApp()).get('/settings/videos/progress/not-an-id');
+    expect(res.body).toEqual({ stage: 'none', percent: null });
+    expect(vi.mocked(getStreamerByDiscordId)).not.toHaveBeenCalled();
+  });
+
+  it('answers 500 with none when the streamer lookup fails', async () => {
+    vi.mocked(getStreamerByDiscordId).mockRejectedValue(new Error('db down'));
+    const res = await supertest(buildApp()).get(`/settings/videos/progress/${UPLOAD_ID}`);
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ stage: 'none', percent: null });
   });
 });

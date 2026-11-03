@@ -49,10 +49,12 @@
 
       <div class="card card-spaced">
         <div class="card-body">
-          <!-- Submitted via fetch in overlayAdmin.js with the CSRF token in an
+          <!-- Submitted with XHR by registerUploadFormHandler (utils.js) with the CSRF token in an
                X-CSRF-Token header, so the session token is never placed in the URL
-               (browser history / Referer). -->
-          <form method="POST" action="/overlay/settings/videos/upload" enctype="multipart/form-data" class="js-overlay-upload">
+               (browser history / Referer). It fills the progress bar below while the file
+               uploads, then polls data-progress-url while a MOV converts. -->
+          <form method="POST" action="/overlay/settings/videos/upload" enctype="multipart/form-data" class="js-overlay-upload"
+                data-progress-url="/overlay/settings/videos/progress" data-processing-label="Saving…">
             <div class="form-row-wrap items-end">
               <div class="flex-1">
                 <label class="hint hint-compact" for="video-name">Name</label>
@@ -65,6 +67,10 @@
               <div>
                 <button type="submit" class="btn">Upload</button>
               </div>
+            </div>
+            <div class="upload-progress is-hidden mt-04" data-upload-progress>
+              <progress class="upload-progress-bar" max="100" value="0" aria-label="Upload progress"></progress>
+              <span class="hint" data-upload-progress-label role="status" aria-live="polite"></span>
             </div>
             <p class="hint mt-04">For transparent overlays, upload WebM with an alpha channel or a MOV (e.g. ProRes 4444): MOV files are converted to WebM on upload, keeping transparency, which can take a minute. Max <%= maxFileMb %> MB.</p>
           </form>

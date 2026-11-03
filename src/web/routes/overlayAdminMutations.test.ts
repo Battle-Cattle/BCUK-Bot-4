@@ -52,6 +52,7 @@ import fs from 'fs';
 import { csrfProtection } from '../csrf';
 import { storeMovAsWebm } from './overlayMovConversion';
 import { isWebmTranscodeQueueFull } from './overlayVideoTranscode';
+import { getConversionProgress } from './overlayConversionProgress';
 import type { RequestHandler } from 'express';
 import { buildTestApp, drainBodyBeforeRedirect } from '../../test-utils/expressTestApp';
 
@@ -229,6 +230,48 @@ describe('POST /settings/videos/upload', () => {
       .attach('video', MOV_BUF, { filename: 'clip.mov', contentType: 'video/quicktime' });
     expect(res.headers.location).toBe(`/overlay/settings?error=${code}`);
     expect(vi.mocked(addVideo)).not.toHaveBeenCalled();
+  });
+
+  it('publishes a MOV conversion\'s progress under the page\'s upload ID while it runs, then clears it', async () => {
+    const uploadId = 'a'.repeat(32);
+    let seenDuringConversion: unknown;
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    vi.mocked(storeMovAsWebm).mockImplementation(async (_dir, baseName, _buffer, onProgress) => {
+      onProgress?.({ stage: 'converting', percent: 42 });
+      seenDuringConversion = getConversionProgress(MOCK_STREAMER.id, uploadId);
+      return `${baseName}.webm`;
+    });
+    const res = await supertest(buildApp())
+      .post('/settings/videos/upload')
+      .set('X-Upload-Id', uploadId)
+      .attach('video', MOV_BUF, { filename: 'clip.mov', contentType: 'video/quicktime' });
+    expect(res.headers.location).toBe('/overlay/settings?success=video_uploaded');
+    expect(seenDuringConversion).toEqual({ stage: 'converting', percent: 42 });
+    expect(getConversionProgress(MOCK_STREAMER.id, uploadId)).toBeUndefined();
+  });
+
+  it('clears the published progress when the conversion fails', async () => {
+    const uploadId = 'b'.repeat(32);
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    vi.mocked(storeMovAsWebm).mockImplementation(async (_dir, _baseName, _buffer, onProgress) => {
+      onProgress?.({ stage: 'converting', percent: 10 });
+      throw Object.assign(new Error('ffmpeg'), { code: 'transcode_failed' });
+    });
+    const res = await supertest(buildApp())
+      .post('/settings/videos/upload')
+      .set('X-Upload-Id', uploadId)
+      .attach('video', MOV_BUF, { filename: 'clip.mov', contentType: 'video/quicktime' });
+    expect(res.headers.location).toBe('/overlay/settings?error=transcode_failed');
+    expect(getConversionProgress(MOCK_STREAMER.id, uploadId)).toBeUndefined();
+  });
+
+  it('converts without publishing progress when the upload ID is missing or malformed', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    await supertest(buildApp())
+      .post('/settings/videos/upload')
+      .set('X-Upload-Id', '../not-an-id')
+      .attach('video', MOV_BUF, { filename: 'clip.mov', contentType: 'video/quicktime' });
+    expect(vi.mocked(storeMovAsWebm).mock.calls[0]![3]).toBeUndefined();
   });
 
   it('removes the converted WebM when the DB insert fails after a MOV conversion', async () => {

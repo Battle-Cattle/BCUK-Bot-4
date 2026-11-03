@@ -49,10 +49,16 @@ afterEach(async () => {
 describe('storeMovAsWebm', () => {
   it('converts the upload and leaves only the finished WebM', async () => {
     await expect(storeMovAsWebm(dir, 'abc', MOV_BYTES)).resolves.toBe('abc.webm');
-    expect(vi.mocked(transcodeToWebm)).toHaveBeenCalledWith(path.join(dir, 'abc.mov.upload'), path.join(dir, 'abc.webm.part'));
+    expect(vi.mocked(transcodeToWebm)).toHaveBeenCalledWith(path.join(dir, 'abc.mov.upload'), path.join(dir, 'abc.webm.part'), undefined);
     expect(convertedInput).toEqual(MOV_BYTES);
     expect(await files()).toEqual(['abc.webm']);
     expect(await fs.promises.readFile(path.join(dir, 'abc.webm'))).toEqual(WEBM_BYTES);
+  });
+
+  it('passes the progress listener through to the conversion', async () => {
+    const onProgress = vi.fn();
+    await storeMovAsWebm(dir, 'abc', MOV_BYTES, onProgress);
+    expect(vi.mocked(transcodeToWebm)).toHaveBeenCalledWith(expect.any(String), expect.any(String), onProgress);
   });
 
   it('removes both temporary files and reports transcode_failed when ffmpeg fails partway', async () => {
