@@ -222,13 +222,27 @@ mv "$BUILD_DIR" dist
 trap - ERR  # Rollback no longer needed — code is good.
 rm -rf dist.old
 
-# Reads WEB_PORT from .env (the bot's own source of truth for it) the way dotenv does: last entry
-# wins, an inline ` # comment` is dropped, surrounding quotes and spaces are stripped. No entry
-# (grep finding nothing must not trip pipefail) or a blank one falls back to 3000, like config.ts.
-WEB_PORT_SETTING="$( { grep -E '^[[:space:]]*WEB_PORT=' .env 2>/dev/null || true; } \
-    | tail -n 1 | cut -d= -f2- | sed -E 's/[[:space:]]+#.*$//' | tr -d "[:space:]\"'")"
+# Prints a setting from .env (the bot's own source of truth for it) the way dotenv reads it: last
+# entry wins, an inline ` # comment` is dropped, surrounding quotes and spaces are stripped. Prints
+# nothing for no entry (grep finding nothing must not trip pipefail) or a blank one.
+env_setting() {
+    { grep -E "^[[:space:]]*$1=" .env 2>/dev/null || true; } \
+        | tail -n 1 | cut -d= -f2- | sed -E 's/[[:space:]]+#.*$//' | tr -d "[:space:]\"'"
+}
+
+# Blank or missing values fall back to the same defaults as config.ts.
+WEB_PORT_SETTING="$(env_setting WEB_PORT)"
 WEB_PORT="${WEB_PORT_SETTING:-3000}"
-HEALTH_URL="http://127.0.0.1:${WEB_PORT}/healthz"
+WEB_HOST_SETTING="$(env_setting WEB_HOST)"
+WEB_HOST="${WEB_HOST_SETTING:-127.0.0.1}"
+# A wildcard bind is reachable on loopback; an IPv6 literal needs brackets in a URL.
+case "$WEB_HOST" in
+    0.0.0.0) HEALTH_HOST=127.0.0.1 ;;
+    ::) HEALTH_HOST='[::1]' ;;
+    *:*) HEALTH_HOST="[${WEB_HOST}]" ;;
+    *) HEALTH_HOST="$WEB_HOST" ;;
+esac
+HEALTH_URL="http://${HEALTH_HOST}:${WEB_PORT}/healthz"
 
 # Prints the PIDs listening on WEB_PORT, one per line (nothing if none, or if ss can't see them).
 # deploy.sh runs as the service's own user, so ss can see the bot's PID.

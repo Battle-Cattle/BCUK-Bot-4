@@ -86,6 +86,11 @@ export const GLOBAL_COOLDOWN_MS = parseIntEnvInRange('GLOBAL_COOLDOWN_MS', 3000,
 
 // Web panel
 export const WEB_PORT = parseIntEnvInRange('WEB_PORT', 3000, 1, MAX_PORT);
+// Interface the panel binds to. Loopback by default: the app trusts exactly one X-Forwarded-For
+// hop (`trust proxy: 1`, set for Caddy), so a client able to reach the port directly could spoof
+// its IP and dodge the IP-keyed rate limiters. Set it to a private interface only when the
+// reverse proxy runs on another host or in a container.
+export const WEB_HOST = process.env.WEB_HOST?.trim() || '127.0.0.1';
 export const SESSION_SECRET = require_env('SESSION_SECRET');
 if (SESSION_SECRET === '__REQUIRED_GENERATE_LONG_RANDOM_SECRET__') {
   throw new Error('SESSION_SECRET has not been set — replace the placeholder in .env with a long random string');

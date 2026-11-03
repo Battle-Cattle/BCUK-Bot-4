@@ -9,6 +9,7 @@ import { waitFor } from '../test-utils/waitFor';
 
 vi.mock('../shared/config', () => ({
   WEB_PORT: 3000,
+  WEB_HOST: '127.0.0.1',
   SESSION_SECRET: 'x'.repeat(32),
   DB_HOST: 'localhost',
   DB_PORT: 3306,
@@ -553,6 +554,16 @@ describe('startWebPanel / stopWebPanel', () => {
 
     await socketClosed;
     expect(server.listening).toBe(false);
+  });
+
+  it('binds the configured host, loopback by default', async () => {
+    const server = await startWebPanel(0);
+    expect((server.address() as AddressInfo).address).toBe('127.0.0.1');
+  });
+
+  it('binds the host it is given', async () => {
+    const server = await startWebPanel(0, '0.0.0.0');
+    expect((server.address() as AddressInfo).address).toBe('0.0.0.0');
   });
 
   it('is a no-op when the panel is not running', async () => {

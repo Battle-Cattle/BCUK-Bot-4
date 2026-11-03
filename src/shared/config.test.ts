@@ -218,6 +218,23 @@ describe('config — GLOBAL_COOLDOWN_MS', () => {
   });
 });
 
+describe('config — WEB_HOST', () => {
+  it('defaults to loopback when unset', async () => {
+    const config = await loadConfig({ WEB_HOST: undefined });
+    expect(config.WEB_HOST).toBe('127.0.0.1');
+  });
+
+  it('defaults to loopback when blank', async () => {
+    const config = await loadConfig({ WEB_HOST: '   ' });
+    expect(config.WEB_HOST).toBe('127.0.0.1');
+  });
+
+  it('uses the configured interface, trimmed', async () => {
+    const config = await loadConfig({ WEB_HOST: ' 10.0.0.5 ' });
+    expect(config.WEB_HOST).toBe('10.0.0.5');
+  });
+});
+
 describe('config — WEB_PORT', () => {
   it('defaults to 3000 when unset', async () => {
     const config = await loadConfig({ WEB_PORT: undefined });

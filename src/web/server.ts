@@ -7,7 +7,7 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import path from 'path';
 import type { Server } from 'http';
-import { WEB_PORT, SESSION_SECRET } from '../shared/config';
+import { WEB_HOST, WEB_PORT, SESSION_SECRET } from '../shared/config';
 import { getSessionPool } from '../db';
 
 const log = createLogger('Web');
@@ -337,22 +337,24 @@ function stopSessionCleanup(): void {
 }
 
 /**
- * Starts the Express app listening on {@link WEB_PORT}.
+ * Starts the Express app listening on {@link WEB_HOST}:{@link WEB_PORT}. The host defaults to
+ * loopback so the panel is only reachable through the reverse proxy it trusts one hop of.
  * @param port - Port to listen on; defaults to {@link WEB_PORT} (tests pass 0 for a free port).
+ * @param host - Interface to bind; defaults to {@link WEB_HOST}.
  * @returns Resolves with the listening server. Rejects with the listen error (e.g.
  *   `EADDRINUSE`) instead — Express 5 hands that error to the listen callback, so ignoring the
- *   callback's argument would log "Panel available" for a panel that never came up.
+ *   callback's argument would log "Panel listening" for a panel that never came up.
  */
-export function startWebPanel(port: number = WEB_PORT): Promise<Server> {
+export function startWebPanel(port: number = WEB_PORT, host: string = WEB_HOST): Promise<Server> {
   return new Promise((resolve, reject) => {
-    const server = app.listen(port, (err?: Error) => {
+    const server = app.listen(port, host, (err?: Error) => {
       if (err) {
         reject(err);
         return;
       }
       webServer = server;
       startSessionCleanup();
-      log.info(`Panel available at http://localhost:${port}`);
+      log.info(`Panel listening on ${host}:${port}`);
       resolve(server);
     });
   });
