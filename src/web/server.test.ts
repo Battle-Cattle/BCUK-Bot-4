@@ -148,7 +148,7 @@ vi.mock('./routes/serviceWorker', () => ({ default: emptyRouter() }));
 vi.mock('./routes/health', () => ({ default: markerRouter('health') }));
 vi.mock('./routes/healthStatusEvents', () => ({ default: emptyRouter() }));
 
-import { app, generalLimiter, sessionLimiter, startWebPanel, stopWebPanel } from './server';
+import { app, generalLimiter, sessionLimiter, startWebPanel, stopWebPanel, WEB_REQUEST_TIMEOUT_MS } from './server';
 import { requireAuth, requireGuildContext } from './middleware';
 
 describe('server route wiring', () => {
@@ -532,6 +532,14 @@ describe('startWebPanel / stopWebPanel', () => {
     } finally {
       await new Promise<void>((resolve) => blocker.close(() => resolve()));
     }
+  });
+
+  it('gives requests 30 minutes to arrive, for large uploads, while keeping the header deadline', async () => {
+    const server = await startWebPanel(0);
+    expect(WEB_REQUEST_TIMEOUT_MS).toBe(30 * 60_000);
+    expect(server.requestTimeout).toBe(WEB_REQUEST_TIMEOUT_MS);
+    expect(server.headersTimeout).toBeLessThanOrEqual(60_000);
+    await stopWebPanel();
   });
 
   it('closes the server and drops in-flight connections on stop', async () => {
