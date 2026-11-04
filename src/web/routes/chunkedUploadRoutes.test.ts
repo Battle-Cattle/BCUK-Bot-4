@@ -7,14 +7,14 @@ import supertest from 'supertest';
 import { mockLogger } from '../../test-utils/loggerMock';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 import { ChunkedUploadStore, CHUNK_MAX_BYTES } from '../chunkedUploadStore';
-import { mountChunkedUploadRoutes, parseOffset, toMemoryFile } from './chunkedUploadRoutes';
+import { mountChunkedUploadRoutes, parseOffset, toMemoryFile, type ChunkedUploadRouteOptions } from './chunkedUploadRoutes';
 
 let dir: string;
 let store: ChunkedUploadStore;
 let received: { file?: Express.Multer.File; body?: unknown };
 const checkStart = vi.fn((): string | null => null);
 
-function makeApp(user: unknown = { discordId: 'u1' }) {
+function makeApp(user: unknown = { discordId: 'u1' }, toFile: ChunkedUploadRouteOptions['toFile'] = toMemoryFile) {
   const router = Router();
   mountChunkedUploadRoutes(router, {
     path: '/upload',
@@ -22,7 +22,7 @@ function makeApp(user: unknown = { discordId: 'u1' }) {
     guards: [],
     field: 'sound',
     checkStart,
-    toFile: toMemoryFile,
+    toFile,
     complete: [(req: Request, res: Response) => {
       received = { file: req.file, body: req.body };
       res.redirect('/page?success=uploaded');
@@ -142,5 +142,21 @@ describe('mountChunkedUploadRoutes', () => {
     expect((await app.delete(`/upload/${id}`)).status).toBe(204);
     expect((await app.get(`/upload/${id}`)).status).toBe(404);
     await start(app);
+  });
+
+  it('answers 500 when the store fails unexpectedly', async () => {
+    vi.spyOn(store, 'status').mockRejectedValue(new Error('disk gone'));
+    const res = await makeApp().get('/upload/0f8fad5b-d9cb-469f-a165-70867728950e');
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ error: 'upload_failed' });
+  });
+
+  it('redirects with upload_failed when the finished file cannot be handed over', async () => {
+    const app = makeApp({ discordId: 'u1' }, () => Promise.reject(new Error('read failed')));
+    const id = await start(app, 1);
+    await put(app, id, 0, 'a');
+    const done = await app.post(`/upload/${id}/complete`);
+    expect(done.headers.location).toBe('/page?error=upload_failed');
+    expect(received.file).toBeUndefined();
   });
 });

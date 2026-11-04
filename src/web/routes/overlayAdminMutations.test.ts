@@ -341,6 +341,17 @@ describe('POST /settings/videos/upload', () => {
     expect(vi.mocked(addVideo)).not.toHaveBeenCalled();
   });
 
+  it('refuses to start a chunked MOV upload with transcode_busy while the conversion queue is full', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    vi.mocked(isWebmTranscodeQueueFull).mockReturnValue(true);
+    const res = await supertest(buildApp())
+      .post('/settings/videos/upload/start')
+      .type('form')
+      .send({ name: 'clip.mov', size: '100', type: 'video/quicktime' });
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({ error: 'transcode_busy' });
+  });
+
   it('still accepts WebM and MP4 uploads while the conversion queue is full', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
     vi.mocked(isWebmTranscodeQueueFull).mockReturnValue(true);

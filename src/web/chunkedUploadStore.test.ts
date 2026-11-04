@@ -1,7 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChunkedUploadStore, isUploadId, parseDeclaration } from './chunkedUploadStore';
 
 let dir: string;
@@ -15,6 +15,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await fs.promises.rm(dir, { recursive: true, force: true });
 });
 
@@ -129,5 +130,22 @@ describe('ChunkedUploadStore', () => {
     clock += 50_000;
     await store.sweep();
     expect(await store.status('u1', id)).toEqual({ ok: true, received: 3, size: 6 });
+  });
+});
+
+describe('ChunkedUploadStore without its folder or with failing removals', () => {
+  it('starts in a folder that does not exist yet, and sweeps nothing there', async () => {
+    const fresh = new ChunkedUploadStore({ dir: path.join(dir, 'missing'), maxBytes: 10 });
+    await fresh.sweep();
+    expect((await fresh.start('u1', { name: 'a', size: 1, type: '' })).ok).toBe(true);
+  });
+
+  it('logs instead of throwing when a session file cannot be removed or swept', async () => {
+    const id = await startUpload();
+    const rm = vi.spyOn(fs.promises, 'rm').mockRejectedValue(new Error('EBUSY'));
+    expect(await store.cancel('u1', id)).toBe(true);
+    clock += 120_000;
+    await expect(store.sweep()).resolves.toBeUndefined();
+    expect(rm).toHaveBeenCalled();
   });
 });
