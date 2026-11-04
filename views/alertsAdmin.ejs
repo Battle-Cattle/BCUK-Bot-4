@@ -104,7 +104,7 @@
           <div class="form-row-wrap items-end mt-1">
             <div class="flex-1">
               <label class="hint hint-compact" for="image-<%= eventType %>">Image / GIF (max <%= maxImageMb %> MB)</label>
-              <form method="POST" action="/alerts/settings/<%= eventType %>/image" data-chunked-url="/alerts/settings/<%= eventType %>/image" enctype="multipart/form-data" class="js-alert-upload d-flex gap-05 items-end">
+              <form method="POST" action="/alerts/settings/<%= eventType %>/image" enctype="multipart/form-data" class="js-alert-upload d-flex gap-05 items-end">
                 <input id="image-<%= eventType %>" class="input" type="file" name="image" accept="image/png,image/gif,image/jpeg,image/webp" required>
                 <button type="submit" class="btn btn-sm">Upload</button>
               </form>
@@ -121,7 +121,7 @@
 
             <div class="flex-1">
               <label class="hint hint-compact" for="sound-<%= eventType %>">Sound (max <%= maxSoundMb %> MB)</label>
-              <form method="POST" action="/alerts/settings/<%= eventType %>/sound" data-chunked-url="/alerts/settings/<%= eventType %>/sound" enctype="multipart/form-data" class="js-alert-upload d-flex gap-05 items-end">
+              <form method="POST" action="/alerts/settings/<%= eventType %>/sound" enctype="multipart/form-data" class="js-alert-upload d-flex gap-05 items-end">
                 <input id="sound-<%= eventType %>" class="input" type="file" name="sound" accept="audio/mpeg,audio/ogg,audio/wav" required>
                 <button type="submit" class="btn btn-sm">Upload</button>
               </form>

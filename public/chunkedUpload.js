@@ -1,7 +1,7 @@
 /* global findUploadProgress, nameUploadProgress, showUploadProgress, pollProcessingProgress, newUploadId */
 // Chunked, resumable uploads for every web panel upload form (issue #912): registerUploadFormHandler
-// in utils.js hands a form with `data-chunked-url` to submitChunkedUpload, which sends the chosen
-// file in pieces to the routes `src/web/routes/chunkedUploadRoutes.ts` mounts under that URL.
+// in utils.js hands each upload form to submitChunkedUpload, which sends the chosen file in pieces
+// to the routes `src/web/routes/chunkedUploadRoutes.ts` mounts under the form's `action`.
 
 /** Attempts at sending one piece before the upload gives up (a dropped connection is retried). */
 var CHUNK_SEND_ATTEMPTS = 6;
@@ -62,7 +62,7 @@ async function chunkedError(res) {
 
 /**
  * The localStorage key remembering a page's upload in progress, so a reload can resume it.
- * @param {string} base - The form's chunked-upload URL.
+ * @param {string} base - The form's upload path (its `action`).
  * @returns {string} The key.
  */
 function chunkedResumeKey(base) {
@@ -72,7 +72,7 @@ function chunkedResumeKey(base) {
 /**
  * Remembers (or, with null, forgets) the upload in progress for this form; storage failures
  * (private windows, blocked storage) are ignored, since resuming is only a convenience.
- * @param {string} base - The form's chunked-upload URL.
+ * @param {string} base - The form's upload path (its `action`).
  * @param {{id: string, name: string, size: number, lastModified: number}|null} record - What to remember.
  * @returns {void}
  */
@@ -98,7 +98,7 @@ function isSameFile(saved, file) {
 /**
  * The upload ID to resume for `file`, if the server's running upload is one this browser
  * started for the same file.
- * @param {string} base - The form's chunked-upload URL.
+ * @param {string} base - The form's upload path (its `action`).
  * @param {File} file - The chosen file.
  * @param {string} activeId - The user's running upload, as the server reported it.
  * @returns {string|null} `activeId` when it's this file's, otherwise null.
@@ -114,7 +114,7 @@ function resumableUploadId(base, file, activeId) {
 
 /**
  * Starts (or resumes) the chunked upload of `file`.
- * @param {string} base - The form's chunked-upload URL.
+ * @param {string} base - The form's upload path (its `action`).
  * @param {File} file - The chosen file.
  * @param {string} fallbackPath - Page to return to with an error.
  * @returns {Promise<string>} The upload ID.
@@ -138,7 +138,7 @@ async function startChunkedUpload(base, file, fallbackPath) {
 
 /**
  * Asks the server how many bytes of an upload it holds.
- * @param {string} base - The form's chunked-upload URL.
+ * @param {string} base - The form's upload path (its `action`).
  * @param {string} id - The upload ID.
  * @returns {Promise<number|null>} The confirmed offset, or null if it couldn't be read.
  */
@@ -154,7 +154,7 @@ async function confirmedOffset(base, id) {
 
 /**
  * Sends the piece of `file` starting at `offset`.
- * @param {string} base - The form's chunked-upload URL.
+ * @param {string} base - The form's upload path (its `action`).
  * @param {string} id - The upload ID.
  * @param {File} file - The chosen file.
  * @param {{offset: number, size: number}} piece - Where the piece starts and its largest size.
@@ -229,7 +229,7 @@ function nonFileFields(form) {
 /**
  * Completes the upload with the form's other fields, polling processing progress meanwhile.
  * @param {HTMLFormElement} form - The upload form.
- * @param {string} base - The form's chunked-upload URL.
+ * @param {string} base - The form's upload path (its `action`).
  * @param {string} id - The upload ID.
  * @param {{box: HTMLElement, bar: HTMLProgressElement|null, label: HTMLElement|null}|null} progress - The display.
  * @returns {Promise<string>} The page the server redirected to.
@@ -253,7 +253,7 @@ async function completeChunkedUpload(form, base, id, progress) {
 }
 
 /**
- * Sends one upload form as a chunked, resumable upload to its `data-chunked-url`: starts it (or
+ * Sends one upload form as a chunked, resumable upload to the routes under its `action`: starts it (or
  * resumes this browser's upload of the same file), sends the file in pieces (re-sending a
  * dropped piece from the server's confirmed offset), then completes it with the form's other
  * fields and navigates to the page the server redirected to.
@@ -262,7 +262,7 @@ async function completeChunkedUpload(form, base, id, progress) {
  * @returns {Promise<void>} Resolves once the browser has been sent on.
  */
 async function submitChunkedUpload(form, fallbackPath) {
-  var base = form.dataset.chunkedUrl;
+  var base = form.getAttribute('action');
   var input = form.querySelector('input[type="file"]');
   var file = input && input.files && input.files[0];
   var progress = findUploadProgress(form);

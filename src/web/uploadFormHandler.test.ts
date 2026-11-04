@@ -7,7 +7,11 @@ import vm from 'vm';
 const utilsSource = ['utils.js', 'chunkedUpload.js']
   .map((name) => fs.readFileSync(path.join(__dirname, '../../public', name), 'utf8'))
   .join('\n');
-const ACTION = 'https://bot.example/overlay/settings/videos/upload';
+const BASE = '/overlay/settings/videos/upload';
+const ID = '0f8fad5b-d9cb-469f-a165-70867728950e';
+const PROGRESS_ID = 'ab'.repeat(16);
+const DONE_URL = '/overlay/settings?success=video_uploaded';
+const PROGRESS_URL = '/overlay/settings/videos/progress/';
 
 type Listener = (event?: any) => void;
 
@@ -22,30 +26,19 @@ class FakeTarget {
   }
 }
 
-/** Fake XMLHttpRequest recording what was sent; the test drives its events. */
-class FakeXhr extends FakeTarget {
-  static last: FakeXhr | undefined;
-  upload = new FakeTarget();
-  headers: Record<string, string> = {};
-  method = '';
-  url = '';
-  body: unknown;
-  status = 0;
-  responseURL = '';
-  constructor() {
-    super();
-    FakeXhr.last = this;
-  }
-  open(method: string, url: string) {
-    this.method = method;
-    this.url = url;
-  }
-  setRequestHeader(name: string, value: string) {
-    this.headers[name] = value;
-  }
-  send(body: unknown) {
-    this.body = body;
-  }
+/** A fake File of `size` bytes whose slices report their range. */
+function makeFile(size: number) {
+  return { name: 'clip.mov', size, type: 'video/quicktime', lastModified: 5, slice: (a: number, b: number) => `bytes ${a}-${Math.min(b, size)}` };
+}
+
+/** A fetch Response. */
+function response(status: number, body: unknown, extra: Record<string, unknown> = {}) {
+  return Promise.resolve({ ok: status >= 200 && status < 300, status, redirected: false, url: '', json: () => Promise.resolve(body), ...extra });
+}
+
+/** A completed upload's redirect response. */
+function redirectTo(url: string) {
+  return response(200, null, { redirected: true, url });
 }
 
 /** The form's progress display: a box, a `<progress>` bar and a label. */
@@ -66,17 +59,33 @@ function makeProgressDisplay() {
   return { box, bar, label };
 }
 
-/** Builds a page context with `utils.js` loaded and the overlay upload handler registered. */
-function setup(options: { withProgress?: boolean; dataset?: Record<string, string> } = {}) {
-  const { withProgress = true, dataset = { progressUrl: '/overlay/settings/videos/progress', processingLabel: 'Saving…' } } = options;
+interface SetupOptions {
+  file?: ReturnType<typeof makeFile> | null;
+  stored?: Record<string, string>;
+  withProgress?: boolean;
+  dataset?: Record<string, string>;
+}
+
+/** A page context with `utils.js` + `chunkedUpload.js` loaded and the overlay upload form registered. */
+function setup(options: SetupOptions = {}) {
+  const {
+    file = makeFile(6),
+    stored = {},
+    withProgress = true,
+    dataset = { progressUrl: '/overlay/settings/videos/progress', processingLabel: 'Saving…' },
+  } = options;
   const display = makeProgressDisplay();
   const button = { disabled: false };
+  const input = { files: file ? [file] : [] };
   class HTMLFormElement {
-    action = ACTION;
     dataset: Record<string, string> = { ...dataset };
     classList = { contains: (name: string) => name === 'js-overlay-upload' };
+    getAttribute(name: string) {
+      return name === 'action' ? BASE : null;
+    }
     querySelector(selector: string) {
       if (selector === 'button[type="submit"]') return button;
+      if (selector === 'input[type="file"]') return input;
       if (selector === '[data-upload-progress]') return withProgress ? display.box : null;
       return null;
     }
@@ -85,16 +94,30 @@ function setup(options: { withProgress?: boolean; dataset?: Record<string, strin
   document.body = { dataset: { csrfToken: 'tok' } };
   const assign = vi.fn();
   const fetch = vi.fn();
+  const storage: Record<string, string> = { ...stored };
   const context = {
     document,
     HTMLFormElement,
-    XMLHttpRequest: FakeXhr,
-    FormData: class { constructor(public form: unknown) {} },
+    FormData: class {
+      forEach(fn: (value: unknown, key: string) => void) {
+        fn('My clip', 'name');
+        fn(file, 'video');
+      }
+    },
+    URLSearchParams,
     fetch,
     AbortController,
     setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms),
     clearTimeout: (id: ReturnType<typeof setTimeout>) => clearTimeout(id),
-    window: { location: { assign }, crypto: { getRandomValues: (a: Uint8Array) => a.fill(171) } },
+    window: {
+      location: { assign },
+      crypto: { getRandomValues: (a: Uint8Array) => a.fill(171) },
+      localStorage: {
+        getItem: (k: string) => storage[k] ?? null,
+        setItem: (k: string, v: string) => { storage[k] = v; },
+        removeItem: (k: string) => { delete storage[k]; },
+      },
+    },
   };
   vm.runInNewContext(utilsSource, context);
   vm.runInNewContext("registerUploadFormHandler('js-overlay-upload', '/overlay/settings');", context);
@@ -105,21 +128,52 @@ function setup(options: { withProgress?: boolean; dataset?: Record<string, strin
     document.fire('submit', event);
     return event;
   };
-  return { form, button, display, assign, fetch, submit };
+  return { form, button, display, assign, fetch, submit, storage };
 }
 
-/** A resolved fetch Response carrying `body` as JSON. */
-function jsonResponse(body: unknown, ok = true) {
-  return Promise.resolve({ ok, json: () => Promise.resolve(body) });
+/** Answers a 6-byte upload's start, status and one piece, then `complete` and the progress polls. */
+function routeFetch(
+  fetch: ReturnType<typeof vi.fn>,
+  handlers: { complete?: () => Promise<unknown>; progress?: (init: any) => Promise<unknown> } = {},
+) {
+  fetch.mockImplementation((url: string, init: any) => {
+    if (url === `${BASE}/start`) return response(200, { id: ID });
+    if (url === `${BASE}/${ID}`) return response(200, { received: 0, size: 6 });
+    if (url.includes('/chunk?offset=0')) return response(200, { received: 6 });
+    if (url.endsWith('/complete')) return handlers.complete ? handlers.complete() : redirectTo(DONE_URL);
+    if (url.startsWith(PROGRESS_URL)) return handlers.progress ? handlers.progress(init) : response(200, { stage: 'none' });
+    return response(404, {});
+  });
 }
 
-/** Lets pending promise callbacks (the poll's fetch chain) run. */
+/** Waits (advancing fake timers) until the page navigates. */
+async function navigated(assign: ReturnType<typeof vi.fn>) {
+  for (let i = 0; i < 200 && assign.mock.calls.length === 0; i++) await vi.advanceTimersByTimeAsync(100);
+  return assign.mock.calls[0]?.[0];
+}
+
+/** Lets pending promise callbacks run. */
 async function flush() {
-  for (let i = 0; i < 5; i++) await Promise.resolve();
+  for (let i = 0; i < 200; i++) await Promise.resolve();
 }
+
+/** A promise whose settling the test controls. */
+function deferred() {
+  let resolve: (value: unknown) => void = () => {};
+  const promise = new Promise((r) => { resolve = r; });
+  return { promise, resolve };
+}
+
+/** Calls to the conversion-progress endpoint so far. */
+function progressCalls(fetch: ReturnType<typeof vi.fn>) {
+  return fetch.mock.calls.filter(([u]) => String(u).startsWith(PROGRESS_URL));
+}
+
+/** Never settles: a complete request still being processed. */
+const pending = () => new Promise(() => {});
 
 beforeEach(() => {
-  FakeXhr.last = undefined;
+  vi.useFakeTimers();
 });
 
 afterEach(() => {
@@ -127,285 +181,169 @@ afterEach(() => {
 });
 
 describe('registerUploadFormHandler', () => {
-  it('posts the form with XHR, sending the CSRF token and a fresh upload ID', () => {
-    const { form, button, display, submit } = setup();
-    const event = submit();
-    const xhr = FakeXhr.last!;
-    expect(event.preventDefault).toHaveBeenCalled();
-    expect(button.disabled).toBe(true);
-    expect([xhr.method, xhr.url]).toEqual(['POST', ACTION]);
-    expect(xhr.headers['X-CSRF-Token']).toBe('tok');
-    expect(xhr.headers['X-Upload-Id']).toBe('ab'.repeat(16));
-    expect((xhr.body as { form: unknown }).form).toBe(form);
-    expect(display.box.hidden).toBe(false);
-    expect(display.label.textContent).toBe('Uploading… 0%');
-  });
-
-  it('names the bar after the stage it is showing', () => {
-    const { display, fetch, submit } = setup();
-    fetch.mockImplementation(() => new Promise(() => {}));
-    submit();
-    expect(display.bar.ariaLabel).toBe('Upload progress');
-    FakeXhr.last!.upload.fire('load');
-    expect(display.bar.ariaLabel).toBe('Processing progress');
-  });
-
-  it('abandons a poll that never answers and carries on polling', async () => {
-    vi.useFakeTimers();
-    const { display, fetch, submit } = setup();
-    let signal: AbortSignal | undefined;
-    fetch.mockImplementationOnce((_url: string, init: { signal: AbortSignal }) => {
-      signal = init.signal;
-      return new Promise((_resolve, reject) => init.signal.addEventListener('abort', () => reject(new Error('aborted'))));
-    }).mockImplementationOnce(() => jsonResponse({ stage: 'converting', percent: 55 }));
-    submit();
-    FakeXhr.last!.upload.fire('load');
-    await vi.advanceTimersByTimeAsync(10_000);
-    expect(signal?.aborted).toBe(true);
-    await vi.advanceTimersByTimeAsync(2000);
-    await flush();
-    expect(fetch).toHaveBeenCalledTimes(2);
-    expect(display.label.textContent).toBe('Converting… 55%');
-  });
-
-  it('ignores a second submit while the first is still pending', () => {
-    const { submit } = setup();
-    submit();
-    const first = FakeXhr.last;
-    submit();
-    expect(FakeXhr.last).toBe(first);
-  });
-
-  it('shows the upload percentage as the file is sent', () => {
-    const { display, submit } = setup();
-    submit();
-    FakeXhr.last!.upload.fire('progress', { lengthComputable: true, loaded: 42, total: 100 });
-    expect(display.bar.value).toBe(42);
-    expect(display.label.textContent).toBe('Uploading… 42%');
-    FakeXhr.last!.upload.fire('progress', { lengthComputable: false, loaded: 90, total: 0 });
-    expect(display.bar.value).toBe(42);
-  });
-
-  it('once the file is sent, polls the progress endpoint and shows the conversion percentage', async () => {
-    vi.useFakeTimers();
-    const { display, fetch, submit } = setup();
-    fetch.mockImplementationOnce(() => jsonResponse({ stage: 'queued', percent: null }))
-      .mockImplementationOnce(() => jsonResponse({ stage: 'converting', percent: 37 }));
-    submit();
-    FakeXhr.last!.upload.fire('load');
-    expect(display.bar.hasValue).toBe(false);
-    expect(fetch).toHaveBeenCalledWith(
-      `/overlay/settings/videos/progress/${'ab'.repeat(16)}`,
-      expect.objectContaining({ headers: { Accept: 'application/json' }, signal: expect.any(AbortSignal) }),
-    );
-    await flush();
-    expect(display.label.textContent).toBe('Waiting for another conversion to finish…');
-    await vi.advanceTimersByTimeAsync(2000);
-    await flush();
-    expect(fetch).toHaveBeenCalledTimes(2);
-    expect(display.bar.value).toBe(37);
-    expect(display.label.textContent).toBe('Converting… 37%');
-  });
-
-  it('shows the form\'s processing label while the server reports no conversion, or a failed poll', async () => {
-    vi.useFakeTimers();
-    const { display, fetch, submit } = setup();
-    fetch.mockImplementationOnce(() => jsonResponse({ stage: 'none', percent: null }))
-      .mockImplementationOnce(() => jsonResponse({}, false))
-      .mockImplementationOnce(() => Promise.reject(new Error('offline')))
-      .mockImplementationOnce(() => jsonResponse({ stage: 'converting', percent: null }));
-    submit();
-    FakeXhr.last!.upload.fire('load');
-    await flush();
-    expect(display.label.textContent).toBe('Saving…');
-    await vi.advanceTimersByTimeAsync(2000);
-    await flush();
-    expect(display.label.textContent).toBe('Saving…');
-    await vi.advanceTimersByTimeAsync(2000);
-    await flush();
-    expect(display.label.textContent).toBe('Saving…');
-    await vi.advanceTimersByTimeAsync(2000);
-    await flush();
-    expect(display.label.textContent).toBe('Converting…');
-  });
-
-  it('stops polling once the upload request finishes', async () => {
-    vi.useFakeTimers();
-    const { form, fetch, submit } = setup();
-    fetch.mockImplementation(() => jsonResponse({ stage: 'converting', percent: 10 }));
-    submit();
-    const xhr = FakeXhr.last!;
-    xhr.upload.fire('load');
-    await flush();
-    xhr.status = 200;
-    xhr.responseURL = 'https://bot.example/overlay/settings?success=video_uploaded';
-    xhr.fire('load');
-    xhr.fire('loadend');
-    await vi.advanceTimersByTimeAsync(10_000);
-    expect(fetch).toHaveBeenCalledOnce();
-    expect(form.dataset.submitting).toBeUndefined();
-  });
-
-  it('ignores a poll that answers after the upload has finished', async () => {
-    let answer: (value: unknown) => void = () => {};
-    const { display, fetch, submit } = setup();
-    fetch.mockImplementationOnce(() => new Promise((resolve) => { answer = resolve; }));
-    submit();
-    const xhr = FakeXhr.last!;
-    xhr.upload.fire('load');
-    xhr.fire('loadend');
-    answer({ ok: true, json: () => Promise.resolve({ stage: 'converting', percent: 80 }) });
-    await flush();
-    expect(display.label.textContent).toBe('Saving…');
-  });
-
-  it.each([
-    ['the page the server redirected to', 200, 'https://bot.example/overlay/settings?success=video_uploaded', 'https://bot.example/overlay/settings?success=video_uploaded'],
-    ['the fallback page for an OK response that did not redirect', 200, ACTION, '/overlay/settings'],
-    ['the error page for a non-OK response', 403, ACTION, '/overlay/settings?error=upload_failed'],
-  ])('navigates to %s', (_label, status, responseURL, expected) => {
-    const { assign, submit } = setup();
-    submit();
-    const xhr = FakeXhr.last!;
-    xhr.status = status;
-    xhr.responseURL = responseURL;
-    xhr.fire('load');
-    expect(assign).toHaveBeenCalledWith(expected);
-  });
-
-  it('navigates to the error page when the request fails outright', () => {
-    const { assign, submit } = setup();
-    submit();
-    FakeXhr.last!.fire('error');
-    expect(assign).toHaveBeenCalledWith('/overlay/settings?error=upload_failed');
-  });
-
-  it('uploads without showing or polling anything on a form with no progress display', () => {
-    const { fetch, submit } = setup({ withProgress: false });
-    submit();
-    FakeXhr.last!.upload.fire('progress', { lengthComputable: true, loaded: 1, total: 2 });
-    FakeXhr.last!.upload.fire('load');
-    expect(fetch).not.toHaveBeenCalled();
-  });
-
-  it('shows a generic processing label and does not poll without a progress URL', () => {
-    const { display, fetch, submit } = setup({ dataset: {} });
-    submit();
-    FakeXhr.last!.upload.fire('load');
-    expect(display.label.textContent).toBe('Processing…');
-    expect(fetch).not.toHaveBeenCalled();
-  });
-});
-
-describe('chunked uploads (data-chunked-url)', () => {
-  const BASE = '/overlay/settings/videos/upload';
-
-  /** A fake File of `size` bytes whose slices report their range. */
-  function makeFile(size: number) {
-    return { name: 'clip.mov', size, type: 'video/quicktime', lastModified: 5, slice: (a: number, b: number) => `bytes ${a}-${Math.min(b, size)}` };
-  }
-
-  /** A fetch Response. */
-  function response(status: number, body: unknown, extra: Record<string, unknown> = {}) {
-    return Promise.resolve({ ok: status >= 200 && status < 300, status, redirected: false, url: '', json: () => Promise.resolve(body), ...extra });
-  }
-
-  /** A page context with `utils.js` loaded and a chunked overlay upload form. */
-  function setupChunked(file: ReturnType<typeof makeFile> | null, stored: Record<string, string> = {}) {
-    const button = { disabled: false };
-    const input = { files: file ? [file] : [] };
-    class HTMLFormElement {
-      action = ACTION;
-      dataset: Record<string, string> = { chunkedUrl: BASE };
-      classList = { contains: (name: string) => name === 'js-overlay-upload' };
-      querySelector(selector: string) {
-        if (selector === 'button[type="submit"]') return button;
-        if (selector === 'input[type="file"]') return input;
-        return null;
-      }
-    }
-    const document = new FakeTarget() as FakeTarget & { body: unknown };
-    document.body = { dataset: { csrfToken: 'tok' } };
-    const assign = vi.fn();
-    const fetch = vi.fn();
-    const storage: Record<string, string> = { ...stored };
-    const context = {
-      document,
-      HTMLFormElement,
-      XMLHttpRequest: FakeXhr,
-      FormData: class {
-        forEach(fn: (value: unknown, key: string) => void) {
-          fn('My clip', 'name');
-          fn(file, 'video');
-        }
-      },
-      URLSearchParams,
-      fetch,
-      AbortController,
-      setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms),
-      clearTimeout: (id: ReturnType<typeof setTimeout>) => clearTimeout(id),
-      window: {
-        location: { assign },
-        crypto: { getRandomValues: (a: Uint8Array) => a.fill(171) },
-        localStorage: {
-          getItem: (k: string) => storage[k] ?? null,
-          setItem: (k: string, v: string) => { storage[k] = v; },
-          removeItem: (k: string) => { delete storage[k]; },
-        },
-      },
-    };
-    vm.runInNewContext(utilsSource, context);
-    vm.runInNewContext("registerUploadFormHandler('js-overlay-upload', '/overlay/settings');", context);
-    const form = new HTMLFormElement();
-    const submit = () => document.fire('submit', { target: form, preventDefault: vi.fn() });
-    return { form, assign, fetch, submit, storage };
-  }
-
-  /** Waits until the page navigates. */
-  async function navigated(assign: ReturnType<typeof vi.fn>) {
-    for (let i = 0; i < 200 && assign.mock.calls.length === 0; i++) await vi.advanceTimersByTimeAsync(100);
-    return assign.mock.calls[0]?.[0];
-  }
-
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
   it('starts, sends the file in pieces and completes with the form fields', async () => {
     const file = makeFile(10 * 1024 * 1024);
-    const { fetch, submit, assign, storage } = setupChunked(file);
-    const id = '0f8fad5b-d9cb-469f-a165-70867728950e';
+    const { fetch, submit, assign, storage, button } = setup({ file });
     fetch.mockImplementation((url: string) => {
-      if (url === `${BASE}/start`) return response(200, { id, chunkSize: 8 * 1024 * 1024 });
-      if (url === `${BASE}/${id}`) return response(200, { received: 0, size: file.size });
+      if (url === `${BASE}/start`) return response(200, { id: ID, chunkSize: 8 * 1024 * 1024 });
+      if (url === `${BASE}/${ID}`) return response(200, { received: 0, size: file.size });
       if (url.includes('/chunk?offset=0')) return response(200, { received: 8 * 1024 * 1024 });
       if (url.includes(`/chunk?offset=${8 * 1024 * 1024}`)) return response(200, { received: file.size });
-      if (url.endsWith('/complete')) return response(200, null, { redirected: true, url: '/overlay/settings?success=video_uploaded' });
-      return response(404, {});
+      if (url.endsWith('/complete')) return redirectTo(DONE_URL);
+      return response(200, { stage: 'none' });
     });
-    submit();
-    expect(await navigated(assign)).toBe('/overlay/settings?success=video_uploaded');
+    const event = submit();
+    expect(event.preventDefault).toHaveBeenCalled();
+    expect(button.disabled).toBe(true);
+    expect(await navigated(assign)).toBe(DONE_URL);
     const start = fetch.mock.calls.find(([u]) => u === `${BASE}/start`)!;
     expect(JSON.parse(start[1].body)).toEqual({ name: 'clip.mov', size: file.size, type: 'video/quicktime' });
     expect(start[1].headers['X-CSRF-Token']).toBe('tok');
     const complete = fetch.mock.calls.find(([u]) => u.endsWith('/complete'))!;
     expect(complete[1].body.toString()).toBe('name=My+clip');
+    expect(complete[1].headers).toEqual({ 'X-CSRF-Token': 'tok', 'X-Upload-Id': PROGRESS_ID });
     expect(Object.keys(storage)).toEqual([]);
   });
 
+  it('ignores a second submit while the first is still pending', async () => {
+    const { fetch, submit, assign } = setup();
+    routeFetch(fetch);
+    submit();
+    submit();
+    await navigated(assign);
+    expect(fetch.mock.calls.filter(([u]) => u === `${BASE}/start`)).toHaveLength(1);
+  });
+
+  it('shows the upload percentage as pieces are confirmed, naming the bar after each stage', async () => {
+    const file = makeFile(16 * 1024 * 1024);
+    const { display, fetch, submit } = setup({ file });
+    const secondPiece = deferred();
+    fetch.mockImplementation((url: string) => {
+      if (url === `${BASE}/start`) return response(200, { id: ID });
+      if (url === `${BASE}/${ID}`) return response(200, { received: 0, size: file.size });
+      if (url.includes('/chunk?offset=0')) return response(200, { received: 8 * 1024 * 1024 });
+      if (url.includes('/chunk?offset=')) return secondPiece.promise;
+      return pending();
+    });
+    submit();
+    expect(display.box.hidden).toBe(false);
+    expect(display.bar.ariaLabel).toBe('Upload progress');
+    await flush();
+    expect(display.bar.value).toBe(50);
+    expect(display.label.textContent).toBe('Uploading… 50%');
+    secondPiece.resolve({ ok: true, status: 200, redirected: false, json: () => Promise.resolve({ received: file.size }) });
+    await flush();
+    expect(display.bar.ariaLabel).toBe('Processing progress');
+    expect(display.label.textContent).toBe('Saving…');
+  });
+
+  it('polls the progress endpoint while the upload completes and shows the conversion percentage', async () => {
+    const { display, fetch, submit } = setup();
+    const progress = [{ stage: 'queued', percent: null }, { stage: 'converting', percent: 37 }];
+    routeFetch(fetch, { complete: pending, progress: () => response(200, progress.shift()) });
+    submit();
+    await flush();
+    expect(display.bar.hasValue).toBe(false);
+    expect(progressCalls(fetch)[0]).toEqual([
+      `${PROGRESS_URL}${PROGRESS_ID}`,
+      expect.objectContaining({ headers: { Accept: 'application/json' }, signal: expect.any(AbortSignal) }),
+    ]);
+    expect(display.label.textContent).toBe('Waiting for another conversion to finish…');
+    await vi.advanceTimersByTimeAsync(2000);
+    await flush();
+    expect(display.bar.value).toBe(37);
+    expect(display.label.textContent).toBe('Converting… 37%');
+  });
+
+  it("shows the form's processing label while the server reports no conversion, or a failed poll", async () => {
+    const { display, fetch, submit } = setup();
+    const answers = [
+      () => response(200, { stage: 'none', percent: null }),
+      () => response(500, {}),
+      () => Promise.reject(new Error('offline')),
+      () => response(200, { stage: 'converting', percent: null }),
+    ];
+    routeFetch(fetch, { complete: pending, progress: () => answers.shift()!() });
+    submit();
+    await flush();
+    expect(display.label.textContent).toBe('Saving…');
+    for (const expected of ['Saving…', 'Saving…', 'Converting…']) {
+      await vi.advanceTimersByTimeAsync(2000);
+      await flush();
+      expect(display.label.textContent).toBe(expected);
+    }
+  });
+
+  it('abandons a poll that never answers and carries on polling', async () => {
+    const { display, fetch, submit } = setup();
+    let signal: AbortSignal | undefined;
+    const answers = [
+      (init: { signal: AbortSignal }) => {
+        signal = init.signal;
+        return new Promise((_resolve, reject) => init.signal.addEventListener('abort', () => reject(new Error('aborted'))));
+      },
+      () => response(200, { stage: 'converting', percent: 55 }),
+    ];
+    routeFetch(fetch, { complete: pending, progress: (init) => answers.shift()!(init) });
+    submit();
+    await flush();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(signal?.aborted).toBe(true);
+    await vi.advanceTimersByTimeAsync(2000);
+    await flush();
+    expect(display.label.textContent).toBe('Converting… 55%');
+  });
+
+  it('stops polling once the complete request finishes, ignoring a late poll answer', async () => {
+    const { form, display, fetch, submit, assign } = setup();
+    const complete = deferred();
+    const poll = deferred();
+    routeFetch(fetch, { complete: () => complete.promise, progress: () => poll.promise });
+    submit();
+    await flush();
+    complete.resolve({ ok: true, status: 200, redirected: true, url: DONE_URL });
+    expect(await navigated(assign)).toBe(DONE_URL);
+    poll.resolve({ ok: true, json: () => Promise.resolve({ stage: 'converting', percent: 80 }) });
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(progressCalls(fetch)).toHaveLength(1);
+    expect(display.label.textContent).toBe('Saving…');
+    expect(form.dataset.submitting).toBeUndefined();
+  });
+
+  it.each([
+    ['the fallback page when completing did not redirect', () => response(200, null), '/overlay/settings'],
+    ['the error page when completing fails outright', () => Promise.reject(new TypeError('network')), '/overlay/settings?error=upload_failed'],
+  ])('navigates to %s', async (_label, complete, expected) => {
+    const { fetch, submit, assign } = setup();
+    routeFetch(fetch, { complete });
+    submit();
+    expect(await navigated(assign)).toBe(expected);
+  });
+
+  it('uploads without polling on a form with no progress display', async () => {
+    const { fetch, submit, assign } = setup({ withProgress: false });
+    routeFetch(fetch);
+    submit();
+    expect(await navigated(assign)).toBe(DONE_URL);
+    expect(progressCalls(fetch)).toHaveLength(0);
+  });
+
+  it('shows a generic processing label and does not poll without a progress URL', async () => {
+    const { display, fetch, submit } = setup({ dataset: {} });
+    routeFetch(fetch, { complete: pending });
+    submit();
+    await flush();
+    expect(display.label.textContent).toBe('Processing…');
+    expect(progressCalls(fetch)).toHaveLength(0);
+  });
+
   it('re-sends a dropped piece and resumes from the confirmed offset', async () => {
-    const file = makeFile(6);
-    const { fetch, submit, assign } = setupChunked(file);
-    const id = 'abc';
+    const { fetch, submit, assign } = setup();
     let dropped = false;
     let received = 0;
     fetch.mockImplementation((url: string) => {
-      if (url === `${BASE}/start`) return response(200, { id });
-      if (url === `${BASE}/${id}`) return response(200, { received, size: 6 });
+      if (url === `${BASE}/start`) return response(200, { id: ID });
+      if (url === `${BASE}/${ID}`) return response(200, { received, size: 6 });
       if (url.includes('/chunk')) {
         if (!dropped) {
           dropped = true;
@@ -414,45 +352,64 @@ describe('chunked uploads (data-chunked-url)', () => {
         received = 6;
         return response(200, { received });
       }
-      return response(200, null, { redirected: true, url: '/overlay/settings?success=video_uploaded' });
+      if (url.endsWith('/complete')) return redirectTo(DONE_URL);
+      return response(200, { stage: 'none' });
     });
     submit();
-    expect(await navigated(assign)).toBe('/overlay/settings?success=video_uploaded');
+    expect(await navigated(assign)).toBe(DONE_URL);
     expect(fetch.mock.calls.filter(([u]) => u.includes('/chunk?offset=0'))).toHaveLength(2);
   });
 
-  it("resumes this browser's running upload of the same file after a reload", async () => {
-    const file = makeFile(6);
-    const id = 'old';
-    const saved = { [`chunkedUpload:${BASE}`]: JSON.stringify({ id, name: 'clip.mov', size: 6, lastModified: 5 }) };
-    const { fetch, submit, assign } = setupChunked(file, saved);
+  it('gives up with upload_failed once a piece keeps failing', async () => {
+    const { fetch, submit, assign } = setup();
     fetch.mockImplementation((url: string) => {
-      if (url === `${BASE}/start`) return response(409, { error: 'upload_busy', activeId: id });
-      if (url === `${BASE}/${id}`) return response(200, { received: 4, size: 6 });
+      if (url === `${BASE}/start`) return response(200, { id: ID });
+      if (url === `${BASE}/${ID}`) return response(200, { received: 0, size: 6 });
+      return response(503, {});
+    });
+    submit();
+    for (let i = 0; i < 100 && assign.mock.calls.length === 0; i++) await vi.advanceTimersByTimeAsync(1000);
+    expect(assign).toHaveBeenCalledWith('/overlay/settings?error=upload_failed');
+  });
+
+  it("resumes this browser's running upload of the same file after a reload", async () => {
+    const saved = { [`chunkedUpload:${BASE}`]: JSON.stringify({ id: 'old', name: 'clip.mov', size: 6, lastModified: 5 }) };
+    const { fetch, submit, assign } = setup({ stored: saved });
+    fetch.mockImplementation((url: string) => {
+      if (url === `${BASE}/start`) return response(409, { error: 'upload_busy', activeId: 'old' });
+      if (url === `${BASE}/old`) return response(200, { received: 4, size: 6 });
       if (url.includes('/chunk?offset=4')) return response(200, { received: 6 });
-      if (url.endsWith(`/${id}/complete`)) return response(200, null, { redirected: true, url: '/overlay/settings?success=video_uploaded' });
+      if (url.endsWith('/old/complete')) return redirectTo(DONE_URL);
+      if (url.startsWith(PROGRESS_URL)) return response(200, { stage: 'none' });
       return response(500, {});
     });
     submit();
-    expect(await navigated(assign)).toBe('/overlay/settings?success=video_uploaded');
+    expect(await navigated(assign)).toBe(DONE_URL);
   });
 
   it('reports a refused start, such as another upload in progress', async () => {
-    const { fetch, submit, assign } = setupChunked(makeFile(6));
+    const { fetch, submit, assign } = setup();
     fetch.mockImplementation(() => response(409, { error: 'upload_busy', activeId: 'someone-else' }));
     submit();
     expect(await navigated(assign)).toBe('/overlay/settings?error=upload_busy');
   });
 
+  it('reports upload_failed for a refusal without a JSON error', async () => {
+    const { fetch, submit, assign } = setup();
+    fetch.mockImplementation(() => Promise.resolve({ ok: false, status: 502, redirected: false, json: () => Promise.reject(new Error('html')) }));
+    submit();
+    expect(await navigated(assign)).toBe('/overlay/settings?error=upload_failed');
+  });
+
   it('follows a guard redirect such as not_a_streamer', async () => {
-    const { fetch, submit, assign } = setupChunked(makeFile(6));
-    fetch.mockImplementation(() => response(200, null, { redirected: true, url: '/overlay/settings?error=not_a_streamer' }));
+    const { fetch, submit, assign } = setup();
+    fetch.mockImplementation(() => redirectTo('/overlay/settings?error=not_a_streamer'));
     submit();
     expect(await navigated(assign)).toBe('/overlay/settings?error=not_a_streamer');
   });
 
   it('reports an expired upload when a piece is answered 404', async () => {
-    const { fetch, submit, assign } = setupChunked(makeFile(6));
+    const { fetch, submit, assign } = setup();
     fetch.mockImplementation((url: string) => {
       if (url.endsWith('/start')) return response(200, { id: 'x' });
       if (url.endsWith('/x')) return response(200, { received: 0, size: 6 });
@@ -463,7 +420,7 @@ describe('chunked uploads (data-chunked-url)', () => {
   });
 
   it('reports invalid_file when no file was chosen', async () => {
-    const { submit, assign } = setupChunked(null);
+    const { submit, assign } = setup({ file: null });
     submit();
     expect(await navigated(assign)).toBe('/overlay/settings?error=invalid_file');
   });

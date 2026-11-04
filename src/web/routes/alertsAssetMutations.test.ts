@@ -3,6 +3,10 @@ import { mockLogger } from '../../test-utils/loggerMock';
 import { ACCESS_LEVEL_MOCK } from '../../test-utils/accessLevelMock';
 
 /** Mocks the shared logger so route handlers don't write real log output during tests. */
+vi.mock('../chunkedUploadStore', async (importOriginal) =>
+  (await import('../../test-utils/chunkedUploadTest.js')).mockChunkedUploadStoreModule(await importOriginal<object>()));
+vi.mock('./chunkedUploadRoutes', async (importOriginal) =>
+  (await import('../../test-utils/chunkedUploadTest.js')).mockChunkedUploadRoutesModule(await importOriginal<object>()));
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
 vi.mock('../../db', () => ({
@@ -30,7 +34,7 @@ vi.mock('../middleware', () => ({
 
 vi.mock('../../shared/config', () => ({ UPLOAD_INCOMING_FOLDER: '/app/upload-incoming',
   ALERT_ASSETS_FOLDER: '/app/alert-assets',
-  // Use 1 MB so the oversized-upload tests can trigger Multer's LIMIT_FILE_SIZE with a small buffer.
+  // Use 1 MB so the oversized-upload tests can exceed the limit with a small buffer.
   ALERT_MAX_IMAGE_MB: 1,
   ALERT_MAX_SOUND_MB: 1,
   // Pulled in transitively via sfxFileUpload.ts (source of the shared detectAudioType).
@@ -48,6 +52,7 @@ vi.mock('fs', () => ({
   },
 }));
 
+import { uploadRequest } from '../../test-utils/chunkedUploadTest';
 import supertest from 'supertest';
 import { router } from './alertsAssetMutations';
 import { getStreamerByDiscordId, setAlertImage, setAlertSound } from '../../db';
@@ -55,7 +60,7 @@ import { AccessLevel } from '../../db';
 import fs from 'fs';
 import { csrfProtection } from '../csrf';
 import type { RequestHandler } from 'express';
-import { buildTestApp, drainBodyBeforeRedirect } from '../../test-utils/expressTestApp';
+import { buildTestApp } from '../../test-utils/expressTestApp';
 
 // Minimal buffers with correct magic bytes for each format
 const PNG_BUF = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00]);
@@ -90,7 +95,7 @@ beforeEach(() => {
 
 describe('POST /settings/:eventType/image', () => {
   it('redirects with error when user is not a streamer', async () => {
-    const res = await supertest(buildApp())
+    const res = await uploadRequest(buildApp())
       .post('/settings/follow/image')
       .attach('image', PNG_BUF, 'test.png');
     expect(res.headers.location).toBe('/alerts/settings?error=not_a_streamer');
@@ -98,21 +103,21 @@ describe('POST /settings/:eventType/image', () => {
 
   it('redirects with error for an invalid event type', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
-    const res = await supertest(buildApp())
+    const res = await uploadRequest(buildApp())
       .post('/settings/bogus/image')
       .attach('image', PNG_BUF, 'test.png');
     expect(res.headers.location).toBe('/alerts/settings?error=invalid_event_type');
   });
 
-  it('redirects with error when no file is uploaded', async () => {
+  it('redirects a completion with no upload behind it to upload_expired', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
-    const res = await supertest(buildApp()).post('/settings/follow/image');
-    expect(res.headers.location).toBe('/alerts/settings?error=invalid_file');
+    const res = await uploadRequest(buildApp()).post('/settings/follow/image');
+    expect(res.headers.location).toBe('/alerts/settings?error=upload_expired');
   });
 
   it('rejects a file with no recognised magic bytes even if MIME type is correct', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
-    const res = await supertest(buildApp())
+    const res = await uploadRequest(buildApp())
       .post('/settings/follow/image')
       .attach('image', Buffer.from('not a real image'), { filename: 'evil.png', contentType: 'image/png' });
     expect(res.headers.location).toBe('/alerts/settings?error=invalid_file');
@@ -122,7 +127,7 @@ describe('POST /settings/:eventType/image', () => {
   it('rejects an SVG upload — not in the magic-byte allowlist', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
     const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
-    const res = await supertest(buildApp())
+    const res = await uploadRequest(buildApp())
       .post('/settings/follow/image')
       .attach('image', svg, { filename: 'evil.svg', contentType: 'image/svg+xml' });
     expect(res.headers.location).toBe('/alerts/settings?error=invalid_file');
@@ -131,7 +136,7 @@ describe('POST /settings/:eventType/image', () => {
   it('removes a partially written file and skips the DB update when the write fails', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
     vi.mocked(fs.promises.writeFile).mockRejectedValueOnce(Object.assign(new Error('no space'), { code: 'ENOSPC' }));
-    const res = await supertest(buildApp())
+    const res = await uploadRequest(buildApp())
       .post('/settings/follow/image')
       .attach('image', PNG_BUF, { filename: 'test.png', contentType: 'image/png' });
     expect(res.headers.location).toBe('/alerts/settings?error=upload_failed');
@@ -144,7 +149,7 @@ describe('POST /settings/:eventType/image', () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
     vi.mocked(fs.promises.writeFile).mockRejectedValueOnce(Object.assign(new Error('no space'), { code: 'ENOSPC' }));
     vi.mocked(fs.promises.rm).mockRejectedValueOnce(new Error('EACCES'));
-    const res = await supertest(buildApp())
+    const res = await uploadRequest(buildApp())
       .post('/settings/follow/image')
       .attach('image', PNG_BUF, { filename: 'test.png', contentType: 'image/png' });
     expect(res.headers.location).toBe('/alerts/settings?error=upload_failed');
@@ -154,7 +159,7 @@ describe('POST /settings/:eventType/image', () => {
   it('successfully uploads a valid png and removes the previous image', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
     vi.mocked(setAlertImage).mockResolvedValue('follow-old.png');
-    const res = await supertest(buildApp())
+    const res = await uploadRequest(buildApp())
       .post('/settings/follow/image')
       .attach('image', PNG_BUF, { filename: 'test.png', contentType: 'image/png' });
     expect(res.headers.location).toBe('/alerts/settings?success=image_uploaded');
@@ -168,7 +173,7 @@ describe('POST /settings/:eventType/image', () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
     vi.mocked(setAlertImage).mockResolvedValue('follow-old.png');
     vi.mocked(fs.promises.rm).mockRejectedValueOnce(new Error('EACCES'));
-    const res = await supertest(buildApp())
+    const res = await uploadRequest(buildApp())
       .post('/settings/follow/image')
       .attach('image', PNG_BUF, { filename: 'test.png', contentType: 'image/png' });
     expect(res.headers.location).toBe('/alerts/settings?success=image_uploaded');
@@ -177,7 +182,7 @@ describe('POST /settings/:eventType/image', () => {
   it('rolls back the written file when setAlertImage fails', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
     vi.mocked(setAlertImage).mockRejectedValue(new Error('DB error'));
-    const res = await supertest(buildApp())
+    const res = await uploadRequest(buildApp())
       .post('/settings/follow/image')
       .attach('image', PNG_BUF, { filename: 'test.png', contentType: 'image/png' });
     expect(res.headers.location).toBe('/alerts/settings?error=upload_failed');
@@ -185,9 +190,9 @@ describe('POST /settings/:eventType/image', () => {
     expect(vi.mocked(fs.promises.rm)).toHaveBeenCalledWith(writtenPath, { force: true });
   });
 
-  it('rejects a non-streamer before Multer buffers the upload (oversized body gets not_a_streamer, not file_too_large)', async () => {
+  it('rejects a non-streamer before the upload starts (oversized file gets not_a_streamer, not file_too_large)', async () => {
     const oversized = Buffer.concat([PNG_BUF, Buffer.alloc(1024 * 1024 + 1024, 1)]);
-    const res = await supertest(buildApp(USER, [drainBodyBeforeRedirect]))
+    const res = await uploadRequest(buildApp(USER))
       .post('/settings/follow/image')
       .attach('image', oversized, 'big.png');
     expect(res.headers.location).toBe('/alerts/settings?error=not_a_streamer');
@@ -197,26 +202,27 @@ describe('POST /settings/:eventType/image', () => {
 
   it('redirects with upload_failed when the pre-upload streamer lookup fails', async () => {
     vi.mocked(getStreamerByDiscordId).mockRejectedValueOnce(new Error('DB down'));
-    const res = await supertest(buildApp())
+    const res = await uploadRequest(buildApp())
       .post('/settings/follow/image')
       .attach('image', PNG_BUF, 'test.png');
     expect(res.headers.location).toBe('/alerts/settings?error=upload_failed');
     expect(vi.mocked(fs.promises.writeFile)).not.toHaveBeenCalled();
   });
 
-  it('redirects an oversized upload to file_too_large via the route middleware', async () => {
+  it('refuses to start an upload over the size limit with file_too_large', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
     const oversized = Buffer.concat([PNG_BUF, Buffer.alloc(1024 * 1024 + 1024, 1)]);
-    const res = await supertest(buildApp())
+    const res = await uploadRequest(buildApp())
       .post('/settings/follow/image')
       .attach('image', oversized, { filename: 'big.png', contentType: 'image/png' });
-    expect(res.headers.location).toBe('/alerts/settings?error=file_too_large');
+    expect(res.status).toBe(413);
+    expect(res.body).toEqual({ error: 'file_too_large' });
     expect(vi.mocked(fs.promises.writeFile)).not.toHaveBeenCalled();
   });
 
   it('blocks path traversal via a malicious streamer id', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue({ ...MOCK_STREAMER, id: '../../../etc/passwd' } as any);
-    const res = await supertest(buildApp())
+    const res = await uploadRequest(buildApp())
       .post('/settings/follow/image')
       .attach('image', PNG_BUF, { filename: 'test.png', contentType: 'image/png' });
     expect(res.headers.location).toBe('/alerts/settings?error=invalid_path');
@@ -225,12 +231,12 @@ describe('POST /settings/:eventType/image', () => {
 });
 
 describe('POST /settings/:eventType/image — CSRF protection', () => {
-  it('rejects with 403 and does not invoke Multer when CSRF token is invalid', async () => {
+  it('rejects with 403 and stores nothing when the CSRF token is invalid', async () => {
     vi.mocked(csrfProtection).mockImplementationOnce((_req, res, _next) => {
       res.status(403).send('invalid csrf token');
     });
 
-    const res = await supertest(buildApp())
+    const res = await uploadRequest(buildApp())
       .post('/settings/follow/image')
       .attach('image', PNG_BUF, { filename: 'test.png', contentType: 'image/png' });
 
@@ -243,7 +249,7 @@ describe('POST /settings/:eventType/image — CSRF protection', () => {
 
 describe('POST /settings/:eventType/sound', () => {
   it('redirects with error when user is not a streamer', async () => {
-    const res = await supertest(buildApp())
+    const res = await uploadRequest(buildApp())
       .post('/settings/raid/sound')
       .attach('sound', MP3_BUF, 'test.mp3');
     expect(res.headers.location).toBe('/alerts/settings?error=not_a_streamer');
@@ -253,7 +259,7 @@ describe('POST /settings/:eventType/sound', () => {
 
   it('redirects with error for an invalid event type', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
-    const res = await supertest(buildApp())
+    const res = await uploadRequest(buildApp())
       .post('/settings/bogus/sound')
       .attach('sound', MP3_BUF, 'test.mp3');
     expect(res.headers.location).toBe('/alerts/settings?error=invalid_event_type');
@@ -261,7 +267,7 @@ describe('POST /settings/:eventType/sound', () => {
 
   it('successfully uploads a valid mp3 using the shared detectAudioType', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
-    const res = await supertest(buildApp())
+    const res = await uploadRequest(buildApp())
       .post('/settings/raid/sound')
       .attach('sound', MP3_BUF, { filename: 'test.mp3', contentType: 'audio/mpeg' });
     expect(res.headers.location).toBe('/alerts/settings?success=sound_uploaded');
@@ -270,7 +276,7 @@ describe('POST /settings/:eventType/sound', () => {
 
   it('rejects a file with no recognised audio magic bytes', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
-    const res = await supertest(buildApp())
+    const res = await uploadRequest(buildApp())
       .post('/settings/raid/sound')
       .attach('sound', Buffer.from('not audio'), { filename: 'evil.mp3', contentType: 'audio/mpeg' });
     expect(res.headers.location).toBe('/alerts/settings?error=invalid_file');

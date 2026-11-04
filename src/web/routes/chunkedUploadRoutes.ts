@@ -1,5 +1,4 @@
 import fs from 'fs';
-import { Readable } from 'stream';
 import express from 'express';
 import type { NextFunction, Request, RequestHandler, Response, Router } from 'express';
 import type { Logger } from 'winston';
@@ -11,6 +10,7 @@ import {
   type ChunkedUploadStore,
   type FinishedChunkedUpload,
 } from '../chunkedUploadStore';
+import type { UploadedFile } from '../uploadedFile';
 
 // The routes of a chunked, resumable upload (issue #912), mounted once per upload area under
 // that area's upload path. The page starts an upload, sends it in pieces of at most
@@ -50,7 +50,7 @@ export interface ChunkedUploadRouteOptions {
   /** Optional per-area check at start; returns an error code (answered with 409) or null. */
   checkStart?: (declared: ChunkedUploadDeclaration) => string | null;
   /** Turns a finished upload into the `req.file` the area's handler expects. */
-  toFile: (finished: FinishedChunkedUpload, field: string) => Promise<Express.Multer.File>;
+  toFile: (finished: FinishedChunkedUpload, field: string) => Promise<UploadedFile>;
   /** The area's existing handlers, run once `req.file` is set; they redirect as they do today. */
   complete: RequestHandler[];
   /** Page to redirect to with `?error=<code>` when the upload can't be completed. */
@@ -118,22 +118,19 @@ export function parseOffset(raw: unknown): number | null {
  * enough to check from a buffer: SFX and alert assets), removing the assembled file.
  * @param finished - The finished upload from the store.
  * @param field - Name of the form's file field.
- * @returns A Multer-shaped file with `buffer` set.
+ * @returns The file record, with `buffer` set.
  */
-export async function toMemoryFile(finished: FinishedChunkedUpload, field: string): Promise<Express.Multer.File> {
+export async function toMemoryFile(finished: FinishedChunkedUpload, field: string): Promise<UploadedFile> {
   try {
     const buffer = await fs.promises.readFile(finished.path);
     return {
       fieldname: field,
       originalname: finished.name,
-      encoding: '7bit',
       mimetype: finished.type,
       size: buffer.length,
       buffer,
-      destination: '',
       filename: '',
       path: '',
-      stream: Readable.from(buffer),
     };
   } finally {
     await fs.promises.rm(finished.path, { force: true });

@@ -3,6 +3,7 @@ import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Router, type Request, type Response } from 'express';
+import type { UploadedFile } from '../uploadedFile';
 import supertest from 'supertest';
 import { mockLogger } from '../../test-utils/loggerMock';
 import { buildTestApp } from '../../test-utils/expressTestApp';
@@ -11,7 +12,7 @@ import { mountChunkedUploadRoutes, parseOffset, toMemoryFile, type ChunkedUpload
 
 let dir: string;
 let store: ChunkedUploadStore;
-let received: { file?: Express.Multer.File; body?: unknown };
+let received: { file?: UploadedFile; body?: unknown };
 const checkStart = vi.fn((): string | null => null);
 
 function makeApp(user: unknown = { discordId: 'u1' }, toFile: ChunkedUploadRouteOptions['toFile'] = toMemoryFile) {

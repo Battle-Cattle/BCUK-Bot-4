@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockLogger } from '../../test-utils/loggerMock';
 
+vi.mock('../chunkedUploadStore', async (importOriginal) =>
+  (await import('../../test-utils/chunkedUploadTest.js')).mockChunkedUploadStoreModule(await importOriginal<object>()));
+vi.mock('./chunkedUploadRoutes', async (importOriginal) =>
+  (await import('../../test-utils/chunkedUploadTest.js')).mockChunkedUploadRoutesModule(await importOriginal<object>()));
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 vi.mock('../../db', () => ({ getStreamerByDiscordId: vi.fn(), setAdvancedCommandAlertAsset: vi.fn(), addSfxFile: vi.fn() }));
 vi.mock('../../shared/config', () => ({ UPLOAD_INCOMING_FOLDER: '/app/upload-incoming',
@@ -14,6 +18,7 @@ vi.mock('../../shared/pathUtils', async (importOriginal) => {
   return { ...actual, safeResolve: vi.fn(actual.safeResolve) };
 });
 
+import { uploadRequest } from '../../test-utils/chunkedUploadTest';
 import supertest from 'supertest';
 import fs from 'fs';
 import { router, removeAlertAssetFiles } from './advancedCommandAlertAssets';
@@ -37,7 +42,7 @@ beforeEach(() => {
 
 describe('alert asset uploads', () => {
   it('stores an image under a generated name and removes the one it replaces', async () => {
-    const res = await supertest(app()).post('/advanced-commands/7/alert/image').attach('image', PNG, 'pic.png').expect(302);
+    const res = await uploadRequest(app()).post('/advanced-commands/7/alert/image').attach('image', PNG, 'pic.png').expect(302);
     expect(res.headers.location).toBe('/advanced-commands?success=image_uploaded');
     const filename = vi.mocked(setAdvancedCommandAlertAsset).mock.calls[0]![3] as string;
     expect(filename).toMatch(/^command-7-[0-9a-f-]+\.png$/);
@@ -48,40 +53,40 @@ describe('alert asset uploads', () => {
 
   it('stores a sound', async () => {
     vi.mocked(setAdvancedCommandAlertAsset).mockResolvedValue({ previous: null });
-    const res = await supertest(app()).post('/advanced-commands/7/alert/sound').attach('sound', MP3, 'a.mp3').expect(302);
+    const res = await uploadRequest(app()).post('/advanced-commands/7/alert/sound').attach('sound', MP3, 'a.mp3').expect(302);
     expect(res.headers.location).toBe('/advanced-commands?success=sound_uploaded');
     expect(fs.promises.rm).not.toHaveBeenCalled();
   });
 
   it('rejects a file that is not the right type', async () => {
-    const res = await supertest(app()).post('/advanced-commands/7/alert/image').attach('image', MP3, 'x.png').expect(302);
+    const res = await uploadRequest(app()).post('/advanced-commands/7/alert/image').attach('image', MP3, 'x.png').expect(302);
     expect(res.headers.location).toBe('/advanced-commands?error=invalid_file');
     expect(setAdvancedCommandAlertAsset).not.toHaveBeenCalled();
   });
 
   it('removes the stored file when the command has no alert', async () => {
     vi.mocked(setAdvancedCommandAlertAsset).mockResolvedValue(null);
-    const res = await supertest(app()).post('/advanced-commands/7/alert/image').attach('image', PNG, 'pic.png').expect(302);
+    const res = await uploadRequest(app()).post('/advanced-commands/7/alert/image').attach('image', PNG, 'pic.png').expect(302);
     expect(res.headers.location).toBe('/advanced-commands?error=no_alert');
     expect(fs.promises.rm).toHaveBeenCalledOnce();
   });
 
   it('removes the stored file and reports a failed DB write', async () => {
     vi.mocked(setAdvancedCommandAlertAsset).mockRejectedValue(new Error('boom'));
-    const res = await supertest(app()).post('/advanced-commands/7/alert/image').attach('image', PNG, 'pic.png').expect(302);
+    const res = await uploadRequest(app()).post('/advanced-commands/7/alert/image').attach('image', PNG, 'pic.png').expect(302);
     expect(res.headers.location).toBe('/advanced-commands?error=upload_failed');
     expect(fs.promises.rm).toHaveBeenCalledOnce();
   });
 
-  it('rejects a request with no file attached', async () => {
-    const res = await supertest(app()).post('/advanced-commands/7/alert/image').expect(302);
-    expect(res.headers.location).toBe('/advanced-commands?error=invalid_file');
+  it('rejects a completion with no upload behind it as upload_expired', async () => {
+    const res = await uploadRequest(app()).post('/advanced-commands/7/alert/image').expect(302);
+    expect(res.headers.location).toBe('/advanced-commands?error=upload_expired');
     expect(setAdvancedCommandAlertAsset).not.toHaveBeenCalled();
   });
 
   it('rejects the upload without writing anything when the target path does not resolve', async () => {
     vi.mocked(safeResolve).mockReturnValueOnce(null);
-    const res = await supertest(app()).post('/advanced-commands/7/alert/image').attach('image', PNG, 'pic.png').expect(302);
+    const res = await uploadRequest(app()).post('/advanced-commands/7/alert/image').attach('image', PNG, 'pic.png').expect(302);
     expect(res.headers.location).toBe('/advanced-commands?error=invalid_path');
     expect(fs.promises.writeFile).not.toHaveBeenCalled();
     expect(setAdvancedCommandAlertAsset).not.toHaveBeenCalled();
@@ -89,17 +94,17 @@ describe('alert asset uploads', () => {
 
   it('rejects the upload if the streamer is unlinked between the pre-upload check and the handler', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValueOnce({ id: 3, discord_id: '1', twitch_name: 's' } as any).mockResolvedValueOnce(null);
-    const res = await supertest(app()).post('/advanced-commands/7/alert/image').attach('image', PNG, 'pic.png').expect(302);
+    const res = await uploadRequest(app()).post('/advanced-commands/7/alert/image').attach('image', PNG, 'pic.png').expect(302);
     expect(res.headers.location).toBe('/advanced-commands?error=not_a_streamer');
     expect(fs.promises.writeFile).not.toHaveBeenCalled();
     expect(setAdvancedCommandAlertAsset).not.toHaveBeenCalled();
   });
 
   it('rejects a bad command id and a non-streamer', async () => {
-    let res = await supertest(app()).post('/advanced-commands/x/alert/image').attach('image', PNG, 'pic.png').expect(302);
+    let res = await uploadRequest(app()).post('/advanced-commands/x/alert/image').attach('image', PNG, 'pic.png').expect(302);
     expect(res.headers.location).toBe('/advanced-commands?error=not_found');
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(null);
-    res = await supertest(app()).post('/advanced-commands/7/alert/image').attach('image', PNG, 'pic.png');
+    res = await uploadRequest(app()).post('/advanced-commands/7/alert/image').attach('image', PNG, 'pic.png');
     expect(res.headers.location).toBe('/advanced-commands?error=not_a_streamer');
   });
 });

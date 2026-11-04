@@ -163,69 +163,12 @@ function pollProcessingProgress(form, uploadId, progress) {
 }
 
 /**
- * Works out where to send the browser once an upload request has finished. XHR follows the
- * server's redirect (success/error → `fallbackPath?…`), and `responseURL` is where it ended
- * up; a response that didn't redirect, or a non-OK one (e.g. 403 CSRF, 500), keeps the POST-only
- * upload route's URL, so it can't be navigated to.
- * @param {XMLHttpRequest} xhr - The finished upload request.
- * @param {HTMLFormElement} form - The upload form (its `action` is the upload route).
- * @param {string} fallbackPath - The page to return to without a redirect to follow.
- * @returns {string} The URL to navigate to.
- */
-function uploadDestination(xhr, form, fallbackPath) {
-  var ok = xhr.status >= 200 && xhr.status < 300;
-  if (ok && xhr.responseURL && xhr.responseURL !== form.action) return xhr.responseURL;
-  return ok ? fallbackPath : fallbackPath + '?error=upload_failed';
-}
-
-/**
- * Sends one upload form with XHR (which, unlike fetch, reports upload progress): the CSRF token
- * goes in `X-CSRF-Token` and a fresh ID in `X-Upload-Id`. The form's progress display, if it has
- * one, shows the upload percentage and then, while the server processes the file, either the
- * form's `data-processing-label` or what its `data-progress-url` endpoint reports. When the
- * request finishes the browser navigates to the page the server redirected to.
- * @param {HTMLFormElement} form - The upload form.
- * @param {string} fallbackPath - Page to return to on success without a redirect, or on failure
- *   (with `?error=upload_failed` appended).
- * @returns {void}
- */
-function submitUploadForm(form, fallbackPath) {
-  var token = (document.body && document.body.dataset.csrfToken) || '';
-  var uploadId = newUploadId();
-  var progress = findUploadProgress(form);
-  var stopPolling = function () {};
-  var xhr = new XMLHttpRequest();
-  xhr.open('POST', form.action);
-  xhr.setRequestHeader('X-CSRF-Token', token);
-  xhr.setRequestHeader('X-Upload-Id', uploadId);
-  xhr.upload.addEventListener('progress', function (event) {
-    if (!event.lengthComputable) return;
-    var percent = Math.floor((event.loaded / event.total) * 100);
-    showUploadProgress(progress, percent, 'Uploading… ' + percent + '%');
-  });
-  xhr.upload.addEventListener('load', function () {
-    nameUploadProgress(progress, 'Processing progress');
-    showUploadProgress(progress, null, form.dataset.processingLabel || 'Processing…');
-    stopPolling = pollProcessingProgress(form, uploadId, progress);
-  });
-  xhr.addEventListener('load', function () { window.location.assign(uploadDestination(xhr, form, fallbackPath)); });
-  xhr.addEventListener('error', function () { window.location.assign(fallbackPath + '?error=upload_failed'); });
-  xhr.addEventListener('loadend', function () {
-    stopPolling();
-    delete form.dataset.submitting;
-  });
-  nameUploadProgress(progress, 'Upload progress');
-  showUploadProgress(progress, 0, 'Uploading… 0%');
-  xhr.send(new FormData(form));
-}
-
-/**
  * Registers a global 'submit' listener that intercepts forms carrying `formClassName` and sends
- * them with {@link submitUploadForm} instead of the page's normal multipart POST, so the session
- * token is never placed in the URL (browser history/Referer). csrfProtection validates the
- * header before Multer parses the multipart body. A second submit (Enter key, double-click)
- * while the first is still pending is ignored. Shared by every file-upload admin page (SFX
- * sounds, overlay videos, alert images/sounds).
+ * them as chunked, resumable uploads with `submitChunkedUpload` (chunkedUpload.js, which the
+ * page must also load) instead of the page's normal multipart POST. The CSRF token goes in a
+ * header, so it's never placed in the URL (browser history/Referer). A second submit (Enter key,
+ * double-click) while the first is still pending is ignored. Shared by every file-upload admin
+ * page (SFX sounds, overlay videos, alert images/sounds, advanced-command alert assets).
  * @param {string} formClassName - CSS class marking a form as one this handler should intercept.
  * @param {string} fallbackPath - Path to navigate to on success if the response wasn't a
  *   redirect, or on a network failure (with `?error=upload_failed` appended).
@@ -241,8 +184,7 @@ function registerUploadFormHandler(formClassName, fallbackPath) {
     form.dataset.submitting = 'true';
     var submitBtn = form.querySelector('button[type="submit"]');
     if (submitBtn) submitBtn.disabled = true;
-    if (form.dataset.chunkedUrl) void submitChunkedUpload(form, fallbackPath);
-    else submitUploadForm(form, fallbackPath);
+    void submitChunkedUpload(form, fallbackPath);
   });
 }
 

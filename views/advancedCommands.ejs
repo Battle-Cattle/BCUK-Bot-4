@@ -180,7 +180,7 @@
             <% if (c.alert) { %>
             <% [['image', c.alert.imageFilename, 'image/png,image/gif,image/jpeg,image/webp', maxImageMb], ['sound', c.alert.soundFilename, 'audio/mpeg,audio/ogg,audio/wav', maxSoundMb]].forEach(function (asset) { %>
             <div class="d-flex gap-05 items-end mt-05">
-              <form method="POST" action="/advanced-commands/<%= c.id %>/alert/<%= asset[0] %>" data-chunked-url="/advanced-commands/<%= c.id %>/alert/<%= asset[0] %>" enctype="multipart/form-data" class="js-advanced-command-upload d-flex gap-05 items-end">
+              <form method="POST" action="/advanced-commands/<%= c.id %>/alert/<%= asset[0] %>" enctype="multipart/form-data" class="js-advanced-command-upload d-flex gap-05 items-end">
                 <label class="form-label">Alert <%= asset[0] %> <span class="muted">(<%= asset[1] ? 'replace' : 'none yet' %>, <%= asset[3] %> MB max)</span>
                   <input type="file" name="<%= asset[0] %>" accept="<%= asset[2] %>" required></label>
                 <button type="submit" class="btn btn-sm btn-primary">Upload</button>

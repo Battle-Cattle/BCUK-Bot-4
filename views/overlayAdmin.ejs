@@ -53,13 +53,13 @@
 
       <div class="card card-spaced">
         <div class="card-body">
-          <!-- Sent by registerUploadFormHandler (utils.js, via chunkedUpload.js) as a chunked, resumable upload to
-               data-chunked-url, with the CSRF token in an X-CSRF-Token header, so the session
-               token is never placed in the URL (browser history / Referer). It fills the
-               progress bar below as pieces arrive, then polls data-progress-url while a MOV
-               converts. -->
+          <!-- Sent by registerUploadFormHandler (utils.js, via chunkedUpload.js) as a chunked,
+               resumable upload to the routes under its action, with the CSRF token in an
+               X-CSRF-Token header, so the session token is never placed in the URL (browser
+               history / Referer). It fills the progress bar below as pieces arrive, then polls
+               data-progress-url while a MOV converts. -->
           <form method="POST" action="/overlay/settings/videos/upload" enctype="multipart/form-data" class="js-overlay-upload"
-                data-chunked-url="/overlay/settings/videos/upload" data-progress-url="/overlay/settings/videos/progress" data-processing-label="Saving…">
+                data-progress-url="/overlay/settings/videos/progress" data-processing-label="Saving…">
             <div class="form-row-wrap items-end">
               <div class="flex-1">
                 <label class="hint hint-compact" for="video-name">Name</label>
