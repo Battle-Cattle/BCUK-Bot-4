@@ -293,3 +293,175 @@ describe('registerUploadFormHandler', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 });
+
+describe('chunked uploads (data-chunked-url)', () => {
+  const BASE = '/overlay/settings/videos/upload';
+
+  /** A fake File of `size` bytes whose slices report their range. */
+  function makeFile(size: number) {
+    return { name: 'clip.mov', size, type: 'video/quicktime', lastModified: 5, slice: (a: number, b: number) => `bytes ${a}-${Math.min(b, size)}` };
+  }
+
+  /** A fetch Response. */
+  function response(status: number, body: unknown, extra: Record<string, unknown> = {}) {
+    return Promise.resolve({ ok: status >= 200 && status < 300, status, redirected: false, url: '', json: () => Promise.resolve(body), ...extra });
+  }
+
+  /** A page context with `utils.js` loaded and a chunked overlay upload form. */
+  function setupChunked(file: ReturnType<typeof makeFile> | null, stored: Record<string, string> = {}) {
+    const button = { disabled: false };
+    const input = { files: file ? [file] : [] };
+    class HTMLFormElement {
+      action = ACTION;
+      dataset: Record<string, string> = { chunkedUrl: BASE };
+      classList = { contains: (name: string) => name === 'js-overlay-upload' };
+      querySelector(selector: string) {
+        if (selector === 'button[type="submit"]') return button;
+        if (selector === 'input[type="file"]') return input;
+        return null;
+      }
+    }
+    const document = new FakeTarget() as FakeTarget & { body: unknown };
+    document.body = { dataset: { csrfToken: 'tok' } };
+    const assign = vi.fn();
+    const fetch = vi.fn();
+    const storage: Record<string, string> = { ...stored };
+    const context = {
+      document,
+      HTMLFormElement,
+      XMLHttpRequest: FakeXhr,
+      FormData: class {
+        forEach(fn: (value: unknown, key: string) => void) {
+          fn('My clip', 'name');
+          fn(file, 'video');
+        }
+      },
+      URLSearchParams,
+      fetch,
+      AbortController,
+      setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms),
+      clearTimeout: (id: ReturnType<typeof setTimeout>) => clearTimeout(id),
+      window: {
+        location: { assign },
+        crypto: { getRandomValues: (a: Uint8Array) => a.fill(171) },
+        localStorage: {
+          getItem: (k: string) => storage[k] ?? null,
+          setItem: (k: string, v: string) => { storage[k] = v; },
+          removeItem: (k: string) => { delete storage[k]; },
+        },
+      },
+    };
+    vm.runInNewContext(utilsSource, context);
+    vm.runInNewContext("registerUploadFormHandler('js-overlay-upload', '/overlay/settings');", context);
+    const form = new HTMLFormElement();
+    const submit = () => document.fire('submit', { target: form, preventDefault: vi.fn() });
+    return { form, assign, fetch, submit, storage };
+  }
+
+  /** Waits until the page navigates. */
+  async function navigated(assign: ReturnType<typeof vi.fn>) {
+    for (let i = 0; i < 200 && assign.mock.calls.length === 0; i++) await vi.advanceTimersByTimeAsync(100);
+    return assign.mock.calls[0]?.[0];
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('starts, sends the file in pieces and completes with the form fields', async () => {
+    const file = makeFile(10 * 1024 * 1024);
+    const { fetch, submit, assign, storage } = setupChunked(file);
+    const id = '0f8fad5b-d9cb-469f-a165-70867728950e';
+    fetch.mockImplementation((url: string) => {
+      if (url === `${BASE}/start`) return response(200, { id, chunkSize: 8 * 1024 * 1024 });
+      if (url === `${BASE}/${id}`) return response(200, { received: 0, size: file.size });
+      if (url.includes('/chunk?offset=0')) return response(200, { received: 8 * 1024 * 1024 });
+      if (url.includes(`/chunk?offset=${8 * 1024 * 1024}`)) return response(200, { received: file.size });
+      if (url.endsWith('/complete')) return response(200, null, { redirected: true, url: '/overlay/settings?success=video_uploaded' });
+      return response(404, {});
+    });
+    submit();
+    expect(await navigated(assign)).toBe('/overlay/settings?success=video_uploaded');
+    const start = fetch.mock.calls.find(([u]) => u === `${BASE}/start`)!;
+    expect(JSON.parse(start[1].body)).toEqual({ name: 'clip.mov', size: file.size, type: 'video/quicktime' });
+    expect(start[1].headers['X-CSRF-Token']).toBe('tok');
+    const complete = fetch.mock.calls.find(([u]) => u.endsWith('/complete'))!;
+    expect(complete[1].body.toString()).toBe('name=My+clip');
+    expect(Object.keys(storage)).toEqual([]);
+  });
+
+  it('re-sends a dropped piece and resumes from the confirmed offset', async () => {
+    const file = makeFile(6);
+    const { fetch, submit, assign } = setupChunked(file);
+    const id = 'abc';
+    let dropped = false;
+    let received = 0;
+    fetch.mockImplementation((url: string) => {
+      if (url === `${BASE}/start`) return response(200, { id });
+      if (url === `${BASE}/${id}`) return response(200, { received, size: 6 });
+      if (url.includes('/chunk')) {
+        if (!dropped) {
+          dropped = true;
+          return Promise.reject(new TypeError('network'));
+        }
+        received = 6;
+        return response(200, { received });
+      }
+      return response(200, null, { redirected: true, url: '/overlay/settings?success=video_uploaded' });
+    });
+    submit();
+    expect(await navigated(assign)).toBe('/overlay/settings?success=video_uploaded');
+    expect(fetch.mock.calls.filter(([u]) => u.includes('/chunk?offset=0'))).toHaveLength(2);
+  });
+
+  it("resumes this browser's running upload of the same file after a reload", async () => {
+    const file = makeFile(6);
+    const id = 'old';
+    const saved = { [`chunkedUpload:${BASE}`]: JSON.stringify({ id, name: 'clip.mov', size: 6, lastModified: 5 }) };
+    const { fetch, submit, assign } = setupChunked(file, saved);
+    fetch.mockImplementation((url: string) => {
+      if (url === `${BASE}/start`) return response(409, { error: 'upload_busy', activeId: id });
+      if (url === `${BASE}/${id}`) return response(200, { received: 4, size: 6 });
+      if (url.includes('/chunk?offset=4')) return response(200, { received: 6 });
+      if (url.endsWith(`/${id}/complete`)) return response(200, null, { redirected: true, url: '/overlay/settings?success=video_uploaded' });
+      return response(500, {});
+    });
+    submit();
+    expect(await navigated(assign)).toBe('/overlay/settings?success=video_uploaded');
+  });
+
+  it('reports a refused start, such as another upload in progress', async () => {
+    const { fetch, submit, assign } = setupChunked(makeFile(6));
+    fetch.mockImplementation(() => response(409, { error: 'upload_busy', activeId: 'someone-else' }));
+    submit();
+    expect(await navigated(assign)).toBe('/overlay/settings?error=upload_busy');
+  });
+
+  it('follows a guard redirect such as not_a_streamer', async () => {
+    const { fetch, submit, assign } = setupChunked(makeFile(6));
+    fetch.mockImplementation(() => response(200, null, { redirected: true, url: '/overlay/settings?error=not_a_streamer' }));
+    submit();
+    expect(await navigated(assign)).toBe('/overlay/settings?error=not_a_streamer');
+  });
+
+  it('reports an expired upload when a piece is answered 404', async () => {
+    const { fetch, submit, assign } = setupChunked(makeFile(6));
+    fetch.mockImplementation((url: string) => {
+      if (url.endsWith('/start')) return response(200, { id: 'x' });
+      if (url.endsWith('/x')) return response(200, { received: 0, size: 6 });
+      return response(404, { error: 'not_found' });
+    });
+    submit();
+    expect(await navigated(assign)).toBe('/overlay/settings?error=upload_expired');
+  });
+
+  it('reports invalid_file when no file was chosen', async () => {
+    const { submit, assign } = setupChunked(null);
+    submit();
+    expect(await navigated(assign)).toBe('/overlay/settings?error=invalid_file');
+  });
+});

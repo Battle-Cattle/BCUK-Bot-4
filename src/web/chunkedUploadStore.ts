@@ -13,6 +13,13 @@ import { createLogger } from '../shared/logger';
 
 const log = createLogger('ChunkedUploadStore');
 
+/**
+ * Largest piece a client may send in one request. A 500 MB overlay is about 63 pieces, well
+ * inside `sessionLimiter`'s 600 requests per 15 minutes, and a reverse proxy only needs a body
+ * limit above this.
+ */
+export const CHUNK_MAX_BYTES = 8 * 1024 * 1024;
+
 /** An upload with no piece received for this long is abandoned: it's rejected and swept. */
 const UPLOAD_SESSION_TTL_MS = 60 * 60_000;
 
@@ -42,7 +49,7 @@ interface UploadSessionMeta extends ChunkedUploadDeclaration {
 }
 
 /** Reasons a store operation is refused. */
-type ChunkedUploadError =
+export type ChunkedUploadError =
   | 'invalid_upload'
   | 'file_too_large'
   | 'upload_busy'

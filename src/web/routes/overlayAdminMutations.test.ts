@@ -50,6 +50,8 @@ vi.mock('./overlayUploadStorage', async () => {
     placeUpload: vi.fn(),
     discardUpload: vi.fn(),
     sweepStaleIncomingUploads: vi.fn(),
+    INCOMING_DIR: '/app/overlay-videos/.incoming',
+    adoptChunkedUpload: vi.fn(),
   };
 });
 

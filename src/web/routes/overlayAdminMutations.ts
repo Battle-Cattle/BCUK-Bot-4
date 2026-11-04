@@ -13,13 +13,15 @@ import { parsePositiveIntId } from './validation';
 import { requireStreamer } from './viewHelpers';
 import { logAndRedirectError } from './errorHandling';
 import { createMulterErrorRedirectHandler, makeUploadMiddleware, makeRequireStreamerBeforeUpload } from './uploadMiddleware';
+import { ChunkedUploadStore, type ChunkedUploadDeclaration } from '../chunkedUploadStore';
+import { mountChunkedUploadRoutes } from './chunkedUploadRoutes';
 import { safeResolve } from '../../shared/pathUtils';
 import { NOT_A_STREAMER_REDIRECT } from './overlayAdminShared';
 import { storeMovAsWebm } from './overlayMovConversion';
 import { isWebmTranscodeQueueFull, type ProgressListener } from './overlayVideoTranscode';
 import { parseUploadId, claimConversionProgress, setConversionProgress, releaseConversionProgress } from './overlayConversionProgress';
 import {
-  overlayUploadStorage, detectUploadedVideoType, placeUpload, discardUpload, sweepStaleIncomingUploads, type OverlayVideoType,
+  overlayUploadStorage, adoptChunkedUpload, INCOMING_DIR, detectUploadedVideoType, placeUpload, discardUpload, sweepStaleIncomingUploads, type OverlayVideoType,
 } from './overlayUploadStorage';
 
 const log = createLogger('OverlayAdmin');
@@ -45,11 +47,12 @@ const MAX_FILE_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
 /**
  * True if the client says the upload is a QuickTime file, by its name or MIME type. That claim
  * can't be trusted to accept a file (magic bytes decide that), only to turn one away early.
- * @param file - Multer's description of the incoming file, before its bytes are read.
+ * @param name - The file name the client sent.
+ * @param type - The MIME type the client sent.
  * @returns True for a `.mov` name or a `video/quicktime` type.
  */
-function declaresMov(file: Express.Multer.File): boolean {
-  return file.mimetype === 'video/quicktime' || path.extname(file.originalname).toLowerCase() === '.mov';
+function declaresMov(name: string, type: string): boolean {
+  return type === 'video/quicktime' || path.extname(name).toLowerCase() === '.mov';
 }
 
 /**
@@ -62,7 +65,7 @@ function declaresMov(file: Express.Multer.File): boolean {
  * @param cb - Multer's callback: an error to refuse the file, or `true` to accept it.
  */
 function admitUpload(_req: Express.Request, file: Express.Multer.File, cb: multer.FileFilterCallback): void {
-  if (declaresMov(file) && isWebmTranscodeQueueFull()) {
+  if (declaresMov(file.originalname, file.mimetype) && isWebmTranscodeQueueFull()) {
     cb(Object.assign(new Error('Too many WebM conversions pending'), { code: 'transcode_busy' }));
     return;
   }
@@ -254,15 +257,52 @@ async function handleVideoUpload(req: Request, res: Response): Promise<void> {
  *   (`invalid_path`), the file exceeds the size limit (`file_too_large`,
  *   redirected by `handleUploadError`), or saving fails (`upload_failed`).
  */
-router.post('/settings/videos/upload', requireAuth, csrfProtection, requireStreamerBeforeUpload, limitConcurrentUploads, uploadVideo, async (req, res) => {
+router.post('/settings/videos/upload', requireAuth, csrfProtection, requireStreamerBeforeUpload, limitConcurrentUploads, uploadVideo, handleVideoUploadAndCleanUp);
+
+/**
+ * Runs {@link handleVideoUpload}, then makes sure nothing is left in the incoming folder: a
+ * stored upload was moved out already, and anything else (rejected, failed) is removed here.
+ * Shared by the multipart route above and the chunked upload's complete route.
+ * @param req - Express request carrying the upload in `req.file`.
+ * @param res - Express response, redirected with the outcome.
+ * @returns Resolves once the response has been sent and the upload cleaned up.
+ */
+async function handleVideoUploadAndCleanUp(req: Request, res: Response): Promise<void> {
   try {
     await handleVideoUpload(req, res);
   } finally {
-    // Whatever happened, nothing is left in the incoming folder: a stored upload was moved out
-    // already, and anything else (rejected, failed) is removed here.
     if (req.file) await discardUpload(req.file);
     await sweepStaleIncomingUploads();
   }
+}
+
+/** Chunked upload sessions for overlay videos, inside the incoming folder so finishing is a rename. */
+const chunkedVideoStore = new ChunkedUploadStore({ dir: path.join(INCOMING_DIR, 'chunked'), maxBytes: MAX_FILE_BYTES });
+
+/**
+ * Turns away a declared MOV with `transcode_busy` when the conversion queue is already full,
+ * before any of it is sent (the chunked counterpart of {@link admitUpload}).
+ * @param declared - The upload's declared name and type.
+ * @returns `transcode_busy`, or null to let the upload start.
+ */
+function checkChunkedVideoStart(declared: ChunkedUploadDeclaration): string | null {
+  return declaresMov(declared.name, declared.type) && isWebmTranscodeQueueFull() ? 'transcode_busy' : null;
+}
+
+/**
+ * Chunked, resumable overlay video uploads under `/settings/videos/upload/…` (see
+ * `mountChunkedUploadRoutes`); completing one runs the same handler as the multipart route.
+ */
+mountChunkedUploadRoutes(router, {
+  path: '/settings/videos/upload',
+  store: chunkedVideoStore,
+  guards: [requireAuth, csrfProtection, requireStreamerBeforeUpload],
+  field: 'video',
+  checkStart: checkChunkedVideoStart,
+  toFile: adoptChunkedUpload,
+  complete: [limitConcurrentUploads, handleVideoUploadAndCleanUp],
+  basePath: '/overlay/settings',
+  log,
 });
 
 /**

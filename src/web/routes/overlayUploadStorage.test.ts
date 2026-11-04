@@ -15,7 +15,7 @@ import express from 'express';
 import multer from 'multer';
 import supertest from 'supertest';
 import {
-  INCOMING_DIR, overlayUploadStorage, detectUploadedVideoType, placeUpload, discardUpload, sweepStaleIncomingUploads,
+  INCOMING_DIR, overlayUploadStorage, adoptChunkedUpload, detectUploadedVideoType, placeUpload, discardUpload, sweepStaleIncomingUploads,
 } from './overlayUploadStorage';
 import { STALE_TEMP_FILE_MS } from './overlayFiles';
 import { OVERLAY_FOLDER as overlayFolder } from '../../shared/config';
@@ -230,5 +230,21 @@ describe('sweepStaleIncomingUploads', () => {
 
   it('does nothing when the incoming folder does not exist yet', async () => {
     await expect(sweepStaleIncomingUploads()).resolves.toBeUndefined();
+  });
+});
+
+describe('adoptChunkedUpload', () => {
+  it('moves an assembled chunked upload into the incoming folder as an upload this process can use', async () => {
+    const sessionDir = path.join(INCOMING_DIR, 'chunked');
+    await fs.promises.mkdir(sessionDir, { recursive: true });
+    const assembled = path.join(sessionDir, 'abc.done');
+    await fs.promises.writeFile(assembled, MOV_BYTES);
+    const file = await adoptChunkedUpload({ path: assembled, name: 'clip.mov', size: MOV_BYTES.length, type: 'video/quicktime' }, 'video');
+    expect(file).toMatchObject({ fieldname: 'video', originalname: 'clip.mov', mimetype: 'video/quicktime', size: MOV_BYTES.length });
+    expect(file.filename).toMatch(/\.incoming$/);
+    expect(fs.existsSync(assembled)).toBe(false);
+    expect(await detectUploadedVideoType(file)).toBe('mov');
+    await discardUpload(file);
+    expect(fs.existsSync(file.path)).toBe(false);
   });
 });

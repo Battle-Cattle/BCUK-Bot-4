@@ -37,7 +37,7 @@ describe('views/overlayAdmin.ejs', () => {
 describe('views/overlayAdmin.ejs upload progress', () => {
   it('gives the upload form a hidden progress display and the conversion progress endpoint', async () => {
     const html = await render();
-    expect(html).toMatch(/class="js-overlay-upload"\s+data-progress-url="\/overlay\/settings\/videos\/progress" data-processing-label="Saving…"/);
+    expect(html).toMatch(/class="js-overlay-upload"\s+data-chunked-url="\/overlay\/settings\/videos\/upload" data-progress-url="\/overlay\/settings\/videos\/progress" data-processing-label="Saving…"/);
     expect(html).toContain('<div class="upload-progress is-hidden mt-04" data-upload-progress>');
     expect(html).toContain('<progress class="upload-progress-bar" max="100" value="0" aria-label="Upload progress"></progress>');
     expect(html).toContain('data-upload-progress-label role="status" aria-live="polite"');

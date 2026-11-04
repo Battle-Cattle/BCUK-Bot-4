@@ -12,7 +12,10 @@
         invalid_file:     'No valid file was uploaded. Accepted formats: WebM, MP4, MOV.',
         transcode_failed: 'The MOV file could not be converted to WebM. Check it plays locally, or export it as WebM.',
         transcode_busy:   'Other videos are being converted right now. Try again in a few minutes.',
-        upload_busy:      'Other overlay uploads are in progress right now. Try again once they finish.',
+        upload_busy:      'Another upload is already in progress. Try again once it finishes.',
+        upload_incomplete:'The upload did not finish arriving — please try again.',
+        upload_expired:   'The upload expired before it finished — please try again.',
+        invalid_upload:   'No valid file was chosen.',
         upload_failed:    'Upload failed — please try again.',
         delete_failed:    'Delete failed — please try again.',
         invalid_reward_id:'Invalid reward ID format. Paste the UUID from your Twitch dashboard.',
@@ -50,12 +53,13 @@
 
       <div class="card card-spaced">
         <div class="card-body">
-          <!-- Submitted with XHR by registerUploadFormHandler (utils.js) with the CSRF token in an
-               X-CSRF-Token header, so the session token is never placed in the URL
-               (browser history / Referer). It fills the progress bar below while the file
-               uploads, then polls data-progress-url while a MOV converts. -->
+          <!-- Sent by registerUploadFormHandler (utils.js) as a chunked, resumable upload to
+               data-chunked-url, with the CSRF token in an X-CSRF-Token header, so the session
+               token is never placed in the URL (browser history / Referer). It fills the
+               progress bar below as pieces arrive, then polls data-progress-url while a MOV
+               converts. -->
           <form method="POST" action="/overlay/settings/videos/upload" enctype="multipart/form-data" class="js-overlay-upload"
-                data-progress-url="/overlay/settings/videos/progress" data-processing-label="Saving…">
+                data-chunked-url="/overlay/settings/videos/upload" data-progress-url="/overlay/settings/videos/progress" data-processing-label="Saving…">
             <div class="form-row-wrap items-end">
               <div class="flex-1">
                 <label class="hint hint-compact" for="video-name">Name</label>

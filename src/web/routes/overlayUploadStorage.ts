@@ -1,7 +1,9 @@
 import fs from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
+import { Readable } from 'stream';
 import multer from 'multer';
+import type { FinishedChunkedUpload } from '../chunkedUploadStore';
 import { OVERLAY_FOLDER } from '../../shared/config';
 import { createLogger } from '../../shared/logger';
 import { detectVideoType } from './uploadFileTypes';
@@ -172,4 +174,33 @@ export async function discardUpload(file: Express.Multer.File): Promise<void> {
  */
 export function sweepStaleIncomingUploads(): Promise<void> {
   return sweepStaleTempFiles(INCOMING_DIR, (name) => name.endsWith(INCOMING_SUFFIX));
+}
+
+/**
+ * Takes over a file assembled by a chunked upload: moves it into {@link INCOMING_DIR} under a
+ * random `.incoming` name and records it, so the overlay upload handler can check, place and
+ * discard it exactly like a file Multer stored.
+ * @param finished - The finished chunked upload; its file must be on the same disk (the overlay
+ *   chunk sessions live inside {@link INCOMING_DIR}).
+ * @param field - Name of the form's file field.
+ * @returns A Multer-shaped file record for `req.file`.
+ */
+export async function adoptChunkedUpload(finished: FinishedChunkedUpload, field: string): Promise<Express.Multer.File> {
+  await fs.promises.mkdir(INCOMING_DIR, { recursive: true });
+  const name = `${randomUUID()}${INCOMING_SUFFIX}`;
+  const fullPath = path.join(INCOMING_DIR, name);
+  await fs.promises.rename(finished.path, fullPath);
+  storedUploads.set(name, fullPath);
+  return {
+    fieldname: field,
+    originalname: finished.name,
+    encoding: '7bit',
+    mimetype: finished.type,
+    size: finished.size,
+    destination: INCOMING_DIR,
+    filename: name,
+    path: fullPath,
+    buffer: Buffer.alloc(0),
+    stream: Readable.from([]),
+  };
 }
