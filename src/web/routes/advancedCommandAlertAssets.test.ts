@@ -3,7 +3,7 @@ import { mockLogger } from '../../test-utils/loggerMock';
 
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 vi.mock('../../db', () => ({ getStreamerByDiscordId: vi.fn(), setAdvancedCommandAlertAsset: vi.fn(), addSfxFile: vi.fn() }));
-vi.mock('../../shared/config', () => ({
+vi.mock('../../shared/config', () => ({ UPLOAD_INCOMING_FOLDER: '/app/upload-incoming',
   ALERT_ASSETS_FOLDER: '/app/alert-assets', ALERT_MAX_IMAGE_MB: 1, ALERT_MAX_SOUND_MB: 1, SFX_FOLDER: '/app/sfx', SFX_MAX_FILE_MB: 10,
 }));
 vi.mock('../csrf', () => ({ csrfProtection: (_req: any, _res: any, next: any) => next() }));

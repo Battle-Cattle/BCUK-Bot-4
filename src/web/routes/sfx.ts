@@ -8,6 +8,7 @@ import { safeResolve, realPathWithin } from '../../shared/pathUtils';
 import { filterQueryParam, parsePositiveIntId } from './validation';
 import { renderView } from './viewHelpers';
 import { renderOrError } from './errorHandling';
+import { CHUNKED_UPLOAD_ERROR_CODES } from './chunkedUploadRoutes';
 
 const log = createLogger('Web');
 const router = Router();
@@ -24,6 +25,7 @@ const KNOWN_ERRORS = new Set([
   'update_failed',
   'remove_failed',
   'upload_failed',
+  ...CHUNKED_UPLOAD_ERROR_CODES,
 ]);
 
 const KNOWN_SUCCESS = new Set([

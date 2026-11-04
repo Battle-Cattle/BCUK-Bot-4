@@ -3,7 +3,10 @@ import fs from 'fs';
 import path from 'path';
 import vm from 'vm';
 
-const utilsSource = fs.readFileSync(path.join(__dirname, '../../public/utils.js'), 'utf8');
+// utils.js plus chunkedUpload.js, as the upload pages load them.
+const utilsSource = ['utils.js', 'chunkedUpload.js']
+  .map((name) => fs.readFileSync(path.join(__dirname, '../../public', name), 'utf8'))
+  .join('\n');
 const ACTION = 'https://bot.example/overlay/settings/videos/upload';
 
 type Listener = (event?: any) => void;

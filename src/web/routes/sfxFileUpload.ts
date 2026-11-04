@@ -1,12 +1,14 @@
 import { createLogger } from '../../shared/logger';
-import { Router } from 'express';
+import { Router, type Request, type Response } from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { addSfxFile } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireMod } from '../middleware';
-import { SFX_FOLDER, SFX_MAX_FILE_MB } from '../../shared/config';
+import { SFX_FOLDER, SFX_MAX_FILE_MB, UPLOAD_INCOMING_FOLDER } from '../../shared/config';
+import { ChunkedUploadStore } from '../chunkedUploadStore';
+import { mountChunkedUploadRoutes, toMemoryFile } from './chunkedUploadRoutes';
 import { safeResolve } from '../../shared/pathUtils';
 import { parsePositiveIntId, parsePositiveBigIntId, parseCheckboxField } from './validation';
 import { detectAudioType } from './uploadFileTypes';
@@ -161,7 +163,16 @@ const uploadSound = makeUploadMiddleware(upload, 'sound', handleUploadError);
  * @param req Express request; reads `trigger_id`, `weight`, `file_hidden` and `req.file`.
  * @param res Express response; always issues a redirect.
  */
-router.post('/sfx/file/upload', requireMod, csrfProtection, uploadSound, async (req, res) => {
+router.post('/sfx/file/upload', requireMod, csrfProtection, uploadSound, handleSoundUpload);
+
+/**
+ * Validates and stores an uploaded sound (see the route above), shared by the multipart route and
+ * the chunked upload's complete route.
+ * @param req - Express request; reads `trigger_id`, `weight`, `file_hidden` and `req.file`.
+ * @param res - Express response; always issues a redirect.
+ * @returns Resolves once the redirect has been sent.
+ */
+async function handleSoundUpload(req: Request, res: Response): Promise<void> {
   const triggerId = parsePositiveBigIntId(req.body.trigger_id);
   if (triggerId === null) return res.redirect('/sfx?error=invalid_id');
   if (!req.file) return res.redirect('/sfx?error=invalid_file');
@@ -178,6 +189,18 @@ router.post('/sfx/file/upload', requireMod, csrfProtection, uploadSound, async (
 
   log.info(`SFX file uploaded for trigger ${triggerId}: ${stored.storedName}`);
   res.redirect('/sfx?success=file_uploaded');
+}
+
+/** Chunked, resumable SFX uploads under `/sfx/file/upload/…` (see `mountChunkedUploadRoutes`). */
+mountChunkedUploadRoutes(router, {
+  path: '/sfx/file/upload',
+  store: new ChunkedUploadStore({ dir: path.join(UPLOAD_INCOMING_FOLDER, 'sfx'), maxBytes: SFX_MAX_FILE_MB * 1024 * 1024 }),
+  guards: [requireMod, csrfProtection],
+  field: 'sound',
+  toFile: toMemoryFile,
+  complete: [handleSoundUpload],
+  basePath: '/sfx',
+  log,
 });
 
 export default router;

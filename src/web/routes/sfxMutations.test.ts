@@ -36,7 +36,7 @@ vi.mock('../middleware', () => ({
   requireOwnerJson: vi.fn((_req: any, _res: any, next: any) => next()),
 }));
 
-vi.mock('../../shared/config', () => ({
+vi.mock('../../shared/config', () => ({ UPLOAD_INCOMING_FOLDER: '/app/upload-incoming',
   SFX_FOLDER: '/app/sfx',
   // 1 MB so the oversized-upload test can trigger Multer's LIMIT_FILE_SIZE with a
   // just-over-1 MB buffer. Every other upload test uses a few-byte buffer.

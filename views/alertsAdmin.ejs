@@ -13,6 +13,10 @@
         invalid_file:       'No valid file was uploaded, or the file type is not supported.',
         invalid_message:    'The on-screen message cannot be blank.',
         upload_failed:      'Upload failed — please try again.',
+        upload_busy: 'Another upload is already in progress. Try again once it finishes.',
+        upload_incomplete: 'The upload did not finish arriving — please try again.',
+        upload_expired: 'The upload expired before it finished — please try again.',
+        invalid_upload: 'No valid file was chosen.',
         delete_failed:      'Delete failed — please try again.',
         save_failed:        'Failed to save — please try again.',
         invalid_path:       'Invalid request.',
@@ -100,7 +104,7 @@
           <div class="form-row-wrap items-end mt-1">
             <div class="flex-1">
               <label class="hint hint-compact" for="image-<%= eventType %>">Image / GIF (max <%= maxImageMb %> MB)</label>
-              <form method="POST" action="/alerts/settings/<%= eventType %>/image" enctype="multipart/form-data" class="js-alert-upload d-flex gap-05 items-end">
+              <form method="POST" action="/alerts/settings/<%= eventType %>/image" data-chunked-url="/alerts/settings/<%= eventType %>/image" enctype="multipart/form-data" class="js-alert-upload d-flex gap-05 items-end">
                 <input id="image-<%= eventType %>" class="input" type="file" name="image" accept="image/png,image/gif,image/jpeg,image/webp" required>
                 <button type="submit" class="btn btn-sm">Upload</button>
               </form>
@@ -117,7 +121,7 @@
 
             <div class="flex-1">
               <label class="hint hint-compact" for="sound-<%= eventType %>">Sound (max <%= maxSoundMb %> MB)</label>
-              <form method="POST" action="/alerts/settings/<%= eventType %>/sound" enctype="multipart/form-data" class="js-alert-upload d-flex gap-05 items-end">
+              <form method="POST" action="/alerts/settings/<%= eventType %>/sound" data-chunked-url="/alerts/settings/<%= eventType %>/sound" enctype="multipart/form-data" class="js-alert-upload d-flex gap-05 items-end">
                 <input id="sound-<%= eventType %>" class="input" type="file" name="sound" accept="audio/mpeg,audio/ogg,audio/wav" required>
                 <button type="submit" class="btn btn-sm">Upload</button>
               </form>
@@ -148,6 +152,7 @@
   </main>
 
   <%- include('partials/page-end') %>
+  <script src="/chunkedUpload.js"></script>
   <script src="/alertsAdmin.js"></script>
 </body>
 </html>

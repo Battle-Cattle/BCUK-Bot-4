@@ -4,7 +4,7 @@ import { mockLogger } from '../../test-utils/loggerMock';
 // The module pulls in multer/config at import time; stub the surrounding deps so
 // the pure helpers can be imported in isolation.
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
-vi.mock('../../shared/config', () => ({ SFX_FOLDER: '/app/sfx', SFX_MAX_FILE_MB: 10 }));
+vi.mock('../../shared/config', () => ({ UPLOAD_INCOMING_FOLDER: '/app/upload-incoming', SFX_FOLDER: '/app/sfx', SFX_MAX_FILE_MB: 10 }));
 vi.mock('../csrf', () => ({ csrfProtection: (_req: any, _res: any, next: any) => next() }));
 vi.mock('../middleware', () => ({ requireMod: (_req: any, _res: any, next: any) => next() }));
 vi.mock('../../db', () => ({ addSfxFile: vi.fn(), updateSfxFile: vi.fn(), deleteSfxFile: vi.fn() }));

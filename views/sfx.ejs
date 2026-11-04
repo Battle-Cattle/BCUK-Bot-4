@@ -18,6 +18,10 @@
       update_failed: 'Failed to update the item.',
       remove_failed: 'Failed to remove the item.',
       upload_failed: 'Failed to upload the sound file.',
+      upload_busy: 'Another upload is already in progress. Try again once it finishes.',
+      upload_incomplete: 'The upload did not finish arriving — please try again.',
+      upload_expired: 'The upload expired before it finished — please try again.',
+      invalid_upload: 'No valid file was chosen.',
     }; %>
     <div class="card card-alert-danger" role="alert" aria-live="assertive" aria-atomic="true">
       <span class="text-danger">&#9888; <%= errorMessages[error] || `Operation failed: ${error.replace(/_/g, ' ')}` %></span>
@@ -181,7 +185,7 @@
                 <div class="command-edit-panel">
                   <!-- Submitted via fetch in sfx.js with the CSRF token in an X-CSRF-Token
                        header, so the session token is never placed in the URL (history/Referer). -->
-                  <form method="POST" action="/sfx/file/upload" enctype="multipart/form-data" class="js-sfx-upload">
+                  <form method="POST" action="/sfx/file/upload" data-chunked-url="/sfx/file/upload" enctype="multipart/form-data" class="js-sfx-upload">
                     <input type="hidden" name="trigger_id" value="<%= t.triggerId %>">
                     <div class="form-row-wrap form-section-gap items-end">
                       <div class="form-col-grow">
@@ -313,6 +317,7 @@
   </main>
 
   <%- include('partials/page-end') %>
+  <script src="/chunkedUpload.js"></script>
   <script src="/sfx.js"></script>
   <script src="/sfx-suggest-description.js"></script>
 </body>

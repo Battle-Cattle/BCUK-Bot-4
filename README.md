@@ -88,6 +88,11 @@ The web panel serves uploaded files straight from disk: overlay videos from `OVE
 - Make these folders owned and writable **only** by the user the bot runs as (e.g. `chown -R bot:bot <folder> && chmod -R go-w <folder>`). Anyone else who can write there could plant a symlink to a file outside the folder and race the check.
 - Don't point them at a shared or world-writable location (e.g. `/tmp`), and don't nest one inside a directory other users can write to.
 - Keep them outside the repo checkout and away from `.env` and other secrets.
+- The same applies to `UPLOAD_INCOMING_FOLDER`, where SFX and alert uploads are assembled before they're checked (overlay videos use `OVERLAY_FOLDER/.incoming`).
+
+### Uploads and reverse proxies
+
+Every web panel upload is sent as a chunked, resumable upload: the page sends the file in 8 MB pieces, each its own short request, and re-sends a piece that fails from the last one the server confirmed. A reverse proxy in front of the panel therefore only needs a request body limit above one piece (say 10 MB, e.g. nginx `client_max_body_size 10m;`), whatever the largest file is, and its default read timeouts are enough. Each user can have one upload in progress per upload area at a time; an upload with no new piece for an hour is abandoned and its pieces are removed.
 
 ### SFX file format
 

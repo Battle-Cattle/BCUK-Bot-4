@@ -67,6 +67,12 @@ function parsePositiveIntEnv(envVar: string | undefined, fallback: number): numb
 }
 
 export const SFX_FOLDER = process.env.SFX_FOLDER ?? './sfx';
+/**
+ * Where chunked uploads of SFX sounds and alert images/sounds are assembled before they're
+ * checked and stored. Overlay videos use `OVERLAY_FOLDER/.incoming/chunked` instead, so finishing
+ * one is a rename on the same disk.
+ */
+export const UPLOAD_INCOMING_FOLDER = process.env.UPLOAD_INCOMING_FOLDER ?? './upload-incoming';
 export const SFX_MAX_FILE_MB = parsePositiveIntEnv(process.env.SFX_MAX_FILE_MB, 10);
 export const OVERLAY_FOLDER = process.env.OVERLAY_FOLDER ?? './overlay-videos';
 export const OVERLAY_MAX_FILE_MB = parsePositiveIntEnv(process.env.OVERLAY_MAX_FILE_MB, 500);

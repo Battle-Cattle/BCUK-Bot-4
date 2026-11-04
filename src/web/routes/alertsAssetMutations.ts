@@ -1,3 +1,4 @@
+import path from 'path';
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import type { Request, Response } from 'express';
@@ -8,7 +9,9 @@ import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import { setAlertImage, setAlertSound } from '../../db';
 import type { AlertEventType, DbStreamerEventSub } from '../../db';
-import { ALERT_ASSETS_FOLDER, ALERT_MAX_IMAGE_MB, ALERT_MAX_SOUND_MB } from '../../shared/config';
+import { ALERT_ASSETS_FOLDER, ALERT_MAX_IMAGE_MB, ALERT_MAX_SOUND_MB, UPLOAD_INCOMING_FOLDER } from '../../shared/config';
+import { ChunkedUploadStore } from '../chunkedUploadStore';
+import { mountChunkedUploadRoutes, toMemoryFile } from './chunkedUploadRoutes';
 import { safeResolve } from '../../shared/pathUtils';
 import { requireStreamer } from './viewHelpers';
 import { logAndRedirectError } from './errorHandling';
@@ -230,7 +233,8 @@ const uploadSound = makeUploadMiddleware(soundUpload, 'sound', handleUploadError
  *   (`invalid_path`), the file exceeds the size limit (`file_too_large`), or saving fails
  *   (`upload_failed`).
  */
-router.post('/settings/:eventType/image', requireAuth, csrfProtection, requireStreamerBeforeUpload, uploadImage, makeUploadHandler(detectImageType, setAlertImage, 'image'));
+const handleImageUpload = makeUploadHandler(detectImageType, setAlertImage, 'image');
+router.post('/settings/:eventType/image', requireAuth, csrfProtection, requireStreamerBeforeUpload, uploadImage, handleImageUpload);
 
 /**
  * POST /alerts/settings/:eventType/sound — uploads a sound (magic-byte validated, via the
@@ -241,7 +245,32 @@ router.post('/settings/:eventType/image', requireAuth, csrfProtection, requireSt
  *   success, or to `/alerts/settings?error=<code>` with the same error codes as the image
  *   upload route above.
  */
-router.post('/settings/:eventType/sound', requireAuth, csrfProtection, requireStreamerBeforeUpload, uploadSound, makeUploadHandler(detectAudioType, setAlertSound, 'sound'));
+const handleSoundUpload = makeUploadHandler(detectAudioType, setAlertSound, 'sound');
+router.post('/settings/:eventType/sound', requireAuth, csrfProtection, requireStreamerBeforeUpload, uploadSound, handleSoundUpload);
+
+/** Chunked, resumable alert image uploads under `/settings/:eventType/image/…` (see `mountChunkedUploadRoutes`). */
+mountChunkedUploadRoutes(router, {
+  path: '/settings/:eventType/image',
+  store: new ChunkedUploadStore({ dir: path.join(UPLOAD_INCOMING_FOLDER, 'alert-image'), maxBytes: MAX_IMAGE_MB * 1024 * 1024 }),
+  guards: [requireAuth, csrfProtection, requireStreamerBeforeUpload],
+  field: 'image',
+  toFile: toMemoryFile,
+  complete: [handleImageUpload],
+  basePath: '/alerts/settings',
+  log,
+});
+
+/** Chunked, resumable alert sound uploads under `/settings/:eventType/sound/…`; as for images. */
+mountChunkedUploadRoutes(router, {
+  path: '/settings/:eventType/sound',
+  store: new ChunkedUploadStore({ dir: path.join(UPLOAD_INCOMING_FOLDER, 'alert-sound'), maxBytes: MAX_SOUND_MB * 1024 * 1024 }),
+  guards: [requireAuth, csrfProtection, requireStreamerBeforeUpload],
+  field: 'sound',
+  toFile: toMemoryFile,
+  complete: [handleSoundUpload],
+  basePath: '/alerts/settings',
+  log,
+});
 
 /**
  * POST /alerts/settings/:eventType/image/delete — removes the requesting streamer's uploaded

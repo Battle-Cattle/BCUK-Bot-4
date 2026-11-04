@@ -37,6 +37,10 @@
         invalid_path:            'Couldn\'t store that file.',
         file_too_large:          'That file is too large.',
         upload_failed:           'Upload failed — please try again.',
+        upload_busy: 'Another upload is already in progress. Try again once it finishes.',
+        upload_incomplete: 'The upload did not finish arriving — please try again.',
+        upload_expired: 'The upload expired before it finished — please try again.',
+        invalid_upload: 'No valid file was chosen.',
         no_alert:                'Turn on and save the command\'s alert before uploading files for it.',
         test_failed:             'Failed to send the test.',
         command_disabled:        'That command is disabled — enable it first.',
@@ -176,7 +180,7 @@
             <% if (c.alert) { %>
             <% [['image', c.alert.imageFilename, 'image/png,image/gif,image/jpeg,image/webp', maxImageMb], ['sound', c.alert.soundFilename, 'audio/mpeg,audio/ogg,audio/wav', maxSoundMb]].forEach(function (asset) { %>
             <div class="d-flex gap-05 items-end mt-05">
-              <form method="POST" action="/advanced-commands/<%= c.id %>/alert/<%= asset[0] %>" enctype="multipart/form-data" class="js-advanced-command-upload d-flex gap-05 items-end">
+              <form method="POST" action="/advanced-commands/<%= c.id %>/alert/<%= asset[0] %>" data-chunked-url="/advanced-commands/<%= c.id %>/alert/<%= asset[0] %>" enctype="multipart/form-data" class="js-advanced-command-upload d-flex gap-05 items-end">
                 <label class="form-label">Alert <%= asset[0] %> <span class="muted">(<%= asset[1] ? 'replace' : 'none yet' %>, <%= asset[3] %> MB max)</span>
                   <input type="file" name="<%= asset[0] %>" accept="<%= asset[2] %>" required></label>
                 <button type="submit" class="btn btn-sm btn-primary">Upload</button>
@@ -225,6 +229,7 @@
     </section>
   </main>
   <script src="/utils.js"></script>
+  <script src="/chunkedUpload.js"></script>
   <script src="/advancedCommands.js"></script>
   <%- include('partials/pwa-register') %>
   <%- include('partials/footer') %>

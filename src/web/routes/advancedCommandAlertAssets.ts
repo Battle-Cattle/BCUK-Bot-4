@@ -2,13 +2,16 @@
 // `ALERT_ASSETS_FOLDER/<streamer_id>/` and served by the same `GET /alerts/assets/...` route. The
 // filename is generated here and written to the DB only by these routes, so a form can't point
 // an alert at an arbitrary file.
+import path from 'path';
 import { createLogger } from '../../shared/logger';
 import { Router, type Request, type Response } from 'express';
 import multer from 'multer';
 import fs from 'fs';
 import { randomUUID } from 'crypto';
 import { setAdvancedCommandAlertAsset } from '../../db';
-import { ALERT_ASSETS_FOLDER, ALERT_MAX_IMAGE_MB, ALERT_MAX_SOUND_MB } from '../../shared/config';
+import { ALERT_ASSETS_FOLDER, ALERT_MAX_IMAGE_MB, ALERT_MAX_SOUND_MB, UPLOAD_INCOMING_FOLDER } from '../../shared/config';
+import { ChunkedUploadStore } from '../chunkedUploadStore';
+import { mountChunkedUploadRoutes, toMemoryFile } from './chunkedUploadRoutes';
 import { safeResolve } from '../../shared/pathUtils';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
@@ -145,6 +148,30 @@ router.post(`${BASE_PATH}/:id/alert/image`, requireAuth, csrfProtection, require
 
 /** POST /advanced-commands/:id/alert/sound — uploads a sound for a command's alert; as for the image. */
 router.post(`${BASE_PATH}/:id/alert/sound`, requireAuth, csrfProtection, requireStreamerBeforeUpload, uploadSound, uploadHandler('sound'));
+
+/** Chunked, resumable alert image uploads under `/advanced-commands/:id/alert/image/…` (see `mountChunkedUploadRoutes`). */
+mountChunkedUploadRoutes(router, {
+  path: `${BASE_PATH}/:id/alert/image`,
+  store: new ChunkedUploadStore({ dir: path.join(UPLOAD_INCOMING_FOLDER, 'advanced-image'), maxBytes: ALERT_MAX_IMAGE_MB * 1024 * 1024 }),
+  guards: [requireAuth, csrfProtection, requireStreamerBeforeUpload],
+  field: 'image',
+  toFile: toMemoryFile,
+  complete: [uploadHandler('image')],
+  basePath: BASE_PATH,
+  log,
+});
+
+/** Chunked, resumable alert sound uploads under `/advanced-commands/:id/alert/sound/…`; as for images. */
+mountChunkedUploadRoutes(router, {
+  path: `${BASE_PATH}/:id/alert/sound`,
+  store: new ChunkedUploadStore({ dir: path.join(UPLOAD_INCOMING_FOLDER, 'advanced-sound'), maxBytes: ALERT_MAX_SOUND_MB * 1024 * 1024 }),
+  guards: [requireAuth, csrfProtection, requireStreamerBeforeUpload],
+  field: 'sound',
+  toFile: toMemoryFile,
+  complete: [uploadHandler('sound')],
+  basePath: BASE_PATH,
+  log,
+});
 
 /** POST /advanced-commands/:id/alert/image/delete — removes a command's alert image (DB and disk). */
 router.post(`${BASE_PATH}/:id/alert/image/delete`, requireAuth, csrfProtection, deleteHandler('image'));

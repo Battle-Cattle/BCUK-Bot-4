@@ -19,6 +19,14 @@ import {
 // `req.file` the area's existing upload handler expects, so each area keeps its own type checks,
 // storage and redirects.
 
+/**
+ * Error codes a chunked upload can send a page back with, on top of each area's own: another
+ * upload by the same user still running, an upload completed before every piece arrived, one
+ * that expired (or was never this user's), and a malformed start. Each upload page lists them
+ * among its known errors.
+ */
+export const CHUNKED_UPLOAD_ERROR_CODES = ['upload_busy', 'upload_incomplete', 'upload_expired', 'invalid_upload'] as const;
+
 /** HTTP status for each refusal, answered as JSON to the page's uploader. */
 const ERROR_STATUS: Record<ChunkedUploadError, number> = {
   invalid_upload: 400,
@@ -79,7 +87,7 @@ function sendFailure(res: Response, failure: { error: ChunkedUploadError; receiv
  * @param handler - The handler to run with the requester's Discord ID.
  * @returns Express middleware.
  */
-function jsonRoute(log: Logger, label: string, handler: (req: Request, res: Response, owner: string) => Promise<void>): RequestHandler {
+function jsonRoute(log: Logger, label: string, handler: JsonHandler): RequestHandler {
   return async (req, res) => {
     const owner = ownerOf(req);
     if (!owner) {
@@ -142,7 +150,7 @@ function finishUpload(options: ChunkedUploadRouteOptions): RequestHandler {
   const { store, field, toFile, basePath, log } = options;
   return async (req: Request, res: Response, next: NextFunction) => {
     const owner = ownerOf(req);
-    const id = String(req.params.id);
+    const id = String(req.params.uploadId);
     try {
       const finished = owner ? await store.finish(owner, id) : null;
       if (!finished?.ok) {
@@ -162,11 +170,11 @@ function finishUpload(options: ChunkedUploadRouteOptions): RequestHandler {
  * Mounts one upload area's chunked-upload routes on `router`:
  * - `POST <path>/start` (JSON `{name, size, type}`) → `{id, chunkSize}`, or 409 `upload_busy`
  *   with the user's running upload as `activeId`, or 413 `file_too_large`;
- * - `GET <path>/:id` → `{received, size}`, so the page can resume;
- * - `PUT <path>/:id/chunk?offset=N` (raw bytes) → `{received}`, or 409 `bad_offset` with the
+ * - `GET <path>/:uploadId` → `{received, size}`, so the page can resume;
+ * - `PUT <path>/:uploadId/chunk?offset=N` (raw bytes) → `{received}`, or 409 `bad_offset` with the
  *   confirmed `received` offset to resume from;
- * - `DELETE <path>/:id` → 204, abandoning the upload;
- * - `POST <path>/:id/complete` (the form's other fields) → the area's handlers, which redirect.
+ * - `DELETE <path>/:uploadId` → 204, abandoning the upload;
+ * - `POST <path>/:uploadId/complete` (the form's other fields) → the area's handlers, which redirect.
  *
  * Another user's upload ID, or an expired one, answers 404.
  * @param router - The area's Express router.
@@ -174,46 +182,78 @@ function finishUpload(options: ChunkedUploadRouteOptions): RequestHandler {
  * @returns Nothing; the routes are mounted.
  */
 export function mountChunkedUploadRoutes(router: Router, options: ChunkedUploadRouteOptions): void {
-  const { path, store, guards, log } = options;
+  const { path, guards, log } = options;
+  const rawBody = express.raw({ type: () => true, limit: CHUNK_MAX_BYTES });
+  router.post(`${path}/start`, ...guards, jsonRoute(log, 'Chunked upload start error:', startHandler(options)));
+  router.get(`${path}/:uploadId`, ...guards, jsonRoute(log, 'Chunked upload status error:', statusHandler(options.store)));
+  router.put(`${path}/:uploadId/chunk`, ...guards, rawBody, jsonRoute(log, 'Chunked upload piece error:', pieceHandler(options.store)));
+  router.delete(`${path}/:uploadId`, ...guards, jsonRoute(log, 'Chunked upload cancel error:', cancelHandler(options.store)));
+  router.post(`${path}/:uploadId/complete`, ...guards, finishUpload(options), ...options.complete);
+}
 
-  router.post(`${path}/start`, ...guards, jsonRoute(log, 'Chunked upload start error:', async (req, res, owner) => {
+/** A JSON route body run by {@link jsonRoute} with the requester's Discord ID. */
+type JsonHandler = (req: Request, res: Response, owner: string) => Promise<void>;
+
+/**
+ * Builds the start route: checks the declaration and the area's own rule, then starts a session.
+ * @param options - The area's route options.
+ * @returns The route body.
+ */
+function startHandler(options: ChunkedUploadRouteOptions): JsonHandler {
+  const { store, checkStart } = options;
+  return async (req, res, owner) => {
     // Each start also clears abandoned sessions, so they never outlive the next upload by long.
     void store.sweep();
     const declared = parseDeclaration(req.body);
-    if (!declared) return sendFailure(res, { error: 'invalid_upload' });
-    const refused = options.checkStart?.(declared);
-    if (refused) {
-      res.status(409).json({ error: refused });
+    const refused = declared ? checkStart?.(declared) : null;
+    if (!declared || refused) {
+      res.status(declared ? 409 : 400).json({ error: refused ?? 'invalid_upload' });
       return;
     }
     const started = await store.start(owner, declared);
-    if (!started.ok) return sendFailure(res, started);
-    res.json({ id: started.id, chunkSize: CHUNK_MAX_BYTES });
-  }));
+    if (started.ok) res.json({ id: started.id, chunkSize: CHUNK_MAX_BYTES });
+    else sendFailure(res, started);
+  };
+}
 
-  router.get(`${path}/:id`, ...guards, jsonRoute(log, 'Chunked upload status error:', async (req, res, owner) => {
-    const status = await store.status(owner, String(req.params.id));
-    if (!status.ok) return sendFailure(res, status);
-    res.json({ received: status.received, size: status.size });
-  }));
+/**
+ * Builds the status route, reporting the confirmed offset so the page can resume.
+ * @param store - The area's session store.
+ * @returns The route body.
+ */
+function statusHandler(store: ChunkedUploadStore): JsonHandler {
+  return async (req, res, owner) => {
+    const status = await store.status(owner, String(req.params.uploadId));
+    if (status.ok) res.json({ received: status.received, size: status.size });
+    else sendFailure(res, status);
+  };
+}
 
-  const rawBody = express.raw({ type: () => true, limit: CHUNK_MAX_BYTES });
-  router.put(`${path}/:id/chunk`, ...guards, rawBody, jsonRoute(log, 'Chunked upload piece error:', async (req, res, owner) => {
+/**
+ * Builds the piece route, appending the raw body at the `offset` query value.
+ * @param store - The area's session store.
+ * @returns The route body.
+ */
+function pieceHandler(store: ChunkedUploadStore): JsonHandler {
+  return async (req, res, owner) => {
     const offset = parseOffset(req.query.offset);
     const chunk: unknown = req.body;
-    if (offset === null || !Buffer.isBuffer(chunk)) return sendFailure(res, { error: 'bad_offset' });
-    const appended = await store.append(owner, String(req.params.id), offset, chunk);
-    if (!appended.ok) return sendFailure(res, appended);
-    res.json({ received: appended.received });
-  }));
+    const appended = offset !== null && Buffer.isBuffer(chunk)
+      ? await store.append(owner, String(req.params.uploadId), offset, chunk)
+      : { ok: false as const, error: 'bad_offset' as const };
+    if (appended.ok) res.json({ received: appended.received });
+    else sendFailure(res, appended);
+  };
+}
 
-  router.delete(`${path}/:id`, ...guards, jsonRoute(log, 'Chunked upload cancel error:', async (req, res, owner) => {
-    if (await store.cancel(owner, String(req.params.id))) {
-      res.status(204).end();
-      return;
-    }
-    sendFailure(res, { error: 'not_found' });
-  }));
-
-  router.post(`${path}/:id/complete`, ...guards, finishUpload(options), ...options.complete);
+/**
+ * Builds the cancel route, abandoning the requester's upload.
+ * @param store - The area's session store.
+ * @returns The route body.
+ */
+function cancelHandler(store: ChunkedUploadStore): JsonHandler {
+  return async (req, res, owner) => {
+    if (await store.cancel(owner, String(req.params.uploadId))) res.status(204).end();
+    else sendFailure(res, { error: 'not_found' });
+  };
 }
