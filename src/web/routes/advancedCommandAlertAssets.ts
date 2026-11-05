@@ -2,13 +2,15 @@
 // `ALERT_ASSETS_FOLDER/<streamer_id>/` and served by the same `GET /alerts/assets/...` route. The
 // filename is generated here and written to the DB only by these routes, so a form can't point
 // an alert at an arbitrary file.
+import path from 'path';
 import { createLogger } from '../../shared/logger';
 import { Router, type Request, type Response } from 'express';
-import multer from 'multer';
 import fs from 'fs';
 import { randomUUID } from 'crypto';
 import { setAdvancedCommandAlertAsset } from '../../db';
-import { ALERT_ASSETS_FOLDER, ALERT_MAX_IMAGE_MB, ALERT_MAX_SOUND_MB } from '../../shared/config';
+import { ALERT_ASSETS_FOLDER, ALERT_MAX_IMAGE_MB, ALERT_MAX_SOUND_MB, UPLOAD_INCOMING_FOLDER } from '../../shared/config';
+import { ChunkedUploadStore } from '../chunkedUploadStore';
+import { mountChunkedUploadRoutes, toMemoryFile } from './chunkedUploadRoutes';
 import { safeResolve } from '../../shared/pathUtils';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
@@ -16,10 +18,11 @@ import { requireStreamer } from './viewHelpers';
 import { logAndRedirectError } from './errorHandling';
 import { parsePositiveIntId } from './validation';
 import {
-  createMulterErrorRedirectHandler, makeRequireStreamerBeforeUpload, makeUploadMiddleware, writeFileOrCleanup,
+  makeRequireStreamerBeforeUpload, writeFileOrCleanup,
 } from './uploadMiddleware';
 import { detectAudioType, detectImageType } from './uploadFileTypes';
 import { BASE_PATH, NOT_A_STREAMER_REDIRECT } from './advancedCommandPaths';
+import type { UploadedFile } from '../uploadedFile';
 
 const log = createLogger('Web');
 export const router = Router();
@@ -59,7 +62,7 @@ export async function removeAlertAssetFiles(streamerId: number, filenames: strin
  * @param file - The uploaded file, if any.
  * @returns A `?error=` code, or null on success.
  */
-async function storeAsset(streamerId: number, commandId: number, kind: AssetKind, file: Express.Multer.File | undefined): Promise<string | null> {
+async function storeAsset(streamerId: number, commandId: number, kind: AssetKind, file: UploadedFile | undefined): Promise<string | null> {
   const ext = file ? DETECTORS[kind](file.buffer) : null;
   if (!file || !ext) return 'invalid_file';
   const filename = `command-${commandId}-${randomUUID()}.${ext}`;
@@ -125,26 +128,37 @@ function deleteHandler(kind: AssetKind) {
   };
 }
 
-const handleUploadError = createMulterErrorRedirectHandler(BASE_PATH, log, 'Advanced command upload middleware error:');
 const requireStreamerBeforeUpload = makeRequireStreamerBeforeUpload({
   notAStreamerRedirect: NOT_A_STREAMER_REDIRECT, basePath: BASE_PATH, log, logLabel: 'Advanced command upload streamer check error:',
 });
-const uploadImage = makeUploadMiddleware(
-  multer({ storage: multer.memoryStorage(), limits: { fileSize: ALERT_MAX_IMAGE_MB * 1024 * 1024 } }), 'image', handleUploadError,
-);
-const uploadSound = makeUploadMiddleware(
-  multer({ storage: multer.memoryStorage(), limits: { fileSize: ALERT_MAX_SOUND_MB * 1024 * 1024 } }), 'sound', handleUploadError,
-);
 
 /**
- * POST /advanced-commands/:id/alert/image — uploads an image/GIF (magic-byte validated) for a
- * command's alert. CSRF and the streamer check run before Multer buffers the file; the page sends
- * the token in an X-CSRF-Token header.
+ * Chunked, resumable alert image uploads under `/advanced-commands/:id/alert/image/…` (see
+ * `mountChunkedUploadRoutes`): an image/GIF (magic-byte validated) for a command's alert. CSRF and
+ * the streamer check guard every route; the page sends the token in an X-CSRF-Token header.
  */
-router.post(`${BASE_PATH}/:id/alert/image`, requireAuth, csrfProtection, requireStreamerBeforeUpload, uploadImage, uploadHandler('image'));
+mountChunkedUploadRoutes(router, {
+  path: `${BASE_PATH}/:id/alert/image`,
+  store: new ChunkedUploadStore({ dir: path.join(UPLOAD_INCOMING_FOLDER, 'advanced-image'), maxBytes: ALERT_MAX_IMAGE_MB * 1024 * 1024 }),
+  guards: [requireAuth, csrfProtection, requireStreamerBeforeUpload],
+  field: 'image',
+  toFile: toMemoryFile,
+  complete: [uploadHandler('image')],
+  basePath: BASE_PATH,
+  log,
+});
 
-/** POST /advanced-commands/:id/alert/sound — uploads a sound for a command's alert; as for the image. */
-router.post(`${BASE_PATH}/:id/alert/sound`, requireAuth, csrfProtection, requireStreamerBeforeUpload, uploadSound, uploadHandler('sound'));
+/** Chunked, resumable alert sound uploads under `/advanced-commands/:id/alert/sound/…`; as for images. */
+mountChunkedUploadRoutes(router, {
+  path: `${BASE_PATH}/:id/alert/sound`,
+  store: new ChunkedUploadStore({ dir: path.join(UPLOAD_INCOMING_FOLDER, 'advanced-sound'), maxBytes: ALERT_MAX_SOUND_MB * 1024 * 1024 }),
+  guards: [requireAuth, csrfProtection, requireStreamerBeforeUpload],
+  field: 'sound',
+  toFile: toMemoryFile,
+  complete: [uploadHandler('sound')],
+  basePath: BASE_PATH,
+  log,
+});
 
 /** POST /advanced-commands/:id/alert/image/delete — removes a command's alert image (DB and disk). */
 router.post(`${BASE_PATH}/:id/alert/image/delete`, requireAuth, csrfProtection, deleteHandler('image'));

@@ -88,7 +88,7 @@ function conversionError(err: unknown): Error {
  * @param dir - Absolute path of the streamer's overlay folder (already safe-resolved and created).
  * @param baseName - Random base name (no extension) for the stored file.
  * @param placeSource - Puts the uploaded MOV at the path it's given (the temporary copy ffmpeg
- *   reads), e.g. by moving the file Multer stored.
+ *   reads), e.g. by moving the finished upload into place.
  * @param onProgress - Told the conversion's stage and percentage as it goes (optional).
  * @returns The stored WebM's filename.
  * @throws With `code: 'transcode_busy'` if too many conversions are pending, or

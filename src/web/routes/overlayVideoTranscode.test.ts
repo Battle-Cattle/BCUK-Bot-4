@@ -5,6 +5,7 @@ import { mockLogger } from '../../test-utils/loggerMock';
 vi.mock('child_process', () => ({ spawn: vi.fn() }));
 vi.mock('ffmpeg-static', () => ({ default: '/usr/bin/ffmpeg' }));
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
+vi.mock('../../shared/config', () => ({ OVERLAY_TRANSCODE_TIMEOUT_MINUTES: 30 }));
 
 import { spawn } from 'child_process';
 import { waitFor } from '../../test-utils/waitFor';
@@ -12,6 +13,18 @@ import {
   buildWebmTranscodeArgs, transcodeToWebm, isWebmTranscodeQueueFull,
   WEBM_TRANSCODE_TIMEOUT_MS, KILLED_FFMPEG_EXIT_GRACE_MS, MAX_PENDING_WEBM_TRANSCODES,
 } from './overlayVideoTranscode';
+import { STALE_TEMP_FILE_MS } from './overlayFiles';
+
+describe('WEBM_TRANSCODE_TIMEOUT_MS', () => {
+  it('comes from OVERLAY_TRANSCODE_TIMEOUT_MINUTES', () => {
+    expect(WEBM_TRANSCODE_TIMEOUT_MS).toBe(30 * 60_000);
+  });
+
+  it('is outlasted by the stale-file sweep threshold, so a queued MOV is never swept before it converts', () => {
+    expect(STALE_TEMP_FILE_MS).toBeGreaterThan(MAX_PENDING_WEBM_TRANSCODES * WEBM_TRANSCODE_TIMEOUT_MS);
+    expect(STALE_TEMP_FILE_MS).toBe(60 * 60_000 + MAX_PENDING_WEBM_TRANSCODES * WEBM_TRANSCODE_TIMEOUT_MS);
+  });
+});
 
 /** Fake ChildProcess-like EventEmitter for mocking `spawn`. */
 function makeFakeProcess() {

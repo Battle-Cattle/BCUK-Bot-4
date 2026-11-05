@@ -33,7 +33,7 @@ vi.mock('../../db', async () => {
     ReservedCommandError: reserved.ReservedCommandError,
   };
 });
-vi.mock('../../shared/config', () => ({ ALERT_ASSETS_FOLDER: '/app/alert-assets', ALERT_MAX_IMAGE_MB: 1, ALERT_MAX_SOUND_MB: 1 }));
+vi.mock('../../shared/config', () => ({ UPLOAD_INCOMING_FOLDER: '/app/upload-incoming', ALERT_ASSETS_FOLDER: '/app/alert-assets', ALERT_MAX_IMAGE_MB: 1, ALERT_MAX_SOUND_MB: 1 }));
 vi.mock('../csrf', () => ({
   csrfProtection: (req: any, _res: any, next: any) => {
     req.csrfToken = () => 'test-csrf-token';

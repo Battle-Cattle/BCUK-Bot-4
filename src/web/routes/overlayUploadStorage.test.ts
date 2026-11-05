@@ -7,47 +7,34 @@ import { mockLogger } from '../../test-utils/loggerMock';
 vi.mock('../../shared/config', async () => {
   const nodeOs = await import('os');
   const nodePath = await import('path');
-  return { OVERLAY_FOLDER: nodePath.join(nodeOs.tmpdir(), `overlay-upload-${process.pid}-${Date.now()}`) };
+  return { OVERLAY_TRANSCODE_TIMEOUT_MINUTES: 30, OVERLAY_FOLDER: nodePath.join(nodeOs.tmpdir(), `overlay-upload-${process.pid}-${Date.now()}`) };
 });
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
-import express from 'express';
-import multer from 'multer';
-import supertest from 'supertest';
 import {
-  INCOMING_DIR, overlayUploadStorage, detectUploadedVideoType, placeUpload, discardUpload, sweepStaleIncomingUploads,
+  INCOMING_DIR, adoptChunkedUpload, detectUploadedVideoType, placeUpload, discardUpload, sweepStaleIncomingUploads,
 } from './overlayUploadStorage';
+import type { UploadedFile } from '../uploadedFile';
 import { STALE_TEMP_FILE_MS } from './overlayFiles';
 import { OVERLAY_FOLDER as overlayFolder } from '../../shared/config';
 
 const MOV_BYTES = Buffer.from([0x00, 0x00, 0x00, 0x14, ...Buffer.from('ftypqt  ', 'ascii'), ...Buffer.alloc(64, 7)]);
 
-/** An app whose one route stores a `video` upload with the real storage engine and reports it. */
-function buildApp(maxBytes = 1024 * 1024) {
-  const upload = multer({ storage: overlayUploadStorage, limits: { fileSize: maxBytes } }).single('video');
-  const app = express();
-  app.post('/upload', (req, res) => {
-    upload(req, res, (err: unknown) => {
-      if (err) {
-        res.status(400).json({ error: (err as { code?: string }).code ?? String(err) });
-        return;
-      }
-      res.json({ path: req.file?.path, size: req.file?.size });
-    });
-  });
-  return app;
+let adoptedCount = 0;
+
+/** Writes `bytes` as a finished chunked upload and adopts it, like the complete route does. */
+async function adopted(bytes: Buffer): Promise<UploadedFile> {
+  const sessionDir = path.join(INCOMING_DIR, 'chunked');
+  await fs.promises.mkdir(sessionDir, { recursive: true });
+  const assembled = path.join(sessionDir, `upload-${adoptedCount++}.done`);
+  await fs.promises.writeFile(assembled, bytes);
+  return adoptChunkedUpload({ path: assembled, name: 'clip.mov', size: bytes.length, type: 'video/quicktime' }, 'video');
 }
 
-/** A Multer file record for a file the storage engine stored at `fullPath`. */
-function fileAt(fullPath: string): Express.Multer.File {
-  return { path: fullPath, filename: path.basename(fullPath), originalname: 'clip.mov' } as Express.Multer.File;
-}
-
-/** Files currently in the incoming folder, sorted. */
+/** Files currently in the incoming folder (not counting the chunked-session folder), sorted. */
 async function incoming() {
-  return (await fs.promises.readdir(INCOMING_DIR).catch(() => [] as string[])).sort();
+  return (await fs.promises.readdir(INCOMING_DIR).catch(() => [] as string[])).filter((n) => n !== 'chunked').sort();
 }
-
 beforeEach(async () => {
   await fs.promises.rm(INCOMING_DIR, { recursive: true, force: true });
 });
@@ -60,77 +47,24 @@ afterAll(async () => {
   await fs.promises.rm(overlayFolder, { recursive: true, force: true });
 });
 
-describe('overlayUploadStorage', () => {
-  it('streams an upload to a random .incoming file inside the overlay folder, creating the folder', async () => {
-    const res = await supertest(buildApp()).post('/upload').attach('video', MOV_BYTES, 'clip.mov');
-    expect(res.status).toBe(200);
-    expect(INCOMING_DIR).toBe(path.join(overlayFolder, '.incoming'));
-    expect(path.dirname(res.body.path)).toBe(INCOMING_DIR);
-    expect(path.basename(res.body.path)).toMatch(/^[0-9a-f-]{36}\.incoming$/);
-    expect(await fs.promises.readFile(res.body.path)).toEqual(MOV_BYTES);
-  });
-
-  it('leaves nothing behind when an upload is over the size limit', async () => {
-    const res = await supertest(buildApp(16)).post('/upload').attach('video', MOV_BYTES, 'clip.mov');
-    expect(res.body.error).toBe('LIMIT_FILE_SIZE');
-    expect(await incoming()).toEqual([]);
-  });
-
-  it('removes a partly written upload when the write fails, before reporting the error', async () => {
-    const realCreate = fs.createWriteStream.bind(fs);
-    vi.spyOn(fs, 'createWriteStream').mockImplementationOnce(((target: fs.PathLike) => {
-      const stream = realCreate(target);
-      stream.once('open', () => stream.destroy(Object.assign(new Error('disk full'), { code: 'ENOSPC' })));
-      return stream;
-    }) as typeof fs.createWriteStream);
-    const res = await supertest(buildApp()).post('/upload').attach('video', MOV_BYTES, 'clip.mov');
-    expect(res.body.error).toBe('ENOSPC');
-    expect(await incoming()).toEqual([]);
-  });
-
-  it('still reports a failed write when removing the partial upload also fails', async () => {
-    const realCreate = fs.createWriteStream.bind(fs);
-    vi.spyOn(fs, 'createWriteStream').mockImplementationOnce(((target: fs.PathLike) => {
-      const stream = realCreate(target);
-      stream.once('open', () => stream.destroy(Object.assign(new Error('disk full'), { code: 'ENOSPC' })));
-      return stream;
-    }) as typeof fs.createWriteStream);
-    vi.spyOn(fs.promises, 'rm').mockRejectedValueOnce(new Error('denied'));
-    const res = await supertest(buildApp()).post('/upload').attach('video', MOV_BYTES, 'clip.mov');
-    expect(res.body.error).toBe('ENOSPC');
-  });
-
-  it('fails the upload when the incoming folder cannot be created', async () => {
-    vi.spyOn(fs.promises, 'mkdir').mockRejectedValueOnce(Object.assign(new Error('denied'), { code: 'EACCES' }));
-    const res = await supertest(buildApp()).post('/upload').attach('video', MOV_BYTES, 'clip.mov');
-    expect(res.status).toBe(400);
-  });
-
-  it('fails the upload when mkdir rejects with something other than an Error', async () => {
-    vi.spyOn(fs.promises, 'mkdir').mockRejectedValueOnce('nope');
-    const res = await supertest(buildApp()).post('/upload').attach('video', MOV_BYTES, 'clip.mov');
-    expect(res.status).toBe(400);
-  });
-});
-
 describe('detectUploadedVideoType', () => {
   it('detects the type from the file on disk', async () => {
-    const res = await supertest(buildApp()).post('/upload').attach('video', MOV_BYTES, 'clip.mov');
-    expect(await detectUploadedVideoType(fileAt(res.body.path))).toBe('mov');
+    const file = await adopted(MOV_BYTES);
+    expect(await detectUploadedVideoType(file)).toBe('mov');
   });
 
   it('returns null for a file that is not a video', async () => {
-    const res = await supertest(buildApp()).post('/upload').attach('video', Buffer.from('hello'), 'clip.mov');
-    expect(await detectUploadedVideoType(fileAt(res.body.path))).toBeNull();
+    const file = await adopted(Buffer.from('hello'));
+    expect(await detectUploadedVideoType(file)).toBeNull();
   });
 });
 
 describe('placeUpload', () => {
   /** Stores MOV_BYTES as an upload and returns its file record and a destination path. */
   async function stored() {
-    const res = await supertest(buildApp()).post('/upload').attach('video', MOV_BYTES, 'clip.mov');
+    const file = await adopted(MOV_BYTES);
     const dest = path.join(overlayFolder, `dest-${Date.now()}-${Math.random()}.mov.upload`);
-    return { file: fileAt(res.body.path), dest };
+    return { file, dest };
   }
 
   it('moves the upload to its destination', async () => {
@@ -170,34 +104,34 @@ describe('placeUpload', () => {
 
 describe('discardUpload', () => {
   it('removes the upload, and does nothing if it has already gone', async () => {
-    const res = await supertest(buildApp()).post('/upload').attach('video', MOV_BYTES, 'clip.mov');
-    await discardUpload(fileAt(res.body.path));
+    const file = await adopted(MOV_BYTES);
+    await discardUpload(file);
     expect(await incoming()).toEqual([]);
-    await expect(discardUpload(fileAt(res.body.path))).resolves.toBeUndefined();
+    await expect(discardUpload(file)).resolves.toBeUndefined();
   });
 
   it('logs instead of throwing when the upload cannot be removed, and can still remove it later', async () => {
-    const res = await supertest(buildApp()).post('/upload').attach('video', MOV_BYTES, 'clip.mov');
+    const file = await adopted(MOV_BYTES);
     vi.spyOn(fs.promises, 'rm').mockRejectedValueOnce(new Error('denied'));
-    await expect(discardUpload(fileAt(res.body.path))).resolves.toBeUndefined();
+    await expect(discardUpload(file)).resolves.toBeUndefined();
     expect(await incoming()).toHaveLength(1);
-    await discardUpload(fileAt(res.body.path));
+    await discardUpload(file);
     expect(await incoming()).toEqual([]);
   });
 
   it('does nothing once the upload has been moved into place', async () => {
-    const res = await supertest(buildApp()).post('/upload').attach('video', MOV_BYTES, 'clip.mov');
+    const file = await adopted(MOV_BYTES);
     const dest = path.join(overlayFolder, `placed-${Date.now()}.webm`);
-    await placeUpload(fileAt(res.body.path), dest);
+    await placeUpload(file, dest);
     const rm = vi.spyOn(fs.promises, 'rm');
-    await discardUpload(fileAt(res.body.path));
+    await discardUpload(file);
     expect(rm).not.toHaveBeenCalled();
     expect(await fs.promises.readFile(dest)).toEqual(MOV_BYTES);
   });
 });
 
 describe('uploads this process did not store', () => {
-  const outside = { path: '/etc/passwd', filename: '../../etc/passwd', originalname: 'clip.mov' } as Express.Multer.File;
+  const outside = { path: '/etc/passwd', filename: '../../etc/passwd', originalname: 'clip.mov' } as UploadedFile;
 
   it('are refused rather than read, moved or removed, whatever path their record names', async () => {
     const rm = vi.spyOn(fs.promises, 'rm');
@@ -230,5 +164,41 @@ describe('sweepStaleIncomingUploads', () => {
 
   it('does nothing when the incoming folder does not exist yet', async () => {
     await expect(sweepStaleIncomingUploads()).resolves.toBeUndefined();
+  });
+});
+
+describe('adoptChunkedUpload', () => {
+  it('moves an assembled chunked upload into the incoming folder as an upload this process can use', async () => {
+    const sessionDir = path.join(INCOMING_DIR, 'chunked');
+    await fs.promises.mkdir(sessionDir, { recursive: true });
+    const assembled = path.join(sessionDir, 'abc.done');
+    await fs.promises.writeFile(assembled, MOV_BYTES);
+    const file = await adoptChunkedUpload({ path: assembled, name: 'clip.mov', size: MOV_BYTES.length, type: 'video/quicktime' }, 'video');
+    expect(file).toMatchObject({ fieldname: 'video', originalname: 'clip.mov', mimetype: 'video/quicktime', size: MOV_BYTES.length });
+    expect(file.filename).toMatch(/\.incoming$/);
+    expect(fs.existsSync(assembled)).toBe(false);
+    expect(await detectUploadedVideoType(file)).toBe('mov');
+    await discardUpload(file);
+    expect(fs.existsSync(file.path)).toBe(false);
+  });
+});
+
+describe('adoptChunkedUpload failures', () => {
+  it('removes the assembled file and rethrows when it cannot be moved into the incoming folder', async () => {
+    const sessionDir = path.join(INCOMING_DIR, 'chunked');
+    await fs.promises.mkdir(sessionDir, { recursive: true });
+    const assembled = path.join(sessionDir, 'failed.done');
+    await fs.promises.writeFile(assembled, MOV_BYTES);
+    vi.spyOn(fs.promises, 'rename').mockRejectedValueOnce(Object.assign(new Error('denied'), { code: 'EACCES' }));
+    await expect(adoptChunkedUpload({ path: assembled, name: 'clip.mov', size: MOV_BYTES.length, type: '' }, 'video'))
+      .rejects.toMatchObject({ code: 'EACCES' });
+    await expect(fs.promises.access(assembled)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('still rethrows the move error when removing the assembled file also fails', async () => {
+    vi.spyOn(fs.promises, 'rename').mockRejectedValueOnce(Object.assign(new Error('denied'), { code: 'EACCES' }));
+    vi.spyOn(fs.promises, 'rm').mockRejectedValueOnce(new Error('EBUSY'));
+    await expect(adoptChunkedUpload({ path: '/nowhere/x.done', name: 'clip.mov', size: 1, type: '' }, 'video'))
+      .rejects.toMatchObject({ code: 'EACCES' });
   });
 });

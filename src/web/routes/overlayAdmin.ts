@@ -15,6 +15,7 @@ import { MAX_OVERLAY_VIDEO_WEIGHT } from './overlayAdminShared';
 import { connections as overlaySourceConnections } from './overlaySource';
 import { createOverlayStatusEventsHandler } from './sseEventsHandlers';
 import { parseUploadId, getConversionProgress } from './overlayConversionProgress';
+import { CHUNKED_UPLOAD_ERROR_CODES } from './chunkedUploadRoutes';
 
 const log = createLogger('OverlayAdmin');
 const router = Router();
@@ -27,7 +28,8 @@ export const statusConnections = new Map<number, Set<Response>>();
 const KNOWN_ERRORS = new Set([
   'not_a_streamer', 'invalid_file', 'upload_failed', 'delete_failed',
   'invalid_reward_id', 'no_videos_selected', 'save_failed', 'invalid_id', 'invalid_path',
-  'file_too_large', 'invalid_weight', 'transcode_failed', 'transcode_busy', 'upload_busy',
+  'file_too_large', 'invalid_weight', 'transcode_failed', 'transcode_busy',
+  ...CHUNKED_UPLOAD_ERROR_CODES,
 ]);
 const KNOWN_SUCCESSES = new Set([
   'video_uploaded', 'video_deleted', 'reward_saved', 'reward_deleted',

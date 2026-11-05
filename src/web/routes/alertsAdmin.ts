@@ -12,6 +12,7 @@ import { router as mutationsRouter } from './alertsAdminMutations';
 import { router as assetMutationsRouter, MAX_IMAGE_MB, MAX_SOUND_MB } from './alertsAssetMutations';
 import { connections as alertsSourceConnections } from './alertsOverlaySource';
 import { createOverlayStatusEventsHandler } from './sseEventsHandlers';
+import { CHUNKED_UPLOAD_ERROR_CODES } from './chunkedUploadRoutes';
 
 const log = createLogger('AlertsAdmin');
 const router = Router();
@@ -24,6 +25,7 @@ export const statusConnections = new Map<number, Set<Response>>();
 const KNOWN_ERRORS = new Set([
   'not_a_streamer', 'invalid_event_type', 'invalid_file', 'invalid_message',
   'upload_failed', 'delete_failed', 'save_failed', 'invalid_path', 'file_too_large',
+  ...CHUNKED_UPLOAD_ERROR_CODES,
 ]);
 const KNOWN_SUCCESSES = new Set([
   'image_uploaded', 'sound_uploaded', 'image_deleted', 'sound_deleted', 'config_saved', 'test_sent',

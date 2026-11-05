@@ -5,6 +5,7 @@ import path from 'path';
 import { mockLogger } from '../../test-utils/loggerMock';
 
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
+vi.mock('../../shared/config', () => ({ OVERLAY_TRANSCODE_TIMEOUT_MINUTES: 30 }));
 vi.mock('./overlayVideoTranscode', () => ({ transcodeToWebm: vi.fn() }));
 
 import { transcodeToWebm } from './overlayVideoTranscode';
@@ -15,7 +16,7 @@ const MOV_BYTES = Buffer.from('fake mov bytes');
 /** A converted file that starts with a WebM (EBML) header. */
 const WEBM_BYTES = Buffer.concat([Buffer.from([0x1a, 0x45, 0xdf, 0xa3]), Buffer.from('rest of the webm')]);
 let dir: string;
-/** Puts the uploaded MOV at the path the conversion gives it, as moving Multer's file would. */
+/** Puts the uploaded MOV at the path the conversion gives it, as moving the finished upload would. */
 const writeMov = (sourcePath: string) => fs.promises.writeFile(sourcePath, MOV_BYTES);
 /** What the most recent conversion read from its input file. */
 let convertedInput: Buffer | undefined;
