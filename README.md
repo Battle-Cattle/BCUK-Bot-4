@@ -142,6 +142,8 @@ When a client goes over one of the panel's rate limits, the bot logs it as an er
 3. Make sure no other copy of the bot is running against the database (an old `screen` session, say): one still on the previous key would keep writing tokens under it after this pass. Then restart the bot. On startup it re-encrypts every stored token under the new key and logs `Every stored token is under the active key; EVENTSUB_TOKEN_SECRET_PREVIOUS can now be removed`. Until then, tokens under the previous key keep working.
 4. Remove `EVENTSUB_TOKEN_SECRET_PREVIOUS` from `.env` and restart again.
 
+Database backups taken before the rotation (including the `pre-deploy` and nightly dumps) still hold tokens encrypted under the previous key. To restore one later without those streamers (and the bot account) having to reconnect, keep the previous key somewhere separate and safe, and set it as `EVENTSUB_TOKEN_SECRET_PREVIOUS` again when you restore. If you rotated because that key was leaked, keeping it is your call: without it, those accounts reconnect after such a restore, and nothing else is lost.
+
 If startup warns that some token rows changed during re-encryption, restart once more before step 4; don't remove the previous key until the "can now be removed" line appears. If it warns that some tokens can't be decrypted with any configured key, those were written under a key that is no longer in `.env`; the affected streamers (or the bot account, via `/admin/bot-auth`) must reconnect. Never put a key or a decrypted token in a log, an issue or a chat.
 
 Stored tokens keep the same `enc:` format whichever key wrote them, and outside a rotation startup leaves them untouched, so a deploy can always be rolled back without breaking tokens.

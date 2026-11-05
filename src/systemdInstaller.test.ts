@@ -55,7 +55,7 @@ afterEach(() => {
 });
 
 /** Runs the installer with `env` as the checkout's .env, returning the rendered unit file. */
-function install(env: string): string {
+function install(env: string, nodeBinDir = path.join(nodePrefix, 'bin')): string {
   fs.writeFileSync(path.join(repo, '.env'), env);
   const result = spawnSync('bash', [path.join(repo, 'scripts/install-systemd-service.sh')], {
     cwd: repo,
@@ -63,7 +63,7 @@ function install(env: string): string {
     env: {
       ...process.env,
       STATE: state,
-      PATH: `${path.join(root, 'stubs')}:${path.join(nodePrefix, 'bin')}:${process.env.PATH ?? ''}`,
+      PATH: `${path.join(root, 'stubs')}:${nodeBinDir}:${process.env.PATH ?? ''}`,
     },
   });
   if (result.status !== 0) throw new Error(`installer failed:\n${result.stdout}\n${result.stderr}`);
@@ -104,6 +104,27 @@ describe.skipIf(onWindows)('install-systemd-service.sh', () => {
 
     expect(setting(install(''), 'BindReadOnlyPaths')).toBe(`"${repo}" "${nodePrefix}"`);
   });
+
+  // A ~/bin/node install: the folder above bin/ is the home directory itself. Needs a real home
+  // directory (the installer only treats /home/<user> and /root as one) without a ~/bin/node of its own.
+  const homeBin = path.join(os.homedir(), 'bin');
+  it.skipIf(!/^(\/home\/[^/]+|\/root)$/.test(os.homedir()) || fs.existsSync(path.join(homeBin, 'node')))(
+    'binds only the node binary, not the whole home directory, for a ~/bin/node install',
+    () => {
+      const createdBin = !fs.existsSync(homeBin);
+      fs.mkdirSync(homeBin, { recursive: true });
+      const node = path.join(homeBin, 'node');
+      fs.symlinkSync(process.execPath, node);
+      try {
+        const binds = setting(install('', homeBin), 'BindReadOnlyPaths');
+        expect(binds?.split(' ')).toContain(`"${node}"`);
+        expect(binds).not.toContain(`"${os.homedir()}"`);
+      } finally {
+        fs.rmSync(node);
+        if (createdBin) fs.rmdirSync(homeBin);
+      }
+    },
+  );
 
   it('refuses a folder path the unit cannot express', () => {
     expect(() => install(`OVERLAY_FOLDER=${root}/100%videos\n`)).toThrow(/can't express/);

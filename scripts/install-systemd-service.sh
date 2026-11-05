@@ -70,17 +70,23 @@ check_unit_path() {
 # The unit hides every home directory (ProtectHome=tmpfs) and binds back, read-only, the checkout
 # and the Node install the service runs. For Node that is its install prefix (the folder above bin/),
 # under both the path the unit names and the real path it resolves to (nvm's links, say), when that
-# lives in a home directory; one elsewhere (e.g. /usr) stays visible anyway.
-READONLY_DIRS=("$REPO_DIR")
+# lives in a home directory; one elsewhere (e.g. /usr) stays visible anyway. A bin/ straight inside
+# a home directory (~/bin/node) has the home directory itself as its prefix, and binding that would
+# put every file in it back: there only the node binary is bound.
+READONLY_BINDS=("$REPO_DIR")
 for node_path in "$NODE_BIN" "$(realpath "$NODE_BIN")"; do
     prefix="$(dirname "$(dirname "$node_path")")"
     case "$prefix" in
-        /home/*|/root|/root/*)
-            [[ " ${READONLY_DIRS[*]} " == *" $prefix "* ]] || READONLY_DIRS+=("$prefix") ;;
+        /home|/home/*|/root|/root/*) ;;
+        *) continue ;;
     esac
+    if [[ "$prefix" =~ ^/home(/[^/]+)?$ || "$prefix" == /root ]]; then
+        prefix="$node_path"
+    fi
+    [[ " ${READONLY_BINDS[*]} " == *" $prefix "* ]] || READONLY_BINDS+=("$prefix")
 done
 READONLY_PATHS=""
-for dir in "${READONLY_DIRS[@]}"; do
+for dir in "${READONLY_BINDS[@]}"; do
     check_unit_path "$dir"
     READONLY_PATHS+="${READONLY_PATHS:+ }\"${dir}\""
 done
@@ -106,7 +112,7 @@ echo "==> Installing /etc/systemd/system/${SERVICE_NAME}.service"
 echo "    user:      $RUN_USER"
 echo "    directory: $REPO_DIR"
 echo "    node:      $NODE_BIN (v$("$NODE_BIN" -v | tr -d v))"
-echo "    read-only: ${READONLY_DIRS[*]}"
+echo "    read-only: ${READONLY_BINDS[*]}"
 echo "    writable:  ${WRITABLE_DIRS[*]}"
 UNIT_TMP="$(mktemp)"
 trap 'rm -f "$UNIT_TMP" "${SUDOERS_TMP:-}"' EXIT
