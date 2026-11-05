@@ -369,6 +369,32 @@ retry() {
     done
 }
 
+# Puts back a folder an earlier deploy moved aside to <dir>.old, if that deploy was cut off (power loss,
+# SIGKILL) before its rollback could run, so the .old copy may be the only good one. It moves back
+# when <dir> is missing (cut off between the move aside and the new copy landing), or when <dir> is
+# incomplete and the .old copy isn't: <marker> is a file that only a complete copy holds. Otherwise
+# <dir> is complete and the .old copy is a stale leftover, which this deploy replaces when it moves
+# <dir> aside itself.
+recover_moved_aside() {
+    local dir="$1" marker="$2" reason
+    [ -d "$dir.old" ] || return 0
+    if [ ! -e "$dir" ]; then
+        reason="there is no $dir/"
+    elif [ ! -e "$dir/$marker" ] && [ -e "$dir.old/$marker" ]; then
+        reason="$dir/ is incomplete (no $marker)"
+        rm -rf "$dir"
+    else
+        return 0
+    fi
+    echo "==> An earlier deploy was cut off before its rollback ran: $reason. Moving $dir.old/ back."
+    mv "$dir.old" "$dir"
+}
+
+# Run before anything is deleted or moved. dist/ is the compiled entry point's folder; npm writes
+# node_modules/.package-lock.json only once an install has finished.
+recover_moved_aside dist index.js
+recover_moved_aside node_modules .package-lock.json
+
 echo "==> Pulling latest code..."
 git update-index -q --refresh
 if ! git diff-index --quiet HEAD --; then
@@ -458,7 +484,7 @@ if [ "$DEPS_CHANGED" -eq 0 ] && [ -d node_modules ] && install_dependencies_incr
 else
     # `npm ci` deletes node_modules before installing. Move it aside instead, so a failed deploy can
     # put the previous dependencies straight back rather than reinstalling them (no network needed).
-    rm -rf node_modules.old  # Left over from an interrupted deploy.
+    rm -rf node_modules.old  # A stale leftover: recover_moved_aside put back any copy still needed.
     if [ -d node_modules ]; then
         MOVING_NODE_MODULES=1
         mv node_modules node_modules.old
@@ -521,7 +547,7 @@ npm prune --omit=dev
 git checkout -- package-lock.json
 
 echo "==> Swapping in the new build..."
-rm -rf dist.old  # Left over from an interrupted deploy.
+rm -rf dist.old  # A stale leftover: recover_moved_aside put back any copy still needed.
 if [ -d dist ]; then
     MOVING_DIST=1
     mv dist dist.old

@@ -70,7 +70,7 @@ if [ -f "$STATE/journal-$running" ]; then cat "$STATE/journal-$running"; else ec
   npm: `#!/usr/bin/env bash
 version="$(cat VERSION)"
 case "$1" in
-  ci) mkdir -p node_modules && echo "$version" > node_modules/marker ;;
+  ci) mkdir -p node_modules && echo "$version" > node_modules/marker && echo "{}" > node_modules/.package-lock.json ;;
   install|audit|prune) exit 0 ;;
   test)
     if [ -n "\${NPM_TEST_SIGNAL:-}" ]; then
@@ -91,7 +91,7 @@ case "$1" in
       ignore-term) (trap '' TERM; exec sleep 30) & echo "$!" > "$STATE/build-child"; wait ;;
       ?*) sleep 30 & echo "$!" > "$STATE/build-child"; wait ;;
     esac
-    mkdir -p "$out" && echo "$version" > "$out/marker" ;;
+    mkdir -p "$out" && echo "$version" > "$out/marker" && : > "$out/index.js" ;;
 esac
 `,
   mysqldump: `#!/usr/bin/env bash
@@ -225,7 +225,9 @@ function createSandbox(): Sandbox {
   run('git', ['clone', '-q', sandbox.origin, sandbox.work], root);
   write(path.join(sandbox.work, '.env'), `DB_USER=bot\nDB_PASSWORD='p#ss "word"'\nDB_NAME=bcuk\nBACKUP_DIR=${sandbox.backups}\nBACKUP_KEEP=3\n`);
   write(path.join(sandbox.work, 'dist/marker'), 'v1\n');
+  write(path.join(sandbox.work, 'dist/index.js'), '');
   write(path.join(sandbox.work, 'node_modules/marker'), 'v1\n');
+  write(path.join(sandbox.work, 'node_modules/.package-lock.json'), '{}\n');
   write(path.join(state, 'running'), 'v1\n');
   // The database already records the migration the checkout starts with, as a real one would.
   write(path.join(state, 'applied-migrations'), '0001_baseline\n');
@@ -318,6 +320,43 @@ describe.skipIf(onWindows)('deploy.sh', { timeout: SCRIPT_TEST_TIMEOUT_MS }, () 
     expect(restarts()).toEqual(['v2', 'v1']);
     expect(failureReport()).toContain('ROLLBACK FAILED');
     expect(failureReport()).toContain('The bot is DOWN');
+  });
+
+  it('puts back a previous build an earlier deploy moved aside and was cut off before replacing', () => {
+    // Cut off (say, by a power cut) between `mv dist dist.old` and the new build landing.
+    fs.renameSync(path.join(sandbox.work, 'dist'), path.join(sandbox.work, 'dist.old'));
+    pushV2();
+    const result = deploy({ NPM_TEST_EXIT: '1' });
+
+    expect(result.stdout).toContain('there is no dist/. Moving dist.old/ back.');
+    // The failed deploy rolled back onto that build instead of finding none.
+    expect(read(path.join(sandbox.work, 'dist/marker'))).toBe('v1');
+    expect(fs.existsSync(path.join(sandbox.work, 'dist.old'))).toBe(false);
+  });
+
+  it('puts back the previous dependencies when an earlier deploy was cut off mid-install', () => {
+    // Cut off during `npm ci`: node_modules holds a partial install with no hidden lockfile yet.
+    fs.renameSync(path.join(sandbox.work, 'node_modules'), path.join(sandbox.work, 'node_modules.old'));
+    write(path.join(sandbox.work, 'node_modules/partial'), '');
+    const result = deploy({ NPM_TEST_EXIT: '1' });
+
+    expect(result.stdout).toContain('node_modules/ is incomplete (no .package-lock.json). Moving node_modules.old/ back.');
+    expect(read(path.join(sandbox.work, 'node_modules/marker'))).toBe('v1');
+    expect(fs.existsSync(path.join(sandbox.work, 'node_modules/partial'))).toBe(false);
+    expect(fs.existsSync(path.join(sandbox.work, 'node_modules.old'))).toBe(false);
+  });
+
+  it('replaces stale .old copies as usual when the current folders are complete', () => {
+    write(path.join(sandbox.work, 'dist.old/marker'), 'v0\n');
+    write(path.join(sandbox.work, 'node_modules.old/marker'), 'v0\n');
+    pushV2();
+    const result = deploy();
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).not.toContain('Moving');
+    expect(read(path.join(sandbox.work, 'dist/marker'))).toBe('v2');
+    expect(fs.existsSync(path.join(sandbox.work, 'dist.old'))).toBe(false);
+    expect(fs.existsSync(path.join(sandbox.work, 'node_modules.old'))).toBe(false);
   });
 
   it('rolls back without restarting when the tests fail', () => {
