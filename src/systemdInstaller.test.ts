@@ -93,11 +93,14 @@ describe.skipIf(onWindows)('install-systemd-service.sh', () => {
   });
 
   it('binds the Node install once when its link and real path share a prefix', () => {
-    // Replace the link with a real file, so the path the unit names is also the real path.
+    // Replace the link with a real file, so the path the unit names is also the real path. Copied by
+    // a separate `cp` process: copying it here would hold a write handle on it in this multi-threaded
+    // process, which a child another test spawns at that moment can inherit, and Linux then refuses
+    // to run the file ("Text file busy").
     const node = path.join(nodePrefix, 'bin', 'node');
     fs.rmSync(node);
-    fs.copyFileSync(process.execPath, node);
-    fs.chmodSync(node, 0o755);
+    const copied = spawnSync('cp', [process.execPath, node]);
+    if (copied.status !== 0) throw new Error(`cp failed: ${String(copied.stderr)}`);
 
     expect(setting(install(''), 'BindReadOnlyPaths')).toBe(`"${repo}" "${nodePrefix}"`);
   });
