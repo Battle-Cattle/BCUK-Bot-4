@@ -151,7 +151,8 @@ async function rotateAndRemember(discordId: string): Promise<IssuedKey> {
 }
 
 /**
- * Applies a request for Streamdeck access in `guildId` and returns the key to show, if any. Call only inside `runUserMutation` for this user.
+ * Applies a request for Streamdeck access in `guildId` and returns the key to show, if any. Call
+ * only inside `runUserMutation` for this user.
  * - No key yet: mints one (shown once).
  * - Key from another guild, no row here: requests access with that key (no plaintext to show,
  *   since only its hash is stored).
