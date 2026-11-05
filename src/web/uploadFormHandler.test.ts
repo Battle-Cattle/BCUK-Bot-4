@@ -127,12 +127,13 @@ function setup(options: SetupOptions = {}) {
       }
     },
     URLSearchParams,
+    URL,
     fetch,
     AbortController,
     setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms),
     clearTimeout: (id: ReturnType<typeof setTimeout>) => clearTimeout(id),
     window: {
-      location: { assign },
+      location: { assign, href: 'https://bot.example/overlay/settings', origin: 'https://bot.example' },
       crypto: { getRandomValues: (a: Uint8Array) => a.fill(171), subtle: subtle ? fakeSubtle : undefined },
       confirm: vi.fn(() => confirm),
       localStorage: {
@@ -545,5 +546,15 @@ describe('registerUploadFormHandler', () => {
     submit();
     expect(await navigated(assign)).toBe('/overlay/settings?error=upload_busy');
     expect(confirmFn).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ['another origin', 'https://evil.example/phish'],
+    ['a javascript: URL', 'javascript:alert(1)'],
+  ])('never navigates to %s, reporting upload_failed instead', async (_label, url) => {
+    const { fetch, submit, assign } = setup();
+    routeFetch(fetch, { complete: () => redirectTo(url) });
+    submit();
+    expect(await navigated(assign)).toBe('/overlay/settings?error=upload_failed');
   });
 });

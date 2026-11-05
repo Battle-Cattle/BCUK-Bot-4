@@ -29,6 +29,24 @@ function ChunkedUploadStop(destination) {
 }
 
 /**
+ * The path (with query and hash) of `url` when it's on this page's origin, so the page only ever
+ * navigates within the panel: a redirect that ended up elsewhere, or a `javascript:` URL, gives
+ * the fallback instead.
+ * @param {string} url - Where the upload says to go (a server redirect or an error page).
+ * @param {string} fallbackPath - The upload page's own path.
+ * @returns {string} A same-origin path to navigate to.
+ */
+function sameOriginPath(url, fallbackPath) {
+  try {
+    var parsed = new URL(url, window.location.href);
+    if (parsed.origin === window.location.origin) return parsed.pathname + parsed.search + parsed.hash;
+  } catch {
+    // Not a URL at all: fall through to the fallback.
+  }
+  return fallbackPath + '?error=upload_failed';
+}
+
+/**
  * Resolves after `ms` milliseconds.
  * @param {number} ms - How long to wait.
  * @returns {Promise<void>} Resolves once the time has passed.
@@ -247,5 +265,5 @@ async function submitChunkedUpload(form, fallbackPath) {
     destination = err instanceof ChunkedUploadStop ? err.destination : fallbackPath + '?error=upload_failed';
   }
   delete form.dataset.submitting;
-  window.location.assign(destination);
+  window.location.assign(sameOriginPath(destination, fallbackPath));
 }
