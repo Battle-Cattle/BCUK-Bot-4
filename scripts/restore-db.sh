@@ -11,8 +11,8 @@
 # current data with backup-db.sh (label "pre-restore") before changing anything, unless it holds
 # nothing to save (no tables, views, routines or events, or it doesn't exist yet). Dumps don't
 # hold Event Scheduler events (see backup-db.sh), so one in the target survives the restore. Any
-# other target that already has tables (a mistyped name, say) asks for the same confirmation,
-# since every table in it is dropped first; an empty or new scratch database doesn't ask.
+# other target that already has tables or routines (a mistyped name, say) asks for the same
+# confirmation, since all of them are dropped first; an empty or new scratch database doesn't ask.
 set -euo pipefail
 
 SERVICE_NAME="bcuk-bot"
@@ -117,18 +117,21 @@ fi
 mysql --defaults-extra-file="$CREDENTIALS" -e "CREATE DATABASE IF NOT EXISTS \`$TARGET\`" < /dev/null
 # The dump only drops and recreates the tables it contains, so a table created after the backup (by a
 # later migration, say) would otherwise survive with newer data and leave the result unlike the dump.
-# Drop every table and view first; foreign-key checks are off so the order doesn't matter. A
-# backtick inside a name is doubled, as MySQL's quoting needs.
+# Drop every table and view first; foreign-key checks are off so the order doesn't matter. Stored
+# procedures and functions go too, for the same reason: the dump recreates the ones it holds, but
+# can't remove one added since. Event Scheduler events stay (dumps leave them out; see
+# backup-db.sh). A backtick inside a name is doubled, as MySQL's quoting needs.
 DROPS="$(mysql --defaults-extra-file="$CREDENTIALS" -N -B "$TARGET" -e \
-    "SELECT CONCAT(IF(table_type = 'VIEW', 'DROP VIEW IF EXISTS \`', 'DROP TABLE IF EXISTS \`'), REPLACE(table_name, '\`', '\`\`'), '\`;') FROM information_schema.tables WHERE table_schema = DATABASE()" < /dev/null)"
+    "SELECT CONCAT(IF(table_type = 'VIEW', 'DROP VIEW IF EXISTS \`', 'DROP TABLE IF EXISTS \`'), REPLACE(table_name, '\`', '\`\`'), '\`;') FROM information_schema.tables WHERE table_schema = DATABASE()
+     UNION ALL SELECT CONCAT('DROP ', routine_type, ' IF EXISTS \`', REPLACE(routine_name, '\`', '\`\`'), '\`;') FROM information_schema.routines WHERE routine_schema = DATABASE()" < /dev/null)"
 if [ -n "$DROPS" ]; then
     # The live database was confirmed above. Any other target is normally an empty scratch
-    # database, so existing tables mean a reused or mistyped name: confirm before dropping them.
+    # database, so existing objects mean a reused or mistyped name: confirm before dropping them.
     if [ "$TARGET" != "$DB_NAME" ]; then
-        echo "'$TARGET' already has tables; restoring drops all of them first."
+        echo "'$TARGET' already has tables, views or routines; restoring drops all of them first."
         confirm_target
     fi
-    echo "==> Clearing the existing tables in '$TARGET'..."
+    echo "==> Clearing the existing tables, views and routines in '$TARGET'..."
     printf 'SET FOREIGN_KEY_CHECKS=0;\n%s\n' "$DROPS" | mysql --defaults-extra-file="$CREDENTIALS" "$TARGET"
 fi
 echo "==> Restoring into '$TARGET'..."

@@ -10,12 +10,13 @@ import zlib from 'zlib';
  * clone of a bare "origin") and runs the real scripts against stub `systemctl`, `sudo`, `npm`,
  * `curl`, `ss`, `journalctl`, `mysqldump` and `mysql` on PATH. The stubs keep their state in
  * files under `state/`: which build is "running", how many restarts there were, what was dumped.
- * POSIX shells only, so these don't run on Windows.
+ * Linux only, like the server the scripts run on: elsewhere these are skipped.
  */
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const NODE_BIN = process.execPath;
-const onWindows = process.platform === 'win32';
+// The scripts target the Linux server (GNU find's -printf, /proc), so these only run on Linux.
+const notLinux = process.platform !== 'linux';
 /** These spawn real git and bash processes, which run slowly on a busy CI runner under coverage. */
 const SCRIPT_TEST_TIMEOUT_MS = 30_000;
 
@@ -122,11 +123,13 @@ case "$*" in
     exit 0 ;;
   *"information_schema"*)
     # The restore's "what exists?" query: one DROP statement per line of existing-tables, where a
-    # "view:" prefix marks a view. The query itself is kept for the tests to check.
+    # "view:", "procedure:" or "function:" prefix marks one of those. The query itself is kept for the tests to check.
     printf '%s\\n' "$*" > "$STATE/drops-query"
     while read -r table; do
       case "$table" in
         view:*) echo "DROP VIEW IF EXISTS \\\`\${table#view:}\\\`;" ;;
+        procedure:*) echo "DROP PROCEDURE IF EXISTS \\\`\${table#procedure:}\\\`;" ;;
+        function:*) echo "DROP FUNCTION IF EXISTS \\\`\${table#function:}\\\`;" ;;
         ?*) echo "DROP TABLE IF EXISTS \\\`$table\\\`;" ;;
       esac
     done < "$STATE/existing-tables" 2>/dev/null
@@ -262,7 +265,7 @@ function pushV2({ migration = false } = {}): void {
   });
 }
 
-describe.skipIf(onWindows)('deploy.sh', { timeout: SCRIPT_TEST_TIMEOUT_MS }, () => {
+describe.skipIf(notLinux)('deploy.sh', { timeout: SCRIPT_TEST_TIMEOUT_MS }, () => {
   beforeEach(() => {
     createSandbox();
   });
@@ -570,7 +573,7 @@ describe.skipIf(onWindows)('deploy.sh', { timeout: SCRIPT_TEST_TIMEOUT_MS }, () 
   });
 });
 
-describe.skipIf(onWindows)('backup-db.sh', { timeout: SCRIPT_TEST_TIMEOUT_MS }, () => {
+describe.skipIf(notLinux)('backup-db.sh', { timeout: SCRIPT_TEST_TIMEOUT_MS }, () => {
   beforeEach(() => {
     createSandbox();
   });
@@ -667,7 +670,7 @@ describe.skipIf(onWindows)('backup-db.sh', { timeout: SCRIPT_TEST_TIMEOUT_MS }, 
   });
 });
 
-describe.skipIf(onWindows)('restore-db.sh', { timeout: SCRIPT_TEST_TIMEOUT_MS }, () => {
+describe.skipIf(notLinux)('restore-db.sh', { timeout: SCRIPT_TEST_TIMEOUT_MS }, () => {
   let dump: string;
 
   beforeEach(() => {
@@ -749,6 +752,19 @@ describe.skipIf(onWindows)('restore-db.sh', { timeout: SCRIPT_TEST_TIMEOUT_MS },
     expect(query).toContain("IF(table_type = 'VIEW', 'DROP VIEW IF EXISTS `', 'DROP TABLE IF EXISTS `')");
     expect(query).toContain("REPLACE(table_name, '`', '``')");
     expect(query).not.toContain('BASE TABLE');
+  });
+
+  it('drops stored procedures and functions too, so ones added since the backup go', () => {
+    write(path.join(sandbox.state, 'existing-tables'), 'procedure:added_later\nfunction:helper\n');
+    expect(restore([dump, 'bcuk_restore_test'], 'bcuk_restore_test\n').status).toBe(0);
+
+    const input = read(path.join(sandbox.state, 'mysql-input'));
+    expect(input).toContain('DROP PROCEDURE IF EXISTS `added_later`;');
+    expect(input).toContain('DROP FUNCTION IF EXISTS `helper`;');
+    const query = read(path.join(sandbox.state, 'drops-query'));
+    expect(query).toContain("CONCAT('DROP ', routine_type, ' IF EXISTS `', REPLACE(routine_name, '`', '``'), '`;') FROM information_schema.routines");
+    // Events are left alone: dumps don't hold them, so dropping them would lose them for good.
+    expect(query).not.toContain('information_schema.events');
   });
 
   it('saves the live database before replacing it, and skips that for a scratch database', () => {
