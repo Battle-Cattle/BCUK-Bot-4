@@ -121,6 +121,12 @@ case "$*" in
     [ -n "\${MYSQL_COUNT_EXIT:-}" ] && { echo "ERROR 1045: Access denied" >&2; exit "$MYSQL_COUNT_EXIT"; }
     cat "$STATE/existing-tables" 2>/dev/null | grep -c . || true
     exit 0 ;;
+  *"@@lower_case_table_names"*)
+    # The restore's "does this server ignore the case of names?" check. MYSQL_LOWER_CASE sets the
+    # answer (default 0); MYSQL_LOWER_CASE_EXIT fails it.
+    [ -n "\${MYSQL_LOWER_CASE_EXIT:-}" ] && { echo "ERROR 2003: Can't connect" >&2; exit "$MYSQL_LOWER_CASE_EXIT"; }
+    echo "\${MYSQL_LOWER_CASE:-0}"
+    exit 0 ;;
   *"information_schema"*)
     # The restore's "what exists?" query: one DROP statement per line of existing-tables, where a
     # "view:", "procedure:" or "function:" prefix marks one of those. The query itself is kept for the tests to check.
@@ -587,6 +593,18 @@ describe.skipIf(notLinux)('backup-db.sh', { timeout: SCRIPT_TEST_TIMEOUT_MS }, (
     return spawnSync('bash', ['scripts/backup-db.sh', ...args], { cwd: sandbox.work, env: { ...sandbox.env, ...extraEnv }, encoding: 'utf8' });
   }
 
+  it('refuses when a DB_ setting is exported in the shell with a value other than .env\'s', () => {
+    const result = backup([], { DB_NAME: 'other_db' });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toMatch(/DB_NAME is exported in this shell with a different value from \S*\.env's\./);
+    expect(fs.existsSync(path.join(sandbox.state, 'mysqldump-args'))).toBe(false);
+  });
+
+  it('accepts exported DB_ settings that match .env, including the default host and port', () => {
+    expect(backup([], { DB_NAME: 'bcuk', DB_HOST: 'localhost', DB_PORT: '3306' }).status).toBe(0);
+  });
+
   it('writes a private gzipped dump and prints its path', () => {
     const result = backup(['nightly']);
 
@@ -833,6 +851,38 @@ describe.skipIf(notLinux)('restore-db.sh', { timeout: SCRIPT_TEST_TIMEOUT_MS }, 
     expect(result.stderr).toContain("Couldn't check what 'bcuk' holds; nothing was changed.");
     expect(fs.existsSync(path.join(sandbox.state, 'mysqldump-args'))).toBe(false);
     expect(read(path.join(sandbox.state, 'mysql-input'))).toBe('');
+    expect(read(path.join(sandbox.state, 'mysql-calls'))).toBe('');
+  });
+
+  it('treats a case variant of the live database as the live one when the server ignores case', () => {
+    write(path.join(sandbox.state, 'service-state'), 'active');
+    const result = spawnSync('bash', ['scripts/restore-db.sh', dump, 'BCUK'], {
+      cwd: sandbox.work, env: { ...sandbox.env, MYSQL_LOWER_CASE: '1' }, encoding: 'utf8', input: 'bcuk\n',
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain("'BCUK' is the live database 'bcuk' on this server");
+    // So the live-database checks apply: here, the running service stops it.
+    expect(result.stderr).toContain('is running. Stop it first');
+    expect(read(path.join(sandbox.state, 'mysql-input'))).toBe('');
+  });
+
+  it('treats a case variant as a separate database when the server keeps case', () => {
+    const result = restore([dump, 'BCUK']);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).not.toContain('is the live database');
+    expect(fs.existsSync(path.join(sandbox.state, 'mysqldump-args'))).toBe(false);
+    expect(read(path.join(sandbox.state, 'mysql-calls')).split('\n')[1]).toMatch(/^--defaults-extra-file=\S+ BCUK$/);
+  });
+
+  it("changes nothing when it can't tell whether the server ignores the case of names", () => {
+    const result = spawnSync('bash', ['scripts/restore-db.sh', dump, 'bcuk_restore_test'], {
+      cwd: sandbox.work, env: { ...sandbox.env, MYSQL_LOWER_CASE_EXIT: '1' }, encoding: 'utf8',
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("Couldn't read lower_case_table_names from the server; nothing was changed.");
     expect(read(path.join(sandbox.state, 'mysql-calls'))).toBe('');
   });
 

@@ -48,6 +48,26 @@ fi
 command -v mysql > /dev/null || { echo "ERROR: mysql (the client) is not installed (e.g. apt install mysql-client)." >&2; exit 1; }
 gzip -t "$DUMP" || { echo "ERROR: $DUMP is not a complete gzip file." >&2; exit 1; }
 
+CREDENTIALS="$(write_mysql_credentials)"
+RESTORE_SOURCE="$DUMP"
+PRIVATE_COPY=""
+trap 'rm -f "$CREDENTIALS" ${PRIVATE_COPY:+"$PRIVATE_COPY"}' EXIT
+
+# A server with lower_case_table_names set (1 or 2) treats database names that differ only in case
+# as one database, so a name like that is the live database, and gets every live-database check
+# below. The server decides; a setting that can't be read refuses the restore.
+if [ "$TARGET" != "$DB_NAME" ]; then
+    if ! LOWER_CASE_NAMES="$(mysql --defaults-extra-file="$CREDENTIALS" -N -B -e "SELECT @@lower_case_table_names" < /dev/null)" \
+        || ! [[ "$LOWER_CASE_NAMES" =~ ^[0-9]+$ ]]; then
+        echo "ERROR: Couldn't read lower_case_table_names from the server; nothing was changed." >&2
+        exit 1
+    fi
+    if [ "$LOWER_CASE_NAMES" != 0 ] && [ "${TARGET,,}" = "${DB_NAME,,}" ]; then
+        echo "==> '$TARGET' is the live database '$DB_NAME' on this server (it ignores the case of names)."
+        TARGET="$DB_NAME"
+    fi
+fi
+
 if [ "$TARGET" = "$DB_NAME" ]; then
     # Only a definite "not running" lets the restore go ahead: an error asking systemd counts as
     # "can't tell", which refuses too. A host without systemd at all has no service to check.
@@ -68,11 +88,6 @@ if [ "$TARGET" = "$DB_NAME" ]; then
     echo "    $DUMP"
     confirm_target
 fi
-
-CREDENTIALS="$(write_mysql_credentials)"
-RESTORE_SOURCE="$DUMP"
-PRIVATE_COPY=""
-trap 'rm -f "$CREDENTIALS" ${PRIVATE_COPY:+"$PRIVATE_COPY"}' EXIT
 
 # Prints how many objects (tables, views, routines, events) the target holds; 0 when it doesn't
 # exist, since information_schema answers without the database. Events count although dumps leave

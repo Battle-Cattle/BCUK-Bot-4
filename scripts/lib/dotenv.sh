@@ -22,8 +22,11 @@ env_setting() {
 }
 
 # Loads DB_HOST, DB_PORT, DB_USER, DB_PASSWORD and DB_NAME from $ENV_FILE, with config.ts's
-# defaults for host and port. Exits if the user or database name is missing.
+# defaults for host and port. Exits if the user or database name is missing, or if one of them is
+# also exported in this shell with a different value: the bot's dotenv doesn't override exported
+# variables, so a bot started from this shell would use another database than these scripts.
 load_db_settings() {
+    check_exported_db_settings
     DB_HOST="$(env_setting DB_HOST)"; DB_HOST="${DB_HOST:-localhost}"
     DB_PORT="$(env_setting DB_PORT)"; DB_PORT="${DB_PORT:-3306}"
     DB_USER="$(env_setting DB_USER)"
@@ -33,6 +36,28 @@ load_db_settings() {
         echo "ERROR: DB_USER and DB_NAME must be set in $ENV_FILE." >&2
         exit 1
     fi
+}
+
+# Exits if a DB_* setting is exported in this shell with a value other than $ENV_FILE's (after
+# config.ts's defaults for host and port). Only exported ones count: those are what a bot started
+# from this shell would see.
+check_exported_db_settings() {
+    local name exported from_file
+    for name in DB_HOST DB_PORT DB_USER DB_PASSWORD DB_NAME; do
+        exported="$(printenv "$name" 2>/dev/null)" || continue
+        from_file="$(env_setting "$name")"
+        case "$name" in
+            DB_HOST) from_file="${from_file:-localhost}" ;;
+            DB_PORT) from_file="${from_file:-3306}" ;;
+        esac
+        if [ "$exported" != "$from_file" ]; then
+            echo "ERROR: $name is exported in this shell with a different value from $ENV_FILE's." >&2
+            echo "       A bot started from this shell would use the exported one, so it's unclear which" >&2
+            echo "       database is meant. Make sure the running bot uses $ENV_FILE's settings, then" >&2
+            echo "       unset $name here (or make the two match) and try again." >&2
+            exit 1
+        fi
+    done
 }
 
 # Writes a private MySQL option file holding the connection settings and prints its path. The
