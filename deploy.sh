@@ -428,11 +428,14 @@ mv "$BUILD_DIR" dist
 # dist.old (and node_modules.old, if the dependencies changed) stay until the new build has proved
 # healthy, so a failed restart can roll straight back to them.
 
-# Reads WEB_PORT from .env (the bot's own source of truth for it) the way dotenv does: last entry
-# wins, an inline ` # comment` is dropped, surrounding quotes and spaces are stripped. No entry
-# (grep finding nothing must not trip pipefail) or a blank one falls back to 3000, like config.ts.
-WEB_PORT_SETTING="$( { grep -E '^[[:space:]]*WEB_PORT=' .env 2>/dev/null || true; } \
-    | tail -n 1 | cut -d= -f2- | sed -E 's/[[:space:]]+#.*$//' | tr -d "[:space:]\"'")"
+# Reads WEB_PORT from .env (the bot's own source of truth for it) the way dotenv does, with the
+# same parser as the backup scripts (an `export ` prefix and spaces around `=` included): a port
+# read differently from the bot's would fail the health check and roll back a healthy build. No
+# entry or a blank one falls back to 3000, like config.ts.
+ENV_FILE=.env
+# shellcheck source=scripts/lib/dotenv.sh
+source scripts/lib/dotenv.sh
+WEB_PORT_SETTING="$(env_setting WEB_PORT)"
 WEB_PORT="${WEB_PORT_SETTING:-3000}"
 HEALTH_URL="http://127.0.0.1:${WEB_PORT}/healthz"
 

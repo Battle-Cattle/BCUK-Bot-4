@@ -48,6 +48,7 @@ exec "$@"
 `,
   curl: `#!/usr/bin/env bash
 calls=$(( $(cat "$STATE/curl-calls" 2>/dev/null || echo 0) + 1 )); echo "$calls" > "$STATE/curl-calls"
+printf '%s\\n' "\${@: -1}" >> "$STATE/curl-urls"
 [ "$calls" = "\${CURL_FAIL_CALL:-}" ] && exit 7
 running="$(cat "$STATE/running" 2>/dev/null)"
 for bad in $UNHEALTHY_BUILDS; do [ "$running" = "$bad" ] && exit 7; done
@@ -239,6 +240,15 @@ describe.skipIf(onWindows)('deploy.sh', { timeout: SCRIPT_TEST_TIMEOUT_MS }, () 
     expect(fs.existsSync(path.join(sandbox.work, 'node_modules.old'))).toBe(false);
     expect(restarts()).toEqual(['v2']);
     expect(fs.readdirSync(sandbox.backups).filter((f) => f.endsWith('-pre-deploy.sql.gz'))).toHaveLength(1);
+  });
+
+  it("health-checks the WEB_PORT the bot reads, including `export` and spaces around '='", () => {
+    fs.appendFileSync(path.join(sandbox.work, '.env'), 'WEB_PORT=3000\nexport WEB_PORT = 3001 # panel\n');
+    pushV2();
+
+    expect(deploy().status).toBe(0);
+    const urls = read(path.join(sandbox.state, 'curl-urls')).split('\n');
+    expect(new Set(urls)).toEqual(new Set(['http://127.0.0.1:3001/healthz']));
   });
 
   it('rolls back code, build and dependencies, restarts the previous build and reports why when the new one is unhealthy', () => {
