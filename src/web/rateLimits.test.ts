@@ -5,6 +5,7 @@ import rateLimit from 'express-rate-limit';
 import supertest from 'supertest';
 import type { SessionUser } from '../types/express';
 import { ACCESS_LEVEL_MOCK } from '../test-utils/accessLevelMock';
+import { waitFor } from '../test-utils/waitFor';
 
 vi.mock('../db/users', () => ({ AccessLevel: ACCESS_LEVEL_MOCK }));
 const mockLog = vi.hoisted(() => ({ error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() }));
@@ -323,6 +324,16 @@ describe('limitReachedHandler', () => {
       'unit-b rate limit reached for one',
       'unit-b rate limit reached for two',
     ]);
+  });
+
+  it('logs, rather than crashing, when the limit response itself fails', async () => {
+    const failure = new Error('message lookup failed');
+    const agent = limitedApp('unit-d', () => { throw failure; });
+    await agent.get('/thing').set('x-key', 'one');
+
+    // The response never goes out, so don't wait for one: the request is left to time out.
+    agent.get('/thing').set('x-key', 'one').timeout(200).catch(() => {});
+    await waitFor(() => expect(mockLog.error).toHaveBeenCalledWith('Failed to send the unit-d rate-limit response', failure));
   });
 
   it('sends a message the limiter computes per request', async () => {
