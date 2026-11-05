@@ -49,7 +49,7 @@ The unit keeps running the `node` it was installed with, so after upgrading Node
 
 If any step fails, the deploy rolls back: the previous code, build and dependencies go back in place and, if the service had already restarted, it restarts onto the previous build and checks that comes up. It then prints a report, also saved to `logs/last-deploy-failure.log`: what failed, the command, both commits, the service status and its log since the restart, and whether the rolled-back bot is healthy. A failed rollback says so in capitals: the bot is down.
 
-One case doesn't roll back automatically: when the failed build had already applied a new database migration. The previous build refuses to start against a database that records migrations it doesn't know, so the deploy leaves the new build in place and prints the commands to go back by hand, starting with restoring the backup it took just before the restart. Fixing forward is usually quicker. The same goes for a migration still running, or a migration state the deploy can't read. To check this safely, the rollback first takes the bot's migration lock (`bcuk_bot_migrations`) and holds it until the restart has stopped the failed build, so no migration can start between the check and the restart.
+One case doesn't roll back automatically: a failed restart in a deploy that brings new database migrations (or whose migration state the deploy can't read). By then the new build has usually run them. The previous build refuses to start against a database that records migrations it doesn't know, and a migration that failed part way leaves its earlier statements applied without recording it, which the deploy can't detect. So the deploy leaves the new build in place and prints the commands to go back by hand, starting with restoring the backup it took just before the restart, along with what `schema_migrations` records and whether a migration is still running. Fixing forward is usually quicker.
 
 The backup is required when a deploy adds migrations; otherwise a failed backup only warns. The health check needs `curl` and `ss` (from iproute2); the backup needs `mysqldump`, and the migration check `mysql` (both from `mysql-client`).
 
@@ -96,7 +96,7 @@ The web panel serves uploaded files straight from disk: overlay videos from `OVE
 
 ### Backups
 
-`bash scripts/backup-db.sh [label]` dumps the database (`mysqldump --single-transaction`, which doesn't lock the running bot out) to a gzipped file in `BACKUP_DIR` (default `~/bcuk-bot-backups`) and deletes the oldest beyond `BACKUP_KEEP` (default 14). `deploy.sh` runs it with the label `pre-deploy` before every restart. For a nightly backup too, add a cron entry for the bot's user (`crontab -e`):
+`bash scripts/backup-db.sh [label]` dumps the database (`mysqldump --single-transaction`, which doesn't lock the running bot out) to a gzipped file in `BACKUP_DIR` (default `~/bcuk-bot-backups`) and deletes the oldest beyond `BACKUP_KEEP` (default 14). `deploy.sh` runs it with the label `pre-deploy` before every restart. Dumps hold the tables, views, stored routines and triggers, but not Event Scheduler events: the bot doesn't use them, and dumping them needs the `EVENT` privilege, so add any you create yourself again after a restore. For a nightly backup too, add a cron entry for the bot's user (`crontab -e`):
 
 ```
 17 4 * * * cd /path/to/BCUK-Bot-4 && bash scripts/backup-db.sh nightly > /dev/null

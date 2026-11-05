@@ -160,103 +160,39 @@ applied_migration_versions() {
     )
 }
 
-# The rollback's hold on the migration lock: a mysql session kept open in the background (as a
-# coprocess, so deploy.sh can send it statements), holding MIGRATION_LOCK_NAME. While it is held, no
-# bot process can start a migration (the runner waits for the lock, then gives up), so the rollback's
-# view of the migration state can't go stale before the restart stops the failed build.
-# bash unsets a coprocess's own variables as soon as it exits, so its PID and pipe ends are copied
-# into these.
-LOCK_PID=""
-LOCK_IN=""
-LOCK_OUT=""
-
-# Sends one statement to the lock session and prints its one-line answer (empty if none came within
-# 10 seconds, or the session has gone).
-lock_session_query() {
-    local answer=""
-    [ -n "$LOCK_PID" ] || return 1
-    printf '%s\n' "$1" >&"$LOCK_IN" 2>/dev/null || return 1
-    read -r -t 10 answer <&"$LOCK_OUT" || return 1
-    printf '%s' "$answer"
-}
-
-# Opens the lock session and tries to take the migration lock without waiting. Returns 0 when it is
-# held, 1 when someone else holds it (a migration is running), 2 when the database can't be reached.
-take_migration_lock() {
-    local credentials answer
-    # In a subshell, so a missing setting can't exit the rollback.
-    credentials="$( (ENV_FILE=.env; source scripts/lib/dotenv.sh; load_db_settings > /dev/null && write_mysql_credentials) 2>/dev/null )"
-    [ -n "$credentials" ] || return 2
-    # --unbuffered so each answer arrives as soon as its statement has run. mysql reads the option
-    # file once, at startup, so it can be deleted as soon as the first answer is back.
-    coproc LOCK_SESSION { exec mysql --defaults-extra-file="$credentials" -N -B --unbuffered "$(env_setting DB_NAME)" 2>/dev/null; }
-    LOCK_PID="$LOCK_SESSION_PID"
-    # Duplicated onto fds of their own: the coprocess's go away with its variables when it exits.
-    exec {LOCK_IN}>&"${LOCK_SESSION[1]}" {LOCK_OUT}<&"${LOCK_SESSION[0]}"
-    answer="$(lock_session_query "SELECT GET_LOCK('$MIGRATION_LOCK_NAME', 0);")"
-    rm -f "$credentials"
-    case "$answer" in
-        1) return 0 ;;
-        0) release_migration_lock; return 1 ;;
-        *) release_migration_lock; return 2 ;;
-    esac
-}
-
-# True while the lock session is alive and still holds the migration lock.
-migration_lock_still_held() {
-    [ "$(lock_session_query "SELECT IS_USED_LOCK('$MIGRATION_LOCK_NAME') = CONNECTION_ID();")" = 1 ]
-}
-
-# Ends the lock session, which releases the lock: closing its input makes mysql exit, and the server
-# frees a session's locks when it disconnects. Killed if it hasn't gone within a few seconds.
-release_migration_lock() {
-    local writer="${LOCK_SESSION[1]:-}"
-    [ -n "$LOCK_PID" ] || return 0
-    # Both write ends (the coprocess's own and the copy) must close for mysql to see the end of input.
-    exec {LOCK_IN}>&- {LOCK_OUT}<&-
-    if [ -n "$writer" ]; then exec {writer}>&-; fi
-    for _ in 1 2 3 4 5 6 7 8 9 10; do kill -0 "$LOCK_PID" 2>/dev/null || break; sleep 0.3; done
-    kill "$LOCK_PID" 2>/dev/null
-    wait "$LOCK_PID" 2>/dev/null
-    LOCK_PID=""
-}
-
-# Decides whether a failed restart can be rolled back. True (stop instead) if the database records
-# any of this deploy's new migrations as applied (the previous build would then refuse to start), if
-# a migration is still running (restarting now would cut it off part way, leaving some of its DDL
-# applied but unrecorded), or if any of that can't be checked. Asks the database itself, not the
-# bot's log (LOG_LEVEL can hide the runner's lines).
-#
-# The migration lock is taken first and, when this returns false, kept until the restart has stopped
-# the failed build (see rollback): a process of the failed build that was still starting up when the
-# state was read could otherwise begin a migration in the seconds the rollback takes. Reading the state
-# only after taking the lock also means a migration can't finish between the two.
+# Decides whether a failed restart can be rolled back. True (stop instead) whenever this deploy brings
+# new migrations, or which ones it brings can't be told. Once the failed build has started, its
+# migrations may have run: a recorded one makes the previous build refuse to start, and one that
+# failed part way leaves the statements before the failure applied but unrecorded (MySQL commits
+# each schema change at once), which nothing in the database reliably shows. A failed start almost
+# always got past the migrations anyway (they run right after the database check), so stopping
+# costs little. Sets MIGRATION_CHECK_NOTE to what the database says, for the report; it asks the
+# database itself, not the bot's log (LOG_LEVEL can hide the runner's lines).
 MIGRATION_CHECK_NOTE=""
-new_migrations_were_applied() {
-    local applied version status=0
+new_migrations_block_rollback() {
+    local applied version recorded=""
     if [ "$MIGRATION_STATE_UNKNOWN" -eq 1 ]; then
         MIGRATION_CHECK_NOTE="Couldn't read schema_migrations before the restart, so it's unknown which migrations this build applies; assuming it applied some."
         return 0
     fi
     [ -n "$NEW_MIGRATIONS" ] || return 1
-    take_migration_lock || status=$?
-    if [ "$status" -eq 1 ]; then
-        MIGRATION_CHECK_NOTE="A migration is still running (the $MIGRATION_LOCK_NAME lock is held). Let it finish, or check the bot's log for it, before doing anything below; stopping the service now would cut it off part way."
-        return 0
-    elif [ "$status" -ne 0 ]; then
-        MIGRATION_CHECK_NOTE="Couldn't take the $MIGRATION_LOCK_NAME lock to check safely (is the database reachable?), so assuming they were applied."
+    if ! applied="$(applied_migration_versions 2>&1)"; then
+        MIGRATION_CHECK_NOTE="Couldn't read schema_migrations to check how far they got (${applied:-no output})."
         return 0
     fi
-    # The marker line now just reports the rollback's own hold on the lock, so it is ignored.
-    if ! applied="$(applied_migration_versions 2>&1)"; then
-        release_migration_lock
-        MIGRATION_CHECK_NOTE="Couldn't read schema_migrations to check (${applied:-no output}), so assuming they were applied."
+    if printf '%s\n' "$applied" | grep -qxF "$MIGRATION_LOCK_MARKER"; then
+        MIGRATION_CHECK_NOTE="A migration is still running (the $MIGRATION_LOCK_NAME lock is held). Let it finish, or check the bot's log for it, before doing anything below; stopping the service now would cut it off part way."
         return 0
     fi
     for version in $NEW_MIGRATIONS; do
-        if printf '%s\n' "$applied" | grep -qxF "$version"; then release_migration_lock; return 0; fi
+        if printf '%s\n' "$applied" | grep -qxF "$version"; then recorded="${recorded:+$recorded }$version"; fi
     done
-    return 1
+    if [ -n "$recorded" ]; then
+        MIGRATION_CHECK_NOTE="The database records these as applied: $recorded."
+    else
+        MIGRATION_CHECK_NOTE="None is recorded as applied, but one that failed part way leaves its earlier statements applied without being recorded. Check the bot's log for \"Migration ... failed\": if one failed, undo its changes by hand or restore the backup; if none started, the schema is unchanged."
+    fi
+    return 0
 }
 
 # Leaves the new build in place and explains how to go back by hand. Used when the failed build
@@ -264,12 +200,14 @@ new_migrations_were_applied() {
 # migration it has no file for, so restoring its code alone would leave the bot down.
 stop_without_rollback() {
     report ""
-    report "NOT rolling back automatically: the new build has applied, or is still applying, database migration(s):"
+    report "NOT rolling back automatically: this deploy brings new database migration(s), which the new build"
+    report "may have applied, fully or part way:"
     for version in $NEW_MIGRATIONS; do report "    $version"; done
     if [ -n "$MIGRATION_CHECK_NOTE" ]; then report "($MIGRATION_CHECK_NOTE)"; fi
     report "The previous build ($PREVIOUS_SHORT) refuses to start on a database that records migrations it"
-    report "doesn't have, so putting its code back alone would leave the bot down. The new build"
-    report "($NEW_SHORT) is still in place."
+    report "doesn't have, and a migration that failed part way leaves the schema neither old nor new, so"
+    report "putting its code back alone could leave the bot down or broken. The new build ($NEW_SHORT) is"
+    report "still in place."
     report ""
     report "Either fix forward (push a fix, then deploy again), or go back by hand:"
     report "  sudo systemctl stop $SERVICE_NAME"
@@ -356,7 +294,7 @@ rollback() {
     report "=================================================================="
     if [ "$RESTARTED" -eq 1 ]; then
         report_service_details
-        if new_migrations_were_applied; then
+        if new_migrations_block_rollback; then
             stop_without_rollback
             report ""
             report "Report saved to $FAILURE_LOG"
@@ -394,31 +332,12 @@ rollback() {
         report "dist/, node_modules/ or the checkout may not match $PREVIOUS_SHORT. Fix them by hand before the"
         report "next restart; the service was not restarted by the rollback."
         report "Report saved to $FAILURE_LOG"
-        release_migration_lock
         exit 1
     fi
     if [ "$RESTARTED" -eq 1 ]; then
-        if [ -n "$LOCK_PID" ] && ! migration_lock_still_held; then
-            # The lock session dropped while the files were restored, so a migration could have
-            # started since the check. Restarting now could cut it off; leave it for a person.
-            release_migration_lock
-            report ""
-            report "ROLLBACK INCOMPLETE: lost the $MIGRATION_LOCK_NAME lock before the restart, so a migration may"
-            report "have started. The previous build's files are back in place, but the service was NOT restarted"
-            report "(it is still running the failed build). Check the bot's log and schema_migrations, then:"
-            report "  sudo systemctl restart $SERVICE_NAME"
-            report "Report saved to $FAILURE_LOG"
-            exit 1
-        fi
         report "==> Restarting $SERVICE_NAME on the previous build..."
         RESTART_TIME="$(date '+%Y-%m-%d %H:%M:%S')"
-        # restart stops the failed build (which can't migrate while the lock is held) before it starts
-        # the previous one, and returns once that has started (Type=simple). The lock is released
-        # then, while the previous build's migration runner is still within its wait for it.
-        sudo -n "$SYSTEMCTL_BIN" restart "$SERVICE_NAME"
-        local restart_status=$?
-        release_migration_lock
-        if [ "$restart_status" -eq 0 ] && wait_for_health && wait_for_stability; then
+        if sudo -n "$SYSTEMCTL_BIN" restart "$SERVICE_NAME" && wait_for_health && wait_for_stability; then
             outcome="Rolled back: $SERVICE_NAME is running the previous build ($PREVIOUS_SHORT) and answering health checks."
         else
             outcome="ROLLBACK FAILED: the previous build didn't come up healthy either (${HEALTH_PROBLEM:-restart failed}). The bot is DOWN."

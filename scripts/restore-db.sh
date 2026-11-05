@@ -9,7 +9,8 @@
 # Restoring over the live database replaces everything in it, so it refuses while the bot's
 # service is running (stop it first), asks you to type the database name to confirm, and saves the
 # current data with backup-db.sh (label "pre-restore") before changing anything, unless it holds
-# nothing to save (no tables, views, routines or events, or it doesn't exist yet). Any
+# nothing to save (no tables, views, routines or events, or it doesn't exist yet). Dumps don't
+# hold Event Scheduler events (see backup-db.sh), so one in the target survives the restore. Any
 # other target that already has tables (a mistyped name, say) asks for the same confirmation,
 # since every table in it is dropped first; an empty or new scratch database doesn't ask.
 set -euo pipefail
@@ -74,7 +75,8 @@ PRIVATE_COPY=""
 trap 'rm -f "$CREDENTIALS" ${PRIVATE_COPY:+"$PRIVATE_COPY"}' EXIT
 
 # Prints how many objects (tables, views, routines, events) the target holds; 0 when it doesn't
-# exist, since information_schema answers without the database. Exits if the query fails, as
+# exist, since information_schema answers without the database. Events count although dumps leave
+# them out, so a database holding only an event is still saved first. Exits if the query fails, as
 # that says nothing about whether there's data to save.
 count_target_objects() {
     local count

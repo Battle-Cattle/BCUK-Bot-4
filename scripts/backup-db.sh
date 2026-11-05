@@ -54,6 +54,8 @@ PARTIAL="$FILE.partial"
 
 # --single-transaction: a consistent snapshot of InnoDB tables without locking the live bot out.
 # --no-tablespaces: MySQL 8 otherwise needs the PROCESS privilege, which the bot's user lacks.
+# No --events: the bot uses no Event Scheduler events, and dumping them needs the EVENT privilege,
+# which the bot's user may not have (a failed dump fails the deploy). See README "Backups".
 mysqldump --defaults-extra-file="$CREDENTIALS" --single-transaction --routines --triggers \
     --no-tablespaces "$DB_NAME" | gzip > "$PARTIAL"
 mv "$PARTIAL" "$FILE"
