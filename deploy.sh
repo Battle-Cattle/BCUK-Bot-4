@@ -8,6 +8,9 @@ SERVICE_NAME="bcuk-bot"
 # Startup pings the DB, loads the guild registry and logs in to Discord/Twitch before the panel
 # starts listening, so allow for slow logins.
 HEALTH_TIMEOUT_SECONDS="${DEPLOY_HEALTH_TIMEOUT_SECONDS:-90}"
+# How long a rollback waits for an interrupted deploy's build and tests to exit after asking them to
+# stop, before killing whatever is left.
+JOB_STOP_TIMEOUT_SECONDS="${DEPLOY_JOB_STOP_TIMEOUT_SECONDS:-10}"
 # Once /healthz first answers, how long the bot must then stay up (same process, no restarts, still
 # answering) before the deploy counts as good. Catches a build that comes up and then crashes, e.g.
 # when a Discord/Twitch login fails a few seconds after the panel starts listening.
@@ -215,19 +218,40 @@ restore_step() {
 BUILD_PID=""
 TEST_PID=""
 
-# Stops a process and everything it started, deepest first (npm runs tsc and vitest as
-# grandchildren, so stopping npm alone would leave them running).
-kill_tree() {
+# Sends signal $1 to process $2 and everything it started, deepest first (npm runs tsc and vitest
+# as grandchildren, so signalling npm alone would leave them running), printing each PID signalled.
+signal_tree() {
     local child
-    for child in $(pgrep -P "$1" 2>/dev/null); do kill_tree "$child"; done
-    kill -TERM "$1" 2>/dev/null
+    for child in $(pgrep -P "$2" 2>/dev/null); do signal_tree "$1" "$child"; done
+    kill "-$1" "$2" 2>/dev/null && echo "$2"
 }
 
-# Stops the background build and tests, if any are still running, and waits for them to exit, so
-# nothing writes into the checkout while the rollback restores it.
-stop_background_jobs() {
+# True while a process is still running: it exists and isn't a zombie (one that has exited but not
+# yet been reaped).
+process_alive() {
+    local state
+    state="$(ps -o stat= -p "$1" 2>/dev/null)"
+    [ -n "$state" ] && [ "${state#Z}" = "$state" ]
+}
+
+# True while any of the given processes is still running.
+any_alive() {
     local pid
-    for pid in $BUILD_PID $TEST_PID; do kill_tree "$pid"; done
+    for pid in "$@"; do process_alive "$pid" && return 0; done
+    return 1
+}
+
+# Stops the background build and tests, if any are still running, so nothing writes into the
+# checkout while the rollback restores it. Each job's whole process tree gets a TERM; anything still
+# running JOB_STOP_TIMEOUT_SECONDS later (a process ignoring TERM) is killed, so the rollback can't
+# hang on it. Then the jobs are reaped.
+stop_background_jobs() {
+    local pid deadline signalled=""
+    for pid in $BUILD_PID $TEST_PID; do signalled="$signalled $(signal_tree TERM "$pid" | tr '\n' ' ')"; done
+    deadline=$((SECONDS + JOB_STOP_TIMEOUT_SECONDS))
+    # shellcheck disable=SC2086 # word-splitting the PID list is intended
+    while [ "$SECONDS" -lt "$deadline" ] && any_alive $signalled; do sleep 0.2; done
+    for pid in $signalled; do process_alive "$pid" && kill -KILL "$pid" 2>/dev/null; done
     for pid in $BUILD_PID $TEST_PID; do wait "$pid" 2>/dev/null; done
     BUILD_PID=""
     TEST_PID=""

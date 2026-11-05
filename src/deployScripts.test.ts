@@ -67,13 +67,24 @@ case "$1" in
   ci) mkdir -p node_modules && echo "$version" > node_modules/marker ;;
   install|audit|prune) exit 0 ;;
   test)
-    if [ -n "\${NPM_TEST_SIGNAL:-}" ]; then kill -TERM "$PPID"; sleep 1; fi
+    if [ -n "\${NPM_TEST_SIGNAL:-}" ]; then
+      # With a hanging build, wait (up to 10s) until its child is running, so the interrupt lands
+      # while there is something for the rollback to stop.
+      if [ -n "\${NPM_BUILD_HANG:-}" ]; then
+        for _ in $(seq 100); do [ -s "$STATE/build-child" ] && break; sleep 0.1; done
+      fi
+      kill -TERM "$PPID"; sleep 1
+    fi
     exit "\${NPM_TEST_EXIT:-0}" ;;
   run)
     out="$5"
     # NPM_BUILD_HANG: a build still running when the deploy is interrupted, with a child process
-    # of its own (like tsc under npm), whose PID is kept for the test to check.
-    if [ -n "\${NPM_BUILD_HANG:-}" ]; then sleep 30 & echo "$!" > "$STATE/build-child"; wait; fi
+    # of its own (like tsc under npm), whose PID is kept for the test to check. "ignore-term" makes
+    # that child ignore TERM, like a stuck process the rollback has to kill.
+    case "\${NPM_BUILD_HANG:-}" in
+      ignore-term) (trap '' TERM; exec sleep 30) & echo "$!" > "$STATE/build-child"; wait ;;
+      ?*) sleep 30 & echo "$!" > "$STATE/build-child"; wait ;;
+    esac
     mkdir -p "$out" && echo "$version" > "$out/marker" ;;
 esac
 `,
@@ -411,6 +422,18 @@ describe.skipIf(onWindows)('deploy.sh', { timeout: SCRIPT_TEST_TIMEOUT_MS }, () 
     // orphan can linger as a zombie until init reaps it, which still counts as stopped.
     expect(isRunning(child)).toBe(false);
     expect(fs.existsSync(path.join(sandbox.work, 'dist.new'))).toBe(false);
+    expect(read(path.join(sandbox.work, 'dist/marker'))).toBe('v1');
+  });
+
+  it('kills a build process that ignores TERM instead of letting the rollback hang on it', () => {
+    pushV2();
+    const started = Date.now();
+    const result = deploy({ NPM_TEST_SIGNAL: '1', NPM_BUILD_HANG: 'ignore-term', DEPLOY_JOB_STOP_TIMEOUT_SECONDS: '1' });
+
+    expect(result.status).toBe(1);
+    expect(isRunning(Number(read(path.join(sandbox.state, 'build-child'))))).toBe(false);
+    // Well short of the child's 30s sleep: the rollback gave up waiting and killed it.
+    expect(Date.now() - started).toBeLessThan(15_000);
     expect(read(path.join(sandbox.work, 'dist/marker'))).toBe('v1');
   });
 
