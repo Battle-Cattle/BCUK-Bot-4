@@ -33,14 +33,19 @@ TimeoutStopSec=30
 # parsing an upload) could reach. Check with `systemd-analyze security bcuk-bot`.
 NoNewPrivileges=true
 PrivateTmp=true
-# The whole filesystem is read-only to the bot except the paths below. /home stays readable, not
-# hidden, because the checkout and an nvm-installed node usually live there.
+# The whole filesystem is read-only to the bot, and /home, /root and /run/user are replaced with
+# empty directories, so a compromised process can't read the account's other files (SSH keys,
+# credentials, other projects). Only what the bot needs is put back, by the two Bind lines below.
 ProtectSystem=strict
-ProtectHome=read-only
-# Everywhere the bot writes at runtime: logs/ (log files and the debug-logging state file) and the
-# three upload folders (MOV-to-WebM conversion writes its temporary files there too). The installer
-# fills these in from .env and creates them; `-` keeps a missing one from stopping the service.
-ReadWritePaths=__WRITABLE_PATHS__
+ProtectHome=tmpfs
+# Read-only: the checkout (code, node_modules and .env) and the Node install, which usually live in a
+# home directory. The installer fills these in.
+BindReadOnlyPaths=__READONLY_PATHS__
+# Read-write: everywhere the bot writes at runtime, logs/ (log files and the debug-logging state
+# file) and the three upload folders (MOV-to-WebM conversion writes its temporary files there too).
+# The installer fills these in from .env and creates them; `-` keeps a missing one from stopping the
+# service.
+BindPaths=__WRITABLE_PATHS__
 ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectKernelLogs=true

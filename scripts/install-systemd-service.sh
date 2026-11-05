@@ -7,7 +7,8 @@
 set -euo pipefail
 
 SERVICE_NAME="bcuk-bot"
-REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+# The physical path (no symlinks), as the unit binds it into the service's view of the filesystem.
+REPO_DIR="$(cd "$(dirname "$0")/.." && pwd -P)"
 RUN_USER="$(id -un)"
 
 if [ "$RUN_USER" = "root" ]; then
@@ -80,8 +81,34 @@ folder_path() {
     realpath -m "$value"
 }
 
-# The unit's filesystem is read-only apart from these (ReadWritePaths): logs/ and the upload
-# folders. Created now, as this user, so the bot never has to create one under a read-only parent.
+# Fails unless a path can be written into the unit (inside double quotes, with no % specifiers).
+check_unit_path() {
+    if [[ "$1" == *'"'* || "$1" == *'\'* || "$1" == *%* ]]; then
+        echo "ERROR: $1 contains a quote, backslash or %, which the unit can't express." >&2
+        exit 1
+    fi
+}
+
+# The unit hides every home directory (ProtectHome=tmpfs) and binds back, read-only, the checkout
+# and the Node install the service runs. For Node that is its install prefix (the folder above bin/),
+# under both the path the unit names and the real path it resolves to (nvm's links, say), when that
+# lives in a home directory; one elsewhere (e.g. /usr) stays visible anyway.
+READONLY_DIRS=("$REPO_DIR")
+for node_path in "$NODE_BIN" "$(realpath "$NODE_BIN")"; do
+    prefix="$(dirname "$(dirname "$node_path")")"
+    case "$prefix" in
+        /home/*|/root|/root/*)
+            [[ " ${READONLY_DIRS[*]} " == *" $prefix "* ]] || READONLY_DIRS+=("$prefix") ;;
+    esac
+done
+READONLY_PATHS=""
+for dir in "${READONLY_DIRS[@]}"; do
+    check_unit_path "$dir"
+    READONLY_PATHS+="${READONLY_PATHS:+ }\"${dir}\""
+done
+
+# The unit's filesystem is read-only apart from these (BindPaths): logs/ and the upload folders.
+# Created now, as this user, so the bot never has to create one under a read-only parent.
 WRITABLE_DIRS=(
     "$REPO_DIR/logs"
     "$(folder_path OVERLAY_FOLDER ./overlay-videos)"
@@ -90,10 +117,7 @@ WRITABLE_DIRS=(
 )
 WRITABLE_PATHS=""
 for dir in "${WRITABLE_DIRS[@]}"; do
-    if [[ "$dir" == *'"'* || "$dir" == *'\'* || "$dir" == *%* ]]; then
-        echo "ERROR: $dir contains a quote, backslash or %, which the unit can't express." >&2
-        exit 1
-    fi
+    check_unit_path "$dir"
     mkdir -p "$dir"
     WRITABLE_PATHS+="${WRITABLE_PATHS:+ }\"-${dir}\""
 done
@@ -102,6 +126,7 @@ echo "==> Installing /etc/systemd/system/${SERVICE_NAME}.service"
 echo "    user:      $RUN_USER"
 echo "    directory: $REPO_DIR"
 echo "    node:      $NODE_BIN (v$("$NODE_BIN" -v | tr -d v))"
+echo "    read-only: ${READONLY_DIRS[*]}"
 echo "    writable:  ${WRITABLE_DIRS[*]}"
 UNIT_TMP="$(mktemp)"
 trap 'rm -f "$UNIT_TMP" "${SUDOERS_TMP:-}"' EXIT
@@ -111,6 +136,7 @@ sed_escape() { printf '%s' "$1" | sed -e 's/[\\|&]/\\&/g'; }
 sed -e "s|__USER__|$(sed_escape "$RUN_USER")|" \
     -e "s|__REPO_DIR__|$(sed_escape "$REPO_DIR")|" \
     -e "s|__NODE_BIN__|$(sed_escape "$NODE_BIN")|" \
+    -e "s|__READONLY_PATHS__|$(sed_escape "$READONLY_PATHS")|" \
     -e "s|__WRITABLE_PATHS__|$(sed_escape "$WRITABLE_PATHS")|" \
     "$REPO_DIR/deploy/bcuk-bot.service" > "$UNIT_TMP"
 sudo install -m 644 "$UNIT_TMP" "/etc/systemd/system/${SERVICE_NAME}.service"
