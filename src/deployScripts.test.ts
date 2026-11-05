@@ -71,6 +71,9 @@ case "$1" in
     exit "\${NPM_TEST_EXIT:-0}" ;;
   run)
     out="$5"
+    # NPM_BUILD_HANG: a build still running when the deploy is interrupted, with a child process
+    # of its own (like tsc under npm), whose PID is kept for the test to check.
+    if [ -n "\${NPM_BUILD_HANG:-}" ]; then sleep 30 & echo "$!" > "$STATE/build-child"; wait; fi
     mkdir -p "$out" && echo "$version" > "$out/marker" ;;
 esac
 `,
@@ -130,6 +133,14 @@ function run(cmd: string, args: string[], cwd: string, env: NodeJS.ProcessEnv = 
 function write(file: string, content: string, mode?: number): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, content, mode === undefined ? undefined : { mode });
+}
+
+/** Whether a process is still running: it exists and isn't a zombie waiting to be reaped. */
+function isRunning(pid: number): boolean {
+  const stat = path.join('/proc', String(pid), 'stat');
+  if (!fs.existsSync(stat)) return false;
+  // The state letter follows the parenthesised command name.
+  return fs.readFileSync(stat, 'utf8').split(') ')[1]?.[0] !== 'Z';
 }
 
 /** Reads a file's trimmed contents, or '' when it doesn't exist. */
@@ -387,6 +398,20 @@ describe.skipIf(onWindows)('deploy.sh', { timeout: SCRIPT_TEST_TIMEOUT_MS }, () 
     expect(read(path.join(sandbox.work, 'node_modules/marker'))).toBe('v1');
     expect(fs.existsSync(path.join(sandbox.work, 'node_modules.old'))).toBe(false);
     expect(failureReport()).toContain('the deploy was interrupted');
+  });
+
+  it('stops a build still running in the background before rolling back an interrupted deploy', () => {
+    pushV2();
+    const result = deploy({ NPM_TEST_SIGNAL: '1', NPM_BUILD_HANG: '1' });
+
+    expect(result.status).toBe(1);
+    const child = Number(read(path.join(sandbox.state, 'build-child')));
+    expect(child).toBeGreaterThan(0);
+    // The build's own child was stopped, not left running against the restored checkout. A killed
+    // orphan can linger as a zombie until init reaps it, which still counts as stopped.
+    expect(isRunning(child)).toBe(false);
+    expect(fs.existsSync(path.join(sandbox.work, 'dist.new'))).toBe(false);
+    expect(read(path.join(sandbox.work, 'dist/marker'))).toBe('v1');
   });
 
   it("won't restart onto new migrations without a backup", () => {

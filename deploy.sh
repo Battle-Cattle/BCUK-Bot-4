@@ -210,6 +210,29 @@ restore_step() {
     fi
 }
 
+# Background build and test jobs (set while they run). An interrupted deploy rolls back while they
+# may still be going: background jobs in a script ignore Ctrl-C, and a TERM reaches only deploy.sh.
+BUILD_PID=""
+TEST_PID=""
+
+# Stops a process and everything it started, deepest first (npm runs tsc and vitest as
+# grandchildren, so stopping npm alone would leave them running).
+kill_tree() {
+    local child
+    for child in $(pgrep -P "$1" 2>/dev/null); do kill_tree "$child"; done
+    kill -TERM "$1" 2>/dev/null
+}
+
+# Stops the background build and tests, if any are still running, and waits for them to exit, so
+# nothing writes into the checkout while the rollback restores it.
+stop_background_jobs() {
+    local pid
+    for pid in $BUILD_PID $TEST_PID; do kill_tree "$pid"; done
+    for pid in $BUILD_PID $TEST_PID; do wait "$pid" 2>/dev/null; done
+    BUILD_PID=""
+    TEST_PID=""
+}
+
 # Puts the previous code, build and dependencies back. If the service was already restarted onto the
 # new build, restarts it onto the previous one and checks that it comes up. Always writes a failure
 # report (printed and saved to FAILURE_LOG) and exits 1.
@@ -237,6 +260,7 @@ rollback() {
 
     report ""
     report "==> Rolling back to $PREVIOUS_SHORT..."
+    stop_background_jobs
     restore_step rm -rf "$BUILD_DIR"
     # Past the swap, dist/ holds this deploy's build and dist.old the previous one (if there was
     # one) until the deploy succeeds — put the previous build back.
@@ -399,6 +423,8 @@ BUILD_STATUS=0
 TEST_STATUS=0
 wait "$BUILD_PID" || BUILD_STATUS=$?
 wait "$TEST_PID" || TEST_STATUS=$?
+BUILD_PID=""
+TEST_PID=""
 
 echo "--- Build output ---"
 cat "$BUILD_LOG"
