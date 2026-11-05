@@ -4,8 +4,8 @@ import path from 'path';
 import vm from 'vm';
 import { createHash } from 'crypto';
 
-// utils.js plus chunkedUpload.js, as the upload pages load them.
-const utilsSource = ['utils.js', 'chunkedUpload.js']
+// utils.js plus the chunked uploader's scripts, as the upload pages load them.
+const utilsSource = ['utils.js', 'chunkedUpload.js', 'chunkedUploadResume.js']
   .map((name) => fs.readFileSync(path.join(__dirname, '../../public', name), 'utf8'))
   .join('\n');
 const BASE = '/overlay/settings/videos/upload';

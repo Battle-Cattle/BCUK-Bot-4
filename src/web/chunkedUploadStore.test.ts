@@ -2,7 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ChunkedUploadStore, isUploadId, parseDeclaration } from './chunkedUploadStore';
+import { ChunkedUploadStore } from './chunkedUploadStore';
 
 let dir: string;
 let clock: number;
@@ -24,27 +24,6 @@ async function startUpload(owner = 'u1', size = 6): Promise<string> {
   if (!result.ok) throw new Error(result.error);
   return result.id;
 }
-
-describe('parseDeclaration', () => {
-  it('accepts a name, numeric size and type, keeping only the base name', () => {
-    expect(parseDeclaration({ name: '../x/clip.mov', size: '12', type: 'video/quicktime' }))
-      .toEqual({ name: 'clip.mov', size: 12, type: 'video/quicktime' });
-  });
-
-  it('rejects missing names and non-positive or fractional sizes', () => {
-    expect(parseDeclaration({ name: '', size: 1 })).toBeNull();
-    expect(parseDeclaration({ name: 'a', size: 0 })).toBeNull();
-    expect(parseDeclaration({ name: 'a', size: 1.5 })).toBeNull();
-    expect(parseDeclaration(null)).toBeNull();
-  });
-});
-
-describe('isUploadId', () => {
-  it('accepts only UUIDs', () => {
-    expect(isUploadId('0f8fad5b-d9cb-469f-a165-70867728950e')).toBe(true);
-    expect(isUploadId('../etc/passwd')).toBe(false);
-  });
-});
 
 describe('ChunkedUploadStore', () => {
   it('assembles pieces sent in order and hands the file over on finish', async () => {

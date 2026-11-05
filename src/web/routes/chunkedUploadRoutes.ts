@@ -4,12 +4,11 @@ import type { NextFunction, Request, RequestHandler, Response, Router } from 'ex
 import type { Logger } from 'winston';
 import {
   CHUNK_MAX_BYTES,
-  type ChunkedUploadDeclaration,
-  parseDeclaration,
   type ChunkedUploadError,
   type ChunkedUploadStore,
   type FinishedChunkedUpload,
 } from '../chunkedUploadStore';
+import { parseDeclaration, type ChunkedUploadDeclaration } from '../chunkedUploadDeclaration';
 import type { UploadedFile } from '../uploadedFile';
 
 // The routes of a chunked, resumable upload (issue #912), mounted once per upload area under

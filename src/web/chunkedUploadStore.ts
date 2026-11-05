@@ -2,6 +2,8 @@ import fs from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import { createLogger } from '../shared/logger';
+import { isUploadId, type ChunkedUploadDeclaration } from './chunkedUploadDeclaration';
+import { removeFiles, removeIfOlderThan, truncateOrLog } from './chunkedUploadFiles';
 
 // Upload sessions for chunked, resumable uploads (issue #912): a file arrives as a run of short
 // requests, each appending one piece at the offset the server has confirmed so far, instead of one
@@ -31,25 +33,6 @@ const START_QUEUE_KEY = 'start';
 
 /** What {@link ChunkedUploadStore.cancel} did. */
 export type ChunkedUploadCancelResult = 'cancelled' | 'not_found' | 'failed';
-
-/** Upload IDs are UUIDs; anything else is rejected before it's used in a path. */
-const UPLOAD_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-
-/** Longest file name a client may declare. */
-const MAX_NAME_LENGTH = 255;
-
-/** Longest MIME type a client may declare. */
-const MAX_TYPE_LENGTH = 127;
-
-/** What the client declares when it starts an upload. */
-export interface ChunkedUploadDeclaration {
-  /** The file's original name. */
-  name: string;
-  /** Total size in bytes. */
-  size: number;
-  /** The MIME type the browser reported (may be empty). */
-  type: string;
-}
 
 /** Session state stored in `<id>.json`. */
 interface UploadSessionMeta extends ChunkedUploadDeclaration {
@@ -97,31 +80,6 @@ export interface ChunkedUploadStoreOptions {
   ttlMs?: number;
   /** Current time in epoch milliseconds (injectable for tests). */
   now?: () => number;
-}
-
-/**
- * Checks a client's declaration: a non-empty name and a whole, positive size.
- * @param declared - The declaration from the start request (untrusted).
- * @returns The cleaned declaration, or null when it's malformed.
- */
-export function parseDeclaration(declared: unknown): ChunkedUploadDeclaration | null {
-  if (typeof declared !== 'object' || declared === null) return null;
-  const { name, size, type } = declared as Record<string, unknown>;
-  const sizeNumber = typeof size === 'string' ? Number(size) : size;
-  if (typeof name !== 'string' || name.length === 0 || name.length > MAX_NAME_LENGTH) return null;
-  if (typeof sizeNumber !== 'number' || !Number.isSafeInteger(sizeNumber) || sizeNumber <= 0) return null;
-  const typeString = typeof type === 'string' ? type : '';
-  if (typeString.length > MAX_TYPE_LENGTH) return null;
-  return { name: path.basename(name), size: sizeNumber, type: typeString };
-}
-
-/**
- * True for a well-formed upload ID, the only kind ever joined into a path.
- * @param id - Upload ID from the request.
- * @returns Whether `id` is a lowercase UUID.
- */
-export function isUploadId(id: unknown): id is string {
-  return typeof id === 'string' && UPLOAD_ID_RE.test(id);
 }
 
 /** A session as read from disk: its declared state and the bytes confirmed so far. */
@@ -298,12 +256,7 @@ export class ChunkedUploadStore {
     try {
       await fs.promises.appendFile(this.partPath(id), chunk);
     } catch (err) {
-      try {
-        await fs.promises.truncate(this.partPath(id), offset);
-      } catch (truncateErr) {
-        log.error(`Failed to roll back partly written upload piece for ${id}; dropping the upload:`, truncateErr);
-        await this.remove(id);
-      }
+      if (!(await truncateOrLog(this.partPath(id), offset, log))) await this.remove(id);
       throw err;
     }
   }
@@ -314,12 +267,7 @@ export class ChunkedUploadStore {
    * @returns Resolves once it's been checked; never rejects.
    */
   private async removeIfStale(name: string): Promise<void> {
-    const full = path.join(this.dir, name);
-    try {
-      if ((await fs.promises.stat(full)).mtimeMs < this.now() - this.ttlMs) await fs.promises.rm(full, { force: true });
-    } catch (err) {
-      log.warn(`Failed to sweep stale upload session file ${full}:`, err);
-    }
+    await removeIfOlderThan(path.join(this.dir, name), this.now() - this.ttlMs, log);
   }
 
   /**
@@ -403,14 +351,7 @@ export class ChunkedUploadStore {
    * @returns True once both files are gone, false if either removal failed; never rejects.
    */
   private async remove(id: string): Promise<boolean> {
-    const results = await Promise.all([this.metaPath(id), this.partPath(id)].map((p) => fs.promises.rm(p, { force: true }).then(
-      () => true,
-      (err: unknown) => {
-        log.warn(`Failed to remove upload session file ${p}:`, err);
-        return false;
-      },
-    )));
-    return results.every(Boolean);
+    return removeFiles([this.metaPath(id), this.partPath(id)], log);
   }
 
   /**

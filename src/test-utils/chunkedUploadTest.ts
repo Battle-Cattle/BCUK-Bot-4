@@ -2,8 +2,9 @@ import { randomUUID } from 'crypto';
 import supertest from 'supertest';
 import type { Response as SupertestResponse } from 'supertest';
 import type {
-  ChunkedUploadDeclaration, ChunkedUploadFailure, ChunkedUploadStoreOptions, FinishedChunkedUpload,
+  ChunkedUploadFailure, ChunkedUploadStoreOptions, FinishedChunkedUpload,
 } from '../web/chunkedUploadStore';
+import type { ChunkedUploadDeclaration } from '../web/chunkedUploadDeclaration';
 import type { UploadedFile } from '../web/uploadedFile';
 
 // Test doubles for the upload areas' route tests, which drive each area's real chunked-upload
