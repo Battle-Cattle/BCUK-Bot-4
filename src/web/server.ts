@@ -22,6 +22,7 @@ import {
   ipKey,
   generalLimiterSkip,
   isSessionStoreBusyError,
+  limitReachedHandler,
   markSessionStoreError,
   preSessionLimiterSkip,
   sessionLimiterKey,
@@ -122,6 +123,7 @@ const generalLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: ipKey,
   skip: generalLimiterSkip,
+  handler: limitReachedHandler('general'),
 });
 // Generous limit for the Streamdeck API — keyed by Bearer token so each API key gets
 // its own bucket regardless of which IP the request originates from.
@@ -132,6 +134,7 @@ const streamdeckLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: streamdeckLimiterKey,
   message: 'Too many requests, please try again shortly.',
+  handler: limitReachedHandler('streamdeck'),
 });
 // Per-account limit for session-authenticated panel users. Dashboard polling alone
 // can reach a few hundred req/15 min (status + streams-live), so 600 gives headroom
@@ -144,6 +147,7 @@ const sessionLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: sessionLimiterKey,
   skip: sessionLimiterSkip,
+  handler: limitReachedHandler('session'),
 });
 // Coarse per-IP cap that runs ahead of the session middleware. The limiters above run after it
 // (sessionLimiter's key needs req.session), so without this, a replayed validly signed cookie
@@ -159,6 +163,7 @@ const preSessionLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: ipKey,
   skip: preSessionLimiterSkip,
+  handler: limitReachedHandler('pre-session'),
 });
 // Body parsers
 app.use(express.urlencoded({ extended: false }));

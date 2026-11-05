@@ -131,6 +131,8 @@ The backup and restore scripts, and `deploy.sh`'s migration check, read the data
 
 The web panel must only be reachable through the reverse proxy. It trusts exactly one `X-Forwarded-For` hop (`trust proxy: 1`, for Caddy), so a client that can reach `WEB_PORT` directly can set that header itself, pick its own `req.ip` and get round the IP-keyed rate limiters. The panel binds to `WEB_HOST`, which defaults to `127.0.0.1`; if Caddy runs on another host or in a container, set `WEB_HOST` to the private interface it connects through, and keep `WEB_PORT` firewalled from the internet either way.
 
+When a client goes over one of the panel's rate limits, the bot logs it as an error (in `logs/error-*.log` and on the owner Health page), naming the limiter (`pre-session`, `general`, `session`, `streamdeck`, `auth` or `streamdeck-auth-failure`), the IP, account or hashed key it counted, and the path. It's logged once per client per window, not on every blocked request. A `pre-session` or `general` entry for many users at once, or for the proxy's own address, means the IP limits are catching people who share an address, or `trust proxy` doesn't match your proxy setup.
+
 ### Rotating EVENTSUB_TOKEN_SECRET
 
 `EVENTSUB_TOKEN_SECRET` encrypts every stored Twitch OAuth token (the streamers' EventSub tokens and the chat bot's own). While both the new and the previous key are configured, a token is read with the new key and falls back to the previous one, so the key can be changed without anyone reconnecting:

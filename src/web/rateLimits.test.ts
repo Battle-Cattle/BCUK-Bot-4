@@ -1,17 +1,21 @@
 import { createHash } from 'crypto';
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import express, { type Request, type Response } from 'express';
+import rateLimit from 'express-rate-limit';
 import supertest from 'supertest';
 import type { SessionUser } from '../types/express';
 import { ACCESS_LEVEL_MOCK } from '../test-utils/accessLevelMock';
 
 vi.mock('../db/users', () => ({ AccessLevel: ACCESS_LEVEL_MOCK }));
+const mockLog = vi.hoisted(() => ({ error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() }));
+vi.mock('../shared/logger', () => ({ createLogger: () => mockLog }));
 
 import { AccessLevel } from '../db/users';
 import {
   ipKey,
   generalLimiterSkip,
   isSessionStoreBusyError,
+  limitReachedHandler,
   markSessionStoreError,
   preSessionLimiterSkip,
   sessionLimiterKey,
@@ -276,5 +280,55 @@ describe('streamdeckAuthFailureLimiter', () => {
         .set('Authorization', 'Bearer valid-key');
       expect(res.status).toBe(200);
     }
+  });
+});
+
+describe('limitReachedHandler', () => {
+  beforeEach(() => {
+    mockLog.error.mockClear();
+  });
+
+  /** An app behind a 1-request limiter keyed by the `x-key` header, using the logging handler. */
+  function limitedApp(name: string, message: string | ((req: Request) => string) = 'Slow down') {
+    const app = express();
+    app.use(rateLimit({
+      windowMs: 60_000,
+      limit: 1,
+      keyGenerator: (req) => String(req.headers['x-key']),
+      message,
+      handler: limitReachedHandler(name),
+    }));
+    app.get('/thing', (_req, res) => { res.send('ok'); });
+    return supertest(app);
+  }
+
+  it('answers with the limiter\'s 429 and message, and logs the first block as an error', async () => {
+    const agent = limitedApp('unit-a');
+
+    expect((await agent.get('/thing').set('x-key', 'one')).status).toBe(200);
+    const blocked = await agent.get('/thing').set('x-key', 'one');
+
+    expect(blocked.status).toBe(429);
+    expect(blocked.text).toBe('Slow down');
+    expect(mockLog.error).toHaveBeenCalledTimes(1);
+    expect(mockLog.error).toHaveBeenCalledWith('unit-a rate limit reached for one (2/1 requests in the window), last GET /thing');
+  });
+
+  it('logs each limiter and key once per window, not on every blocked request', async () => {
+    const agent = limitedApp('unit-b');
+    for (const key of ['one', 'one', 'one', 'two', 'two']) await agent.get('/thing').set('x-key', key);
+
+    expect(mockLog.error).toHaveBeenCalledTimes(2);
+    expect(mockLog.error.mock.calls.map(([line]) => String(line).split(' (')[0])).toEqual([
+      'unit-b rate limit reached for one',
+      'unit-b rate limit reached for two',
+    ]);
+  });
+
+  it('sends a message the limiter computes per request', async () => {
+    const agent = limitedApp('unit-c', (req) => `Too fast on ${req.path}`);
+    await agent.get('/thing').set('x-key', 'one');
+
+    expect((await agent.get('/thing').set('x-key', 'one')).text).toBe('Too fast on /thing');
   });
 });
