@@ -1,3 +1,4 @@
+/* global nameUploadProgress, showUploadProgress, pollProcessingProgress, newUploadId */
 // What a chunked upload (chunkedUpload.js) shows when it ends: the browser always returns to the
 // upload page itself with a `?success=` or `?error=` code, rebuilt from a checked code rather than
 // any URL the upload passed through.
@@ -44,4 +45,47 @@ function outcomePath(fallbackPath, outcome) {
   var code = String(outcome.code);
   if (!OUTCOME_CODE_RE.test(code)) return fallbackPath + '?error=upload_failed';
   return fallbackPath + '?' + key + '=' + code;
+}
+
+/**
+ * The form's fields other than its files, for the complete request.
+ * @param {HTMLFormElement} form - The upload form.
+ * @returns {URLSearchParams} The fields.
+ */
+function nonFileFields(form) {
+  var fields = new URLSearchParams();
+  new FormData(form).forEach(function (value, key) {
+    if (typeof value === 'string') fields.append(key, value);
+  });
+  return fields;
+}
+
+/**
+ * Completes the upload with the form's other fields, polling processing progress meanwhile.
+ * @param {HTMLFormElement} form - The upload form.
+ * @param {string} base - The form's upload path (its `action`).
+ * @param {string} id - The upload ID.
+ * @param {{box: HTMLElement, bar: HTMLProgressElement|null, label: HTMLElement|null}|null} progress - The display.
+ * @returns {Promise<{key: string, code: string}|null>} The outcome the server's redirect carries
+ *   (null when it didn't redirect or carries none).
+ */
+async function completeChunkedUpload(form, base, id, progress) {
+  var progressId = newUploadId();
+  nameUploadProgress(progress, 'Processing progress');
+  showUploadProgress(progress, null, form.dataset.processingLabel || 'Processing…');
+  var stopPolling = pollProcessingProgress(form, progressId, progress);
+  try {
+    var res = await fetch(base + '/' + id + '/complete', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'X-CSRF-Token': (document.body && document.body.dataset.csrfToken) || '', 'X-Upload-Id': progressId },
+      body: nonFileFields(form),
+    });
+    if (res.redirected) return outcomeFromUrl(res.url);
+    // A response that didn't redirect is an error page (e.g. a 403 CSRF or 500) unless it's OK.
+    if (!res.ok) throw new Error('Upload completion failed with HTTP ' + res.status);
+    return null;
+  } finally {
+    stopPolling();
+  }
 }

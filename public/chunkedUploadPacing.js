@@ -1,3 +1,4 @@
+/* global sendPiece */
 // Keeps a chunked upload (chunkedUpload.js) within the server's limits: pieces shrink after a
 // failure so a slow connection gets one through within the 5-minute request timeout, but never so
 // small that a large file needs more requests than the session's request limit allows, and a 429
@@ -53,4 +54,30 @@ function rateLimitWaitMs(res) {
   var seconds = Number(res.headers && res.headers.get ? res.headers.get('Retry-After') : NaN);
   if (!Number.isFinite(seconds) || seconds <= 0) return DEFAULT_RETRY_AFTER_MS;
   return Math.min(seconds * 1000, MAX_RETRY_AFTER_MS);
+}
+
+/**
+ * Resolves after `ms` milliseconds.
+ * @param {number} ms - How long to wait.
+ * @returns {Promise<void>} Resolves once the time has passed.
+ */
+function delay(ms) {
+  return new Promise(function (resolve) { setTimeout(resolve, ms); });
+}
+
+/**
+ * Sends a piece, waiting out the session's request limit (a 429 says how long) up to
+ * {@link MAX_RATE_LIMIT_WAITS} times instead of failing the upload.
+ * @param {{base: string, id: string, file: File}} upload - The upload.
+ * @param {{offset: number, size: number}} piece - Where the piece starts and its largest size.
+ * @returns {Promise<{received?: number, error?: string}>} As {@link sendPiece}, with a limit
+ *   that never lifts reported as `upload_failed`.
+ */
+async function sendPacedPiece(upload, piece) {
+  for (var waits = 0; ; waits++) {
+    var answer = await sendPiece(upload.base, upload.id, upload.file, piece);
+    if (!answer.retryAfterMs) return answer;
+    if (waits >= MAX_RATE_LIMIT_WAITS) return { error: 'upload_failed' };
+    await delay(answer.retryAfterMs);
+  }
 }

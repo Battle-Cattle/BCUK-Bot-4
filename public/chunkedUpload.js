@@ -1,6 +1,6 @@
 /* global findUploadProgress, nameUploadProgress, showUploadProgress, pollProcessingProgress, newUploadId */
 /* global fileFingerprint, rememberChunkedUpload, handleRunningUpload, errorOutcome, outcomeFromUrl, outcomePath */
-/* global smallerPiece, rateLimitWaitMs, MAX_RATE_LIMIT_WAITS */
+/* global smallerPiece, rateLimitWaitMs, delay, sendPacedPiece, completeChunkedUpload */
 // Chunked, resumable uploads for every web panel upload form (issue #912): registerUploadFormHandler
 // in utils.js hands each upload form to submitChunkedUpload, which sends the chosen file in pieces
 // to the routes `src/web/routes/chunkedUploadRoutes.ts` mounts under the form's `action`.
@@ -22,15 +22,6 @@ var CHUNK_RETRY_BASE_MS = 1000;
  */
 function ChunkedUploadStop(outcome) {
   this.outcome = outcome;
-}
-
-/**
- * Resolves after `ms` milliseconds.
- * @param {number} ms - How long to wait.
- * @returns {Promise<void>} Resolves once the time has passed.
- */
-function delay(ms) {
-  return new Promise(function (resolve) { setTimeout(resolve, ms); });
 }
 
 /**
@@ -135,23 +126,6 @@ async function sendPiece(base, id, file, piece) {
 }
 
 /**
- * Sends a piece, waiting out the session's request limit (a 429 says how long) up to
- * {@link MAX_RATE_LIMIT_WAITS} times instead of failing the upload.
- * @param {{base: string, id: string, file: File}} upload - The upload.
- * @param {{offset: number, size: number}} piece - Where the piece starts and its largest size.
- * @returns {Promise<{received?: number, error?: string}>} As {@link sendPiece}, with a limit
- *   that never lifts reported as `upload_failed`.
- */
-async function sendPacedPiece(upload, piece) {
-  for (var waits = 0; ; waits++) {
-    var answer = await sendPiece(upload.base, upload.id, upload.file, piece);
-    if (!answer.retryAfterMs) return answer;
-    if (waits >= MAX_RATE_LIMIT_WAITS) return { error: 'upload_failed' };
-    await delay(answer.retryAfterMs);
-  }
-}
-
-/**
  * Sends the next piece, retrying a dropped one with backoff (and, from then on, smaller pieces,
  * down to `smallestPiece` in chunkedUploadPacing.js) and resuming from the server's confirmed offset; a
  * piece the server refuses for any other reason ends the upload.
@@ -187,49 +161,6 @@ async function sendAllPieces(upload, progress) {
     var percent = Math.floor((offset / upload.file.size) * 100);
     showUploadProgress(progress, percent, 'Uploading… ' + percent + '%');
     offset = await sendNextPiece(upload, offset);
-  }
-}
-
-/**
- * The form's fields other than its files, for the complete request.
- * @param {HTMLFormElement} form - The upload form.
- * @returns {URLSearchParams} The fields.
- */
-function nonFileFields(form) {
-  var fields = new URLSearchParams();
-  new FormData(form).forEach(function (value, key) {
-    if (typeof value === 'string') fields.append(key, value);
-  });
-  return fields;
-}
-
-/**
- * Completes the upload with the form's other fields, polling processing progress meanwhile.
- * @param {HTMLFormElement} form - The upload form.
- * @param {string} base - The form's upload path (its `action`).
- * @param {string} id - The upload ID.
- * @param {{box: HTMLElement, bar: HTMLProgressElement|null, label: HTMLElement|null}|null} progress - The display.
- * @returns {Promise<{key: string, code: string}|null>} The outcome the server's redirect carries
- *   (null when it didn't redirect or carries none).
- */
-async function completeChunkedUpload(form, base, id, progress) {
-  var progressId = newUploadId();
-  nameUploadProgress(progress, 'Processing progress');
-  showUploadProgress(progress, null, form.dataset.processingLabel || 'Processing…');
-  var stopPolling = pollProcessingProgress(form, progressId, progress);
-  try {
-    var res = await fetch(base + '/' + id + '/complete', {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { 'X-CSRF-Token': (document.body && document.body.dataset.csrfToken) || '', 'X-Upload-Id': progressId },
-      body: nonFileFields(form),
-    });
-    if (res.redirected) return outcomeFromUrl(res.url);
-    // A response that didn't redirect is an error page (e.g. a 403 CSRF or 500) unless it's OK.
-    if (!res.ok) throw new Error('Upload completion failed with HTTP ' + res.status);
-    return null;
-  } finally {
-    stopPolling();
   }
 }
 
