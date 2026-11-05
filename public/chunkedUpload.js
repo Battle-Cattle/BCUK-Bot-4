@@ -1,5 +1,5 @@
 /* global findUploadProgress, nameUploadProgress, showUploadProgress, pollProcessingProgress, newUploadId */
-/* global fileFingerprint, rememberChunkedUpload, handleRunningUpload */
+/* global fileFingerprint, rememberChunkedUpload, handleRunningUpload, errorOutcome, outcomeFromUrl, outcomePath */
 // Chunked, resumable uploads for every web panel upload form (issue #912): registerUploadFormHandler
 // in utils.js hands each upload form to submitChunkedUpload, which sends the chosen file in pieces
 // to the routes `src/web/routes/chunkedUploadRoutes.ts` mounts under the form's `action`.
@@ -19,9 +19,6 @@ var CHUNK_MIN_PIECE_BYTES = 512 * 1024;
 /** Wait before the first retry of a failed piece, doubled for each further one. */
 var CHUNK_RETRY_BASE_MS = 1000;
 
-/** An outcome code the page will put in its URL: lowercase letters, digits and underscores. */
-var OUTCOME_CODE_RE = /^[a-z0-9_]{1,64}$/;
-
 /**
  * Error raised when the server refuses a chunked-upload step, carrying the outcome to show.
  * @param {{key: string, code: string}|null} outcome - The `success`/`error` code for the upload
@@ -30,47 +27,6 @@ var OUTCOME_CODE_RE = /^[a-z0-9_]{1,64}$/;
  */
 function ChunkedUploadStop(outcome) {
   this.outcome = outcome;
-}
-
-/**
- * An error outcome for the upload page.
- * @param {string} code - The error code.
- * @returns {{key: string, code: string}} The outcome.
- */
-function errorOutcome(code) {
-  return { key: 'error', code: code };
-}
-
-/**
- * The outcome a server redirect carries in its `success` or `error` query parameter. The page
- * only ever returns to its own upload page, so nothing else of the redirect's URL is used.
- * @param {string} url - Where the redirect ended up.
- * @returns {{key: string, code: string}|null} Its outcome, or null when it carries none.
- */
-function outcomeFromUrl(url) {
-  try {
-    var params = new URL(url, window.location.href).searchParams;
-    if (params.has('success')) return { key: 'success', code: params.get('success') };
-    if (params.has('error')) return errorOutcome(params.get('error'));
-  } catch {
-    // Not a URL at all: no outcome.
-  }
-  return null;
-}
-
-/**
- * The upload page's URL showing `outcome`: always the page's own path, with a `success` or
- * `error` code that's checked against {@link OUTCOME_CODE_RE} (anything else shows `upload_failed`).
- * @param {string} fallbackPath - The upload page's own path.
- * @param {{key: string, code: string}|null} outcome - What to show, or null for nothing.
- * @returns {string} The path to navigate to.
- */
-function outcomePath(fallbackPath, outcome) {
-  if (!outcome) return fallbackPath;
-  var key = outcome.key === 'success' ? 'success' : 'error';
-  var code = String(outcome.code);
-  if (!OUTCOME_CODE_RE.test(code)) return fallbackPath + '?error=upload_failed';
-  return fallbackPath + '?' + key + '=' + code;
 }
 
 /**
