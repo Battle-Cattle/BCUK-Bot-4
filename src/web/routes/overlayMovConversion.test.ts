@@ -5,6 +5,7 @@ import path from 'path';
 import { mockLogger } from '../../test-utils/loggerMock';
 
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
+vi.mock('../../shared/config', () => ({ OVERLAY_TRANSCODE_TIMEOUT_MINUTES: 30 }));
 vi.mock('./overlayVideoTranscode', () => ({ transcodeToWebm: vi.fn() }));
 
 import { transcodeToWebm } from './overlayVideoTranscode';

@@ -1,5 +1,6 @@
 /* global findUploadProgress, nameUploadProgress, showUploadProgress, pollProcessingProgress, newUploadId */
 /* global fileFingerprint, rememberChunkedUpload, handleRunningUpload, errorOutcome, outcomeFromUrl, outcomePath */
+/* global smallerPiece, rateLimitWaitMs, MAX_RATE_LIMIT_WAITS */
 // Chunked, resumable uploads for every web panel upload form (issue #912): registerUploadFormHandler
 // in utils.js hands each upload form to submitChunkedUpload, which sends the chosen file in pieces
 // to the routes `src/web/routes/chunkedUploadRoutes.ts` mounts under the form's `action`.
@@ -9,12 +10,6 @@ var CHUNK_SEND_ATTEMPTS = 6;
 
 /** Piece size; matches the server's `CHUNK_MAX_BYTES` (8 MB). */
 var CHUNK_PIECE_BYTES = 8 * 1024 * 1024;
-
-/**
- * Smallest piece the page falls back to: each failed piece halves the piece size down to this, so
- * a slow connection still gets a piece through within the server's 5-minute request timeout.
- */
-var CHUNK_MIN_PIECE_BYTES = 512 * 1024;
 
 /** Wait before the first retry of a failed piece, doubled for each further one. */
 var CHUNK_RETRY_BASE_MS = 1000;
@@ -119,8 +114,9 @@ async function confirmedOffset(base, id) {
  * @param {string} id - The upload ID.
  * @param {File} file - The chosen file.
  * @param {{offset: number, size: number}} piece - Where the piece starts and its largest size.
- * @returns {Promise<{received?: number, error?: string}>} The server's answer, or `{}` when
- *   the request failed outright (a dropped connection) or with a server error, to be retried.
+ * @returns {Promise<{received?: number, error?: string, retryAfterMs?: number}>} The server's
+ *   answer; `{}` when the request failed outright (a dropped connection) or with a server error,
+ *   to be retried; or how long to wait when the session's request limit was reached (429).
  */
 async function sendPiece(base, id, file, piece) {
   try {
@@ -130,6 +126,7 @@ async function sendPiece(base, id, file, piece) {
       body: file.slice(piece.offset, piece.offset + piece.size),
     });
     if (res.ok) return await res.json();
+    if (res.status === 429) return { retryAfterMs: rateLimitWaitMs(res) };
     return res.status >= 500 ? {} : await chunkedError(res);
   } catch (err) {
     if (err instanceof ChunkedUploadStop) throw err;
@@ -138,8 +135,25 @@ async function sendPiece(base, id, file, piece) {
 }
 
 /**
+ * Sends a piece, waiting out the session's request limit (a 429 says how long) up to
+ * {@link MAX_RATE_LIMIT_WAITS} times instead of failing the upload.
+ * @param {{base: string, id: string, file: File}} upload - The upload.
+ * @param {{offset: number, size: number}} piece - Where the piece starts and its largest size.
+ * @returns {Promise<{received?: number, error?: string}>} As {@link sendPiece}, with a limit
+ *   that never lifts reported as `upload_failed`.
+ */
+async function sendPacedPiece(upload, piece) {
+  for (var waits = 0; ; waits++) {
+    var answer = await sendPiece(upload.base, upload.id, upload.file, piece);
+    if (!answer.retryAfterMs) return answer;
+    if (waits >= MAX_RATE_LIMIT_WAITS) return { error: 'upload_failed' };
+    await delay(answer.retryAfterMs);
+  }
+}
+
+/**
  * Sends the next piece, retrying a dropped one with backoff (and, from then on, smaller pieces,
- * down to {@link CHUNK_MIN_PIECE_BYTES}) and resuming from the server's confirmed offset; a
+ * down to `smallestPiece` in chunkedUploadPacing.js) and resuming from the server's confirmed offset; a
  * piece the server refuses for any other reason ends the upload.
  * @param {{base: string, id: string, file: File, chunkSize: number}} upload - The upload.
  * @param {number} offset - Where the next piece starts.
@@ -147,13 +161,13 @@ async function sendPiece(base, id, file, piece) {
  */
 async function sendNextPiece(upload, offset) {
   for (var attempt = 0; attempt < CHUNK_SEND_ATTEMPTS; attempt++) {
-    var answer = await sendPiece(upload.base, upload.id, upload.file, { offset: offset, size: upload.chunkSize });
+    var answer = await sendPacedPiece(upload, { offset: offset, size: upload.chunkSize });
     if (typeof answer.received === 'number') return answer.received;
     if (answer.error && answer.error !== 'bad_offset') {
       var code = answer.error === 'not_found' ? 'upload_expired' : answer.error;
       throw new ChunkedUploadStop(errorOutcome(code));
     }
-    if (!answer.error) upload.chunkSize = Math.max(CHUNK_MIN_PIECE_BYTES, Math.floor(upload.chunkSize / 2));
+    if (!answer.error) upload.chunkSize = smallerPiece(upload.chunkSize, upload.file.size);
     await delay(CHUNK_RETRY_BASE_MS * Math.pow(2, attempt));
     var confirmed = await confirmedOffset(upload.base, upload.id);
     if (confirmed !== null && confirmed !== offset) return confirmed;

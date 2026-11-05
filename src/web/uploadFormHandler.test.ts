@@ -5,7 +5,7 @@ import vm from 'vm';
 import { createHash } from 'crypto';
 
 // utils.js plus the chunked uploader's scripts, as the upload pages load them.
-const utilsSource = ['utils.js', 'chunkedUpload.js', 'chunkedUploadResume.js', 'chunkedUploadOutcome.js']
+const utilsSource = ['utils.js', 'chunkedUpload.js', 'chunkedUploadResume.js', 'chunkedUploadOutcome.js', 'chunkedUploadPacing.js']
   .map((name) => fs.readFileSync(path.join(__dirname, '../../public', name), 'utf8'))
   .join('\n');
 const BASE = '/overlay/settings/videos/upload';
@@ -564,5 +564,61 @@ describe('registerUploadFormHandler', () => {
     routeFetch(fetch, { complete: () => redirectTo('https://evil.example/x?error=%22%3E%3Cscript%3E') });
     submit();
     expect(await navigated(assign)).toBe('/overlay/settings?error=upload_failed');
+  });
+
+  it('waits out the session request limit (429) for its Retry-After, then carries on', async () => {
+    const { fetch, submit, assign } = setup();
+    let limited = 0;
+    fetch.mockImplementation((url: string) => {
+      if (url === `${BASE}/start`) return response(200, { id: ID });
+      if (url === `${BASE}/${ID}`) return response(200, { received: 0, size: 6 });
+      if (url.includes('/chunk')) {
+        if (limited++ === 0) return response(429, null, { headers: { get: () => '120' } });
+        return response(200, { received: 6 });
+      }
+      if (url.endsWith('/complete')) return redirectTo(DONE_URL);
+      return response(200, { stage: 'none' });
+    });
+    submit();
+    await vi.advanceTimersByTimeAsync(119_000);
+    expect(fetch.mock.calls.filter(([u]) => String(u).includes('/chunk'))).toHaveLength(1);
+    expect(await navigated(assign)).toBe(DONE_URL);
+    expect(fetch.mock.calls.filter(([u]) => String(u).includes('/chunk'))).toHaveLength(2);
+  });
+
+  it('gives up with upload_failed when the request limit never lifts', async () => {
+    const { fetch, submit, assign } = setup();
+    fetch.mockImplementation((url: string) => {
+      if (url === `${BASE}/start`) return response(200, { id: ID });
+      if (url === `${BASE}/${ID}`) return response(200, { received: 0, size: 6 });
+      return response(429, null, { headers: { get: () => null } });
+    });
+    submit();
+    for (let i = 0; i < 20 && assign.mock.calls.length === 0; i++) await vi.advanceTimersByTimeAsync(60_000);
+    expect(assign).toHaveBeenCalledWith('/overlay/settings?error=upload_failed');
+  });
+
+  it('never shrinks pieces so far that a large file needs more than 300 of them', async () => {
+    const MiB = 1024 * 1024;
+    const file = makeFile(600 * MiB);
+    const { fetch, submit, assign } = setup({ file });
+    let received = 0;
+    let failures = 0;
+    fetch.mockImplementation((url: string) => {
+      if (url === `${BASE}/start`) return response(200, { id: ID });
+      if (url === `${BASE}/${ID}`) return response(200, { received, size: file.size });
+      if (url.includes('/chunk?offset=')) {
+        if (failures++ < 3) return Promise.reject(new TypeError('timed out'));
+        received = file.size;
+        return response(200, { received });
+      }
+      if (url.endsWith('/complete')) return redirectTo(DONE_URL);
+      return response(200, { stage: 'none' });
+    });
+    submit();
+    for (let i = 0; i < 100 && assign.mock.calls.length === 0; i++) await vi.advanceTimersByTimeAsync(1000);
+    const pieces = fetch.mock.calls.filter(([u]) => String(u).includes('/chunk?offset=')).map(([, init]) => init.body.range);
+    // 8 MiB, then 4, then 2: 600 MiB / 300 pieces = 2 MiB is this file's floor.
+    expect(pieces).toEqual([`bytes 0-${8 * MiB}`, `bytes 0-${4 * MiB}`, `bytes 0-${2 * MiB}`, `bytes 0-${2 * MiB}`]);
   });
 });

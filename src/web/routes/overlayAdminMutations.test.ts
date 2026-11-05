@@ -328,6 +328,23 @@ describe('POST /settings/videos/upload', () => {
     expect(vi.mocked(fs.promises.rm)).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`${baseName}\\.webm$`)), { force: true });
   });
 
+  it('refuses to start any upload with upload_busy while the most uploads are already being processed', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    const held = Array.from({ length: MAX_CONCURRENT_OVERLAY_UPLOADS }, () => {
+      const listeners: Record<string, () => void> = {};
+      const res = { redirect: vi.fn(), once: (event: string, cb: () => void) => { listeners[event] = cb; } };
+      void limitConcurrentUploads({} as any, res as any, vi.fn());
+      return listeners;
+    });
+    const res = await uploadRequest(buildApp())
+      .post('/settings/videos/upload')
+      .attach('video', WEBM_BUF, { filename: 'clip.webm', contentType: 'video/webm' });
+    for (const listeners of held) listeners.close?.();
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({ error: 'upload_busy' });
+    expect(vi.mocked(addVideo)).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['a .mov name', { filename: 'clip.mov', contentType: 'application/octet-stream' }],
     ['a video/quicktime type', { filename: 'clip', contentType: 'video/quicktime' }],

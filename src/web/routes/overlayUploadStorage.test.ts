@@ -7,7 +7,7 @@ import { mockLogger } from '../../test-utils/loggerMock';
 vi.mock('../../shared/config', async () => {
   const nodeOs = await import('os');
   const nodePath = await import('path');
-  return { OVERLAY_FOLDER: nodePath.join(nodeOs.tmpdir(), `overlay-upload-${process.pid}-${Date.now()}`) };
+  return { OVERLAY_TRANSCODE_TIMEOUT_MINUTES: 30, OVERLAY_FOLDER: nodePath.join(nodeOs.tmpdir(), `overlay-upload-${process.pid}-${Date.now()}`) };
 });
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 

@@ -213,12 +213,15 @@ const chunkedVideoStore = new ChunkedUploadStore({
 });
 
 /**
- * Turns away a declared MOV with `transcode_busy` when the conversion queue is already full,
- * before any of it is sent.
+ * Turns an upload away before any of it is sent: with `upload_busy` while the most finished
+ * uploads are already being processed (completion checks again, for races), or a declared MOV
+ * with `transcode_busy` while the conversion queue is full.
  * @param declared - The upload's declared name and type.
- * @returns `transcode_busy`, or null to let the upload start.
+ * @returns `upload_busy`, `transcode_busy`, or null to let the upload start.
  */
 function checkChunkedVideoStart(declared: ChunkedUploadDeclaration): string | null {
+  // Turned away now rather than at completion, so the user doesn't send the whole file first.
+  if (activeUploads >= MAX_CONCURRENT_OVERLAY_UPLOADS) return 'upload_busy';
   return declaresMov(declared.name, declared.type) && isWebmTranscodeQueueFull() ? 'transcode_busy' : null;
 }
 
