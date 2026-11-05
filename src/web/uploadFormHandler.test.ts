@@ -551,9 +551,17 @@ describe('registerUploadFormHandler', () => {
   it.each([
     ['another origin', 'https://evil.example/phish'],
     ['a javascript: URL', 'javascript:alert(1)'],
-  ])('never navigates to %s, reporting upload_failed instead', async (_label, url) => {
+    ['a page off the upload page', 'https://bot.example/elsewhere?x=1'],
+  ])('never navigates to %s, only back to the upload page', async (_label, url) => {
     const { fetch, submit, assign } = setup();
     routeFetch(fetch, { complete: () => redirectTo(url) });
+    submit();
+    expect(await navigated(assign)).toBe('/overlay/settings');
+  });
+
+  it('keeps a redirect\'s outcome only when its code is a plain code', async () => {
+    const { fetch, submit, assign } = setup();
+    routeFetch(fetch, { complete: () => redirectTo('https://evil.example/x?error=%22%3E%3Cscript%3E') });
     submit();
     expect(await navigated(assign)).toBe('/overlay/settings?error=upload_failed');
   });

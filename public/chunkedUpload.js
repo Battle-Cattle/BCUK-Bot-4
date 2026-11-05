@@ -19,31 +19,58 @@ var CHUNK_MIN_PIECE_BYTES = 512 * 1024;
 /** Wait before the first retry of a failed piece, doubled for each further one. */
 var CHUNK_RETRY_BASE_MS = 1000;
 
+/** An outcome code the page will put in its URL: lowercase letters, digits and underscores. */
+var OUTCOME_CODE_RE = /^[a-z0-9_]{1,64}$/;
+
 /**
- * Error raised when the server refuses a chunked-upload step, carrying where to send the browser.
- * @param {string} destination - The URL to navigate to.
+ * Error raised when the server refuses a chunked-upload step, carrying the outcome to show.
+ * @param {{key: string, code: string}|null} outcome - The `success`/`error` code for the upload
+ *   page, or null for the page with no message.
  * @returns {void}
  */
-function ChunkedUploadStop(destination) {
-  this.destination = destination;
+function ChunkedUploadStop(outcome) {
+  this.outcome = outcome;
 }
 
 /**
- * The path (with query and hash) of `url` when it's on this page's origin, so the page only ever
- * navigates within the panel: a redirect that ended up elsewhere, or a `javascript:` URL, gives
- * the fallback instead.
- * @param {string} url - Where the upload says to go (a server redirect or an error page).
- * @param {string} fallbackPath - The upload page's own path.
- * @returns {string} A same-origin path to navigate to.
+ * An error outcome for the upload page.
+ * @param {string} code - The error code.
+ * @returns {{key: string, code: string}} The outcome.
  */
-function sameOriginPath(url, fallbackPath) {
+function errorOutcome(code) {
+  return { key: 'error', code: code };
+}
+
+/**
+ * The outcome a server redirect carries in its `success` or `error` query parameter. The page
+ * only ever returns to its own upload page, so nothing else of the redirect's URL is used.
+ * @param {string} url - Where the redirect ended up.
+ * @returns {{key: string, code: string}|null} Its outcome, or null when it carries none.
+ */
+function outcomeFromUrl(url) {
   try {
-    var parsed = new URL(url, window.location.href);
-    if (parsed.origin === window.location.origin) return parsed.pathname + parsed.search + parsed.hash;
+    var params = new URL(url, window.location.href).searchParams;
+    if (params.has('success')) return { key: 'success', code: params.get('success') };
+    if (params.has('error')) return errorOutcome(params.get('error'));
   } catch {
-    // Not a URL at all: fall through to the fallback.
+    // Not a URL at all: no outcome.
   }
-  return fallbackPath + '?error=upload_failed';
+  return null;
+}
+
+/**
+ * The upload page's URL showing `outcome`: always the page's own path, with a `success` or
+ * `error` code that's checked against {@link OUTCOME_CODE_RE} (anything else shows `upload_failed`).
+ * @param {string} fallbackPath - The upload page's own path.
+ * @param {{key: string, code: string}|null} outcome - What to show, or null for nothing.
+ * @returns {string} The path to navigate to.
+ */
+function outcomePath(fallbackPath, outcome) {
+  if (!outcome) return fallbackPath;
+  var key = outcome.key === 'success' ? 'success' : 'error';
+  var code = String(outcome.code);
+  if (!OUTCOME_CODE_RE.test(code)) return fallbackPath + '?error=upload_failed';
+  return fallbackPath + '?' + key + '=' + code;
 }
 
 /**
@@ -57,7 +84,7 @@ function delay(ms) {
 
 /**
  * Sends one chunked-upload request with the CSRF token, turning a redirect (a page-level guard
- * such as `not_a_streamer`) into a {@link ChunkedUploadStop} for its destination.
+ * such as `not_a_streamer`) into a {@link ChunkedUploadStop} with the outcome it carries.
  * @param {string} url - Request URL.
  * @param {RequestInit} init - Fetch options; the CSRF and Accept headers are added.
  * @returns {Promise<Response>} The response, unless it redirected.
@@ -65,7 +92,7 @@ function delay(ms) {
 async function chunkedFetch(url, init) {
   var headers = Object.assign({ 'X-CSRF-Token': (document.body && document.body.dataset.csrfToken) || '', Accept: 'application/json' }, init.headers || {});
   var res = await fetch(url, Object.assign({}, init, { headers: headers, credentials: 'same-origin' }));
-  if (res.redirected) throw new ChunkedUploadStop(res.url);
+  if (res.redirected) throw new ChunkedUploadStop(outcomeFromUrl(res.url));
   return res;
 }
 
@@ -90,11 +117,10 @@ async function chunkedError(res) {
  * upload here, offers once to cancel it and start this one instead.
  * @param {string} base - The form's upload path (its `action`).
  * @param {File} file - The chosen file.
- * @param {string} fallbackPath - Page to return to with an error.
  * @param {boolean} [retried] - True on the start after cancelling another upload (no second offer).
  * @returns {Promise<string>} The upload ID.
  */
-async function startChunkedUpload(base, file, fallbackPath, retried) {
+async function startChunkedUpload(base, file, retried) {
   var fingerprint = await fileFingerprint(file);
   var res = await chunkedFetch(base + '/start', {
     method: 'POST',
@@ -110,9 +136,9 @@ async function startChunkedUpload(base, file, fallbackPath, retried) {
   var running = failure.error === 'upload_busy' && failure.activeId && !retried
     ? await handleRunningUpload(base, file, { activeId: failure.activeId, fingerprint: fingerprint })
     : null;
-  if (running === '') return startChunkedUpload(base, file, fallbackPath, true);
+  if (running === '') return startChunkedUpload(base, file, true);
   if (running) return running;
-  throw new ChunkedUploadStop(fallbackPath + '?error=' + encodeURIComponent(failure.error));
+  throw new ChunkedUploadStop(errorOutcome(failure.error));
 }
 
 /**
@@ -159,7 +185,7 @@ async function sendPiece(base, id, file, piece) {
  * Sends the next piece, retrying a dropped one with backoff (and, from then on, smaller pieces,
  * down to {@link CHUNK_MIN_PIECE_BYTES}) and resuming from the server's confirmed offset; a
  * piece the server refuses for any other reason ends the upload.
- * @param {{base: string, id: string, file: File, chunkSize: number, fallbackPath: string}} upload - The upload.
+ * @param {{base: string, id: string, file: File, chunkSize: number}} upload - The upload.
  * @param {number} offset - Where the next piece starts.
  * @returns {Promise<number>} The confirmed offset after the piece.
  */
@@ -169,19 +195,19 @@ async function sendNextPiece(upload, offset) {
     if (typeof answer.received === 'number') return answer.received;
     if (answer.error && answer.error !== 'bad_offset') {
       var code = answer.error === 'not_found' ? 'upload_expired' : answer.error;
-      throw new ChunkedUploadStop(upload.fallbackPath + '?error=' + encodeURIComponent(code));
+      throw new ChunkedUploadStop(errorOutcome(code));
     }
     if (!answer.error) upload.chunkSize = Math.max(CHUNK_MIN_PIECE_BYTES, Math.floor(upload.chunkSize / 2));
     await delay(CHUNK_RETRY_BASE_MS * Math.pow(2, attempt));
     var confirmed = await confirmedOffset(upload.base, upload.id);
     if (confirmed !== null && confirmed !== offset) return confirmed;
   }
-  throw new ChunkedUploadStop(upload.fallbackPath + '?error=upload_failed');
+  throw new ChunkedUploadStop(errorOutcome('upload_failed'));
 }
 
 /**
  * Sends a file piece by piece from the server's confirmed offset, updating the progress display.
- * @param {{base: string, id: string, file: File, chunkSize: number, fallbackPath: string}} upload - The upload.
+ * @param {{base: string, id: string, file: File, chunkSize: number}} upload - The upload.
  * @param {{box: HTMLElement, bar: HTMLProgressElement|null, label: HTMLElement|null}|null} progress - The display.
  * @returns {Promise<void>} Resolves once every byte is confirmed.
  */
@@ -213,7 +239,8 @@ function nonFileFields(form) {
  * @param {string} base - The form's upload path (its `action`).
  * @param {string} id - The upload ID.
  * @param {{box: HTMLElement, bar: HTMLProgressElement|null, label: HTMLElement|null}|null} progress - The display.
- * @returns {Promise<string>} The page the server redirected to.
+ * @returns {Promise<{key: string, code: string}|null>} The outcome the server's redirect carries
+ *   (null when it didn't redirect or carries none).
  */
 async function completeChunkedUpload(form, base, id, progress) {
   var progressId = newUploadId();
@@ -227,7 +254,7 @@ async function completeChunkedUpload(form, base, id, progress) {
       headers: { 'X-CSRF-Token': (document.body && document.body.dataset.csrfToken) || '', 'X-Upload-Id': progressId },
       body: nonFileFields(form),
     });
-    if (res.redirected) return res.url;
+    if (res.redirected) return outcomeFromUrl(res.url);
     // A response that didn't redirect is an error page (e.g. a 403 CSRF or 500) unless it's OK.
     if (!res.ok) throw new Error('Upload completion failed with HTTP ' + res.status);
     return null;
@@ -242,7 +269,8 @@ async function completeChunkedUpload(form, base, id, progress) {
  * dropped piece from the server's confirmed offset), then completes it with the form's other
  * fields and navigates to the page the server redirected to.
  * @param {HTMLFormElement} form - The upload form.
- * @param {string} fallbackPath - Page to return to without a redirect, or with an error.
+ * @param {string} fallbackPath - The upload page's own path, which the browser returns to with
+ *   the upload's outcome.
  * @returns {Promise<void>} Resolves once the browser has been sent on.
  */
 async function submitChunkedUpload(form, fallbackPath) {
@@ -250,20 +278,20 @@ async function submitChunkedUpload(form, fallbackPath) {
   var input = form.querySelector('input[type="file"]');
   var file = input && input.files && input.files[0];
   var progress = findUploadProgress(form);
-  var destination = fallbackPath + '?error=invalid_file';
+  var outcome = errorOutcome('invalid_file');
   try {
     if (file) {
       nameUploadProgress(progress, 'Upload progress');
       showUploadProgress(progress, 0, 'Uploading… 0%');
-      var id = await startChunkedUpload(base, file, fallbackPath);
-      await sendAllPieces({ base: base, id: id, file: file, chunkSize: CHUNK_PIECE_BYTES, fallbackPath: fallbackPath }, progress);
-      destination = (await completeChunkedUpload(form, base, id, progress)) || fallbackPath;
+      var id = await startChunkedUpload(base, file);
+      await sendAllPieces({ base: base, id: id, file: file, chunkSize: CHUNK_PIECE_BYTES }, progress);
+      outcome = await completeChunkedUpload(form, base, id, progress);
       // Only now: a completion that never reached the server leaves the upload resumable.
       rememberChunkedUpload(base, null);
     }
   } catch (err) {
-    destination = err instanceof ChunkedUploadStop ? err.destination : fallbackPath + '?error=upload_failed';
+    outcome = err instanceof ChunkedUploadStop ? err.outcome : errorOutcome('upload_failed');
   }
   delete form.dataset.submitting;
-  window.location.assign(sameOriginPath(destination, fallbackPath));
+  window.location.assign(outcomePath(fallbackPath, outcome));
 }
