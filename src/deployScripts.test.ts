@@ -21,6 +21,12 @@ const SCRIPT_TEST_TIMEOUT_MS = 30_000;
 
 /** Stub commands, keyed by name. `$STATE` is the state directory. */
 const STUBS: Record<string, string> = {
+  // The real mv, then (with MV_INTERRUPT naming the folder being moved) a TERM to deploy.sh: an
+  // interrupt landing right after the move, before the script can note that it happened.
+  mv: `#!/usr/bin/env bash
+/bin/mv "$@" || exit
+if [ -n "\${MV_INTERRUPT:-}" ] && [ "$1" = "$MV_INTERRUPT" ]; then kill -TERM "$PPID"; sleep 1; fi
+`,
   systemctl: `#!/usr/bin/env bash
 case "$1" in
   cat) exit 0 ;;
@@ -99,7 +105,12 @@ echo "-- dump of $STATE"
   mysql: `#!/usr/bin/env bash
 case "$*" in
   *"FROM schema_migrations"*)
-    [ "\${MYSQL_QUERY_EXIT:-0}" = 0 ] || { echo "ERROR 2003: Can't connect" >&2; exit "$MYSQL_QUERY_EXIT"; }
+    # MYSQL_QUERY_EXIT fails the query; MYSQL_QUERY_FAIL_FROM=N only from the Nth query on (deploy.sh
+    # reads it once before the restart and again after a failed one).
+    queries=$(( $(cat "$STATE/schema-queries" 2>/dev/null || echo 0) + 1 )); echo "$queries" > "$STATE/schema-queries"
+    if [ "\${MYSQL_QUERY_EXIT:-0}" != 0 ] || [ "$queries" -ge "\${MYSQL_QUERY_FAIL_FROM:-999}" ]; then
+      echo "ERROR 2003: Can't connect" >&2; exit "\${MYSQL_QUERY_EXIT:-1}"
+    fi
     cat "$STATE/applied-migrations" 2>/dev/null
     [ -f "$STATE/migration-lock" ] && echo __migration_lock_held__
     exit 0 ;;
@@ -210,6 +221,8 @@ function createSandbox(): Sandbox {
   write(path.join(sandbox.work, 'dist/marker'), 'v1\n');
   write(path.join(sandbox.work, 'node_modules/marker'), 'v1\n');
   write(path.join(state, 'running'), 'v1\n');
+  // The database already records the migration the checkout starts with, as a real one would.
+  write(path.join(state, 'applied-migrations'), '0001_baseline\n');
   return sandbox;
 }
 
@@ -357,9 +370,9 @@ describe.skipIf(onWindows)('deploy.sh', { timeout: SCRIPT_TEST_TIMEOUT_MS }, () 
     expect(failureReport()).toContain('A migration is still running');
   });
 
-  it("assumes a new migration was applied when it can't query schema_migrations, and stops", () => {
+  it("assumes a new migration was applied when it can't query schema_migrations after the restart, and stops", () => {
     pushV2({ migration: true });
-    const result = deploy({ UNHEALTHY_BUILDS: 'v2', MYSQL_QUERY_EXIT: '1' });
+    const result = deploy({ UNHEALTHY_BUILDS: 'v2', MYSQL_QUERY_FAIL_FROM: '2' });
 
     expect(result.status).toBe(1);
     expect(restarts()).toEqual(['v2']);
@@ -437,6 +450,18 @@ describe.skipIf(onWindows)('deploy.sh', { timeout: SCRIPT_TEST_TIMEOUT_MS }, () 
     expect(read(path.join(sandbox.work, 'dist/marker'))).toBe('v1');
   });
 
+  it.each(['node_modules', 'dist'])('puts %s back when an interrupt lands right after moving it aside', (folder) => {
+    const before = workHead();
+    pushV2();
+    const result = deploy({ MV_INTERRUPT: folder });
+
+    expect(result.status).toBe(1);
+    expect(workHead()).toBe(before);
+    expect(read(path.join(sandbox.work, folder, 'marker'))).toBe('v1');
+    expect(fs.existsSync(path.join(sandbox.work, `${folder}.old`))).toBe(false);
+    expect(failureReport()).toContain('the deploy was interrupted');
+  });
+
   it("won't restart onto new migrations without a backup", () => {
     const before = workHead();
     pushV2({ migration: true });
@@ -446,7 +471,34 @@ describe.skipIf(onWindows)('deploy.sh', { timeout: SCRIPT_TEST_TIMEOUT_MS }, () 
     expect(workHead()).toBe(before);
     expect(restarts()).toEqual([]);
     expect(read(path.join(sandbox.work, 'dist/marker'))).toBe('v1');
-    expect(failureReport()).toContain("couldn't back up the database, and this deploy adds migrations (0002_add_thing)");
+    expect(failureReport()).toContain("couldn't back up the database, and this deploy applies migrations (0002_add_thing)");
+  });
+
+  it('treats a migration the database never recorded as new, even when an earlier deploy already pulled it', () => {
+    // An interrupted deploy pulled 0002 (so this deploy's diff is empty) but it was never applied.
+    pushV2({ migration: true });
+    run('git', ['pull', '-q', 'origin', 'main'], sandbox.work);
+    const before = workHead();
+    const result = deploy({ MYSQLDUMP_EXIT: '2' });
+
+    expect(result.status).toBe(1);
+    expect(workHead()).toBe(before);
+    expect(restarts()).toEqual([]);
+    expect(failureReport()).toContain("couldn't back up the database, and this deploy applies migrations (0002_add_thing)");
+  });
+
+  it("requires the backup, and never rolls back automatically, when it can't read the migration state before the restart", () => {
+    pushV2();
+    const noBackup = deploy({ MYSQL_QUERY_EXIT: '1', MYSQLDUMP_EXIT: '2' });
+    expect(noBackup.status).toBe(1);
+    expect(restarts()).toEqual([]);
+    expect(failureReport()).toContain('this deploy applies migrations (unknown which)');
+
+    const unhealthy = deploy({ MYSQL_QUERY_EXIT: '1', UNHEALTHY_BUILDS: 'v2' });
+    expect(unhealthy.status).toBe(1);
+    expect(restarts()).toEqual(['v2']);
+    expect(failureReport()).toContain('NOT rolling back automatically');
+    expect(failureReport()).toContain("Couldn't read schema_migrations before the restart");
   });
 
   it('only warns about a failed backup when the deploy adds no migrations', () => {
@@ -509,6 +561,19 @@ describe.skipIf(onWindows)('backup-db.sh', { timeout: SCRIPT_TEST_TIMEOUT_MS }, 
     expect(left).toContain('bcuk_other-20200101T000000Z.sql.gz');
   });
 
+  it('never prunes the dump it just made, even when it sorts among the oldest', () => {
+    // A dump named for a later second sorts after this one, so with BACKUP_KEEP=1 a plain
+    // "delete the oldest" would delete the dump just made.
+    write(path.join(sandbox.work, '.env'), `DB_USER=bot\nDB_NAME=bcuk\nBACKUP_DIR=${sandbox.backups}\nBACKUP_KEEP=1\n`);
+    write(path.join(sandbox.backups, 'bcuk-29990101T000000Z-1.sql.gz'), 'sorts last');
+    const result = backup();
+
+    expect(result.status).toBe(0);
+    const made = result.stdout.trim().split('\n').pop()!;
+    expect(fs.existsSync(made)).toBe(true);
+    expect(fs.readdirSync(sandbox.backups)).toEqual([path.basename(made)]);
+  });
+
   it('leaves no file behind and fails when mysqldump fails', () => {
     const result = backup([], { MYSQLDUMP_EXIT: '2' });
 
@@ -523,6 +588,16 @@ describe.skipIf(onWindows)('backup-db.sh', { timeout: SCRIPT_TEST_TIMEOUT_MS }, 
     expect(result.status).toBe(0);
     expect(path.basename(result.stdout.trim())).toMatch(/^bcuk_alt-/);
     expect(read(path.join(sandbox.state, 'mysqldump-credentials'))).toContain('user="bot"');
+  });
+
+  it('keeps an escaped quote inside a quoted value, as dotenv does', () => {
+    write(path.join(sandbox.work, '.env'), `DB_USER='it\\'s'\nDB_PASSWORD="p\\"ss" # comment\nDB_NAME=bcuk\nBACKUP_DIR=${sandbox.backups}\n`);
+    expect(backup().status).toBe(0);
+
+    // dotenv reads these as it\'s and p\"ss; the option file escapes each backslash and quote.
+    const credentials = read(path.join(sandbox.state, 'mysqldump-credentials'));
+    expect(credentials).toContain(String.raw`user="it\\'s"`);
+    expect(credentials).toContain(String.raw`password="p\\\"ss"`);
   });
 
   it('rejects a label that could escape the file name', () => {

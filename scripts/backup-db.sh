@@ -63,9 +63,15 @@ PARTIAL=""
 # plain sort is oldest first. The pattern pins the timestamp, so another database whose name
 # starts with this one's (bcuk vs bcuk-test) never has its dumps pruned here.
 mapfile -t DUMPS < <(find "$BACKUP_DIR" -maxdepth 1 -type f -name "${DB_NAME}-[0-9]*T[0-9]*Z*.sql.gz" -printf '%f\n' | sort)
+# The dump just made is never pruned, even where the sort puts it among the oldest (two dumps in the
+# same second compare their process IDs as text).
 EXCESS=$(( ${#DUMPS[@]} - BACKUP_KEEP ))
-for (( i = 0; i < EXCESS; i++ )); do
-    rm -f "$BACKUP_DIR/${DUMPS[$i]}"
+REMOVED=0
+for dump in "${DUMPS[@]}"; do
+    [ "$REMOVED" -lt "$EXCESS" ] || break
+    [ "$dump" = "${FILE##*/}" ] && continue
+    rm -f "$BACKUP_DIR/$dump"
+    REMOVED=$((REMOVED + 1))
 done
 
 echo "$FILE"

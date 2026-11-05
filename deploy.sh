@@ -86,6 +86,10 @@ SWAPPED=0
 # Set once this deploy has moved the previous node_modules aside (to node_modules.old) for a clean
 # install, so rollback can put it back instead of reinstalling the old dependencies.
 MOVED_NODE_MODULES=0
+# Set just before each of those moves starts, so an interrupt that lands mid-move (after the mv, but
+# before the flag after it) is still undone when the folder it moved is the only copy left.
+MOVING_NODE_MODULES=0
+MOVING_DIST=0
 # Set once the service has been restarted onto the new build. From then on, rolling back also means
 # restarting onto the previous build and checking that it comes up.
 RESTARTED=0
@@ -162,6 +166,10 @@ applied_migration_versions() {
 MIGRATION_CHECK_NOTE=""
 new_migrations_were_applied() {
     local applied version
+    if [ "$MIGRATION_STATE_UNKNOWN" -eq 1 ]; then
+        MIGRATION_CHECK_NOTE="Couldn't read schema_migrations before the restart, so it's unknown which migrations this build applies; assuming it applied some."
+        return 0
+    fi
     [ -n "$NEW_MIGRATIONS" ] || return 1
     if ! applied="$(applied_migration_versions 2>&1)"; then
         MIGRATION_CHECK_NOTE="Couldn't read schema_migrations to check (${applied:-no output}), so assuming they were applied."
@@ -291,10 +299,16 @@ rollback() {
     if [ "$SWAPPED" -eq 1 ]; then
         restore_step rm -rf dist
         if [ -d dist.old ]; then restore_step mv dist.old dist; fi
+    elif [ "$MOVING_DIST" -eq 1 ] && [ ! -e dist ] && [ -d dist.old ]; then
+        # Interrupted right after moving the previous build aside: put it back.
+        restore_step mv dist.old dist
     fi
     if [ "$MOVED_NODE_MODULES" -eq 1 ]; then
         restore_step rm -rf node_modules
         if [ -d node_modules.old ]; then restore_step mv node_modules.old node_modules; fi
+    elif [ "$MOVING_NODE_MODULES" -eq 1 ] && [ ! -e node_modules ] && [ -d node_modules.old ]; then
+        # Interrupted right after moving the previous dependencies aside: put them back.
+        restore_step mv node_modules.old node_modules
     fi
     restore_step git reset -q --hard "$PREVIOUS_SHA"
 
@@ -354,9 +368,32 @@ git pull origin main
 NEW_SHORT=$(git rev-parse --short HEAD)
 # Migration versions (file names without .sql) this deploy adds (or renames), if any. Decides whether the database
 # backup before the restart is required, and whether a failed restart can still be rolled back.
+# record_unapplied_migrations adds any the database doesn't record yet just before the restart.
 NEW_MIGRATIONS="$(git diff --name-only --diff-filter=AR "$PREVIOUS_SHA" HEAD -- 'migrations/*.sql' \
     | sed -e 's|^migrations/||' -e 's|\.sql$||' | tr '\n' ' ')"
 NEW_MIGRATIONS="${NEW_MIGRATIONS% }"
+# Set when the database's migration state couldn't be read before the restart: the backup is then
+# required, and a failed restart is never rolled back automatically.
+MIGRATION_STATE_UNKNOWN=0
+
+# Adds to NEW_MIGRATIONS every migration file in the checkout that schema_migrations doesn't record
+# yet. The diff above misses those when an earlier, interrupted deploy already pulled them (HEAD has
+# moved on, so this deploy's diff is empty) but they were never applied. Sets MIGRATION_STATE_UNKNOWN
+# when the database can't be read.
+record_unapplied_migrations() {
+    local recorded file version
+    if ! recorded="$(applied_migration_versions 2>&1)"; then
+        MIGRATION_STATE_UNKNOWN=1
+        echo "WARNING: Couldn't read the database's migration state (${recorded:-no output}); treating this deploy as one that migrates."
+        return
+    fi
+    for file in migrations/*.sql; do
+        [ -e "$file" ] || continue
+        version="$(basename "$file" .sql)"
+        printf '%s\n' "$recorded" | grep -qxF "$version" && continue
+        case " $NEW_MIGRATIONS " in *" $version "*) ;; *) NEW_MIGRATIONS="${NEW_MIGRATIONS:+$NEW_MIGRATIONS }$version" ;; esac
+    done
+}
 
 # Any failing command from here on rolls the deploy back (see rollback), recording which one failed.
 # So does Ctrl-C or a TERM: an interrupted deploy must not leave a half-swapped checkout behind
@@ -411,6 +448,7 @@ else
     # put the previous dependencies straight back rather than reinstalling them (no network needed).
     rm -rf node_modules.old  # Left over from an interrupted deploy.
     if [ -d node_modules ]; then
+        MOVING_NODE_MODULES=1
         mv node_modules node_modules.old
         MOVED_NODE_MODULES=1
     fi
@@ -472,7 +510,10 @@ git checkout -- package-lock.json
 
 echo "==> Swapping in the new build..."
 rm -rf dist.old  # Left over from an interrupted deploy.
-if [ -d dist ]; then mv dist dist.old; fi
+if [ -d dist ]; then
+    MOVING_DIST=1
+    mv dist dist.old
+fi
 SWAPPED=1
 mv "$BUILD_DIR" dist
 # dist.old (and node_modules.old, if the dependencies changed) stay until the new build has proved
@@ -567,14 +608,16 @@ if [ -n "$DEBUG_HOURS" ]; then
     echo "==> Debug logging will be on for ${DEBUG_HOURS}h from the restart (logs/debug-YYYY-MM-DD.log)."
 fi
 
+record_unapplied_migrations
+
 # A dump from just before the restart is the way back if the new build's migrations go wrong, so it
-# is required when this deploy adds migrations. Otherwise a failed backup only warns.
+# is required when this deploy applies migrations (or might). Otherwise a failed backup only warns.
 echo "==> Backing up the database..."
 if BACKUP_OUTPUT="$(bash scripts/backup-db.sh pre-deploy)"; then
     BACKUP_FILE="$(printf '%s\n' "$BACKUP_OUTPUT" | tail -n 1)"
     echo "    Saved $BACKUP_FILE"
-elif [ -n "$NEW_MIGRATIONS" ]; then
-    FAILURE_REASON="couldn't back up the database, and this deploy adds migrations ($NEW_MIGRATIONS); not restarting without a backup"
+elif [ -n "$NEW_MIGRATIONS" ] || [ "$MIGRATION_STATE_UNKNOWN" -eq 1 ]; then
+    FAILURE_REASON="couldn't back up the database, and this deploy applies migrations (${NEW_MIGRATIONS:-unknown which}); not restarting without a backup"
     rollback
 else
     echo "WARNING: Couldn't back up the database (see above). Continuing, since this deploy adds no migrations."

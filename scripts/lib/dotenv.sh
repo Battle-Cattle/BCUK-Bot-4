@@ -2,18 +2,22 @@
 
 # Prints a setting from $ENV_FILE the way dotenv reads it: an optional `export ` prefix and spaces
 # around `=` are allowed; last entry wins; a quoted value is taken up to its closing quote (so a
-# `#` inside it stays); an unquoted one ends at the first `#` and loses surrounding spaces. Prints nothing for no entry (grep finding nothing must not trip
+# `#` inside it stays, and so does an escaped quote); an unquoted one ends at the first `#` and loses
+# surrounding spaces. Prints nothing for no entry (grep finding nothing must not trip
 # pipefail) or a blank one.
 env_setting() {
     local value
     value="$( { grep -E "^[[:space:]]*(export[[:space:]]+)?$1[[:space:]]*=" "$ENV_FILE" 2>/dev/null || true; } \
         | tail -n 1 | cut -d= -f2-)"
     value="${value#"${value%%[![:space:]]*}"}"
-    case "$value" in
-        \"*) value="${value#\"}"; value="${value%%\"*}" ;;
-        \'*) value="${value#\'}"; value="${value%%\'*}" ;;
-        *) value="${value%%#*}"; value="${value%"${value##*[![:space:]]}"}" ;;
-    esac
+    # A quoted value runs to the first quote not escaped with a backslash, and keeps the escape, as
+    # dotenv does (`"p\"ss"` is `p\"ss`). One with no closing quote is read as unquoted, quote and all.
+    local double_quoted='^"((\\"|[^"])*)"' single_quoted="^'((\\\\'|[^'])*)'"
+    if [[ $value =~ $double_quoted || $value =~ $single_quoted ]]; then
+        value="${BASH_REMATCH[1]}"
+    else
+        value="${value%%#*}"; value="${value%"${value##*[![:space:]]}"}"
+    fi
     printf '%s' "$value"
 }
 
