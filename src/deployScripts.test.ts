@@ -44,7 +44,9 @@ case "$1" in
   status) echo "bcuk-bot.service - stub (running $(cat "$STATE/running" 2>/dev/null))" ;;
   restart)
     cat dist/marker > "$STATE/running"
-    echo "$(cat dist/marker)" >> "$STATE/restarts" ;;
+    echo "$(cat dist/marker)" >> "$STATE/restarts"
+    # Whether the rollback's migration lock was held while the service restarted.
+    if [ -f "$STATE/lock-held" ]; then echo held; else echo free; fi >> "$STATE/restart-lock" ;;
 esac
 `,
   sudo: `#!/usr/bin/env bash
@@ -104,6 +106,22 @@ echo "-- dump of $STATE"
 `,
   mysql: `#!/usr/bin/env bash
 case "$*" in
+  *"--unbuffered"*)
+    # The rollback's lock session: statements on stdin, one answer each. GET_LOCK fails while
+    # migration-lock exists (another session holds it); MYSQL_LOCK_EXIT makes the database
+    # unreachable; LOCK_SESSION_DROP drops the session at the "still held?" check.
+    while read -r statement; do
+      case "$statement" in
+        *GET_LOCK*)
+          [ -n "\${MYSQL_LOCK_EXIT:-}" ] && exit "$MYSQL_LOCK_EXIT"
+          if [ -f "$STATE/migration-lock" ]; then echo 0; else : > "$STATE/lock-held"; echo 1; fi ;;
+        *IS_USED_LOCK*)
+          [ -n "\${LOCK_SESSION_DROP:-}" ] && { rm -f "$STATE/lock-held"; exit 1; }
+          echo 1 ;;
+      esac
+    done
+    rm -f "$STATE/lock-held"
+    exit 0 ;;
   *"FROM schema_migrations"*)
     # MYSQL_QUERY_EXIT fails the query; MYSQL_QUERY_FAIL_FROM=N only from the Nth query on (deploy.sh
     # reads it once before the restart and again after a failed one).
@@ -355,6 +373,41 @@ describe.skipIf(onWindows)('deploy.sh', { timeout: SCRIPT_TEST_TIMEOUT_MS }, () 
     expect(workHead()).toBe(before);
     expect(restarts()).toEqual(['v2', 'v1']);
     expect(failureReport()).toContain('Rolled back');
+    // The rollback held the migration lock through its restart, so nothing could start migrating
+    // between its check and the failed build being stopped, and released it afterwards.
+    expect(read(path.join(sandbox.state, 'restart-lock')).split('\n')).toEqual(['free', 'held']);
+    expect(fs.existsSync(path.join(sandbox.state, 'lock-held'))).toBe(false);
+  });
+
+  it("stops instead of rolling back when it can't take the migration lock", () => {
+    pushV2({ migration: true });
+    const result = deploy({ UNHEALTHY_BUILDS: 'v2', MYSQL_LOCK_EXIT: '1' });
+
+    expect(result.status).toBe(1);
+    expect(restarts()).toEqual(['v2']);
+    expect(failureReport()).toContain('NOT rolling back automatically');
+    expect(failureReport()).toContain("Couldn't take the bcuk_bot_migrations lock");
+  });
+
+  it('restores the files but does not restart when the lock session drops before the restart', () => {
+    const before = workHead();
+    pushV2({ migration: true });
+    const result = deploy({ UNHEALTHY_BUILDS: 'v2', LOCK_SESSION_DROP: '1' });
+
+    expect(result.status).toBe(1);
+    expect(workHead()).toBe(before);
+    expect(read(path.join(sandbox.work, 'dist/marker'))).toBe('v1');
+    expect(restarts()).toEqual(['v2']);
+    expect(failureReport()).toContain('ROLLBACK INCOMPLETE: lost the bcuk_bot_migrations lock');
+  });
+
+  it("doesn't take the migration lock when the deploy adds no migrations", () => {
+    pushV2();
+    const result = deploy({ UNHEALTHY_BUILDS: 'v2' });
+
+    expect(result.status).toBe(1);
+    expect(restarts()).toEqual(['v2', 'v1']);
+    expect(read(path.join(sandbox.state, 'restart-lock')).split('\n')).toEqual(['free', 'free']);
   });
 
   it('stops instead of rolling back while a migration is still running', () => {
