@@ -4,9 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-// deploy.sh and scripts/install-systemd-service.sh each read .env with their own copy of
-// env_setting, which must parse a line the way dotenv (and so the bot) does. These tests lift the
-// function, and deploy.sh's health-URL block, out of the scripts and run them against sample files.
+// deploy.sh, the systemd installer and the backup scripts all read .env with env_setting from
+// scripts/lib/dotenv.sh, which must parse a line the way dotenv (and so the bot) does. These tests
+// run it, and deploy.sh's health-URL block, against sample files.
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const onWindows = process.platform === 'win32';
@@ -41,8 +41,8 @@ function run(env: string, blocks: string[], body: string): string {
   return result.stdout;
 }
 
-describe.skipIf(onWindows).each(['deploy.sh', 'scripts/install-systemd-service.sh'])('env_setting in %s', (script) => {
-  const envSetting = () => scriptBlock(script, 'env_setting() {', /^}$/);
+describe.skipIf(onWindows)('env_setting in scripts/lib/dotenv.sh', () => {
+  const envSetting = () => `ENV_FILE=.env\n${scriptBlock('scripts/lib/dotenv.sh', 'env_setting() {', /^}$/)}`;
 
   it.each([
     ['NAME=plain', 'plain'],
@@ -68,9 +68,10 @@ describe.skipIf(onWindows).each(['deploy.sh', 'scripts/install-systemd-service.s
 
 describe.skipIf(onWindows)('deploy.sh health URL', () => {
   const blocks = () => [
-    scriptBlock('deploy.sh', 'env_setting() {', /^}$/),
-    scriptBlock('deploy.sh', 'trim() {', /^}$/),
-    scriptBlock('deploy.sh', '# Blank or missing values fall back', /^HEALTH_URL=/),
+    'ENV_FILE=.env',
+    scriptBlock('scripts/lib/dotenv.sh', 'env_setting() {', /^}$/),
+    scriptBlock('scripts/lib/dotenv.sh', 'trim() {', /^}$/),
+    scriptBlock('deploy.sh', 'WEB_PORT_SETTING=', /^HEALTH_URL=/),
   ];
 
   it.each([

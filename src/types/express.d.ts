@@ -1,6 +1,7 @@
 import 'express-session';
 import 'express-serve-static-core';
 import { AccessLevel } from '../db';
+import type { UploadedFile } from '../web/uploadedFile';
 
 /** A guild the logged-in user may act in, shown in the guild switcher. */
 export interface SessionGuildSummary {
@@ -72,6 +73,8 @@ declare module 'express-serve-static-core' {
      *  requireCompanionKey — lets a handler re-verify the exact credential later, not just
      *  whether the Discord ID has some active token. */
     companionTokenHash?: string;
+    /** The finished chunked upload, set by the chunked-upload complete route (see `chunkedUploadRoutes.ts`). */
+    file?: UploadedFile;
   }
 }
 

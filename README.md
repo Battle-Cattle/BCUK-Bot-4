@@ -36,7 +36,7 @@ bash scripts/install-systemd-service.sh
 
 This installs and enables the unit from `deploy/bcuk-bot.service`, filled in with your user, this checkout's path and your `node`. It also adds a sudoers rule allowing that user to run `systemctl restart bcuk-bot` and nothing else. It doesn't start the service: stop any copy still running elsewhere first (for example in an old `screen` session), then run `sudo systemctl start bcuk-bot`.
 
-The unit is sandboxed (`ProtectSystem=strict`, `ProtectHome=tmpfs`, `NoNewPrivileges` and friends; see `deploy/bcuk-bot.service`). Every home directory is hidden from the bot, so it can't read the account's other files (SSH keys, credentials, other projects). Only the checkout and the Node install it runs are put back, read-only. It can only write to `logs/`, the three upload folders (`OVERLAY_FOLDER`, `ALERT_ASSETS_FOLDER`, `SFX_FOLDER`), and its own private `/tmp` and `/var/tmp` (`PrivateTmp`, emptied when the service stops). The installer reads those folders from `.env` (set them there, not in a systemd drop-in, which the installer can't see), creates them, and writes them into the unit's `BindPaths`. Re-run it after changing any of them, after moving the checkout or switching to a different Node install, or the bot will fail to start or fail its writes there. Anything the bot needs from a home directory must be inside the checkout: a symlink from it to elsewhere in a home directory won't resolve. `systemd-analyze security bcuk-bot` shows what the sandbox covers.
+The unit is sandboxed (`ProtectSystem=strict`, `ProtectHome=tmpfs`, `NoNewPrivileges` and friends; see `deploy/bcuk-bot.service`). Every home directory is hidden from the bot, so it can't read the account's other files (SSH keys, credentials, other projects). Only the checkout and the Node install it runs are put back, read-only. It can only write to `logs/`, the three upload folders (`OVERLAY_FOLDER`, `ALERT_ASSETS_FOLDER`, `SFX_FOLDER`), `UPLOAD_INCOMING_FOLDER` (where chunked uploads are assembled), and its own private `/tmp` and `/var/tmp` (`PrivateTmp`, emptied when the service stops). The installer reads those folders from `.env` (set them there, not in a systemd drop-in, which the installer can't see), creates them, and writes them into the unit's `BindPaths`. Re-run it after changing any of them, after moving the checkout or switching to a different Node install, or the bot will fail to start or fail its writes there. Anything the bot needs from a home directory must be inside the checkout: a symlink from it to elsewhere in a home directory won't resolve. `systemd-analyze security bcuk-bot` shows what the sandbox covers.
 
 The unit keeps running the `node` it was installed with, so after upgrading Node, re-run `bash scripts/install-systemd-service.sh` (it rewrites the unit with the `node` now on your `PATH`) and then deploy. `deploy.sh` checks that the service's `node` meets `engines` in `package.json` and stops before installing anything if it doesn't.
 
@@ -44,11 +44,18 @@ The unit keeps running the `node` it was installed with, so after upgrading Node
 
 1. Pulls the latest code.
 2. Builds and tests it.
-3. Swaps the new build in.
-4. Restarts the service.
-5. Waits up to 90 seconds for `GET /healthz` on the web panel to answer from the service's own process.
+3. Swaps the new build in, keeping the previous one (and, if the dependencies changed, the previous `node_modules`) beside it.
+4. Backs up the database (see [Backups](#backups)).
+5. Restarts the service.
+6. Waits up to 90 seconds for `GET /healthz` on the web panel to answer from the service's own process, then 30 more to check it stays up: the same process, no restarts, still answering.
 
-If the bot doesn't come back up, the deploy fails and prints the service status and its last 50 log lines. It also fails straight away if another process holds the web port, such as a copy still running in an old `screen` session. The health check needs `curl` and `ss` (from iproute2).
+If any step fails, the deploy rolls back: the previous code, build and dependencies go back in place and, if the service had already restarted, it restarts onto the previous build and checks that comes up. It then prints a report, also saved to `logs/last-deploy-failure.log`: what failed, the command, both commits, the service status and its log since the restart, and whether the rolled-back bot is healthy. A failed rollback says so in capitals: the bot is down.
+
+A deploy cut off outright (a power cut, or `kill -9`) gets no rollback, and can leave the previous build or dependencies only in `dist.old/` or `node_modules.old/`. The next deploy checks for that before deleting anything: it moves a `.old` copy back when the folder it came from is missing, or incomplete while the copy is complete (no `dist/index.js`, or no `node_modules/.package-lock.json`, which npm writes once an install finishes).
+
+One case doesn't roll back automatically: a failed restart in a deploy that brings new database migrations (or whose migration state the deploy can't read). By then the new build has usually run them. The previous build refuses to start against a database that records migrations it doesn't know, and a migration that failed part way leaves its earlier statements applied without recording it, which the deploy can't detect. So the deploy leaves the new build in place and prints the commands to go back by hand, starting with restoring the backup it took just before the restart, along with what `schema_migrations` records and whether a migration is still running. Fixing forward is usually quicker.
+
+The backup is required when a deploy adds migrations; otherwise a failed backup only warns. The health check needs `curl` and `ss` (from iproute2); the backup needs `mysqldump`, and the migration check `mysql` (both from `mysql-client`).
 
 Day to day:
 
@@ -90,6 +97,37 @@ The web panel serves uploaded files straight from disk: overlay videos from `OVE
 - Make these folders owned and writable **only** by the user the bot runs as (e.g. `chown -R bot:bot <folder> && chmod -R go-w <folder>`). Anyone else who can write there could plant a symlink to a file outside the folder and race the check.
 - Don't point them at a shared or world-writable location (e.g. `/tmp`), and don't nest one inside a directory other users can write to.
 - Keep them outside the repo checkout and away from `.env` and other secrets.
+- The same applies to `UPLOAD_INCOMING_FOLDER`, where SFX and alert uploads are assembled before they're checked (overlay videos use `OVERLAY_FOLDER/.incoming`).
+
+### Uploads and reverse proxies
+
+Every web panel upload is sent as a chunked, resumable upload: the page sends the file in 8 MB pieces, each its own short request, and re-sends a piece that fails from the last one the server confirmed. A reverse proxy in front of the panel therefore only needs a request body limit above one piece (say 10 MB, e.g. nginx `client_max_body_size 10m;`), whatever the largest file is. Each piece is a short request, but completing a MOV overlay upload waits for its conversion to WebM, which can take up to `OVERLAY_TRANSCODE_TIMEOUT_MINUTES` (30 by default), longer if other conversions are queued, so give the proxy a read timeout comfortably above that for the panel (nginx: e.g. `proxy_read_timeout 3600s;`; its default is 60 seconds). The page sends smaller pieces after a piece fails, so slow connections still get through within Node's default 5-minute request timeout. Each user can have one upload in progress per upload area at a time, and each area holds a limited number of unfinished uploads across all users (3 for overlay videos); an upload with no new piece for an hour is abandoned and its pieces are removed. Starting a different file while one is unfinished asks whether to cancel the unfinished one.
+
+### Backups
+
+`bash scripts/backup-db.sh [label]` dumps the database (`mysqldump --single-transaction`, which doesn't lock the running bot out) to a gzipped file in `BACKUP_DIR` (default `~/bcuk-bot-backups`) and deletes the oldest beyond `BACKUP_KEEP` (default 14). `deploy.sh` runs it with the label `pre-deploy` before every restart. Every dump of the database counts towards `BACKUP_KEEP`, whatever its label (nightly, `pre-deploy`, `pre-restore`), so a run of deploys can push older nightly dumps out sooner than the cron schedule suggests: raise `BACKUP_KEEP` if you deploy often, or copy the dumps you want to keep elsewhere. Dumps hold the tables, views, stored routines and triggers, but not Event Scheduler events: the bot doesn't use them, and dumping them needs the `EVENT` privilege, so add any you create yourself again after a restore. For a nightly backup too, add a cron entry for the bot's user (`crontab -e`):
+
+```
+17 4 * * * cd /path/to/BCUK-Bot-4 && bash scripts/backup-db.sh nightly > /dev/null
+```
+
+Treat dumps as secrets: they hold every stored OAuth token, encrypted with `EVENTSUB_TOKEN_SECRET`, and the directory and files are created readable by the bot's user only. Back up separately, and somewhere other than this server:
+
+- **`.env`**, above all `EVENTSUB_TOKEN_SECRET` (without it, restored tokens can't be decrypted and every streamer has to reconnect) and `SESSION_SECRET`.
+- **The upload folders** (`OVERLAY_FOLDER`, `ALERT_ASSETS_FOLDER`, `SFX_FOLDER`), which the database rows point at, e.g. `tar czf uploads-$(date +%F).tar.gz <folders>`.
+- **The dumps themselves**: a copy on the same disk doesn't survive losing the disk.
+
+**Restoring.** `bash scripts/restore-db.sh <dump.sql.gz>` replaces the live database. It refuses while the service is running and asks you to type the database name to confirm. Before it changes anything it saves the current data as a `pre-restore` dump (and stops if that fails; a database that is empty or doesn't exist yet, as on a rebuilt server, has nothing to save and skips this); it prints the file's path, which you can restore the same way to undo it:
+
+```bash
+sudo systemctl stop bcuk-bot
+bash scripts/restore-db.sh ~/bcuk-bot-backups/<file>.sql.gz
+sudo systemctl start bcuk-bot
+```
+
+**Test a backup** now and then by restoring it into a scratch database, which leaves the live one alone: `bash scripts/restore-db.sh <file> bcuk_restore_test`. If that database already has tables (a name reused or mistyped), it asks you to type the name first, since restoring drops them all. Then check it looks right, logging in as the bot's database user (`DB_HOST`, `DB_PORT` and `DB_USER` in `.env`, with 3306 for an unset port; `-p` asks for `DB_PASSWORD`): `mysql -h <DB_HOST> -P <DB_PORT> -u <DB_USER> -p bcuk_restore_test -e 'SELECT COUNT(*) FROM user; SELECT version FROM schema_migrations'`. Drop it afterwards the same way: `mysql -h <DB_HOST> -P <DB_PORT> -u <DB_USER> -p -e 'DROP DATABASE bcuk_restore_test'`. The bot's MySQL user needs the `CREATE` and `DROP` privileges on that database. On a server that ignores the case of database names (`lower_case_table_names` set), a name differing from `DB_NAME` only in case is the live database, and gets the live checks.
+
+The backup and restore scripts, and `deploy.sh`'s migration check, read the database settings from `.env`. If a `DB_` setting is also exported in your shell with a different value, they stop: a bot started from that shell would use the exported value, since dotenv doesn't override exported variables.
 
 The web panel must only be reachable through the reverse proxy. It trusts exactly one `X-Forwarded-For` hop (`trust proxy: 1`, for Caddy), so a client that can reach `WEB_PORT` directly can set that header itself, pick its own `req.ip` and get round the IP-keyed rate limiters. The panel binds to `WEB_HOST`, which defaults to `127.0.0.1`; if Caddy runs on another host or in a container, set `WEB_HOST` to the private interface it connects through, and keep `WEB_PORT` firewalled from the internet either way.
 

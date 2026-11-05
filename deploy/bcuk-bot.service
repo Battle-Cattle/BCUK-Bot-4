@@ -42,7 +42,8 @@ ProtectHome=tmpfs
 # home directory. The installer fills these in.
 BindReadOnlyPaths=__READONLY_PATHS__
 # Read-write: everywhere the bot writes at runtime, logs/ (log files and the debug-logging state
-# file) and the three upload folders (MOV-to-WebM conversion writes its temporary files there too).
+# file), the three upload folders (MOV-to-WebM conversion writes its temporary files there too) and
+# UPLOAD_INCOMING_FOLDER, where chunked uploads are assembled.
 # The installer fills these in from .env and creates them; `-` keeps a missing one from stopping the
 # service.
 BindPaths=__WRITABLE_PATHS__

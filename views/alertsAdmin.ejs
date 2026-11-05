@@ -13,6 +13,10 @@
         invalid_file:       'No valid file was uploaded, or the file type is not supported.',
         invalid_message:    'The on-screen message cannot be blank.',
         upload_failed:      'Upload failed — please try again.',
+        upload_busy: 'Another upload is already in progress. Try again once it finishes.',
+        upload_incomplete: 'The upload did not finish arriving — please try again.',
+        upload_expired: 'The upload expired before it finished — please try again.',
+        invalid_upload: 'No valid file was chosen.',
         delete_failed:      'Delete failed — please try again.',
         save_failed:        'Failed to save — please try again.',
         invalid_path:       'Invalid request.',
@@ -148,6 +152,10 @@
   </main>
 
   <%- include('partials/page-end') %>
+  <script src="/chunkedUpload.js"></script>
+  <script src="/chunkedUploadResume.js"></script>
+  <script src="/chunkedUploadOutcome.js"></script>
+  <script src="/chunkedUploadPacing.js"></script>
   <script src="/alertsAdmin.js"></script>
 </body>
 </html>

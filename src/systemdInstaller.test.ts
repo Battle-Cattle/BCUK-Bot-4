@@ -36,6 +36,8 @@ beforeEach(() => {
   fs.mkdirSync(path.join(repo, 'deploy'), { recursive: true });
   fs.mkdirSync(state);
   fs.copyFileSync(path.join(REPO_ROOT, 'scripts/install-systemd-service.sh'), path.join(repo, 'scripts/install-systemd-service.sh'));
+  fs.mkdirSync(path.join(repo, 'scripts/lib'));
+  fs.copyFileSync(path.join(REPO_ROOT, 'scripts/lib/dotenv.sh'), path.join(repo, 'scripts/lib/dotenv.sh'));
   fs.copyFileSync(path.join(REPO_ROOT, 'deploy/bcuk-bot.service'), path.join(repo, 'deploy/bcuk-bot.service'));
   fs.writeFileSync(path.join(repo, 'package.json'), JSON.stringify({ engines: { node: '>=1.0.0' } }));
   const stubs = path.join(root, 'stubs');
@@ -82,7 +84,7 @@ describe.skipIf(onWindows)('install-systemd-service.sh', () => {
     expect(setting(unit, 'ProtectSystem')).toBe('strict');
     expect(setting(unit, 'BindReadOnlyPaths')).toBe(`"${repo}" "${nodePrefix}"`);
     expect(setting(unit, 'BindPaths')).toBe(
-      `"-${repo}/logs" "-${videos}" "-${repo}/alert-assets" "-${repo}/my-sfx"`,
+      `"-${repo}/logs" "-${videos}" "-${repo}/alert-assets" "-${repo}/my-sfx" "-${repo}/upload-incoming"`,
     );
     // ReadWritePaths can't reach under the hidden /home; everything writable is a bind instead.
     expect(setting(unit, 'ReadWritePaths')).toBeUndefined();

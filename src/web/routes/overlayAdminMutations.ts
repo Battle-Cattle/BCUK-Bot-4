@@ -1,6 +1,5 @@
 import { createLogger } from '../../shared/logger';
 import { Router, type NextFunction, type Request, type Response } from 'express';
-import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { randomUUID } from 'crypto';
@@ -12,22 +11,26 @@ import { OVERLAY_FOLDER, OVERLAY_MAX_FILE_MB } from '../../shared/config';
 import { parsePositiveIntId } from './validation';
 import { requireStreamer } from './viewHelpers';
 import { logAndRedirectError } from './errorHandling';
-import { createMulterErrorRedirectHandler, makeUploadMiddleware, makeRequireStreamerBeforeUpload } from './uploadMiddleware';
+import { makeRequireStreamerBeforeUpload } from './uploadMiddleware';
+import type { UploadedFile } from '../uploadedFile';
+import { ChunkedUploadStore } from '../chunkedUploadStore';
+import type { ChunkedUploadDeclaration } from '../chunkedUploadDeclaration';
+import { mountChunkedUploadRoutes } from './chunkedUploadRoutes';
 import { safeResolve } from '../../shared/pathUtils';
 import { NOT_A_STREAMER_REDIRECT } from './overlayAdminShared';
 import { storeMovAsWebm } from './overlayMovConversion';
 import { isWebmTranscodeQueueFull, type ProgressListener } from './overlayVideoTranscode';
 import { parseUploadId, claimConversionProgress, setConversionProgress, releaseConversionProgress } from './overlayConversionProgress';
 import {
-  overlayUploadStorage, detectUploadedVideoType, placeUpload, discardUpload, sweepStaleIncomingUploads, type OverlayVideoType,
+  adoptChunkedUpload, INCOMING_DIR, detectUploadedVideoType, placeUpload, discardUpload, sweepStaleIncomingUploads, type OverlayVideoType,
 } from './overlayUploadStorage';
 
 const log = createLogger('OverlayAdmin');
 
 /**
- * Most overlay uploads in progress at once. Each can stream up to the size limit into
- * `OVERLAY_FOLDER/.incoming`, so this bounds the disk a burst of uploads can take before any of
- * them is checked.
+ * Most overlay uploads being completed (checked, converted and stored) at once, which bounds the
+ * disk and CPU a burst of finished uploads can take while they're processed. Also the most
+ * unfinished overlay uploads across all streamers (see `chunkedVideoStore`).
  */
 export const MAX_CONCURRENT_OVERLAY_UPLOADS = 3;
 
@@ -45,50 +48,26 @@ const MAX_FILE_BYTES = MAX_UPLOAD_MB * 1024 * 1024;
 /**
  * True if the client says the upload is a QuickTime file, by its name or MIME type. That claim
  * can't be trusted to accept a file (magic bytes decide that), only to turn one away early.
- * @param file - Multer's description of the incoming file, before its bytes are read.
+ * @param name - The file name the client sent.
+ * @param type - The MIME type the client sent.
  * @returns True for a `.mov` name or a `video/quicktime` type.
  */
-function declaresMov(file: Express.Multer.File): boolean {
-  return file.mimetype === 'video/quicktime' || path.extname(file.originalname).toLowerCase() === '.mov';
+function declaresMov(name: string, type: string): boolean {
+  return type === 'video/quicktime' || path.extname(name).toLowerCase() === '.mov';
 }
-
-/**
- * Multer `fileFilter`: refuses a declared MOV with `transcode_busy` when the conversion queue is
- * already full, before Multer stores any of it. Every other upload (and a MOV sent under
- * another name) is let through; `detectUploadedVideoType()` still validates the bytes, and
- * `transcodeToWebm` still enforces the limit for a MOV this check didn't recognise.
- * @param _req - Express request (unused).
- * @param file - Multer's description of the incoming file.
- * @param cb - Multer's callback: an error to refuse the file, or `true` to accept it.
- */
-function admitUpload(_req: Express.Request, file: Express.Multer.File, cb: multer.FileFilterCallback): void {
-  if (declaresMov(file) && isWebmTranscodeQueueFull()) {
-    cb(Object.assign(new Error('Too many WebM conversions pending'), { code: 'transcode_busy' }));
-    return;
-  }
-  cb(null, true);
-}
-
-// Overlay videos stream to disk (see overlayUploadStorage.ts) rather than memory: a transparent
-// MOV can be hundreds of megabytes.
-const upload = multer({
-  storage: overlayUploadStorage,
-  limits: { fileSize: MAX_FILE_BYTES },
-  fileFilter: admitUpload,
-});
 
 /**
  * Moves an uploaded overlay video into `dir` under a random name: WebM and MP4 as uploaded, MOV
  * converted to WebM first (see `storeMovAsWebm`).
  * @param dir - Absolute path of the streamer's overlay folder (already safe-resolved).
- * @param file - The Multer upload, stored on disk by `overlayUploadStorage`.
+ * @param file - The finished upload, kept on disk in the incoming folder (see `adoptChunkedUpload`).
  * @param type - The upload's format, from `detectUploadedVideoType`.
  * @param onProgress - Told a MOV conversion's stage and percentage as it goes (optional).
  * @returns The stored file's name within `dir`.
  * @throws With `code: 'transcode_busy'`/`'transcode_failed'` if a MOV can't be converted now
  *   or at all, or the error from moving the file.
  */
-async function storeVideoFile(dir: string, file: Express.Multer.File, type: OverlayVideoType, onProgress?: ProgressListener): Promise<string> {
+async function storeVideoFile(dir: string, file: UploadedFile, type: OverlayVideoType, onProgress?: ProgressListener): Promise<string> {
   const baseName = randomUUID();
   if (type === 'mov') return storeMovAsWebm(dir, baseName, (sourcePath) => placeUpload(file, sourcePath), onProgress);
   const filename = `${baseName}.${type}`;
@@ -102,7 +81,7 @@ async function storeVideoFile(dir: string, file: Express.Multer.File, type: Over
  * another request is already using the same upload ID, this one just isn't tracked.
  * @param streamer - Owning streamer.
  * @param dir - Absolute path of the streamer's overlay folder (already safe-resolved).
- * @param file - The Multer upload, stored on disk by `overlayUploadStorage`.
+ * @param file - The finished upload, kept on disk in the incoming folder (see `adoptChunkedUpload`).
  * @param details - The upload's detected format and, when the page sent one, its upload ID.
  * @returns The stored file's name within `dir`.
  * @throws Whatever {@link storeVideoFile} throws.
@@ -110,7 +89,7 @@ async function storeVideoFile(dir: string, file: Express.Multer.File, type: Over
 async function storeWithProgress(
   streamer: DbStreamerEventSub,
   dir: string,
-  file: Express.Multer.File,
+  file: UploadedFile,
   details: { type: OverlayVideoType; uploadId: string | null },
 ): Promise<string> {
   const { type, uploadId } = details;
@@ -127,14 +106,14 @@ async function storeWithProgress(
  * Stores an uploaded overlay video in the streamer's folder (see {@link storeVideoFile}) and
  * records it in the DB, deleting the file again if the DB insert fails.
  * @param streamer - Owning streamer.
- * @param file - The Multer upload, stored on disk by `overlayUploadStorage`.
+ * @param file - The finished upload, kept on disk in the incoming folder (see `adoptChunkedUpload`).
  * @param name - Display name for the video.
  * @param uploadId - The page's ID for this upload (`X-Upload-Id`), or null when it sent none.
  * @returns Resolves once the file is saved and recorded.
  * @throws With `code: 'invalid_path'`, `'invalid_file'`, `'transcode_busy'` or `'transcode_failed'`
  *   for a bad path, a non-video upload, a full conversion queue or a MOV that couldn't be converted.
  */
-async function saveVideoFile(streamer: DbStreamerEventSub, file: Express.Multer.File, name: string, uploadId: string | null): Promise<void> {
+async function saveVideoFile(streamer: DbStreamerEventSub, file: UploadedFile, name: string, uploadId: string | null): Promise<void> {
   const dir = safeResolve(OVERLAY_FOLDER, String(streamer.id));
   if (!dir) throw Object.assign(new Error('Path traversal blocked'), { code: 'invalid_path' });
   const type = await detectUploadedVideoType(file);
@@ -151,40 +130,19 @@ async function saveVideoFile(streamer: DbStreamerEventSub, file: Express.Multer.
   log.info(`Overlay video uploaded for ${streamer.twitch_name}: ${filename}${type === 'mov' ? ' (converted from MOV)' : ''}`);
 }
 
-/** Redirects a Multer error: `file_too_large` for an oversized file, `upload_failed` otherwise. */
-const redirectMulterError = createMulterErrorRedirectHandler('/overlay/settings', log, 'Overlay upload middleware error:');
-
 /**
- * Translate an upload-middleware error into a user-facing redirect, instead of letting it reach
- * the centralised 500 handler: `transcode_busy` from {@link admitUpload}, `file_too_large` for an
- * oversized file, and `upload_failed` for anything else. Also starts a sweep of stale incoming
- * uploads, since a rejected upload never reaches the route handler that normally runs it.
- * @param err - The error passed by Multer's callback, or null/undefined if none.
- * @param res - Express response used to issue the redirect when an error occurred.
- * @returns true when `err` was an error and a redirect was sent (caller should stop); false when
- *   there was no error (caller should continue).
- */
-export function handleUploadError(err: unknown, res: Response): boolean {
-  // A rejected upload never reaches the route handler, so sweep leftovers from here too.
-  if (err) void sweepStaleIncomingUploads();
-  if (err instanceof Error && (err as NodeJS.ErrnoException).code === 'transcode_busy') {
-    res.redirect('/overlay/settings?error=transcode_busy');
-    return true;
-  }
-  return redirectMulterError(err, res);
-}
-
-/**
- * Express middleware admitting an upload only while fewer than
- * {@link MAX_CONCURRENT_OVERLAY_UPLOADS} are in progress, before Multer stores any of it; a
- * further one is turned away with `upload_busy`. The slot is released once the response has
- * been sent or the connection closes, whichever comes first.
- * @param _req - Express request (unused).
+ * Express middleware admitting a finished upload for processing only while fewer than
+ * {@link MAX_CONCURRENT_OVERLAY_UPLOADS} are being processed; a further one is turned away with
+ * `upload_busy` and its file removed. The slot is released once the response has been sent or
+ * the connection closes, whichever comes first.
+ * @param req - Express request carrying the finished upload in `req.file`.
  * @param res - Express response; redirected when the limit is reached.
- * @param next - Continues to Multer when the upload is admitted.
+ * @param next - Continues to the upload handler when the upload is admitted.
+ * @returns Resolves once the upload is admitted or turned away.
  */
-export function limitConcurrentUploads(_req: Request, res: Response, next: NextFunction): void {
+export async function limitConcurrentUploads(req: Request, res: Response, next: NextFunction): Promise<void> {
   if (activeUploads >= MAX_CONCURRENT_OVERLAY_UPLOADS) {
+    if (req.file) await discardUpload(req.file);
     res.redirect('/overlay/settings?error=upload_busy');
     return;
   }
@@ -200,10 +158,7 @@ export function limitConcurrentUploads(_req: Request, res: Response, next: NextF
   next();
 }
 
-/** Express middleware running Multer's single-file (`video`) parser, redirecting on error. */
-const uploadVideo = makeUploadMiddleware(upload, 'video', handleUploadError);
-
-/** Redirects non-streamers before Multer buffers the upload (see `makeRequireStreamerBeforeUpload`). */
+/** Redirects non-streamers before any chunked-upload route runs (see `makeRequireStreamerBeforeUpload`). */
 const requireStreamerBeforeUpload = makeRequireStreamerBeforeUpload({
   notAStreamerRedirect: NOT_A_STREAMER_REDIRECT,
   basePath: '/overlay/settings',
@@ -212,8 +167,8 @@ const requireStreamerBeforeUpload = makeRequireStreamerBeforeUpload({
 });
 
 /**
- * Handles one overlay video upload once Multer has stored it: stores and records it, and
- * redirects with the outcome (see the route below for the redirect codes).
+ * Handles one finished overlay video upload: stores and records it, and redirects with the
+ * outcome (see the chunked upload routes below for the redirect codes).
  * @param req - Express request; reads `name`, the `video` file and the `X-Upload-Id` header.
  * @param res - Express response, redirected to `/overlay/settings` with the outcome.
  * @returns Resolves once the response has been sent.
@@ -234,35 +189,67 @@ async function handleVideoUpload(req: Request, res: Response): Promise<void> {
 }
 
 /**
- * POST /overlay/settings/videos/upload — uploads a video file (webm/mp4/mov,
- * validated by magic bytes; a mov is converted to webm) for the requesting streamer. An
- * `X-Upload-Id` header (32 lowercase hex characters) lets the page poll a MOV's conversion
- * progress at `GET /overlay/settings/videos/progress/:uploadId` while this request runs.
- * csrfProtection and requireStreamerBeforeUpload run BEFORE uploadVideo so a bad token or a
- * non-streamer is rejected before Multer stores the file; the client (utils.js) sends the token
- * in an X-CSRF-Token header — available before body parsing and never placed in the URL. The
- * upload is streamed to disk and always removed from the incoming folder afterwards.
- * @param req - Express request; reads `name` and the `video` file from
- *   `req.body`/`req.file`.
- * @param res - Express response; redirects to `/overlay/settings?success=video_uploaded`
- *   on success, or to `/overlay/settings?error=<code>` if the requester isn't a
- *   streamer (`not_a_streamer`), no file was uploaded or it failed magic-byte
- *   validation (`invalid_file`), a mov couldn't be converted (`transcode_failed`) or
- *   too many are already converting (`transcode_busy`), too many uploads are already in
- *   progress (`upload_busy`, redirected by `limitConcurrentUploads` before Multer runs),
- *   the resolved storage path is unsafe
- *   (`invalid_path`), the file exceeds the size limit (`file_too_large`,
- *   redirected by `handleUploadError`), or saving fails (`upload_failed`).
+ * Runs {@link handleVideoUpload}, then makes sure nothing is left in the incoming folder: a
+ * stored upload was moved out already, and anything else (rejected, failed) is removed here.
+ * @param req - Express request carrying the upload in `req.file`.
+ * @param res - Express response, redirected with the outcome.
+ * @returns Resolves once the response has been sent and the upload cleaned up.
  */
-router.post('/settings/videos/upload', requireAuth, csrfProtection, requireStreamerBeforeUpload, limitConcurrentUploads, uploadVideo, async (req, res) => {
+async function handleVideoUploadAndCleanUp(req: Request, res: Response): Promise<void> {
   try {
     await handleVideoUpload(req, res);
   } finally {
-    // Whatever happened, nothing is left in the incoming folder: a stored upload was moved out
-    // already, and anything else (rejected, failed) is removed here.
     if (req.file) await discardUpload(req.file);
     await sweepStaleIncomingUploads();
   }
+}
+
+/** Chunked upload sessions for overlay videos, inside the incoming folder so finishing is a rename. */
+const chunkedVideoStore = new ChunkedUploadStore({
+  dir: path.join(INCOMING_DIR, 'chunked'),
+  maxBytes: MAX_FILE_BYTES,
+  // Bounds the disk unfinished overlay uploads can take across all streamers (each up to the size limit).
+  maxSessions: MAX_CONCURRENT_OVERLAY_UPLOADS,
+});
+
+/**
+ * Turns an upload away before any of it is sent: with `upload_busy` while the most finished
+ * uploads are already being processed (completion checks again, for races), or a declared MOV
+ * with `transcode_busy` while the conversion queue is full.
+ * @param declared - The upload's declared name and type.
+ * @returns `upload_busy`, `transcode_busy`, or null to let the upload start.
+ */
+function checkChunkedVideoStart(declared: ChunkedUploadDeclaration): string | null {
+  // Turned away now rather than at completion, so the user doesn't send the whole file first.
+  if (activeUploads >= MAX_CONCURRENT_OVERLAY_UPLOADS) return 'upload_busy';
+  return declaresMov(declared.name, declared.type) && isWebmTranscodeQueueFull() ? 'transcode_busy' : null;
+}
+
+/**
+ * Chunked, resumable overlay video uploads under `/overlay/settings/videos/upload/…` (see
+ * `mountChunkedUploadRoutes`): a video file (webm/mp4/mov, validated by magic bytes; a mov is
+ * converted to webm) for the requesting streamer. The complete request's `X-Upload-Id` header
+ * (32 lowercase hex characters) lets the page poll a MOV's conversion progress at
+ * `GET /overlay/settings/videos/progress/:uploadId` while it runs. CSRF and the streamer check
+ * guard every route; the page sends the token in an X-CSRF-Token header. Completing redirects to
+ * `/overlay/settings?success=video_uploaded`, or `?error=<code>`: `not_a_streamer`,
+ * `invalid_file` (failed magic-byte validation), `transcode_failed`/`transcode_busy` (a MOV
+ * couldn't be converted, now or at all), `upload_busy` (too many being processed), `invalid_path`
+ * or `upload_failed`. The finished file is always removed from the incoming folder afterwards.
+ */
+mountChunkedUploadRoutes(router, {
+  path: '/settings/videos/upload',
+  store: chunkedVideoStore,
+  guards: [requireAuth, csrfProtection, requireStreamerBeforeUpload],
+  field: 'video',
+  checkStart: checkChunkedVideoStart,
+  toFile: adoptChunkedUpload,
+  complete: [limitConcurrentUploads, handleVideoUploadAndCleanUp],
+  basePath: '/overlay/settings',
+  log,
+  // Leftovers in the incoming folder (e.g. from a restart mid-upload) are swept even when no
+  // further upload completes.
+  onSweep: sweepStaleIncomingUploads,
 });
 
 /**

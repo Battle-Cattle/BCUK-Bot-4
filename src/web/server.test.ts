@@ -155,7 +155,7 @@ vi.mock('./routes/serviceWorker', () => ({ default: emptyRouter() }));
 vi.mock('./routes/health', () => ({ default: markerRouter('health') }));
 vi.mock('./routes/healthStatusEvents', () => ({ default: emptyRouter() }));
 
-import { app, generalLimiter, preSessionLimiter, sessionLimiter, startWebPanel, stopWebPanel, WEB_REQUEST_TIMEOUT_MS } from './server';
+import { app, generalLimiter, preSessionLimiter, sessionLimiter, startWebPanel, stopWebPanel } from './server';
 import { createHmac } from 'crypto';
 import { requireAuth, requireGuildContext } from './middleware';
 
@@ -549,10 +549,9 @@ describe('startWebPanel / stopWebPanel', () => {
     }
   });
 
-  it('gives requests 30 minutes to arrive, for large uploads, while keeping the header deadline', async () => {
+  it("keeps Node's default request and header deadlines, since uploads arrive in short pieces", async () => {
     const server = await startWebPanel(0);
-    expect(WEB_REQUEST_TIMEOUT_MS).toBe(30 * 60_000);
-    expect(server.requestTimeout).toBe(WEB_REQUEST_TIMEOUT_MS);
+    expect(server.requestTimeout).toBe(5 * 60_000);
     expect(server.headersTimeout).toBeLessThanOrEqual(60_000);
     await stopWebPanel();
   });
