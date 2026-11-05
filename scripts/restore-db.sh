@@ -120,10 +120,15 @@ mysql --defaults-extra-file="$CREDENTIALS" -e "CREATE DATABASE IF NOT EXISTS \`$
 # Drop every table and view first; foreign-key checks are off so the order doesn't matter. Stored
 # procedures and functions go too, for the same reason: the dump recreates the ones it holds, but
 # can't remove one added since. Event Scheduler events stay (dumps leave them out; see
-# backup-db.sh). A backtick inside a name is doubled, as MySQL's quoting needs.
-DROPS="$(mysql --defaults-extra-file="$CREDENTIALS" -N -B "$TARGET" -e \
-    "SELECT CONCAT(IF(table_type = 'VIEW', 'DROP VIEW IF EXISTS \`', 'DROP TABLE IF EXISTS \`'), REPLACE(table_name, '\`', '\`\`'), '\`;') FROM information_schema.tables WHERE table_schema = DATABASE()
-     UNION ALL SELECT CONCAT('DROP ', routine_type, ' IF EXISTS \`', REPLACE(routine_name, '\`', '\`\`'), '\`;') FROM information_schema.routines WHERE routine_schema = DATABASE()" < /dev/null)"
+# backup-db.sh). A backtick inside a name is doubled, as MySQL's quoting needs, and --raw keeps
+# -B from escaping a tab, newline or backslash in one (which would drop a different name). Routines
+# are dropped first: dropping one needs ALTER ROUTINE, so if this user lacks it the restore stops
+# there, before any table is gone.
+DROPS="$(mysql --defaults-extra-file="$CREDENTIALS" -N -B --raw "$TARGET" -e \
+    "SELECT stmt FROM (
+       SELECT 0 AS step, CONCAT('DROP ', routine_type, ' IF EXISTS \`', REPLACE(routine_name, '\`', '\`\`'), '\`;') AS stmt FROM information_schema.routines WHERE routine_schema = DATABASE()
+       UNION ALL SELECT 1, CONCAT(IF(table_type = 'VIEW', 'DROP VIEW IF EXISTS \`', 'DROP TABLE IF EXISTS \`'), REPLACE(table_name, '\`', '\`\`'), '\`;') FROM information_schema.tables WHERE table_schema = DATABASE()
+     ) AS drops ORDER BY step" < /dev/null)"
 if [ -n "$DROPS" ]; then
     # The live database was confirmed above. Any other target is normally an empty scratch
     # database, so existing objects mean a reused or mistyped name: confirm before dropping them.

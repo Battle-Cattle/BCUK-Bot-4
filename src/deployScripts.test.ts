@@ -762,9 +762,13 @@ describe.skipIf(notLinux)('restore-db.sh', { timeout: SCRIPT_TEST_TIMEOUT_MS }, 
     expect(input).toContain('DROP PROCEDURE IF EXISTS `added_later`;');
     expect(input).toContain('DROP FUNCTION IF EXISTS `helper`;');
     const query = read(path.join(sandbox.state, 'drops-query'));
-    expect(query).toContain("CONCAT('DROP ', routine_type, ' IF EXISTS `', REPLACE(routine_name, '`', '``'), '`;') FROM information_schema.routines");
+    expect(query).toContain("CONCAT('DROP ', routine_type, ' IF EXISTS `', REPLACE(routine_name, '`', '``'), '`;') AS stmt FROM information_schema.routines");
     // Events are left alone: dumps don't hold them, so dropping them would lose them for good.
     expect(query).not.toContain('information_schema.events');
+    // Routines go first (a missing ALTER ROUTINE privilege then fails before any table is dropped),
+    // and --raw keeps -B from escaping a tab, newline or backslash in a name.
+    expect(query).toMatch(/SELECT 0 AS step, CONCAT\('DROP ', routine_type[\s\S]*UNION ALL SELECT 1,[\s\S]*ORDER BY step/);
+    expect(query.split(' ')).toContain('--raw');
   });
 
   it('saves the live database before replacing it, and skips that for a scratch database', () => {
