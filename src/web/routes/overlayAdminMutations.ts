@@ -28,7 +28,8 @@ const log = createLogger('OverlayAdmin');
 
 /**
  * Most overlay uploads being completed (checked, converted and stored) at once, which bounds the
- * disk and CPU a burst of finished uploads can take while they're processed.
+ * disk and CPU a burst of finished uploads can take while they're processed. Also the most
+ * unfinished overlay uploads across all streamers (see `chunkedVideoStore`).
  */
 export const MAX_CONCURRENT_OVERLAY_UPLOADS = 3;
 
@@ -203,7 +204,12 @@ async function handleVideoUploadAndCleanUp(req: Request, res: Response): Promise
 }
 
 /** Chunked upload sessions for overlay videos, inside the incoming folder so finishing is a rename. */
-const chunkedVideoStore = new ChunkedUploadStore({ dir: path.join(INCOMING_DIR, 'chunked'), maxBytes: MAX_FILE_BYTES });
+const chunkedVideoStore = new ChunkedUploadStore({
+  dir: path.join(INCOMING_DIR, 'chunked'),
+  maxBytes: MAX_FILE_BYTES,
+  // Bounds the disk unfinished overlay uploads can take across all streamers (each up to the size limit).
+  maxSessions: MAX_CONCURRENT_OVERLAY_UPLOADS,
+});
 
 /**
  * Turns away a declared MOV with `transcode_busy` when the conversion queue is already full,
@@ -237,6 +243,9 @@ mountChunkedUploadRoutes(router, {
   complete: [limitConcurrentUploads, handleVideoUploadAndCleanUp],
   basePath: '/overlay/settings',
   log,
+  // Leftovers in the incoming folder (e.g. from a restart mid-upload) are swept even when no
+  // further upload completes.
+  onSweep: sweepStaleIncomingUploads,
 });
 
 /**

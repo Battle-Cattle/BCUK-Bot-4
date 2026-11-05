@@ -57,7 +57,15 @@ export interface ChunkedUploadRouteOptions {
   basePath: string;
   /** Logger for failures. */
   log: Logger;
+  /** Extra cleanup run with each periodic sweep (e.g. the overlay incoming folder); must not reject. */
+  onSweep?: () => Promise<void>;
 }
+
+/**
+ * How often each area's abandoned sessions are swept, besides the sweep every start runs, so
+ * they're removed even when no further upload starts.
+ */
+export const CHUNKED_UPLOAD_SWEEP_INTERVAL_MS = 15 * 60_000;
 
 /**
  * The Discord ID of the logged-in user, who owns the uploads they start.
@@ -170,7 +178,8 @@ function finishUpload(options: ChunkedUploadRouteOptions): RequestHandler {
  * - `GET <path>/:uploadId` → `{received, size}`, so the page can resume;
  * - `PUT <path>/:uploadId/chunk?offset=N` (raw bytes) → `{received}`, or 409 `bad_offset` with the
  *   confirmed `received` offset to resume from;
- * - `DELETE <path>/:uploadId` → 204, abandoning the upload;
+ * - `DELETE <path>/:uploadId` → 204, abandoning the upload (500 `upload_failed` if its files
+ *   couldn't all be removed);
  * - `POST <path>/:uploadId/complete` (the form's other fields) → the area's handlers, which redirect.
  *
  * Another user's upload ID, or an expired one, answers 404.
@@ -186,6 +195,18 @@ export function mountChunkedUploadRoutes(router: Router, options: ChunkedUploadR
   router.put(`${path}/:uploadId/chunk`, ...guards, rawBody, jsonRoute(log, 'Chunked upload piece error:', pieceHandler(options.store)));
   router.delete(`${path}/:uploadId`, ...guards, jsonRoute(log, 'Chunked upload cancel error:', cancelHandler(options.store)));
   router.post(`${path}/:uploadId/complete`, ...guards, finishUpload(options), ...options.complete);
+  // unref()ed: a pending sweep never keeps the process alive on shutdown.
+  setInterval(() => void sweepArea(options), CHUNKED_UPLOAD_SWEEP_INTERVAL_MS).unref();
+}
+
+/**
+ * Sweeps one area's abandoned sessions, then runs its extra cleanup.
+ * @param options - The area's route options.
+ * @returns Resolves once both have run; never rejects.
+ */
+async function sweepArea(options: ChunkedUploadRouteOptions): Promise<void> {
+  await options.store.sweep();
+  await options.onSweep?.();
 }
 
 /** A JSON route body run by {@link jsonRoute} with the requester's Discord ID. */
@@ -250,7 +271,9 @@ function pieceHandler(store: ChunkedUploadStore): JsonHandler {
  */
 function cancelHandler(store: ChunkedUploadStore): JsonHandler {
   return async (req, res, owner) => {
-    if (await store.cancel(owner, String(req.params.uploadId))) res.status(204).end();
-    else sendFailure(res, { error: 'not_found' });
+    const result = await store.cancel(owner, String(req.params.uploadId));
+    if (result === 'cancelled') res.status(204).end();
+    else if (result === 'not_found') sendFailure(res, { error: 'not_found' });
+    else res.status(500).json({ error: 'upload_failed' });
   };
 }

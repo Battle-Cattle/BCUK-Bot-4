@@ -8,7 +8,9 @@ import supertest from 'supertest';
 import { mockLogger } from '../../test-utils/loggerMock';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 import { ChunkedUploadStore, CHUNK_MAX_BYTES } from '../chunkedUploadStore';
-import { mountChunkedUploadRoutes, parseOffset, toMemoryFile, type ChunkedUploadRouteOptions } from './chunkedUploadRoutes';
+import {
+  mountChunkedUploadRoutes, parseOffset, toMemoryFile, CHUNKED_UPLOAD_SWEEP_INTERVAL_MS, type ChunkedUploadRouteOptions,
+} from './chunkedUploadRoutes';
 
 let dir: string;
 let store: ChunkedUploadStore;
@@ -159,5 +161,31 @@ describe('mountChunkedUploadRoutes', () => {
     const done = await app.post(`/upload/${id}/complete`);
     expect(done.headers.location).toBe('/page?error=upload_failed');
     expect(received.file).toBeUndefined();
+  });
+
+  it('answers 500 when a cancelled upload\'s files cannot be removed', async () => {
+    vi.spyOn(store, 'cancel').mockResolvedValue('failed');
+    const res = await makeApp().delete('/upload/0f8fad5b-d9cb-469f-a165-70867728950e');
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ error: 'upload_failed' });
+  });
+});
+
+describe('periodic sweep', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("sweeps each area's sessions and runs its extra cleanup on an interval", async () => {
+    vi.useFakeTimers();
+    const sweep = vi.spyOn(store, 'sweep').mockResolvedValue();
+    const onSweep = vi.fn().mockResolvedValue(undefined);
+    mountChunkedUploadRoutes(Router(), {
+      path: '/upload', store, guards: [], field: 'sound', toFile: toMemoryFile, complete: [], basePath: '/page',
+      log: mockLogger() as never, onSweep,
+    });
+    await vi.advanceTimersByTimeAsync(CHUNKED_UPLOAD_SWEEP_INTERVAL_MS);
+    expect(sweep).toHaveBeenCalledOnce();
+    expect(onSweep).toHaveBeenCalledOnce();
   });
 });

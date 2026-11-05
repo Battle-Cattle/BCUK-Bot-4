@@ -197,7 +197,9 @@ describe('POST /settings/videos/upload', () => {
   });
 
   it('rejects the upload if the streamer is unlinked between the pre-upload check and the handler', async () => {
-    vi.mocked(getStreamerByDiscordId).mockResolvedValueOnce(MOCK_STREAMER as any).mockResolvedValueOnce(null);
+    // The guard passes on start and on complete; the handler's own check then finds no streamer.
+    vi.mocked(getStreamerByDiscordId)
+      .mockResolvedValueOnce(MOCK_STREAMER as any).mockResolvedValueOnce(MOCK_STREAMER as any).mockResolvedValueOnce(null);
     const res = await uploadRequest(buildApp())
       .post('/settings/videos/upload')
       .attach('video', MP4_BUF, { filename: 'test.mp4', contentType: 'video/mp4' });

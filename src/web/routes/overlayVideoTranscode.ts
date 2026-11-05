@@ -3,6 +3,7 @@ import type { Readable } from 'stream';
 import ffmpegPath from 'ffmpeg-static';
 import path from 'path';
 import { createLogger } from '../../shared/logger';
+import { OVERLAY_TRANSCODE_TIMEOUT_MINUTES } from '../../shared/config';
 import { createMutationQueue } from '../../shared/mutationQueue';
 import { createFfmpegProgressTracker } from './ffmpegProgress';
 import type { ConversionProgress } from './overlayConversionProgress';
@@ -14,8 +15,8 @@ const log = createLogger('OverlayVideoTranscode');
 // source — can't play. VP9 WebM with an alpha channel is what the overlay page can play with
 // transparency intact.
 
-/** Kills ffmpeg and rejects if one conversion hasn't finished within this long. */
-export const WEBM_TRANSCODE_TIMEOUT_MS = 5 * 60_000;
+/** Kills ffmpeg and rejects if one conversion hasn't finished within this long (`OVERLAY_TRANSCODE_TIMEOUT_MINUTES`). */
+export const WEBM_TRANSCODE_TIMEOUT_MS = OVERLAY_TRANSCODE_TIMEOUT_MINUTES * 60_000;
 
 /**
  * After a timeout kills ffmpeg, waits at most this long for it to exit before giving up its
@@ -26,7 +27,7 @@ export const KILLED_FFMPEG_EXIT_GRACE_MS = 5_000;
 /**
  * Most conversions queued or running at once. Each one holds its upload's buffer and a
  * temporary copy on disk until it finishes, so a burst of uploads is turned away rather than
- * left waiting (and holding both) behind several five-minute conversions.
+ * left waiting (and holding both) behind several long conversions.
  */
 export const MAX_PENDING_WEBM_TRANSCODES = 3;
 

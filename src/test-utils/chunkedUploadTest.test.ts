@@ -31,7 +31,7 @@ describe('FakeChunkedUploadStore', () => {
     expect(await store.finish('u', started.id)).toEqual({ ok: false, error: 'not_found' });
     expect(await store.status()).toEqual({ ok: false, error: 'not_found' });
     expect(await store.append()).toEqual({ ok: false, error: 'not_found' });
-    expect(await store.cancel()).toBe(false);
+    expect(await store.cancel()).toBe('not_found');
     await expect(store.sweep()).resolves.toBeUndefined();
   });
 });

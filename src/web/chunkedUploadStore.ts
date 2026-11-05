@@ -23,6 +23,15 @@ export const CHUNK_MAX_BYTES = 8 * 1024 * 1024;
 /** An upload with no piece received for this long is abandoned: it's rejected and swept. */
 const UPLOAD_SESSION_TTL_MS = 60 * 60_000;
 
+/** Default for {@link ChunkedUploadStoreOptions.maxSessions}. */
+const DEFAULT_MAX_SESSIONS = 10;
+
+/** Queue key that runs every start one at a time, so the session checks can't race. */
+const START_QUEUE_KEY = 'start';
+
+/** What {@link ChunkedUploadStore.cancel} did. */
+export type ChunkedUploadCancelResult = 'cancelled' | 'not_found' | 'failed';
+
 /** Upload IDs are UUIDs; anything else is rejected before it's used in a path. */
 const UPLOAD_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -63,7 +72,7 @@ export interface ChunkedUploadFailure {
   error: ChunkedUploadError;
   /** Bytes the server holds, so the client can resume from there (for `bad_offset`). */
   received?: number;
-  /** ID of the caller's upload already in progress (for `upload_busy`). */
+  /** ID of the caller's upload already in progress (for `upload_busy`; absent when the area is full). */
   activeId?: string;
 }
 
@@ -79,6 +88,11 @@ export interface ChunkedUploadStoreOptions {
   dir: string;
   /** Largest total size this area accepts, in bytes. */
   maxBytes: number;
+  /**
+   * Most live sessions across all users (defaults to {@link DEFAULT_MAX_SESSIONS}), which bounds
+   * the disk this area's unfinished uploads can take: at most this many times `maxBytes`.
+   */
+  maxSessions?: number;
   /** Idle time before a session expires (defaults to {@link UPLOAD_SESSION_TTL_MS}). */
   ttlMs?: number;
   /** Current time in epoch milliseconds (injectable for tests). */
@@ -123,6 +137,7 @@ interface LoadedSession {
 export class ChunkedUploadStore {
   private readonly dir: string;
   private readonly maxBytes: number;
+  private readonly maxSessions: number;
   private readonly ttlMs: number;
   private readonly now: () => number;
   /** Pending work per session, so pieces for one upload are handled one at a time. */
@@ -134,27 +149,44 @@ export class ChunkedUploadStore {
   constructor(options: ChunkedUploadStoreOptions) {
     this.dir = options.dir;
     this.maxBytes = options.maxBytes;
+    this.maxSessions = options.maxSessions ?? DEFAULT_MAX_SESSIONS;
     this.ttlMs = options.ttlMs ?? UPLOAD_SESSION_TTL_MS;
     this.now = options.now ?? Date.now;
   }
 
   /**
-   * Starts an upload, once the size fits this area and the user has no other upload running.
+   * Starts an upload, once the size fits this area, the user has no other upload running and the
+   * area has room for another session. Starts run one at a time, so two can't both pass the checks.
    * @param owner - Discord ID of the requester.
    * @param declared - The checked declaration (see {@link parseDeclaration}).
-   * @returns The new upload ID, or why it was refused (`upload_busy` names the running one).
+   * @returns The new upload ID, or why it was refused: `upload_busy` names the user's running
+   *   upload as `activeId`, or has none when the area already holds `maxSessions` uploads.
    */
-  async start(owner: string, declared: ChunkedUploadDeclaration): Promise<{ ok: true; id: string } | ChunkedUploadFailure> {
-    if (declared.size > this.maxBytes) return { ok: false, error: 'file_too_large' };
-    const activeId = await this.findActive(owner);
-    if (activeId) return { ok: false, error: 'upload_busy', activeId };
+  start(owner: string, declared: ChunkedUploadDeclaration): Promise<{ ok: true; id: string } | ChunkedUploadFailure> {
+    if (declared.size > this.maxBytes) return Promise.resolve({ ok: false, error: 'file_too_large' });
+    return this.serialise(START_QUEUE_KEY, async () => {
+      const live = await this.liveSessions();
+      const activeId = live.find((session) => session.owner === owner)?.id;
+      if (activeId) return { ok: false, error: 'upload_busy', activeId } as const;
+      if (live.length >= this.maxSessions) return { ok: false, error: 'upload_busy' } as const;
+      return { ok: true, id: await this.create(owner, declared) } as const;
+    });
+  }
+
+  /**
+   * Creates a new session's files.
+   * @param owner - Discord ID of the requester.
+   * @param declared - The checked declaration.
+   * @returns The new upload ID.
+   */
+  private async create(owner: string, declared: ChunkedUploadDeclaration): Promise<string> {
     const id = randomUUID();
     const meta: UploadSessionMeta = { ...declared, owner };
     await fs.promises.mkdir(this.dir, { recursive: true });
     await fs.promises.writeFile(this.partPath(id), Buffer.alloc(0), { flag: 'wx' });
     await fs.promises.writeFile(this.metaPath(id), JSON.stringify(meta), { flag: 'wx' });
     await this.touch(id);
-    return { ok: true, id };
+    return id;
   }
 
   /**
@@ -186,7 +218,7 @@ export class ChunkedUploadStore {
         return { ok: false, error: 'bad_offset', received: session.received } as const;
       }
       if (offset + chunk.length > session.meta.size) return { ok: false, error: 'file_too_large' } as const;
-      await fs.promises.appendFile(this.partPath(id), chunk);
+      await this.appendOrRollBack(id, offset, chunk);
       await this.touch(id);
       return { ok: true, received: offset + chunk.length } as const;
     });
@@ -219,13 +251,13 @@ export class ChunkedUploadStore {
    * Abandons an upload and removes what has arrived.
    * @param owner - Discord ID of the requester.
    * @param id - Upload ID from the request (untrusted).
-   * @returns True if the requester's upload existed and was removed.
+   * @returns `cancelled`, `not_found` when the requester has no such upload, or `failed` when
+   *   its files couldn't all be removed (the upload may still count as running).
    */
-  cancel(owner: string, id: string): Promise<boolean> {
+  cancel(owner: string, id: string): Promise<ChunkedUploadCancelResult> {
     return this.serialise(id, async () => {
-      if (!(await this.loadOwned(owner, id))) return false;
-      await this.remove(id);
-      return true;
+      if (!(await this.loadOwned(owner, id))) return 'not_found';
+      return (await this.remove(id)) ? 'cancelled' : 'failed';
     });
   }
 
@@ -241,15 +273,52 @@ export class ChunkedUploadStore {
     } catch {
       return;
     }
-    const cutoff = this.now() - this.ttlMs;
     // One at a time, so a large backlog can't crowd other filesystem work out of the threadpool.
+    // Each check and removal runs in its upload's queue, so a piece arriving meanwhile (which
+    // refreshes the files' mtime) can't have its live session swept away.
     for (const name of names) {
-      const full = path.join(this.dir, name);
+      const id = name.split('.')[0] ?? '';
+      if (isUploadId(id)) await this.serialise(id, () => this.removeIfStale(name));
+      else await this.removeIfStale(name);
+    }
+  }
+
+  /**
+   * Appends a piece to a session's data file. If the write fails partway (e.g. the disk fills
+   * up), truncates the file back to `offset`: the confirmed offset is the file's size, so bytes
+   * left behind would otherwise count as received and the client would resume past them.
+   * @param id - Upload ID (already validated).
+   * @param offset - The confirmed offset before this piece (the file's size).
+   * @param chunk - The piece's bytes.
+   * @returns Resolves once the piece is written.
+   * @throws The original write error, after the rollback (a failed rollback is logged, and the
+   *   session removed so its offset can't be trusted).
+   */
+  private async appendOrRollBack(id: string, offset: number, chunk: Buffer): Promise<void> {
+    try {
+      await fs.promises.appendFile(this.partPath(id), chunk);
+    } catch (err) {
       try {
-        if ((await fs.promises.stat(full)).mtimeMs < cutoff) await fs.promises.rm(full, { force: true });
-      } catch (err) {
-        log.warn(`Failed to sweep stale upload session file ${full}:`, err);
+        await fs.promises.truncate(this.partPath(id), offset);
+      } catch (truncateErr) {
+        log.error(`Failed to roll back partly written upload piece for ${id}; dropping the upload:`, truncateErr);
+        await this.remove(id);
       }
+      throw err;
+    }
+  }
+
+  /**
+   * Removes one file from this area's folder if it's been idle longer than the session lifetime.
+   * @param name - The file's name within the folder.
+   * @returns Resolves once it's been checked; never rejects.
+   */
+  private async removeIfStale(name: string): Promise<void> {
+    const full = path.join(this.dir, name);
+    try {
+      if ((await fs.promises.stat(full)).mtimeMs < this.now() - this.ttlMs) await fs.promises.rm(full, { force: true });
+    } catch (err) {
+      log.warn(`Failed to sweep stale upload session file ${full}:`, err);
     }
   }
 
@@ -329,32 +398,38 @@ export class ChunkedUploadStore {
   }
 
   /**
-   * Removes a session's files.
+   * Removes a session's files, logging any that couldn't be removed.
    * @param id - Upload ID (already validated).
-   * @returns Resolves once both files are gone; never rejects.
+   * @returns True once both files are gone, false if either removal failed; never rejects.
    */
-  private async remove(id: string): Promise<void> {
-    await Promise.all([this.metaPath(id), this.partPath(id)].map((p) => fs.promises.rm(p, { force: true }).catch((err: unknown) => {
-      log.warn(`Failed to remove upload session file ${p}:`, err);
-    })));
+  private async remove(id: string): Promise<boolean> {
+    const results = await Promise.all([this.metaPath(id), this.partPath(id)].map((p) => fs.promises.rm(p, { force: true }).then(
+      () => true,
+      (err: unknown) => {
+        log.warn(`Failed to remove upload session file ${p}:`, err);
+        return false;
+      },
+    )));
+    return results.every(Boolean);
   }
 
   /**
-   * Finds `owner`'s live upload in this area, if any: each user gets one upload at a time.
-   * @param owner - Discord ID of the requester.
-   * @returns The upload's ID, or null.
+   * Lists this area's live (unexpired) sessions with their owners.
+   * @returns Each live session's ID and owner's Discord ID.
    */
-  private async findActive(owner: string): Promise<string | null> {
+  private async liveSessions(): Promise<{ id: string; owner: string }[]> {
     let names: string[];
     try {
       names = await fs.promises.readdir(this.dir);
     } catch {
-      return null;
+      return [];
     }
+    const live: { id: string; owner: string }[] = [];
     for (const name of names) {
       const id = name.endsWith('.json') ? name.slice(0, -'.json'.length) : '';
-      if (isUploadId(id) && (await this.load(id))?.meta.owner === owner) return id;
+      const session = isUploadId(id) ? await this.load(id) : null;
+      if (session) live.push({ id, owner: session.meta.owner });
     }
-    return null;
+    return live;
   }
 }

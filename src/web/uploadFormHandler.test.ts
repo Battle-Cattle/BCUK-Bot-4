@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 import vm from 'vm';
+import { createHash } from 'crypto';
 
 // utils.js plus chunkedUpload.js, as the upload pages load them.
 const utilsSource = ['utils.js', 'chunkedUpload.js']
@@ -26,10 +27,26 @@ class FakeTarget {
   }
 }
 
-/** A fake File of `size` bytes whose slices report their range. */
-function makeFile(size: number) {
-  return { name: 'clip.mov', size, type: 'video/quicktime', lastModified: 5, slice: (a: number, b: number) => `bytes ${a}-${Math.min(b, size)}` };
+/** A fake File of `size` bytes whose slices report their range (and read as `seed` repeated). */
+function makeFile(size: number, seed = 1) {
+  const slices: Array<[number, number]> = [];
+  return {
+    name: 'clip.mov', size, type: 'video/quicktime', lastModified: 5, slices,
+    slice: (a: number, b = size) => {
+      slices.push([a, Math.min(b, size)]);
+      const length = Math.max(0, Math.min(b, size) - a);
+      return { range: `bytes ${a}-${Math.min(b, size)}`, arrayBuffer: async () => new Uint8Array(Math.min(length, 1024)).fill(seed).buffer };
+    },
+  };
 }
+
+/** A SHA-256 `crypto.subtle` stand-in that resolves in a microtask, like the fake timers expect. */
+const fakeSubtle = {
+  digest: async (_algorithm: string, data: Uint8Array) => {
+    const digest = createHash('sha256').update(data).digest();
+    return digest.buffer.slice(digest.byteOffset, digest.byteOffset + digest.length);
+  },
+};
 
 /** A fetch Response. */
 function response(status: number, body: unknown, extra: Record<string, unknown> = {}) {
@@ -64,6 +81,9 @@ interface SetupOptions {
   stored?: Record<string, string>;
   withProgress?: boolean;
   dataset?: Record<string, string>;
+  confirm?: boolean;
+  /** False for a browser without `crypto.subtle` (an insecure context). */
+  subtle?: boolean;
 }
 
 /** A page context with `utils.js` + `chunkedUpload.js` loaded and the overlay upload form registered. */
@@ -73,6 +93,8 @@ function setup(options: SetupOptions = {}) {
     stored = {},
     withProgress = true,
     dataset = { progressUrl: '/overlay/settings/videos/progress', processingLabel: 'Saving…' },
+    confirm = false,
+    subtle = true,
   } = options;
   const display = makeProgressDisplay();
   const button = { disabled: false };
@@ -111,7 +133,8 @@ function setup(options: SetupOptions = {}) {
     clearTimeout: (id: ReturnType<typeof setTimeout>) => clearTimeout(id),
     window: {
       location: { assign },
-      crypto: { getRandomValues: (a: Uint8Array) => a.fill(171) },
+      crypto: { getRandomValues: (a: Uint8Array) => a.fill(171), subtle: subtle ? fakeSubtle : undefined },
+      confirm: vi.fn(() => confirm),
       localStorage: {
         getItem: (k: string) => storage[k] ?? null,
         setItem: (k: string, v: string) => { storage[k] = v; },
@@ -128,7 +151,13 @@ function setup(options: SetupOptions = {}) {
     document.fire('submit', event);
     return event;
   };
-  return { form, button, display, assign, fetch, submit, storage };
+  return { form, button, display, assign, fetch, submit, storage, context, confirmFn: context.window.confirm };
+}
+
+/** What the page remembers for an upload of `file` with ID `id` (as `startChunkedUpload` saves it). */
+async function savedRecord(context: object, file: ReturnType<typeof makeFile>, id: string) {
+  const fingerprint = await (context as { fileFingerprint: (f: unknown) => Promise<string> }).fileFingerprint(file);
+  return JSON.stringify({ id, name: file.name, size: file.size, lastModified: file.lastModified, fingerprint });
 }
 
 /** Answers a 6-byte upload's start, status and one piece, then `complete` and the progress polls. */
@@ -373,8 +402,8 @@ describe('registerUploadFormHandler', () => {
   });
 
   it("resumes this browser's running upload of the same file after a reload", async () => {
-    const saved = { [`chunkedUpload:${BASE}`]: JSON.stringify({ id: 'old', name: 'clip.mov', size: 6, lastModified: 5 }) };
-    const { fetch, submit, assign } = setup({ stored: saved });
+    const record = await savedRecord(setup().context, makeFile(6), 'old');
+    const { fetch, submit, assign } = setup({ stored: { [`chunkedUpload:${BASE}`]: record } });
     fetch.mockImplementation((url: string) => {
       if (url === `${BASE}/start`) return response(409, { error: 'upload_busy', activeId: 'old' });
       if (url === `${BASE}/old`) return response(200, { received: 4, size: 6 });
@@ -423,5 +452,98 @@ describe('registerUploadFormHandler', () => {
     const { submit, assign } = setup({ file: null });
     submit();
     expect(await navigated(assign)).toBe('/overlay/settings?error=invalid_file');
+  });
+
+  it('offers to cancel an unfinished upload of a different file with the same details, then starts again', async () => {
+    const record = await savedRecord(setup().context, makeFile(6, 9), 'old');
+    const { fetch, submit, assign, confirmFn } = setup({ stored: { [`chunkedUpload:${BASE}`]: record }, confirm: true });
+    let started = 0;
+    fetch.mockImplementation((url: string, init: any) => {
+      if (url === `${BASE}/start`) return ++started === 1 ? response(409, { error: 'upload_busy', activeId: 'old' }) : response(200, { id: ID });
+      if (url === `${BASE}/old` && init.method === 'DELETE') return response(204, null);
+      if (url === `${BASE}/${ID}`) return response(200, { received: 0, size: 6 });
+      if (url.includes('/chunk?offset=0')) return response(200, { received: 6 });
+      if (url.endsWith(`/${ID}/complete`)) return redirectTo(DONE_URL);
+      return response(200, { stage: 'none' });
+    });
+    submit();
+    expect(await navigated(assign)).toBe(DONE_URL);
+    expect(confirmFn).toHaveBeenCalledOnce();
+    expect(fetch.mock.calls.some(([u, init]) => u === `${BASE}/old` && init.method === 'DELETE')).toBe(true);
+  });
+
+  it('leaves the unfinished upload alone and reports upload_busy when the user declines to cancel it', async () => {
+    const { fetch, submit, assign, confirmFn } = setup({ confirm: false });
+    fetch.mockImplementation(() => response(409, { error: 'upload_busy', activeId: 'old' }));
+    submit();
+    expect(await navigated(assign)).toBe('/overlay/settings?error=upload_busy');
+    expect(confirmFn).toHaveBeenCalledOnce();
+    expect(fetch.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(false);
+  });
+
+  it('reports upload_busy when cancelling the unfinished upload fails', async () => {
+    const { fetch, submit, assign } = setup({ confirm: true });
+    fetch.mockImplementation((url: string, init: any) =>
+      (init.method === 'DELETE' ? response(500, {}) : response(409, { error: 'upload_busy', activeId: 'old' })));
+    submit();
+    expect(await navigated(assign)).toBe('/overlay/settings?error=upload_busy');
+  });
+
+  it('does not offer to cancel when the area is full of other users\' uploads', async () => {
+    const { fetch, submit, assign, confirmFn } = setup({ confirm: true });
+    fetch.mockImplementation(() => response(409, { error: 'upload_busy' }));
+    submit();
+    expect(await navigated(assign)).toBe('/overlay/settings?error=upload_busy');
+    expect(confirmFn).not.toHaveBeenCalled();
+  });
+
+  it('reports upload_failed when completing answers an error page without redirecting', async () => {
+    const { fetch, submit, assign } = setup();
+    routeFetch(fetch, { complete: () => response(403, null) });
+    submit();
+    expect(await navigated(assign)).toBe('/overlay/settings?error=upload_failed');
+  });
+
+  it('keeps the upload resumable when completing never reaches the server', async () => {
+    const { fetch, submit, assign, storage } = setup();
+    routeFetch(fetch, { complete: () => Promise.reject(new TypeError('network')) });
+    submit();
+    expect(await navigated(assign)).toBe('/overlay/settings?error=upload_failed');
+    expect(JSON.parse(storage[`chunkedUpload:${BASE}`]!)).toMatchObject({ id: ID, name: 'clip.mov', size: 6 });
+  });
+
+  it('sends smaller pieces after a piece fails', async () => {
+    const file = makeFile(16 * 1024 * 1024);
+    const { fetch, submit, assign } = setup({ file });
+    let received = 0;
+    let failed = false;
+    fetch.mockImplementation((url: string, init: any) => {
+      if (url === `${BASE}/start`) return response(200, { id: ID });
+      if (url === `${BASE}/${ID}`) return response(200, { received, size: file.size });
+      if (url.includes('/chunk?offset=')) {
+        if (!failed) {
+          failed = true;
+          return Promise.reject(new TypeError('timed out'));
+        }
+        received += Number(String(init.body.range).split('-')[1]) - Number(String(init.body.range).split(' ')[1]!.split('-')[0]);
+        return response(200, { received });
+      }
+      if (url.endsWith('/complete')) return redirectTo(DONE_URL);
+      return response(200, { stage: 'none' });
+    });
+    submit();
+    expect(await navigated(assign)).toBe(DONE_URL);
+    const pieces = fetch.mock.calls.filter(([u]) => String(u).includes('/chunk?offset=')).map(([, init]) => init.body.range);
+    expect(pieces[0]).toBe(`bytes 0-${8 * 1024 * 1024}`);
+    expect(pieces[1]).toBe(`bytes 0-${4 * 1024 * 1024}`);
+  });
+
+  it('does not resume when the browser cannot fingerprint the file', async () => {
+    const saved = JSON.stringify({ id: 'old', name: 'clip.mov', size: 6, lastModified: 5, fingerprint: null });
+    const { fetch, submit, assign, confirmFn } = setup({ stored: { [`chunkedUpload:${BASE}`]: saved }, subtle: false });
+    fetch.mockImplementation(() => response(409, { error: 'upload_busy', activeId: 'old' }));
+    submit();
+    expect(await navigated(assign)).toBe('/overlay/settings?error=upload_busy');
+    expect(confirmFn).toHaveBeenCalledOnce();
   });
 });

@@ -78,10 +78,10 @@ export class FakeChunkedUploadStore {
 
   /**
    * Not used by the area tests.
-   * @returns Always false.
+   * @returns Always `not_found`.
    */
-  async cancel(): Promise<boolean> {
-    return false;
+  async cancel(): Promise<'not_found'> {
+    return 'not_found';
   }
 
   /**

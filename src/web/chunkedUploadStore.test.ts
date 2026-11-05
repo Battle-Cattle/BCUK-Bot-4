@@ -92,7 +92,7 @@ describe('ChunkedUploadStore', () => {
     expect(await store.status('u2', id)).toEqual({ ok: false, error: 'not_found' });
     expect(await store.append('u2', id, 0, Buffer.from('a'))).toEqual({ ok: false, error: 'not_found' });
     expect((await store.finish('u2', id)).ok).toBe(false);
-    expect(await store.cancel('u2', id)).toBe(false);
+    expect(await store.cancel('u2', id)).toBe('not_found');
   });
 
   it('rejects malformed upload IDs', async () => {
@@ -103,8 +103,69 @@ describe('ChunkedUploadStore', () => {
     const id = await startUpload('u1');
     expect(await store.start('u1', { name: 'b', size: 1, type: '' })).toEqual({ ok: false, error: 'upload_busy', activeId: id });
     expect((await store.start('u2', { name: 'b', size: 1, type: '' })).ok).toBe(true);
-    expect(await store.cancel('u1', id)).toBe(true);
+    expect(await store.cancel('u1', id)).toBe('cancelled');
     expect((await store.start('u1', { name: 'b', size: 1, type: '' })).ok).toBe(true);
+  });
+
+  it('lets only one of two simultaneous starts by the same user through', async () => {
+    const results = await Promise.all([
+      store.start('u1', { name: 'a', size: 1, type: '' }),
+      store.start('u1', { name: 'b', size: 1, type: '' }),
+    ]);
+    expect(results.filter((r) => r.ok)).toHaveLength(1);
+    expect(results.find((r) => !r.ok)).toMatchObject({ ok: false, error: 'upload_busy' });
+  });
+
+  it('refuses a start once the area holds maxSessions unfinished uploads, naming none', async () => {
+    const capped = new ChunkedUploadStore({ dir, maxBytes: 10, maxSessions: 2, ttlMs: 60_000, now: () => clock });
+    expect((await capped.start('a', { name: 'x', size: 1, type: '' })).ok).toBe(true);
+    expect((await capped.start('b', { name: 'x', size: 1, type: '' })).ok).toBe(true);
+    expect(await capped.start('c', { name: 'x', size: 1, type: '' })).toEqual({ ok: false, error: 'upload_busy' });
+    clock += 120_000;
+    expect((await capped.start('c', { name: 'x', size: 1, type: '' })).ok).toBe(true);
+  });
+
+  it('rolls a partly written piece back so the confirmed offset is unchanged and the piece can be re-sent', async () => {
+    const id = await startUpload();
+    await store.append('u1', id, 0, Buffer.from('ab'));
+    const realAppend = fs.promises.appendFile.bind(fs.promises);
+    vi.spyOn(fs.promises, 'appendFile').mockImplementationOnce(async (file, data) => {
+      // Half the piece lands before the disk fills up.
+      await realAppend(file as string, (data as Buffer).subarray(0, 1));
+      throw Object.assign(new Error('no space'), { code: 'ENOSPC' });
+    });
+    await expect(store.append('u1', id, 2, Buffer.from('cd'))).rejects.toMatchObject({ code: 'ENOSPC' });
+    expect(await store.status('u1', id)).toEqual({ ok: true, received: 2, size: 6 });
+    expect(await store.append('u1', id, 2, Buffer.from('cdef'))).toEqual({ ok: true, received: 6 });
+    const done = await store.finish('u1', id);
+    expect(done.ok && (await fs.promises.readFile(done.path, 'utf8'))).toBe('abcdef');
+  });
+
+  it('drops the upload, keeping the write error, when a partly written piece cannot be rolled back', async () => {
+    const id = await startUpload();
+    vi.spyOn(fs.promises, 'appendFile').mockRejectedValueOnce(Object.assign(new Error('no space'), { code: 'ENOSPC' }));
+    vi.spyOn(fs.promises, 'truncate').mockRejectedValueOnce(new Error('EIO'));
+    await expect(store.append('u1', id, 0, Buffer.from('ab'))).rejects.toMatchObject({ code: 'ENOSPC' });
+    expect(await store.status('u1', id)).toEqual({ ok: false, error: 'not_found' });
+  });
+
+  it('sweeps a stale file that belongs to no upload', async () => {
+    const stray = path.join(dir, 'stray.tmp');
+    await fs.promises.writeFile(stray, 'x');
+    const old = new Date(clock - 120_000);
+    await fs.promises.utimes(stray, old, old);
+    await store.sweep();
+    await expect(fs.promises.access(stray)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('keeps a session the sweep finds refreshed by a piece that arrived meanwhile', async () => {
+    const id = await startUpload();
+    clock += 120_000;
+    // The piece is queued ahead of the sweep's check for this upload, so it refreshes the mtime first.
+    const appended = store.append('u1', id, 0, Buffer.from('a'));
+    clock -= 120_000;
+    await Promise.all([appended, store.sweep()]);
+    expect(await fs.promises.readdir(dir)).toEqual(expect.arrayContaining([`${id}.json`, `${id}.part`]));
   });
 
   it('refuses to finish an incomplete upload', async () => {
@@ -140,10 +201,16 @@ describe('ChunkedUploadStore without its folder or with failing removals', () =>
     expect((await fresh.start('u1', { name: 'a', size: 1, type: '' })).ok).toBe(true);
   });
 
-  it('logs instead of throwing when a session file cannot be removed or swept', async () => {
+  it('reports a cancel whose files could not be removed, leaving the upload running', async () => {
     const id = await startUpload();
+    vi.spyOn(fs.promises, 'rm').mockRejectedValue(new Error('EBUSY'));
+    expect(await store.cancel('u1', id)).toBe('failed');
+    expect(await store.start('u1', { name: 'b', size: 1, type: '' })).toEqual({ ok: false, error: 'upload_busy', activeId: id });
+  });
+
+  it('logs instead of throwing when a stale session file cannot be swept', async () => {
+    await startUpload();
     const rm = vi.spyOn(fs.promises, 'rm').mockRejectedValue(new Error('EBUSY'));
-    expect(await store.cancel('u1', id)).toBe(true);
     clock += 120_000;
     await expect(store.sweep()).resolves.toBeUndefined();
     expect(rm).toHaveBeenCalled();

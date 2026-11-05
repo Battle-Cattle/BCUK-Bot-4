@@ -122,12 +122,21 @@ export function sweepStaleIncomingUploads(): Promise<void> {
  *   chunk sessions live inside {@link INCOMING_DIR}).
  * @param field - Name of the form's file field.
  * @returns The file record for `req.file`.
+ * @throws If the file can't be moved; the assembled file is removed first.
  */
 export async function adoptChunkedUpload(finished: FinishedChunkedUpload, field: string): Promise<UploadedFile> {
-  await fs.promises.mkdir(INCOMING_DIR, { recursive: true });
   const name = `${randomUUID()}${INCOMING_SUFFIX}`;
   const fullPath = path.join(INCOMING_DIR, name);
-  await fs.promises.rename(finished.path, fullPath);
+  try {
+    await fs.promises.mkdir(INCOMING_DIR, { recursive: true });
+    await fs.promises.rename(finished.path, fullPath);
+  } catch (err) {
+    // The session is already gone, so nothing could resume or reuse the assembled file.
+    await fs.promises.rm(finished.path, { force: true }).catch((rmErr: unknown) => {
+      log.error(`Failed to remove assembled overlay upload ${finished.path}:`, rmErr);
+    });
+    throw err;
+  }
   storedUploads.set(name, fullPath);
   return {
     fieldname: field,

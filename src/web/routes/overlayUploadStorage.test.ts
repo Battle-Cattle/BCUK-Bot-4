@@ -182,3 +182,23 @@ describe('adoptChunkedUpload', () => {
     expect(fs.existsSync(file.path)).toBe(false);
   });
 });
+
+describe('adoptChunkedUpload failures', () => {
+  it('removes the assembled file and rethrows when it cannot be moved into the incoming folder', async () => {
+    const sessionDir = path.join(INCOMING_DIR, 'chunked');
+    await fs.promises.mkdir(sessionDir, { recursive: true });
+    const assembled = path.join(sessionDir, 'failed.done');
+    await fs.promises.writeFile(assembled, MOV_BYTES);
+    vi.spyOn(fs.promises, 'rename').mockRejectedValueOnce(Object.assign(new Error('denied'), { code: 'EACCES' }));
+    await expect(adoptChunkedUpload({ path: assembled, name: 'clip.mov', size: MOV_BYTES.length, type: '' }, 'video'))
+      .rejects.toMatchObject({ code: 'EACCES' });
+    await expect(fs.promises.access(assembled)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('still rethrows the move error when removing the assembled file also fails', async () => {
+    vi.spyOn(fs.promises, 'rename').mockRejectedValueOnce(Object.assign(new Error('denied'), { code: 'EACCES' }));
+    vi.spyOn(fs.promises, 'rm').mockRejectedValueOnce(new Error('EBUSY'));
+    await expect(adoptChunkedUpload({ path: '/nowhere/x.done', name: 'clip.mov', size: 1, type: '' }, 'video'))
+      .rejects.toMatchObject({ code: 'EACCES' });
+  });
+});

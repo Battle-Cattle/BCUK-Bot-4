@@ -5,6 +5,7 @@ import { mockLogger } from '../../test-utils/loggerMock';
 vi.mock('child_process', () => ({ spawn: vi.fn() }));
 vi.mock('ffmpeg-static', () => ({ default: '/usr/bin/ffmpeg' }));
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
+vi.mock('../../shared/config', () => ({ OVERLAY_TRANSCODE_TIMEOUT_MINUTES: 30 }));
 
 import { spawn } from 'child_process';
 import { waitFor } from '../../test-utils/waitFor';
@@ -12,6 +13,12 @@ import {
   buildWebmTranscodeArgs, transcodeToWebm, isWebmTranscodeQueueFull,
   WEBM_TRANSCODE_TIMEOUT_MS, KILLED_FFMPEG_EXIT_GRACE_MS, MAX_PENDING_WEBM_TRANSCODES,
 } from './overlayVideoTranscode';
+
+describe('WEBM_TRANSCODE_TIMEOUT_MS', () => {
+  it('comes from OVERLAY_TRANSCODE_TIMEOUT_MINUTES', () => {
+    expect(WEBM_TRANSCODE_TIMEOUT_MS).toBe(30 * 60_000);
+  });
+});
 
 /** Fake ChildProcess-like EventEmitter for mocking `spawn`. */
 function makeFakeProcess() {

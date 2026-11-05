@@ -76,6 +76,11 @@ export const UPLOAD_INCOMING_FOLDER = process.env.UPLOAD_INCOMING_FOLDER ?? './u
 export const SFX_MAX_FILE_MB = parsePositiveIntEnv(process.env.SFX_MAX_FILE_MB, 10);
 export const OVERLAY_FOLDER = process.env.OVERLAY_FOLDER ?? './overlay-videos';
 export const OVERLAY_MAX_FILE_MB = parsePositiveIntEnv(process.env.OVERLAY_MAX_FILE_MB, 500);
+/**
+ * Longest one MOV → WebM overlay conversion may run before ffmpeg is killed. Encoding transparent
+ * VP9 from a few hundred MB of ProRes 4444 can take well over five minutes on a small server.
+ */
+export const OVERLAY_TRANSCODE_TIMEOUT_MINUTES = parsePositiveIntEnv(process.env.OVERLAY_TRANSCODE_TIMEOUT_MINUTES, 30);
 export const COMPANION_MAX_SSE_PER_TOKEN = parsePositiveIntEnv(process.env.COMPANION_MAX_SSE_PER_TOKEN, 3);
 export const OVERLAY_MAX_SSE_PER_CHANNEL = parsePositiveIntEnv(process.env.OVERLAY_MAX_SSE_PER_CHANNEL, 10);
 export const ALERT_ASSETS_FOLDER = process.env.ALERT_ASSETS_FOLDER ?? './alert-assets';

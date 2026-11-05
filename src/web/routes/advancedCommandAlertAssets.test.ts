@@ -93,7 +93,9 @@ describe('alert asset uploads', () => {
   });
 
   it('rejects the upload if the streamer is unlinked between the pre-upload check and the handler', async () => {
-    vi.mocked(getStreamerByDiscordId).mockResolvedValueOnce({ id: 3, discord_id: '1', twitch_name: 's' } as any).mockResolvedValueOnce(null);
+    // The guard passes on start and on complete; the handler's own check then finds no streamer.
+    const streamer = { id: 3, discord_id: '1', twitch_name: 's' } as any;
+    vi.mocked(getStreamerByDiscordId).mockResolvedValueOnce(streamer).mockResolvedValueOnce(streamer).mockResolvedValueOnce(null);
     const res = await uploadRequest(app()).post('/advanced-commands/7/alert/image').attach('image', PNG, 'pic.png').expect(302);
     expect(res.headers.location).toBe('/advanced-commands?error=not_a_streamer');
     expect(fs.promises.writeFile).not.toHaveBeenCalled();
