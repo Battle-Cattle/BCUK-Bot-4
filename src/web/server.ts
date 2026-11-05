@@ -336,6 +336,15 @@ export { app };
 // entire app to reach the 100/600 thresholds via every other mounted route.
 export { generalLimiter, preSessionLimiter, sessionLimiter };
 
+/**
+ * Longest a request may take to arrive in full (Node's `server.requestTimeout`, 5 minutes by
+ * default). Overlay video uploads can be hundreds of megabytes (a 500 MB file needs about 14 Mbps
+ * to arrive within 5 minutes), so this allows 30 minutes: about 2.3 Mbps for the largest upload.
+ * Request headers still have to arrive within Node's 60-second `headersTimeout`. Chunked uploads
+ * would make this unnecessary (tracked as a separate issue).
+ */
+export const WEB_REQUEST_TIMEOUT_MS = 30 * 60_000;
+
 /** The panel's listening server, kept so {@link stopWebPanel} can close it on shutdown. */
 let webServer: Server | null = null;
 
@@ -374,8 +383,9 @@ function stopSessionCleanup(): void {
 }
 
 /**
- * Starts the Express app listening on {@link WEB_HOST}:{@link WEB_PORT}. The host defaults to
- * loopback so the panel is only reachable through the reverse proxy it trusts one hop of.
+ * Starts the Express app listening on {@link WEB_HOST}:{@link WEB_PORT}, allowing requests up to
+ * {@link WEB_REQUEST_TIMEOUT_MS} to arrive. The host defaults to loopback so the panel is only
+ * reachable through the reverse proxy it trusts one hop of.
  * @param port - Port to listen on; defaults to {@link WEB_PORT} (tests pass 0 for a free port).
  * @param host - Interface to bind; defaults to {@link WEB_HOST}.
  * @returns Resolves with the listening server. Rejects with the listen error (e.g.
@@ -389,6 +399,7 @@ export function startWebPanel(port: number = WEB_PORT, host: string = WEB_HOST):
         reject(err);
         return;
       }
+      server.requestTimeout = WEB_REQUEST_TIMEOUT_MS;
       webServer = server;
       startSessionCleanup();
       log.info(`Panel listening on ${host}:${port}`);

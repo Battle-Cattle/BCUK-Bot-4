@@ -34,24 +34,39 @@ vi.mock('fs', () => ({
   default: {
     promises: {
       mkdir: vi.fn(),
-      writeFile: vi.fn(),
       rm: vi.fn(),
     },
   },
 }));
+
+// Keeps uploads in memory and detects their type from the buffer, so these tests drive the route
+// without a disk; overlayUploadStorage.test.ts covers the real disk storage.
+vi.mock('./overlayUploadStorage', async () => {
+  const multerModule = (await import('multer')).default;
+  const { detectVideoType } = await import('./uploadFileTypes.js');
+  return {
+    overlayUploadStorage: multerModule.memoryStorage(),
+    detectUploadedVideoType: vi.fn(async (file: Express.Multer.File) => detectVideoType(file.buffer)),
+    placeUpload: vi.fn(),
+    discardUpload: vi.fn(),
+    sweepStaleIncomingUploads: vi.fn(),
+  };
+});
 
 vi.mock('./overlayMovConversion', () => ({ storeMovAsWebm: vi.fn() }));
 vi.mock('./overlayVideoTranscode', () => ({ isWebmTranscodeQueueFull: vi.fn() }));
 
 import supertest from 'supertest';
 import multer from 'multer';
-import { router, handleUploadError } from './overlayAdminMutations';
+import { router, handleUploadError, limitConcurrentUploads, MAX_CONCURRENT_OVERLAY_UPLOADS } from './overlayAdminMutations';
 import { getStreamerByDiscordId, addVideo, deleteVideo } from '../../db';
 import { AccessLevel } from '../../db';
 import fs from 'fs';
 import { csrfProtection } from '../csrf';
 import { storeMovAsWebm } from './overlayMovConversion';
 import { isWebmTranscodeQueueFull } from './overlayVideoTranscode';
+import { getConversionProgress, claimConversionProgress, releaseConversionProgress } from './overlayConversionProgress';
+import { placeUpload, discardUpload, sweepStaleIncomingUploads } from './overlayUploadStorage';
 import type { RequestHandler } from 'express';
 import { buildTestApp, drainBodyBeforeRedirect } from '../../test-utils/expressTestApp';
 
@@ -81,7 +96,9 @@ beforeEach(() => {
   vi.mocked(addVideo).mockResolvedValue(1);
   vi.mocked(deleteVideo).mockResolvedValue(null);
   vi.mocked(fs.promises.mkdir).mockResolvedValue(undefined);
-  vi.mocked(fs.promises.writeFile).mockResolvedValue(undefined);
+  vi.mocked(placeUpload).mockResolvedValue(undefined);
+  vi.mocked(discardUpload).mockResolvedValue(undefined);
+  vi.mocked(sweepStaleIncomingUploads).mockResolvedValue(undefined);
   vi.mocked(fs.promises.rm).mockResolvedValue(undefined);
   vi.mocked(isWebmTranscodeQueueFull).mockReturnValue(false);
   vi.mocked(storeMovAsWebm).mockImplementation(async (_dir, baseName) => `${baseName}.webm`);
@@ -111,34 +128,38 @@ describe('POST /settings/videos/upload', () => {
       .field('name', 'Test Video')
       .attach('video', MP4_BUF, { filename: 'test.mp4', contentType: 'video/mp4' });
     expect(res.headers.location).toBe('/overlay/settings?error=upload_failed');
-    expect(vi.mocked(fs.promises.writeFile)).toHaveBeenCalled();
-    const writtenPath = vi.mocked(fs.promises.writeFile).mock.calls[0]![0] as string;
-    expect(vi.mocked(fs.promises.rm)).toHaveBeenCalledWith(writtenPath, { force: true });
+    expect(vi.mocked(placeUpload)).toHaveBeenCalled();
+    const storedPath = vi.mocked(placeUpload).mock.calls[0]![1];
+    expect(vi.mocked(fs.promises.rm)).toHaveBeenCalledWith(storedPath, { force: true });
   });
 
-  it('removes a partially written file and skips the DB insert when the write fails', async () => {
+  it('skips the DB insert and discards the upload when moving it into place fails', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
-    vi.mocked(fs.promises.writeFile).mockRejectedValueOnce(Object.assign(new Error('no space'), { code: 'ENOSPC' }));
-    const res = await supertest(buildApp())
-      .post('/settings/videos/upload')
-      .field('name', 'Test Video')
-      .attach('video', MP4_BUF, { filename: 'test.mp4', contentType: 'video/mp4' });
-    expect(res.headers.location).toBe('/overlay/settings?error=upload_failed');
-    const writtenPath = vi.mocked(fs.promises.writeFile).mock.calls[0]![0] as string;
-    expect(vi.mocked(fs.promises.rm)).toHaveBeenCalledWith(writtenPath, { force: true });
-    expect(vi.mocked(addVideo)).not.toHaveBeenCalled();
-  });
-
-  it('still redirects with upload_failed when cleanup of a partial write also fails', async () => {
-    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
-    vi.mocked(fs.promises.writeFile).mockRejectedValueOnce(Object.assign(new Error('no space'), { code: 'ENOSPC' }));
-    vi.mocked(fs.promises.rm).mockRejectedValueOnce(new Error('EACCES'));
+    vi.mocked(placeUpload).mockRejectedValueOnce(Object.assign(new Error('no space'), { code: 'ENOSPC' }));
     const res = await supertest(buildApp())
       .post('/settings/videos/upload')
       .field('name', 'Test Video')
       .attach('video', MP4_BUF, { filename: 'test.mp4', contentType: 'video/mp4' });
     expect(res.headers.location).toBe('/overlay/settings?error=upload_failed');
     expect(vi.mocked(addVideo)).not.toHaveBeenCalled();
+    expect(vi.mocked(discardUpload)).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ['a stored WebM', WEBM_BUF, 'clip.webm', 'video/webm'],
+    ['a rejected non-video', Buffer.from('not a video at all'), 'clip.webm', 'video/webm'],
+  ])('discards the incoming file and sweeps stale ones after %s', async (_label, buf, filename, contentType) => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    await supertest(buildApp()).post('/settings/videos/upload').attach('video', buf, { filename, contentType });
+    expect(vi.mocked(discardUpload)).toHaveBeenCalledWith(expect.objectContaining({ originalname: filename }));
+    expect(vi.mocked(sweepStaleIncomingUploads)).toHaveBeenCalledOnce();
+  });
+
+  it('only sweeps when no file arrived', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    await supertest(buildApp()).post('/settings/videos/upload');
+    expect(vi.mocked(discardUpload)).not.toHaveBeenCalled();
+    expect(vi.mocked(sweepStaleIncomingUploads)).toHaveBeenCalledOnce();
   });
 
   it('successfully uploads a valid mp4 file', async () => {
@@ -149,8 +170,10 @@ describe('POST /settings/videos/upload', () => {
       .attach('video', MP4_BUF, { filename: 'test.mp4', contentType: 'video/mp4' });
     expect(res.headers.location).toBe('/overlay/settings?success=video_uploaded');
     expect(vi.mocked(fs.promises.mkdir)).toHaveBeenCalled();
-    expect(vi.mocked(fs.promises.writeFile)).toHaveBeenCalled();
-    expect(vi.mocked(addVideo)).toHaveBeenCalled();
+    const [file, storedPath] = vi.mocked(placeUpload).mock.calls[0]!;
+    expect(file.originalname).toBe('test.mp4');
+    expect(storedPath).toMatch(/[\\/]123[\\/][0-9a-f-]{36}\.mp4$/);
+    expect(vi.mocked(addVideo)).toHaveBeenCalledWith(MOCK_STREAMER.id, 'Test Video', storedPath.split(/[\\/]/).at(-1));
   });
 
   it('names the video after the uploaded file when no name field is sent', async () => {
@@ -178,7 +201,7 @@ describe('POST /settings/videos/upload', () => {
       .post('/settings/videos/upload')
       .attach('video', MP4_BUF, { filename: 'test.mp4', contentType: 'video/mp4' });
     expect(res.headers.location).toBe('/overlay/settings?error=not_a_streamer');
-    expect(vi.mocked(fs.promises.writeFile)).not.toHaveBeenCalled();
+    expect(vi.mocked(placeUpload)).not.toHaveBeenCalled();
     expect(vi.mocked(addVideo)).not.toHaveBeenCalled();
   });
 
@@ -190,9 +213,9 @@ describe('POST /settings/videos/upload', () => {
       .field('name', 'Test Video')
       .attach('video', MP4_BUF, { filename: 'test.mp4', contentType: 'video/mp4' });
     expect(res.headers.location).toBe('/overlay/settings?error=upload_failed');
-    // The DB insert failed after the file was written, so the file is rolled back.
-    expect(vi.mocked(fs.promises.writeFile)).toHaveBeenCalledOnce();
-    expect(vi.mocked(fs.promises.rm)).toHaveBeenCalledWith(vi.mocked(fs.promises.writeFile).mock.calls[0]![0], { force: true });
+    // The DB insert failed after the file was stored, so the file is rolled back.
+    expect(vi.mocked(placeUpload)).toHaveBeenCalledOnce();
+    expect(vi.mocked(fs.promises.rm)).toHaveBeenCalledWith(vi.mocked(placeUpload).mock.calls[0]![1], { force: true });
   });
 
   it('successfully uploads a valid webm file', async () => {
@@ -212,13 +235,15 @@ describe('POST /settings/videos/upload', () => {
       .field('name', 'Transparent Clip')
       .attach('video', MOV_BUF, { filename: 'clip.mov', contentType: 'video/quicktime' });
     expect(res.headers.location).toBe('/overlay/settings?success=video_uploaded');
-    const [dir, baseName, buffer] = vi.mocked(storeMovAsWebm).mock.calls[0]!;
+    const [dir, baseName, placeSource] = vi.mocked(storeMovAsWebm).mock.calls[0]!;
     // path.resolve uses the platform's separator, so accept either.
     expect(dir).toMatch(/[\\/]app[\\/]overlay-videos[\\/]123$/);
     expect(baseName).toMatch(/^[0-9a-f-]{36}$/);
-    expect(buffer).toEqual(MOV_BUF);
-    expect(vi.mocked(fs.promises.writeFile)).not.toHaveBeenCalled();
     expect(vi.mocked(addVideo)).toHaveBeenCalledWith(MOCK_STREAMER.id, 'Transparent Clip', `${baseName}.webm`);
+    // The conversion puts the upload at its temporary source path by moving Multer's file there.
+    expect(vi.mocked(placeUpload)).not.toHaveBeenCalled();
+    await placeSource('/tmp/source.mov.upload');
+    expect(vi.mocked(placeUpload)).toHaveBeenCalledWith(expect.objectContaining({ originalname: 'clip.mov' }), '/tmp/source.mov.upload');
   });
 
   it.each(['transcode_failed', 'transcode_busy'])('redirects with %s when the MOV cannot be stored', async (code) => {
@@ -229,6 +254,64 @@ describe('POST /settings/videos/upload', () => {
       .attach('video', MOV_BUF, { filename: 'clip.mov', contentType: 'video/quicktime' });
     expect(res.headers.location).toBe(`/overlay/settings?error=${code}`);
     expect(vi.mocked(addVideo)).not.toHaveBeenCalled();
+  });
+
+  it('publishes a MOV conversion\'s progress under the page\'s upload ID while it runs, then clears it', async () => {
+    const uploadId = 'a'.repeat(32);
+    let seenDuringConversion: unknown;
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    vi.mocked(storeMovAsWebm).mockImplementation(async (_dir, baseName, _buffer, onProgress) => {
+      onProgress?.({ stage: 'converting', percent: 42 });
+      seenDuringConversion = getConversionProgress(MOCK_STREAMER.id, uploadId);
+      return `${baseName}.webm`;
+    });
+    const res = await supertest(buildApp())
+      .post('/settings/videos/upload')
+      .set('X-Upload-Id', uploadId)
+      .attach('video', MOV_BUF, { filename: 'clip.mov', contentType: 'video/quicktime' });
+    expect(res.headers.location).toBe('/overlay/settings?success=video_uploaded');
+    expect(seenDuringConversion).toEqual({ stage: 'converting', percent: 42 });
+    expect(getConversionProgress(MOCK_STREAMER.id, uploadId)).toBeUndefined();
+  });
+
+  it('clears the published progress when the conversion fails', async () => {
+    const uploadId = 'b'.repeat(32);
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    vi.mocked(storeMovAsWebm).mockImplementation(async (_dir, _baseName, _buffer, onProgress) => {
+      onProgress?.({ stage: 'converting', percent: 10 });
+      throw Object.assign(new Error('ffmpeg'), { code: 'transcode_failed' });
+    });
+    const res = await supertest(buildApp())
+      .post('/settings/videos/upload')
+      .set('X-Upload-Id', uploadId)
+      .attach('video', MOV_BUF, { filename: 'clip.mov', contentType: 'video/quicktime' });
+    expect(res.headers.location).toBe('/overlay/settings?error=transcode_failed');
+    expect(getConversionProgress(MOCK_STREAMER.id, uploadId)).toBeUndefined();
+  });
+
+  it('converts without tracking progress when another request already holds the upload ID', async () => {
+    const uploadId = 'd'.repeat(32);
+    const otherRequest = claimConversionProgress(MOCK_STREAMER.id, uploadId)!;
+    try {
+      vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+      const res = await supertest(buildApp())
+        .post('/settings/videos/upload')
+        .set('X-Upload-Id', uploadId)
+        .attach('video', MOV_BUF, { filename: 'clip.mov', contentType: 'video/quicktime' });
+      expect(res.headers.location).toBe('/overlay/settings?success=video_uploaded');
+      expect(vi.mocked(storeMovAsWebm).mock.calls[0]![3]).toBeUndefined();
+    } finally {
+      releaseConversionProgress(MOCK_STREAMER.id, uploadId, otherRequest);
+    }
+  });
+
+  it('converts without publishing progress when the upload ID is missing or malformed', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    await supertest(buildApp())
+      .post('/settings/videos/upload')
+      .set('X-Upload-Id', '../not-an-id')
+      .attach('video', MOV_BUF, { filename: 'clip.mov', contentType: 'video/quicktime' });
+    expect(vi.mocked(storeMovAsWebm).mock.calls[0]![3]).toBeUndefined();
   });
 
   it('removes the converted WebM when the DB insert fails after a MOV conversion', async () => {
@@ -280,7 +363,7 @@ describe('POST /settings/videos/upload', () => {
       .field('name', 'Bad File')
       .attach('video', Buffer.from('not a real video'), { filename: 'evil.mp4', contentType: 'video/mp4' });
     expect(res.headers.location).toBe('/overlay/settings?error=invalid_file');
-    expect(vi.mocked(fs.promises.writeFile)).not.toHaveBeenCalled();
+    expect(vi.mocked(placeUpload)).not.toHaveBeenCalled();
   });
 
   it('rejects a non-streamer before Multer buffers the upload (oversized body gets not_a_streamer, not file_too_large)', async () => {
@@ -290,7 +373,7 @@ describe('POST /settings/videos/upload', () => {
       .attach('video', oversized, { filename: 'big.mp4', contentType: 'video/mp4' });
     expect(res.headers.location).toBe('/overlay/settings?error=not_a_streamer');
     expect(vi.mocked(getStreamerByDiscordId)).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(fs.promises.writeFile)).not.toHaveBeenCalled();
+    expect(vi.mocked(placeUpload)).not.toHaveBeenCalled();
   });
 
   it('redirects with upload_failed when the pre-upload streamer lookup fails', async () => {
@@ -311,7 +394,7 @@ describe('POST /settings/videos/upload', () => {
       .post('/settings/videos/upload')
       .attach('video', oversized, { filename: 'big.mp4', contentType: 'video/mp4' });
     expect(res.headers.location).toBe('/overlay/settings?error=file_too_large');
-    expect(vi.mocked(fs.promises.writeFile)).not.toHaveBeenCalled();
+    expect(vi.mocked(placeUpload)).not.toHaveBeenCalled();
     expect(vi.mocked(addVideo)).not.toHaveBeenCalled();
   });
 });
@@ -331,7 +414,7 @@ describe('POST /settings/videos/upload — CSRF protection', () => {
 
     expect(res.status).toBe(403);
     // Multer file processing must not have proceeded: no file written, no DB call
-    expect(vi.mocked(fs.promises.writeFile)).not.toHaveBeenCalled();
+    expect(vi.mocked(placeUpload)).not.toHaveBeenCalled();
     expect(vi.mocked(addVideo)).not.toHaveBeenCalled();
   });
 });
@@ -346,7 +429,7 @@ describe('POST /settings/videos/upload — path traversal protection', () => {
       .field('name', 'Test Video')
       .attach('video', MP4_BUF, { filename: 'test.mp4', contentType: 'video/mp4' });
     expect(res.headers.location).toBe('/overlay/settings?error=invalid_path');
-    expect(vi.mocked(fs.promises.writeFile)).not.toHaveBeenCalled();
+    expect(vi.mocked(placeUpload)).not.toHaveBeenCalled();
     expect(vi.mocked(addVideo)).not.toHaveBeenCalled();
   });
 
@@ -357,7 +440,7 @@ describe('POST /settings/videos/upload — path traversal protection', () => {
       .field('name', 'Test Video')
       .attach('video', MP4_BUF, { filename: 'test.mp4', contentType: 'video/mp4' });
     expect(res.headers.location).toBe('/overlay/settings?error=invalid_path');
-    expect(vi.mocked(fs.promises.writeFile)).not.toHaveBeenCalled();
+    expect(vi.mocked(placeUpload)).not.toHaveBeenCalled();
     expect(vi.mocked(addVideo)).not.toHaveBeenCalled();
   });
 
@@ -368,7 +451,7 @@ describe('POST /settings/videos/upload — path traversal protection', () => {
       .field('name', 'Test Video')
       .attach('video', MP4_BUF, { filename: 'test.mp4', contentType: 'video/mp4' });
     expect(res.headers.location).toBe('/overlay/settings?success=video_uploaded');
-    expect(vi.mocked(fs.promises.writeFile)).toHaveBeenCalled();
+    expect(vi.mocked(placeUpload)).toHaveBeenCalled();
     expect(vi.mocked(addVideo)).toHaveBeenCalled();
   });
 });
@@ -425,6 +508,42 @@ describe('POST /settings/videos/:id/delete', () => {
 
 // --- handleUploadError unit tests ---
 
+describe('limitConcurrentUploads', () => {
+  /** A response stub whose `finish`/`close` listeners can be fired. */
+  function makeTrackedRes() {
+    const listeners: Record<string, () => void> = {};
+    return {
+      redirect: vi.fn(),
+      once: vi.fn((event: string, cb: () => void) => { listeners[event] = cb; }),
+      fire: (event: string) => listeners[event]?.(),
+    };
+  }
+
+  it('turns away an upload once the limit is reached, until one of them finishes', () => {
+    const admitted = Array.from({ length: MAX_CONCURRENT_OVERLAY_UPLOADS }, () => makeTrackedRes());
+    const next = vi.fn();
+    for (const res of admitted) limitConcurrentUploads({} as any, res as any, next);
+    expect(next).toHaveBeenCalledTimes(MAX_CONCURRENT_OVERLAY_UPLOADS);
+
+    const refused = makeTrackedRes();
+    limitConcurrentUploads({} as any, refused as any, next);
+    expect(refused.redirect).toHaveBeenCalledWith('/overlay/settings?error=upload_busy');
+    expect(next).toHaveBeenCalledTimes(MAX_CONCURRENT_OVERLAY_UPLOADS);
+
+    // Both events firing for one response frees only its own slot.
+    admitted[0]!.fire('finish');
+    admitted[0]!.fire('close');
+    const nextOne = makeTrackedRes();
+    limitConcurrentUploads({} as any, nextOne as any, next);
+    expect(nextOne.redirect).not.toHaveBeenCalled();
+    const overLimit = makeTrackedRes();
+    limitConcurrentUploads({} as any, overLimit as any, next);
+    expect(overLimit.redirect).toHaveBeenCalledWith('/overlay/settings?error=upload_busy');
+
+    for (const res of [...admitted.slice(1), nextOne]) res.fire('close');
+  });
+});
+
 describe('handleUploadError', () => {
   /** Minimal Express response stub capturing the redirect target. */
   function makeRes() {
@@ -435,6 +554,13 @@ describe('handleUploadError', () => {
     const res = makeRes();
     expect(handleUploadError(null, res)).toBe(false);
     expect(res.redirect).not.toHaveBeenCalled();
+  });
+
+  it('sweeps stale incoming uploads after a rejected upload, but not when there was no error', () => {
+    handleUploadError(null, makeRes());
+    expect(vi.mocked(sweepStaleIncomingUploads)).not.toHaveBeenCalled();
+    handleUploadError(new Error('boom'), makeRes());
+    expect(vi.mocked(sweepStaleIncomingUploads)).toHaveBeenCalledOnce();
   });
 
   it('redirects a full conversion queue to transcode_busy', () => {

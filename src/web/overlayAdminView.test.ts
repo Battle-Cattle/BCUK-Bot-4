@@ -33,3 +33,13 @@ describe('views/overlayAdmin.ejs', () => {
     expect(html).toContain('Each video weight must be a whole number from 1 to 42.');
   });
 });
+
+describe('views/overlayAdmin.ejs upload progress', () => {
+  it('gives the upload form a hidden progress display and the conversion progress endpoint', async () => {
+    const html = await render();
+    expect(html).toMatch(/class="js-overlay-upload"\s+data-progress-url="\/overlay\/settings\/videos\/progress" data-processing-label="Saving…"/);
+    expect(html).toContain('<div class="upload-progress is-hidden mt-04" data-upload-progress>');
+    expect(html).toContain('<progress class="upload-progress-bar" max="100" value="0" aria-label="Upload progress"></progress>');
+    expect(html).toContain('data-upload-progress-label role="status" aria-live="polite"');
+  });
+});
