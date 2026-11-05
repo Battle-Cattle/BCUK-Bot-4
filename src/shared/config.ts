@@ -66,13 +66,15 @@ function parsePositiveIntEnv(envVar: string | undefined, fallback: number): numb
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-export const SFX_FOLDER = process.env.SFX_FOLDER ?? './sfx';
+// Upload folders. A blank setting means the default, the same way scripts/install-systemd-service.sh
+// reads them when it grants the sandboxed service write access to each one.
+export const SFX_FOLDER = process.env.SFX_FOLDER?.trim() || './sfx';
 export const SFX_MAX_FILE_MB = parsePositiveIntEnv(process.env.SFX_MAX_FILE_MB, 10);
-export const OVERLAY_FOLDER = process.env.OVERLAY_FOLDER ?? './overlay-videos';
+export const OVERLAY_FOLDER = process.env.OVERLAY_FOLDER?.trim() || './overlay-videos';
 export const OVERLAY_MAX_FILE_MB = parsePositiveIntEnv(process.env.OVERLAY_MAX_FILE_MB, 500);
 export const COMPANION_MAX_SSE_PER_TOKEN = parsePositiveIntEnv(process.env.COMPANION_MAX_SSE_PER_TOKEN, 3);
 export const OVERLAY_MAX_SSE_PER_CHANNEL = parsePositiveIntEnv(process.env.OVERLAY_MAX_SSE_PER_CHANNEL, 10);
-export const ALERT_ASSETS_FOLDER = process.env.ALERT_ASSETS_FOLDER ?? './alert-assets';
+export const ALERT_ASSETS_FOLDER = process.env.ALERT_ASSETS_FOLDER?.trim() || './alert-assets';
 export const ALERT_MAX_IMAGE_MB = parsePositiveIntEnv(process.env.ALERT_MAX_IMAGE_MB, 10);
 export const ALERT_MAX_SOUND_MB = parsePositiveIntEnv(process.env.ALERT_MAX_SOUND_MB, 5);
 export const ALERT_MAX_SSE_PER_CHANNEL = parsePositiveIntEnv(process.env.ALERT_MAX_SSE_PER_CHANNEL, 10);

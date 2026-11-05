@@ -358,6 +358,18 @@ describe('config — SFX/OVERLAY folder defaults', () => {
     expect(config.OVERLAY_FOLDER).toBe('./overlay-videos');
   });
 
+  it.each(['', '   '])('uses the defaults for blank upload folder settings (%j), as the systemd installer does', async (blank) => {
+    const config = await loadConfig({ SFX_FOLDER: blank, OVERLAY_FOLDER: blank, ALERT_ASSETS_FOLDER: blank });
+    expect(config.SFX_FOLDER).toBe('./sfx');
+    expect(config.OVERLAY_FOLDER).toBe('./overlay-videos');
+    expect(config.ALERT_ASSETS_FOLDER).toBe('./alert-assets');
+  });
+
+  it('trims spaces around an upload folder setting', async () => {
+    const config = await loadConfig({ OVERLAY_FOLDER: ' /srv/videos ' });
+    expect(config.OVERLAY_FOLDER).toBe('/srv/videos');
+  });
+
   it('passes through SFX_FOLDER and OVERLAY_FOLDER when set', async () => {
     const config = await loadConfig({ SFX_FOLDER: '/custom/sfx', OVERLAY_FOLDER: '/custom/overlay' });
     expect(config.SFX_FOLDER).toBe('/custom/sfx');

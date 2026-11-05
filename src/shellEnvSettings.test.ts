@@ -53,6 +53,10 @@ describe.skipIf(onWindows).each(['deploy.sh', 'scripts/install-systemd-service.s
     ['NAME="quoted # kept"', 'quoted # kept'],
     ["NAME=' single '", ' single '],
     ['NAME=first\nNAME = last', 'last'],
+    ['NAME=`back # quoted`', 'back # quoted'],
+    ['NAME="p\\"ss"', 'p\\"ss'],
+    ["NAME='it\\'s'", "it\\'s"],
+    ['NAME="unterminated', '"unterminated'],
   ])('reads %j as %j', (line, expected) => {
     expect(run(`${line}\n`, [envSetting()], 'env_setting NAME')).toBe(expected);
   });
@@ -65,6 +69,7 @@ describe.skipIf(onWindows).each(['deploy.sh', 'scripts/install-systemd-service.s
 describe.skipIf(onWindows)('deploy.sh health URL', () => {
   const blocks = () => [
     scriptBlock('deploy.sh', 'env_setting() {', /^}$/),
+    scriptBlock('deploy.sh', 'trim() {', /^}$/),
     scriptBlock('deploy.sh', '# Blank or missing values fall back', /^HEALTH_URL=/),
   ];
 
@@ -77,6 +82,7 @@ describe.skipIf(onWindows)('deploy.sh health URL', () => {
     ['WEB_HOST=0.0.0.0', 'http://127.0.0.1:3000/healthz'],
     ['WEB_HOST=::', 'http://[::1]:3000/healthz'],
     ['WEB_HOST=::1', 'http://[::1]:3000/healthz'],
+    ['WEB_PORT=" 3001 "', 'http://127.0.0.1:3001/healthz'],
   ])('builds the URL for %j as %s', (env, expected) => {
     expect(run(`${env}\n`, blocks(), 'printf %s "$HEALTH_URL"')).toBe(expected);
   });

@@ -39,26 +39,39 @@ if [ -z "$SYSTEMCTL_BIN" ]; then
 fi
 
 # Prints a setting from .env the way dotenv reads it: an optional `export ` prefix and spaces
-# around `=` are allowed; last entry wins; a quoted value is taken up to its closing quote (so a `#`
-# inside it stays); an unquoted one ends at the first `#` and loses surrounding spaces. Prints nothing for no entry (grep finding nothing must not trip pipefail) or a
-# blank one.
+# around `=` are allowed; last entry wins; a value in double, single or back quotes is taken up to
+# its closing quote (so a `#` inside it stays, and so does an escaped quote); an unquoted one ends at
+# the first `#` and loses surrounding spaces. Prints nothing for no entry (grep finding nothing must
+# not trip pipefail) or a blank one.
 env_setting() {
     local value
     value="$( { grep -E "^[[:space:]]*(export[[:space:]]+)?$1[[:space:]]*=" "$REPO_DIR/.env" 2>/dev/null || true; } | tail -n 1 | cut -d= -f2-)"
     value="${value#"${value%%[![:space:]]*}"}"
-    case "$value" in
-        \"*) value="${value#\"}"; value="${value%%\"*}" ;;
-        \'*) value="${value#\'}"; value="${value%%\'*}" ;;
-        *) value="${value%%#*}"; value="${value%"${value##*[![:space:]]}"}" ;;
-    esac
+    # A value in double, single or back quotes runs to the first matching quote not escaped with a
+    # backslash, and keeps the escape, as dotenv does (`"p\"ss"` is `p\"ss`). One with no closing
+    # quote is read as unquoted, quote and all.
+    local double_quoted='^"((\\"|[^"])*)"' single_quoted="^'((\\\\'|[^'])*)'" back_quoted='^`((\\`|[^`])*)`'
+    if [[ $value =~ $double_quoted || $value =~ $single_quoted || $value =~ $back_quoted ]]; then
+        value="${BASH_REMATCH[1]}"
+    else
+        value="${value%%#*}"; value="${value%"${value##*[![:space:]]}"}"
+    fi
     printf '%s' "$value"
+}
+
+# Strips leading and trailing whitespace from $1, as config.ts's trim() does.
+trim() {
+    local value="$1"
+    value="${value#"${value%%[![:space:]]*}"}"
+    printf '%s' "${value%"${value##*[![:space:]]}"}"
 }
 
 # Prints the absolute path of an upload folder setting, falling back to config.ts's default. A
 # relative path is relative to the checkout, which is the unit's WorkingDirectory.
 folder_path() {
     local value
-    value="$(env_setting "$1")"
+    # Trimmed, and blank counts as unset, exactly as config.ts reads these settings.
+    value="$(trim "$(env_setting "$1")")"
     value="${value:-$2}"
     case "$value" in
         /*) ;;

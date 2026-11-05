@@ -223,28 +223,38 @@ trap - ERR  # Rollback no longer needed — code is good.
 rm -rf dist.old
 
 # Prints a setting from .env the way dotenv reads it: an optional `export ` prefix and spaces
-# around `=` are allowed; last entry wins; a quoted value is taken up to its closing quote (so a `#`
-# inside it stays); an unquoted one ends at the first `#` and loses surrounding spaces. Prints nothing for no entry (grep finding nothing must not trip pipefail) or a
-# blank one.
+# around `=` are allowed; last entry wins; a value in double, single or back quotes is taken up to
+# its closing quote (so a `#` inside it stays, and so does an escaped quote); an unquoted one ends at
+# the first `#` and loses surrounding spaces. Prints nothing for no entry (grep finding nothing must
+# not trip pipefail) or a blank one.
 env_setting() {
     local value
     value="$( { grep -E "^[[:space:]]*(export[[:space:]]+)?$1[[:space:]]*=" .env 2>/dev/null || true; } | tail -n 1 | cut -d= -f2-)"
     value="${value#"${value%%[![:space:]]*}"}"
-    case "$value" in
-        \"*) value="${value#\"}"; value="${value%%\"*}" ;;
-        \'*) value="${value#\'}"; value="${value%%\'*}" ;;
-        *) value="${value%%#*}"; value="${value%"${value##*[![:space:]]}"}" ;;
-    esac
+    # A value in double, single or back quotes runs to the first matching quote not escaped with a
+    # backslash, and keeps the escape, as dotenv does (`"p\"ss"` is `p\"ss`). One with no closing
+    # quote is read as unquoted, quote and all.
+    local double_quoted='^"((\\"|[^"])*)"' single_quoted="^'((\\\\'|[^'])*)'" back_quoted='^`((\\`|[^`])*)`'
+    if [[ $value =~ $double_quoted || $value =~ $single_quoted || $value =~ $back_quoted ]]; then
+        value="${BASH_REMATCH[1]}"
+    else
+        value="${value%%#*}"; value="${value%"${value##*[![:space:]]}"}"
+    fi
     printf '%s' "$value"
 }
 
-# Blank or missing values fall back to the same defaults as config.ts, which also trims WEB_HOST
-# (spaces inside quotes survive env_setting, but not the bot's bind).
-WEB_PORT_SETTING="$(env_setting WEB_PORT)"
+# Strips leading and trailing whitespace from $1, as config.ts's trim() does.
+trim() {
+    local value="$1"
+    value="${value#"${value%%[![:space:]]*}"}"
+    printf '%s' "${value%"${value##*[![:space:]]}"}"
+}
+
+# Blank or missing values fall back to the same defaults as config.ts, which also trims both
+# (spaces inside quotes survive env_setting, but not the bot's own reading of them).
+WEB_PORT_SETTING="$(trim "$(env_setting WEB_PORT)")"
 WEB_PORT="${WEB_PORT_SETTING:-3000}"
-WEB_HOST_SETTING="$(env_setting WEB_HOST)"
-WEB_HOST_SETTING="${WEB_HOST_SETTING#"${WEB_HOST_SETTING%%[![:space:]]*}"}"
-WEB_HOST_SETTING="${WEB_HOST_SETTING%"${WEB_HOST_SETTING##*[![:space:]]}"}"
+WEB_HOST_SETTING="$(trim "$(env_setting WEB_HOST)")"
 WEB_HOST="${WEB_HOST_SETTING:-127.0.0.1}"
 # A wildcard bind is reachable on loopback; an IPv6 literal needs brackets in a URL.
 case "$WEB_HOST" in
