@@ -108,7 +108,7 @@ Treat dumps as secrets: they hold every stored OAuth token, encrypted with `EVEN
 - **The upload folders** (`OVERLAY_FOLDER`, `ALERT_ASSETS_FOLDER`, `SFX_FOLDER`), which the database rows point at, e.g. `tar czf uploads-$(date +%F).tar.gz <folders>`.
 - **The dumps themselves**: a copy on the same disk doesn't survive losing the disk.
 
-**Restoring.** `bash scripts/restore-db.sh <dump.sql.gz>` replaces the live database. It refuses while the service is running and asks you to type the database name to confirm. Before it changes anything it saves the current data as a `pre-restore` dump (and stops if that fails); it prints the file's path, which you can restore the same way to undo it:
+**Restoring.** `bash scripts/restore-db.sh <dump.sql.gz>` replaces the live database. It refuses while the service is running and asks you to type the database name to confirm. Before it changes anything it saves the current data as a `pre-restore` dump (and stops if that fails; a database that is empty or doesn't exist yet, as on a rebuilt server, has nothing to save and skips this); it prints the file's path, which you can restore the same way to undo it:
 
 ```bash
 sudo systemctl stop bcuk-bot

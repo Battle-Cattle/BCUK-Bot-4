@@ -132,6 +132,12 @@ case "$*" in
     cat "$STATE/applied-migrations" 2>/dev/null
     [ -f "$STATE/migration-lock" ] && echo __migration_lock_held__
     exit 0 ;;
+  *"COUNT(*)"*)
+    # The restore's "anything to save?" count: one object per line of existing-tables, or a
+    # failure with MYSQL_COUNT_EXIT.
+    [ -n "\${MYSQL_COUNT_EXIT:-}" ] && { echo "ERROR 1045: Access denied" >&2; exit "$MYSQL_COUNT_EXIT"; }
+    cat "$STATE/existing-tables" 2>/dev/null | grep -c . || true
+    exit 0 ;;
   *"information_schema"*)
     # The restore's "what exists?" query: one DROP statement per line of existing-tables, where a
     # "view:" prefix marks a view. The query itself is kept for the tests to check.
@@ -780,12 +786,34 @@ describe.skipIf(onWindows)('restore-db.sh', { timeout: SCRIPT_TEST_TIMEOUT_MS },
     const chosen = path.join(sandbox.backups, 'bcuk-20200101T000000Z-1.sql.gz');
     fs.mkdirSync(sandbox.backups, { recursive: true });
     fs.copyFileSync(dump, chosen);
+    write(path.join(sandbox.state, 'existing-tables'), 'sessions\n');
 
     const result = restore([chosen], 'bcuk\n');
 
     expect(result.status).toBe(0);
     expect(fs.existsSync(chosen)).toBe(false);
     expect(read(path.join(sandbox.state, 'mysql-input'))).toContain('CREATE TABLE t');
+  });
+
+  it('restores into an empty or missing live database without trying to save it first', () => {
+    const result = restore([dump], 'bcuk\n');
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("'bcuk' is empty or doesn't exist yet, so there's nothing to save first.");
+    expect(fs.existsSync(path.join(sandbox.state, 'mysqldump-args'))).toBe(false);
+    expect(read(path.join(sandbox.state, 'mysql-input'))).toContain('CREATE TABLE t');
+  });
+
+  it("changes nothing when it can't tell whether the live database holds anything", () => {
+    const result = spawnSync('bash', ['scripts/restore-db.sh', dump], {
+      cwd: sandbox.work, env: { ...sandbox.env, MYSQL_COUNT_EXIT: '1' }, encoding: 'utf8', input: 'bcuk\n',
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("Couldn't check what 'bcuk' holds; nothing was changed.");
+    expect(fs.existsSync(path.join(sandbox.state, 'mysqldump-args'))).toBe(false);
+    expect(read(path.join(sandbox.state, 'mysql-input'))).toBe('');
+    expect(read(path.join(sandbox.state, 'mysql-calls'))).toBe('');
   });
 
   it('needs the database name typed before replacing the live database', () => {

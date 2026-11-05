@@ -8,7 +8,8 @@
 #
 # Restoring over the live database replaces everything in it, so it refuses while the bot's
 # service is running (stop it first), asks you to type the database name to confirm, and saves the
-# current data with backup-db.sh (label "pre-restore") before changing anything. Any
+# current data with backup-db.sh (label "pre-restore") before changing anything, unless it holds
+# nothing to save (no tables, views, routines or events, or it doesn't exist yet). Any
 # other target that already has tables (a mistyped name, say) asks for the same confirmation,
 # since every table in it is dropped first; an empty or new scratch database doesn't ask.
 set -euo pipefail
@@ -72,7 +73,28 @@ RESTORE_SOURCE="$DUMP"
 PRIVATE_COPY=""
 trap 'rm -f "$CREDENTIALS" ${PRIVATE_COPY:+"$PRIVATE_COPY"}' EXIT
 
-if [ "$TARGET" = "$DB_NAME" ]; then
+# Prints how many objects (tables, views, routines, events) the target holds; 0 when it doesn't
+# exist, since information_schema answers without the database. Exits if the query fails, as
+# that says nothing about whether there's data to save.
+count_target_objects() {
+    local count
+    if ! count="$(mysql --defaults-extra-file="$CREDENTIALS" -N -B -e \
+        "SELECT (SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '$TARGET') + (SELECT COUNT(*) FROM information_schema.routines WHERE routine_schema = '$TARGET') + (SELECT COUNT(*) FROM information_schema.events WHERE event_schema = '$TARGET')" < /dev/null)" \
+        || ! [[ "$count" =~ ^[0-9]+$ ]]; then
+        echo "ERROR: Couldn't check what '$TARGET' holds; nothing was changed." >&2
+        exit 1
+    fi
+    printf '%s' "$count"
+}
+
+# Assigned on its own line so a failed check stops the script (set -e) rather than reading as "not 0".
+LIVE_OBJECTS=""
+if [ "$TARGET" = "$DB_NAME" ]; then LIVE_OBJECTS="$(count_target_objects)"; fi
+if [ "$LIVE_OBJECTS" = 0 ]; then
+    # A rebuilt server has no database yet, and mysqldump would fail on it, blocking the restore
+    # just when it's needed; with nothing in it there's nothing to save.
+    echo "==> '$TARGET' is empty or doesn't exist yet, so there's nothing to save first."
+elif [ "$TARGET" = "$DB_NAME" ]; then
     # Tables are dropped before the import, and an import can still fail (a dump that is valid
     # gzip but not valid SQL), so save what's there first; a failed backup stops here, unchanged.
     # backup-db.sh prunes the oldest dumps, which could include $DUMP itself, so the import reads
