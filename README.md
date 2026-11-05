@@ -98,7 +98,7 @@ The web panel serves uploaded files straight from disk: overlay videos from `OVE
 
 ### Backups
 
-`bash scripts/backup-db.sh [label]` dumps the database (`mysqldump --single-transaction`, which doesn't lock the running bot out) to a gzipped file in `BACKUP_DIR` (default `~/bcuk-bot-backups`) and deletes the oldest beyond `BACKUP_KEEP` (default 14). `deploy.sh` runs it with the label `pre-deploy` before every restart. Dumps hold the tables, views, stored routines and triggers, but not Event Scheduler events: the bot doesn't use them, and dumping them needs the `EVENT` privilege, so add any you create yourself again after a restore. For a nightly backup too, add a cron entry for the bot's user (`crontab -e`):
+`bash scripts/backup-db.sh [label]` dumps the database (`mysqldump --single-transaction`, which doesn't lock the running bot out) to a gzipped file in `BACKUP_DIR` (default `~/bcuk-bot-backups`) and deletes the oldest beyond `BACKUP_KEEP` (default 14). `deploy.sh` runs it with the label `pre-deploy` before every restart. Every dump of the database counts towards `BACKUP_KEEP`, whatever its label (nightly, `pre-deploy`, `pre-restore`), so a run of deploys can push older nightly dumps out sooner than the cron schedule suggests: raise `BACKUP_KEEP` if you deploy often, or copy the dumps you want to keep elsewhere. Dumps hold the tables, views, stored routines and triggers, but not Event Scheduler events: the bot doesn't use them, and dumping them needs the `EVENT` privilege, so add any you create yourself again after a restore. For a nightly backup too, add a cron entry for the bot's user (`crontab -e`):
 
 ```
 17 4 * * * cd /path/to/BCUK-Bot-4 && bash scripts/backup-db.sh nightly > /dev/null
