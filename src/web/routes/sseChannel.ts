@@ -29,17 +29,19 @@ let totalConnections = 0;
 const connectionCleanups = new WeakMap<Response, () => void>();
 
 /**
- * Writes one SSE frame to `res`, and reports whether the connection should be evicted: the write
- * threw, or it left more than {@link SSE_MAX_PENDING_BYTES} queued (the client isn't keeping up).
- * A client already over the cap is not written to at all, so its buffer stops growing.
- * @param res - The SSE response to write to.
- * @param frame - The complete SSE frame (e.g. `data: …\n\n` or a `: ping` comment).
+ * Runs one SSE frame write for `res`, and reports whether the connection should be evicted: the
+ * write threw, or it left more than {@link SSE_MAX_PENDING_BYTES} queued (the client isn't keeping
+ * up). A client already over the cap is not written to at all, so its buffer stops growing. Each
+ * call site keeps its own `res.write(…)` inside `write`, so a constant keepalive frame and a
+ * broadcast payload never share one write call.
+ * @param res - The SSE response being written to.
+ * @param write - Performs the actual `res.write(…)` of the frame.
  * @returns true if the frame was written and the client is within the cap; false if it should be evicted.
  */
-function writeSseFrame(res: Response, frame: string): boolean {
+function writeWithinPendingLimit(res: Response, write: () => void): boolean {
   if (isOverPendingLimit(res)) return false;
   try {
-    res.write(frame);
+    write();
   } catch {
     return false;
   }
@@ -151,7 +153,7 @@ export function broadcastToChannel<K>(
   let evictedUnregistered = false;
   for (const res of clients) {
     if (isEligible && !isEligible(res)) continue;
-    if (writeSseFrame(res, `data: ${serialized}\n\n`)) continue;
+    if (writeWithinPendingLimit(res, () => res.write(`data: ${serialized}\n\n`))) continue;
     const cleanup = connectionCleanups.get(res);
     if (cleanup) cleanup();
     else evictedUnregistered = clients.delete(res) || evictedUnregistered;
@@ -190,7 +192,7 @@ function sendSseHandshake(res: Response): void {
  */
 function startKeepalive(res: Response, cleanup: () => void): NodeJS.Timeout {
   return setInterval(() => {
-    if (writeSseFrame(res, ': ping\n\n')) return;
+    if (writeWithinPendingLimit(res, () => res.write(': ping\n\n'))) return;
     cleanup();
     dropBackloggedClient(res);
   }, KEEPALIVE_INTERVAL_MS);
