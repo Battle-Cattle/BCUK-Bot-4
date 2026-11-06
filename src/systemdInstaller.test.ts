@@ -13,9 +13,17 @@ const REPO_ROOT = path.resolve(__dirname, '..');
 // BusyBox's may lack it). It binds a Node install back into the sandbox only from under /home or
 // /root, so the fake one made under the home directory is only bound when the home directory is
 // there too (not, say, HOME=/github/home).
+/** The home directory with links resolved, or '' when it doesn't exist (so the suite skips). */
+function realHome(): string {
+  try {
+    return fs.realpathSync(os.homedir());
+  } catch {
+    return '';
+  }
+}
 const canRunInstaller =
   process.platform === 'linux' &&
-  /^\/(home|root)\//.test(`${fs.realpathSync(os.homedir())}/`) &&
+  /^\/(home|root)\//.test(`${realHome()}/`) &&
   spawnSync('bash', ['-c', 'realpath -m /nonexistent/realpath-probe'], { stdio: 'ignore' }).status === 0;
 
 const STUBS: Record<string, string> = {
