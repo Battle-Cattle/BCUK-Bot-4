@@ -1,24 +1,32 @@
 # Helpers shared by deploy.sh and the backup scripts. Sourced, not run: callers set ENV_FILE first.
 
 # Prints a setting from $ENV_FILE the way dotenv reads it: an optional `export ` prefix and spaces
-# around `=` are allowed; last entry wins; a quoted value is taken up to its closing quote (so a
-# `#` inside it stays, and so does an escaped quote); an unquoted one ends at the first `#` and loses
-# surrounding spaces. Prints nothing for no entry (grep finding nothing must not trip
-# pipefail) or a blank one.
+# around `=` are allowed, as is dotenv's `NAME: value` form (a colon straight after the name, then
+# whitespace); last entry wins; a value in double, single or back quotes is taken up to
+# its closing quote (so a `#` inside it stays, and so does an escaped quote); an unquoted one ends at
+# the first `#` and loses surrounding spaces. Prints nothing for no entry (grep finding nothing must
+# not trip pipefail) or a blank one.
 env_setting() {
-    local value
-    value="$( { grep -E "^[[:space:]]*(export[[:space:]]+)?$1[[:space:]]*=" "$ENV_FILE" 2>/dev/null || true; } \
-        | tail -n 1 | cut -d= -f2-)"
+    local value prefix="^[[:space:]]*(export[[:space:]]+)?$1([[:space:]]*=|:[[:space:]])"
+    value="$( { grep -E "$prefix" "$ENV_FILE" 2>/dev/null || true; } | tail -n 1 | sed -E "s/$prefix//")"
     value="${value#"${value%%[![:space:]]*}"}"
-    # A quoted value runs to the first quote not escaped with a backslash, and keeps the escape, as
-    # dotenv does (`"p\"ss"` is `p\"ss`). One with no closing quote is read as unquoted, quote and all.
-    local double_quoted='^"((\\"|[^"])*)"' single_quoted="^'((\\\\'|[^'])*)'"
-    if [[ $value =~ $double_quoted || $value =~ $single_quoted ]]; then
+    # A value in double, single or back quotes runs to the first matching quote not escaped with a
+    # backslash, and keeps the escape, as dotenv does (`"p\"ss"` is `p\"ss`). One with no closing
+    # quote is read as unquoted, quote and all.
+    local double_quoted='^"((\\"|[^"])*)"' single_quoted="^'((\\\\'|[^'])*)'" back_quoted='^`((\\`|[^`])*)`'
+    if [[ $value =~ $double_quoted || $value =~ $single_quoted || $value =~ $back_quoted ]]; then
         value="${BASH_REMATCH[1]}"
     else
         value="${value%%#*}"; value="${value%"${value##*[![:space:]]}"}"
     fi
     printf '%s' "$value"
+}
+
+# Strips leading and trailing whitespace from $1, as config.ts's trim() does.
+trim() {
+    local value="$1"
+    value="${value#"${value%%[![:space:]]*}"}"
+    printf '%s' "${value%"${value##*[![:space:]]}"}"
 }
 
 # Loads DB_HOST, DB_PORT, DB_USER, DB_PASSWORD and DB_NAME from $ENV_FILE, with config.ts's

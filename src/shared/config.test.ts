@@ -218,6 +218,23 @@ describe('config — GLOBAL_COOLDOWN_MS', () => {
   });
 });
 
+describe('config — WEB_HOST', () => {
+  it('defaults to loopback when unset', async () => {
+    const config = await loadConfig({ WEB_HOST: undefined });
+    expect(config.WEB_HOST).toBe('127.0.0.1');
+  });
+
+  it('defaults to loopback when blank', async () => {
+    const config = await loadConfig({ WEB_HOST: '   ' });
+    expect(config.WEB_HOST).toBe('127.0.0.1');
+  });
+
+  it('uses the configured interface, trimmed', async () => {
+    const config = await loadConfig({ WEB_HOST: ' 10.0.0.5 ' });
+    expect(config.WEB_HOST).toBe('10.0.0.5');
+  });
+});
+
 describe('config — WEB_PORT', () => {
   it('defaults to 3000 when unset', async () => {
     const config = await loadConfig({ WEB_PORT: undefined });
@@ -310,6 +327,28 @@ describe('config — Twitch EventSub / encryption settings', () => {
       'EVENTSUB_TOKEN_SECRET must be exactly 64 hex characters (32 bytes)',
     );
   });
+
+  it('defaults EVENTSUB_TOKEN_SECRET_PREVIOUS to an empty string when unset', async () => {
+    const config = await loadConfig({ EVENTSUB_TOKEN_SECRET_PREVIOUS: undefined });
+    expect(config.EVENTSUB_TOKEN_SECRET_PREVIOUS).toBe('');
+  });
+
+  it('passes through EVENTSUB_TOKEN_SECRET_PREVIOUS alongside the active key', async () => {
+    const config = await loadConfig({ EVENTSUB_TOKEN_SECRET: 'f'.repeat(64), EVENTSUB_TOKEN_SECRET_PREVIOUS: 'e'.repeat(64) });
+    expect(config.EVENTSUB_TOKEN_SECRET_PREVIOUS).toBe('e'.repeat(64));
+  });
+
+  it('throws at startup when EVENTSUB_TOKEN_SECRET_PREVIOUS is malformed', async () => {
+    await expect(
+      loadConfig({ EVENTSUB_TOKEN_SECRET: 'f'.repeat(64), EVENTSUB_TOKEN_SECRET_PREVIOUS: 'e'.repeat(63) }),
+    ).rejects.toThrow('EVENTSUB_TOKEN_SECRET_PREVIOUS must be exactly 64 hex characters (32 bytes)');
+  });
+
+  it('throws at startup when EVENTSUB_TOKEN_SECRET_PREVIOUS is set without an active key', async () => {
+    await expect(
+      loadConfig({ EVENTSUB_TOKEN_SECRET: undefined, EVENTSUB_TOKEN_SECRET_PREVIOUS: 'e'.repeat(64) }),
+    ).rejects.toThrow('EVENTSUB_TOKEN_SECRET_PREVIOUS is set but EVENTSUB_TOKEN_SECRET is not');
+  });
 });
 
 describe('config — SFX/OVERLAY folder defaults', () => {
@@ -317,6 +356,18 @@ describe('config — SFX/OVERLAY folder defaults', () => {
     const config = await loadConfig({ SFX_FOLDER: undefined, OVERLAY_FOLDER: undefined });
     expect(config.SFX_FOLDER).toBe('./sfx');
     expect(config.OVERLAY_FOLDER).toBe('./overlay-videos');
+  });
+
+  it.each(['', '   '])('uses the defaults for blank upload folder settings (%j), as the systemd installer does', async (blank) => {
+    const config = await loadConfig({ SFX_FOLDER: blank, OVERLAY_FOLDER: blank, ALERT_ASSETS_FOLDER: blank });
+    expect(config.SFX_FOLDER).toBe('./sfx');
+    expect(config.OVERLAY_FOLDER).toBe('./overlay-videos');
+    expect(config.ALERT_ASSETS_FOLDER).toBe('./alert-assets');
+  });
+
+  it('trims spaces around an upload folder setting', async () => {
+    const config = await loadConfig({ OVERLAY_FOLDER: ' /srv/videos ' });
+    expect(config.OVERLAY_FOLDER).toBe('/srv/videos');
   });
 
   it('passes through SFX_FOLDER and OVERLAY_FOLDER when set', async () => {

@@ -1,6 +1,61 @@
 import { createHash } from 'crypto';
-import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator, type AugmentedRequest, type Options, type RateLimitExceededEventHandler } from 'express-rate-limit';
 import type { Request, Response } from 'express';
+import { createLogger } from '../shared/logger';
+
+const log = createLogger('RateLimit');
+
+/**
+ * When each limiter/key pair may next be logged (ms since the epoch): a blocked client keeps
+ * hitting the limit until its window resets, and one error line per window is enough to see it.
+ */
+const loggedUntil = new Map<string, number>();
+
+/**
+ * Logs, as an error, that a client hit a limiter: at most once per limiter and key until that
+ * key's window resets, so a flood doesn't flood the error log too.
+ * @param name - Which limiter it was, as it appears in the log line.
+ * @param req - The blocked request; express-rate-limit has set `req.rateLimit` on it.
+ * @param windowMs - The limiter's window, used when the store doesn't report a reset time.
+ */
+function logLimitReached(name: string, req: Request, windowMs: number): void {
+  const info = (req as AugmentedRequest).rateLimit;
+  const key = info?.key ?? 'unknown';
+  const now = Date.now();
+  const entry = `${name}\0${key}`;
+  if ((loggedUntil.get(entry) ?? 0) > now) return;
+  for (const [stale, until] of loggedUntil) if (until <= now) loggedUntil.delete(stale);
+  loggedUntil.set(entry, info?.resetTime?.getTime() ?? now + windowMs);
+  const count = info ? `${info.used}/${info.limit}` : 'over the limit';
+  log.error(`${name} rate limit reached for ${key} (${count} requests in the window), last ${req.method} ${req.path}`);
+}
+
+/**
+ * Sends the limiter's usual "too many requests" response, as express-rate-limit's default handler does.
+ * @param req - The blocked request.
+ * @param res - Its response.
+ * @param options - The limiter's options (status code and message).
+ * @returns Resolves once the response is sent.
+ */
+async function sendLimitResponse(req: Request, res: Response, options: Options): Promise<void> {
+  const message: unknown = typeof options.message === 'function' ? await options.message(req, res) : options.message;
+  if (!res.writableEnded) res.status(options.statusCode).send(message);
+}
+
+/**
+ * Builds the handler every limiter uses when a client goes over its limit: logs it as an error
+ * (see {@link logLimitReached}), then answers with the limiter's usual 429.
+ * @param name - The limiter's name for the log line, e.g. "pre-session".
+ * @returns An express-rate-limit `handler`.
+ */
+export function limitReachedHandler(name: string): RateLimitExceededEventHandler {
+  return (req, res, _next, options) => {
+    logLimitReached(name, req, options.windowMs);
+    sendLimitResponse(req, res, options).catch((err: unknown) => {
+      log.error(`Failed to send the ${name} rate-limit response`, err);
+    });
+  };
+}
 
 /**
  * Returns `req.session`, typed as possibly absent: express-session continues without attaching a
@@ -26,6 +81,7 @@ export const authLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: ipKey,
   message: 'Too many requests, please try again shortly.',
+  handler: limitReachedHandler('auth'),
 });
 
 /**
@@ -47,6 +103,57 @@ export function ipKey(req: Request): string {
  */
 export function generalLimiterSkip(req: Request): boolean {
   return req.path.startsWith('/api/streamdeck') || !!maybeSession(req)?.user;
+}
+
+/**
+ * Tells whether a request carries an express-session cookie (`connect.sid`), i.e. whether the
+ * session middleware will look it up in the store.
+ * @param req - Express request object
+ * @returns true if the Cookie header names `connect.sid` (spaces around the name are allowed, as
+ *   the cookie parser express-session uses trims them)
+ */
+function hasSessionCookie(req: Request): boolean {
+  return /(?:^|;)\s*connect\.sid\s*=/.test(req.headers.cookie ?? '');
+}
+
+/**
+ * Determines whether to skip the coarse IP-keyed limiter that runs ahead of the session middleware.
+ * Only Streamdeck API calls without a session cookie are skipped: those never touch the session
+ * store and have their own limiters. One that carries a cookie still costs a store lookup (the
+ * session middleware runs on every path), so it is counted like any other request.
+ * @param req - Express request object
+ * @returns true if the pre-session limiter should be skipped
+ */
+export function preSessionLimiterSkip(req: Request): boolean {
+  return req.path.startsWith('/api/streamdeck') && !hasSessionCookie(req);
+}
+
+/** Marks an error as coming from the session store, so the error handler can tell it apart. */
+const SESSION_STORE_ERROR = Symbol('sessionStoreError');
+
+/**
+ * Marks an error the session middleware passed on as a session-store failure. Only errors marked
+ * this way can become the 503 below; the bot's own pool raises the same mysql2 message when its
+ * queue is full, and that must stay a 500.
+ * @param err - The error express-session handed to `next()`.
+ * @returns The same error, marked when it is an object.
+ */
+export function markSessionStoreError(err: unknown): unknown {
+  if (typeof err === 'object' && err !== null) Object.assign(err, { [SESSION_STORE_ERROR]: true });
+  return err;
+}
+
+/**
+ * Tells whether an error means the session store is overloaded rather than broken: mysql2 rejects a
+ * lookup straight away once the session pool's wait queue is full. The panel answers that with a
+ * 503 instead of a 500.
+ * @param err - The error handed to the error handler.
+ * @returns true for mysql2's "Queue limit reached." rejection, marked by {@link markSessionStoreError}.
+ */
+export function isSessionStoreBusyError(err: unknown): boolean {
+  if (typeof err !== 'object' || err === null) return false;
+  const marked = (err as { [SESSION_STORE_ERROR]?: unknown })[SESSION_STORE_ERROR] === true;
+  return marked && (err as { message?: unknown }).message === 'Queue limit reached.';
 }
 
 /**
@@ -116,4 +223,5 @@ export const streamdeckAuthFailureLimiter = rateLimit({
   skipSuccessfulRequests: true,
   requestWasSuccessful: streamdeckAuthFailureWasSuccessful,
   message: 'Too many failed authentication attempts, please try again later.',
+  handler: limitReachedHandler('streamdeck-auth-failure'),
 });

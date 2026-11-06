@@ -9,6 +9,8 @@ export {
 } from './db/lookupCache';
 export { getPool, getSessionPool, closePool } from './db/pool';
 export { runMigrations } from './db/migrations';
+export { reencryptStoredTokens } from './db/tokenReencryption';
+export type { TokenReencryptionResult } from './db/tokenReencryption';
 export { pingDb } from './db/health';
 
 // ─── Guilds ──────────────────────────────────────────────────────────────────

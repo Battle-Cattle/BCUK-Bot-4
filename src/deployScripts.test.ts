@@ -56,6 +56,7 @@ exec "$@"
   curl: `#!/usr/bin/env bash
 calls=$(( $(cat "$STATE/curl-calls" 2>/dev/null || echo 0) + 1 )); echo "$calls" > "$STATE/curl-calls"
 printf '%s\\n' "\${@: -1}" >> "$STATE/curl-urls"
+printf '%s\\n' "$*" >> "$STATE/curl-args"
 [ "$calls" = "\${CURL_FAIL_CALL:-}" ] && exit 7
 running="$(cat "$STATE/running" 2>/dev/null)"
 for bad in $UNHEALTHY_BUILDS; do [ "$running" = "$bad" ] && exit 7; done
@@ -292,6 +293,16 @@ describe.skipIf(notLinux)('deploy.sh', { timeout: SCRIPT_TEST_TIMEOUT_MS }, () =
     expect(fs.existsSync(path.join(sandbox.work, 'node_modules.old'))).toBe(false);
     expect(restarts()).toEqual(['v2']);
     expect(fs.readdirSync(sandbox.backups).filter((f) => f.endsWith('-pre-deploy.sql.gz'))).toHaveLength(1);
+  });
+
+  it('sends every health probe straight to the bot, never through a proxy', () => {
+    pushV2();
+    // A proxy the deploy shell has set would otherwise carry the probe and could fail it.
+    expect(deploy({ http_proxy: 'http://proxy.invalid:3128', HTTP_PROXY: 'http://proxy.invalid:3128' }).status).toBe(0);
+
+    const calls = read(path.join(sandbox.state, 'curl-args')).split('\n').filter(Boolean);
+    expect(calls.length).toBeGreaterThan(0);
+    for (const call of calls) expect(call).toMatch(/(^| )--noproxy \* /);
   });
 
   it("health-checks the WEB_PORT the bot reads, including `export` and spaces around '='", () => {

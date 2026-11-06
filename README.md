@@ -36,6 +36,10 @@ bash scripts/install-systemd-service.sh
 
 This installs and enables the unit from `deploy/bcuk-bot.service`, filled in with your user, this checkout's path and your `node`. It also adds a sudoers rule allowing that user to run `systemctl restart bcuk-bot` and nothing else. It doesn't start the service: stop any copy still running elsewhere first (for example in an old `screen` session), then run `sudo systemctl start bcuk-bot`.
 
+The unit is sandboxed (`ProtectSystem=strict`, `ProtectHome=tmpfs`, `NoNewPrivileges` and friends; see `deploy/bcuk-bot.service`). Every home directory is hidden from the bot, so it can't read the account's other files (SSH keys, credentials, other projects). Only the checkout and the `node` binary it runs (just that file, not the folder it's in) are put back, read-only. It can only write to `logs/`, the three upload folders (`OVERLAY_FOLDER`, `ALERT_ASSETS_FOLDER`, `SFX_FOLDER`), `UPLOAD_INCOMING_FOLDER` (where chunked uploads are assembled), and its own private `/tmp` and `/var/tmp` (`PrivateTmp`, emptied when the service stops). The installer reads those folders from `.env` (set them there, not in a systemd drop-in, which the installer can't see), creates them, and writes them into the unit's `BindPaths`. Re-run it after changing any of them, after moving the checkout or switching to a different Node install, or the bot will fail to start or fail its writes there. Anything the bot needs from a home directory must be inside the checkout: a symlink from it to elsewhere in a home directory won't resolve. `systemd-analyze security bcuk-bot` shows what the sandbox covers.
+
+`deploy.sh` never rewrites the installed unit, so a change to `deploy/bcuk-bot.service` reaches the server only when the installer runs again. That includes the sandboxing above: an install made before it keeps running unsandboxed until you re-run the installer. After deploying a release that changes the unit, run `bash scripts/install-systemd-service.sh` again as the bot's user, then `sudo systemctl restart bcuk-bot`.
+
 The unit keeps running the `node` it was installed with, so after upgrading Node, re-run `bash scripts/install-systemd-service.sh` (it rewrites the unit with the `node` now on your `PATH`) and then deploy. `deploy.sh` checks that the service's `node` meets `engines` in `package.json` and stops before installing anything if it doesn't.
 
 `bash deploy.sh` (or `npm run deploy`) then:
@@ -126,6 +130,27 @@ sudo systemctl start bcuk-bot
 **Test a backup** now and then by restoring it into a scratch database, which leaves the live one alone: `bash scripts/restore-db.sh <file> bcuk_restore_test`. If that database already has tables (a name reused or mistyped), it asks you to type the name first, since restoring drops them all. Then check it looks right, logging in as the bot's database user (`DB_HOST`, `DB_PORT` and `DB_USER` in `.env`, with 3306 for an unset port; `-p` asks for `DB_PASSWORD`): `mysql -h <DB_HOST> -P <DB_PORT> -u <DB_USER> -p bcuk_restore_test -e 'SELECT COUNT(*) FROM user; SELECT version FROM schema_migrations'`. Drop it afterwards the same way: `mysql -h <DB_HOST> -P <DB_PORT> -u <DB_USER> -p -e 'DROP DATABASE bcuk_restore_test'`. The bot's MySQL user needs the `CREATE` and `DROP` privileges on that database. On a server that ignores the case of database names (`lower_case_table_names` set), a name differing from `DB_NAME` only in case is the live database, and gets the live checks.
 
 The backup and restore scripts, and `deploy.sh`'s migration check, read the database settings from `.env`. If a `DB_` setting is also exported in your shell with a different value, they stop: a bot started from that shell would use the exported value, since dotenv doesn't override exported variables.
+
+The web panel must only be reachable through the reverse proxy. It trusts exactly one `X-Forwarded-For` hop (`trust proxy: 1`, for Caddy), so a client that can reach `WEB_PORT` directly can set that header itself, pick its own `req.ip` and get round the IP-keyed rate limiters. The panel binds to `WEB_HOST`, which defaults to `127.0.0.1`; if Caddy runs on another host or in a container, set `WEB_HOST` to the private interface it connects through, and keep `WEB_PORT` firewalled from the internet either way.
+
+When a client goes over one of the panel's rate limits, the bot logs it as an error (in `logs/error-*.log` and on the owner Health page), naming the limiter (`pre-session`, `general`, `session`, `streamdeck`, `auth` or `streamdeck-auth-failure`), the IP, account or hashed key it counted, and the path. It's logged once per client per window, not on every blocked request. A `pre-session` or `general` entry for many users at once, or for the proxy's own address, means the IP limits are catching people who share an address, or `trust proxy` doesn't match your proxy setup.
+
+### Rotating EVENTSUB_TOKEN_SECRET
+
+`EVENTSUB_TOKEN_SECRET` encrypts every stored Twitch OAuth token (the streamers' EventSub tokens and the chat bot's own). While both the new and the previous key are configured, a token is read with the new key and falls back to the previous one, so the key can be changed without anyone reconnecting:
+
+1. Generate a new key: `openssl rand -hex 32`.
+2. In `.env`, move the current value to `EVENTSUB_TOKEN_SECRET_PREVIOUS` and put the new one in `EVENTSUB_TOKEN_SECRET`.
+3. Make sure no other copy of the bot is running against the database (an old `screen` session, say): one still on the previous key would keep writing tokens under it after this pass. Then restart the bot. On startup it re-encrypts every stored token under the new key and logs `Every stored token is under the active key; EVENTSUB_TOKEN_SECRET_PREVIOUS can now be removed`. Until then, tokens under the previous key keep working.
+4. Remove `EVENTSUB_TOKEN_SECRET_PREVIOUS` from `.env` and restart again.
+
+Database backups taken before the rotation (including the `pre-deploy` and nightly dumps) still hold tokens encrypted under the previous key. To restore one later without those streamers (and the bot account) having to reconnect, keep the previous key somewhere separate and safe, and set it as `EVENTSUB_TOKEN_SECRET_PREVIOUS` again when you restore. If you rotated because that key was leaked, keeping it is your call: without it, those accounts reconnect after such a restore, and nothing else is lost.
+
+If startup warns that some token rows changed during re-encryption, restart once more before step 4; don't remove the previous key until the "can now be removed" line appears. If it warns that some tokens can't be decrypted with any configured key, those were written under a key that is no longer in `.env`; the affected streamers (or the bot account, via `/admin/bot-auth`) must reconnect. Never put a key or a decrypted token in a log, an issue or a chat.
+
+Stored tokens keep the same `enc:` format whichever key wrote them, and outside a rotation startup leaves them untouched, so a deploy can always be rolled back without breaking tokens.
+
+During a rotation, avoid rolling back to a build from before `EVENTSUB_TOKEN_SECRET_PREVIOUS` existed. Such a build reads tokens only with `EVENTSUB_TOKEN_SECRET`, so any token not yet re-encrypted under the new key stops working until this build runs again (the previous key is still in `.env`, so nothing is lost). Finish the rotation, up to the "can now be removed" line, before deploying such a build.
 
 ### SFX file format
 

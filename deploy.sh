@@ -557,16 +557,26 @@ mv "$BUILD_DIR" dist
 # dist.old (and node_modules.old, if the dependencies changed) stay until the new build has proved
 # healthy, so a failed restart can roll straight back to them.
 
-# Reads WEB_PORT from .env (the bot's own source of truth for it) the way dotenv does, with the
-# same parser as the backup scripts (an `export ` prefix and spaces around `=` included): a port
-# read differently from the bot's would fail the health check and roll back a healthy build. No
-# entry or a blank one falls back to 3000, like config.ts.
+# Reads WEB_PORT and WEB_HOST from .env (the bot's own source of truth for them) the way dotenv
+# does, with the same parser as the backup scripts (an `export ` prefix, spaces around `=` and
+# quoting included): a setting read differently from the bot's would fail the health check and roll
+# back a healthy build. Blank or missing values fall back to the same defaults as config.ts, which
+# also trims both (spaces inside quotes survive env_setting, but not the bot's own reading of them).
 ENV_FILE=.env
 # shellcheck source=scripts/lib/dotenv.sh
 source scripts/lib/dotenv.sh
-WEB_PORT_SETTING="$(env_setting WEB_PORT)"
+WEB_PORT_SETTING="$(trim "$(env_setting WEB_PORT)")"
 WEB_PORT="${WEB_PORT_SETTING:-3000}"
-HEALTH_URL="http://127.0.0.1:${WEB_PORT}/healthz"
+WEB_HOST_SETTING="$(trim "$(env_setting WEB_HOST)")"
+WEB_HOST="${WEB_HOST_SETTING:-127.0.0.1}"
+# A wildcard bind is reachable on loopback; an IPv6 literal needs brackets in a URL.
+case "$WEB_HOST" in
+    0.0.0.0) HEALTH_HOST=127.0.0.1 ;;
+    ::) HEALTH_HOST='[::1]' ;;
+    *:*) HEALTH_HOST="[${WEB_HOST}]" ;;
+    *) HEALTH_HOST="$WEB_HOST" ;;
+esac
+HEALTH_URL="http://${HEALTH_HOST}:${WEB_PORT}/healthz"
 
 # Prints the PIDs listening on WEB_PORT, one per line (nothing if none, or if ss can't see them).
 # deploy.sh runs as the service's own user, so ss can see the bot's PID.
@@ -574,6 +584,8 @@ port_listener_pids() {
     { ss -Hltnp "sport = :${WEB_PORT}" 2>/dev/null || true; } | { grep -o 'pid=[0-9]*' || true; } | cut -d= -f2 | sort -u
 }
 
+# Both health probes pass --noproxy '*': they go straight to the bot on this machine (or WEB_HOST's
+# private address), never through a proxy the deploy shell may have set, which would fail them.
 # Waits up to HEALTH_TIMEOUT_SECONDS for /healthz to answer from the unit's own process. Returns 1
 # with HEALTH_PROBLEM set to why when it doesn't.
 wait_for_health() {
@@ -583,7 +595,7 @@ wait_for_health() {
     # to its own 2s timeout on top of the 1s sleep.
     deadline=$((SECONDS + HEALTH_TIMEOUT_SECONDS))
     while [ "$SECONDS" -lt "$deadline" ]; do
-        if curl -fsS --max-time 2 "$HEALTH_URL" > /dev/null 2>&1; then
+        if curl -fsS --noproxy '*' --max-time 2 "$HEALTH_URL" > /dev/null 2>&1; then
             # A 200 only counts if it came from the unit's own process. Something else on the port,
             # such as the old screen-session bot left running, would answer while the new one
             # crash-loops on EADDRINUSE. `restart` waits for the old process to exit, so a different
@@ -624,7 +636,7 @@ wait_for_stability() {
         sleep 1
         if [ "$("$SYSTEMCTL_BIN" show -p MainPID --value "$SERVICE_NAME")" != "$main_pid" ] \
             || [ "$("$SYSTEMCTL_BIN" show -p NRestarts --value "$SERVICE_NAME")" != "$restarts" ] \
-            || ! curl -fsS --max-time 2 "$HEALTH_URL" > /dev/null 2>&1; then
+            || ! curl -fsS --noproxy '*' --max-time 2 "$HEALTH_URL" > /dev/null 2>&1; then
             HEALTH_PROBLEM="it came up but crashed, restarted or stopped answering within ${STABILITY_SECONDS}s"
             return 1
         fi

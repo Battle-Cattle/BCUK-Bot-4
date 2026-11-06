@@ -15,6 +15,7 @@ vi.mock('./db', () => ({
   closePool: vi.fn().mockResolvedValue(undefined),
   pingDb: vi.fn().mockResolvedValue(true),
   runMigrations: vi.fn().mockResolvedValue(undefined),
+  reencryptStoredTokens: vi.fn().mockResolvedValue({ reencrypted: 0, unreadable: 0, pending: 0 }),
 }));
 vi.mock('./shared/healthStore', () => ({
   recordDbPing: vi.fn(),
@@ -319,6 +320,35 @@ describe('startup — guild registry preload', () => {
       .toBeLessThan(vi.mocked(db.runMigrations).mock.invocationCallOrder[0]!);
     expect(vi.mocked(db.runMigrations).mock.invocationCallOrder[0])
       .toBeLessThan(vi.mocked(reloadGuildRegistry).mock.invocationCallOrder[0]!);
+  });
+
+  it('re-encrypts stored tokens after the migrations and before loading the guild registry', async () => {
+    const db = await import('./db.js');
+    const { reloadGuildRegistry } = await import('./discord/guildRegistry.js');
+
+    await runMain();
+
+    expect(vi.mocked(db.reencryptStoredTokens)).toHaveBeenCalledOnce();
+    expect(vi.mocked(db.runMigrations).mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(db.reencryptStoredTokens).mock.invocationCallOrder[0]!);
+    expect(vi.mocked(db.reencryptStoredTokens).mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(reloadGuildRegistry).mock.invocationCallOrder[0]!);
+  });
+
+  it('keeps starting when re-encrypting stored tokens fails', async () => {
+    const db = await import('./db.js');
+    const { startDiscordBot } = await import('./discord/discordBot.js');
+    const failure = new Error('DB hiccup');
+    vi.mocked(db.reencryptStoredTokens).mockRejectedValueOnce(failure);
+
+    await runMain();
+
+    expect(exitSpy).not.toHaveBeenCalled();
+    expect(lastBotLogger!.warn).toHaveBeenCalledWith(
+      'Re-encrypting stored tokens under the active key failed; will retry on the next start:',
+      failure,
+    );
+    expect(vi.mocked(startDiscordBot)).toHaveBeenCalledOnce();
   });
 
   it('calls process.exit(1) and does not start the bot when a migration fails', async () => {
