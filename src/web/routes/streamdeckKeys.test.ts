@@ -195,6 +195,9 @@ describe('POST /streamdeck-key/request', () => {
 
     expect((first.body as any).locals.newKey).toBe('b'.repeat(64));
     expect((second.body as any).locals.newKey).toBe('b'.repeat(64));
+    // The re-shown key carries the marker it was issued with, so its rotate form still matches it.
+    expect((first.body as any).locals.keyVersion).toBe('version-of-bbbb');
+    expect((second.body as any).locals.keyVersion).toBe('version-of-bbbb');
     expect(rotateApiKey).toHaveBeenCalledOnce();
   });
 
