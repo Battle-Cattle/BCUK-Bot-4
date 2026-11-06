@@ -120,7 +120,7 @@ describe.skipIf(onWindows)('install-systemd-service.sh', () => {
     expect(setting(install(''), 'BindReadOnlyPaths')).toBe(`"${repo}" "${link}" "${real}"`);
   });
 
-  it('refuses a folder path the unit cannot express', () => {
-    expect(() => install(`OVERLAY_FOLDER=${root}/100%videos\n`)).toThrow(/can't express/);
+  it.each(['100%videos', 'videos:ro', 'say"hi'])('refuses a folder path the unit cannot express (%s)', (name) => {
+    expect(() => install(`OVERLAY_FOLDER='${root}/${name}'\n`)).toThrow(/can't express/);
   });
 });

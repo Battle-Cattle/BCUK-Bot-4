@@ -59,10 +59,11 @@ folder_path() {
     realpath -m "$value"
 }
 
-# Fails unless a path can be written into the unit (inside double quotes, with no % specifiers).
+# Fails unless a path can be written into the unit as is: inside double quotes, with no % specifiers,
+# and no colon (which BindPaths= reads as the split between source, destination and options).
 check_unit_path() {
-    if [[ "$1" == *'"'* || "$1" == *'\'* || "$1" == *%* ]]; then
-        echo "ERROR: $1 contains a quote, backslash or %, which the unit can't express." >&2
+    if [[ "$1" == *'"'* || "$1" == *'\'* || "$1" == *%* || "$1" == *:* ]]; then
+        echo "ERROR: $1 contains a quote, backslash, % or colon, which the unit can't express." >&2
         exit 1
     fi
 }
