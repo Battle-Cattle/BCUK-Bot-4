@@ -68,22 +68,17 @@ check_unit_path() {
 }
 
 # The unit hides every home directory (ProtectHome=tmpfs) and binds back, read-only, the checkout
-# and the Node install the service runs. For Node that is its install prefix (the folder above bin/),
-# under both the path the unit names and the real path it resolves to (nvm's links, say), when that
-# lives in a home directory; one elsewhere (e.g. /usr) stays visible anyway. A bin/ straight inside
-# a home directory (~/bin/node) has the home directory itself as its prefix, and binding that would
-# put every file in it back: there only the node binary is bound.
+# and the node binary the service runs: the path the unit names and the file it resolves to (nvm's
+# links, say), each when it lives in a home directory (one elsewhere, e.g. /usr, stays visible
+# anyway). Only the binary, never the folder it's in: node needs nothing else from its install at
+# runtime (npm runs from the deploy shell, not the service), and its folder can be shared with
+# unrelated files (~/bin, ~/.local) that the sandbox is there to hide.
 READONLY_BINDS=("$REPO_DIR")
 for node_path in "$NODE_BIN" "$(realpath "$NODE_BIN")"; do
-    prefix="$(dirname "$(dirname "$node_path")")"
-    case "$prefix" in
-        /home|/home/*|/root|/root/*) ;;
-        *) continue ;;
+    case "$node_path" in
+        /home/*|/root/*)
+            [[ " ${READONLY_BINDS[*]} " == *" $node_path "* ]] || READONLY_BINDS+=("$node_path") ;;
     esac
-    if [[ "$prefix" =~ ^/home(/[^/]+)?$ || "$prefix" == /root ]]; then
-        prefix="$node_path"
-    fi
-    [[ " ${READONLY_BINDS[*]} " == *" $prefix "* ]] || READONLY_BINDS+=("$prefix")
 done
 READONLY_PATHS=""
 for dir in "${READONLY_BINDS[@]}"; do

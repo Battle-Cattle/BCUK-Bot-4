@@ -76,13 +76,14 @@ function setting(unit: string, key: string): string | undefined {
 }
 
 describe.skipIf(onWindows)('install-systemd-service.sh', () => {
-  it('hides home directories and binds back only the checkout, the Node install and the writable folders', () => {
+  it('hides home directories and binds back only the checkout, the node binary and the writable folders', () => {
     const videos = path.join(root, 'videos');
     const unit = install(`OVERLAY_FOLDER=${videos} # absolute\nSFX_FOLDER=" ./my-sfx "\n`);
 
     expect(setting(unit, 'ProtectHome')).toBe('tmpfs');
     expect(setting(unit, 'ProtectSystem')).toBe('strict');
-    expect(setting(unit, 'BindReadOnlyPaths')).toBe(`"${repo}" "${nodePrefix}"`);
+    // The node binary, not the install folder it's in.
+    expect(setting(unit, 'BindReadOnlyPaths')).toBe(`"${repo}" "${path.join(nodePrefix, 'bin', 'node')}"`);
     expect(setting(unit, 'BindPaths')).toBe(
       `"-${repo}/logs" "-${videos}" "-${repo}/alert-assets" "-${repo}/my-sfx" "-${repo}/upload-incoming"`,
     );
@@ -92,7 +93,7 @@ describe.skipIf(onWindows)('install-systemd-service.sh', () => {
     expect(unit).not.toMatch(/__(USER|REPO_DIR|NODE_BIN|READONLY_PATHS|WRITABLE_PATHS)__/);
   });
 
-  it('binds the Node install once when its link and real path share a prefix', () => {
+  it('binds the node binary once when the path the unit names is its real path', () => {
     // Replace the link with a real file, so the path the unit names is also the real path. Copied by
     // a separate `cp` process: copying it here would hold a write handle on it in this multi-threaded
     // process, which a child another test spawns at that moment can inherit, and Linux then refuses
@@ -102,29 +103,22 @@ describe.skipIf(onWindows)('install-systemd-service.sh', () => {
     const copied = spawnSync('cp', [process.execPath, node]);
     if (copied.status !== 0) throw new Error(`cp failed: ${String(copied.stderr)}`);
 
-    expect(setting(install(''), 'BindReadOnlyPaths')).toBe(`"${repo}" "${nodePrefix}"`);
+    expect(setting(install(''), 'BindReadOnlyPaths')).toBe(`"${repo}" "${node}"`);
   });
 
-  // A ~/bin/node install: the folder above bin/ is the home directory itself. Needs a real home
-  // directory (the installer only treats /home/<user> and /root as one) without a ~/bin/node of its own.
-  const homeBin = path.join(os.homedir(), 'bin');
-  it.skipIf(!/^(\/home\/[^/]+|\/root)$/.test(os.homedir()) || fs.existsSync(path.join(homeBin, 'node')))(
-    'binds only the node binary, not the whole home directory, for a ~/bin/node install',
-    () => {
-      const createdBin = !fs.existsSync(homeBin);
-      fs.mkdirSync(homeBin, { recursive: true });
-      const node = path.join(homeBin, 'node');
-      fs.symlinkSync(process.execPath, node);
-      try {
-        const binds = setting(install('', homeBin), 'BindReadOnlyPaths');
-        expect(binds?.split(' ')).toContain(`"${node}"`);
-        expect(binds).not.toContain(`"${os.homedir()}"`);
-      } finally {
-        fs.rmSync(node);
-        if (createdBin) fs.rmdirSync(homeBin);
-      }
-    },
-  );
+  it('binds the link and the file it resolves to when both are in a home directory, never their folders', () => {
+    // Like ~/.local/bin/node linking to a binary elsewhere in the home directory: each folder can
+    // hold unrelated files, so only the two node files are bound.
+    const real = path.join(nodePrefix, 'shared', 'bin', 'node');
+    fs.mkdirSync(path.dirname(real), { recursive: true });
+    const copied = spawnSync('cp', [process.execPath, real]);
+    if (copied.status !== 0) throw new Error(`cp failed: ${String(copied.stderr)}`);
+    const link = path.join(nodePrefix, 'bin', 'node');
+    fs.rmSync(link);
+    fs.symlinkSync(real, link);
+
+    expect(setting(install(''), 'BindReadOnlyPaths')).toBe(`"${repo}" "${link}" "${real}"`);
+  });
 
   it('refuses a folder path the unit cannot express', () => {
     expect(() => install(`OVERLAY_FOLDER=${root}/100%videos\n`)).toThrow(/can't express/);

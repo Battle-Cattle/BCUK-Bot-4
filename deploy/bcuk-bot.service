@@ -38,8 +38,8 @@ PrivateTmp=true
 # credentials, other projects). Only what the bot needs is put back, by the two Bind lines below.
 ProtectSystem=strict
 ProtectHome=tmpfs
-# Read-only: the checkout (code, node_modules and .env) and the Node install, which usually live in a
-# home directory. The installer fills these in.
+# Read-only: the checkout (code, node_modules and .env) and the node binary (just the file, not the
+# folder it's in), which usually live in a home directory. The installer fills these in.
 BindReadOnlyPaths=__READONLY_PATHS__
 # Read-write: everywhere the bot writes at runtime, logs/ (log files and the debug-logging state
 # file), the three upload folders (MOV-to-WebM conversion writes its temporary files there too) and

@@ -584,6 +584,8 @@ port_listener_pids() {
     { ss -Hltnp "sport = :${WEB_PORT}" 2>/dev/null || true; } | { grep -o 'pid=[0-9]*' || true; } | cut -d= -f2 | sort -u
 }
 
+# Both health probes pass --noproxy '*': they go straight to the bot on this machine (or WEB_HOST's
+# private address), never through a proxy the deploy shell may have set, which would fail them.
 # Waits up to HEALTH_TIMEOUT_SECONDS for /healthz to answer from the unit's own process. Returns 1
 # with HEALTH_PROBLEM set to why when it doesn't.
 wait_for_health() {
@@ -593,7 +595,7 @@ wait_for_health() {
     # to its own 2s timeout on top of the 1s sleep.
     deadline=$((SECONDS + HEALTH_TIMEOUT_SECONDS))
     while [ "$SECONDS" -lt "$deadline" ]; do
-        if curl -fsS --max-time 2 "$HEALTH_URL" > /dev/null 2>&1; then
+        if curl -fsS --noproxy '*' --max-time 2 "$HEALTH_URL" > /dev/null 2>&1; then
             # A 200 only counts if it came from the unit's own process. Something else on the port,
             # such as the old screen-session bot left running, would answer while the new one
             # crash-loops on EADDRINUSE. `restart` waits for the old process to exit, so a different
@@ -634,7 +636,7 @@ wait_for_stability() {
         sleep 1
         if [ "$("$SYSTEMCTL_BIN" show -p MainPID --value "$SERVICE_NAME")" != "$main_pid" ] \
             || [ "$("$SYSTEMCTL_BIN" show -p NRestarts --value "$SERVICE_NAME")" != "$restarts" ] \
-            || ! curl -fsS --max-time 2 "$HEALTH_URL" > /dev/null 2>&1; then
+            || ! curl -fsS --noproxy '*' --max-time 2 "$HEALTH_URL" > /dev/null 2>&1; then
             HEALTH_PROBLEM="it came up but crashed, restarted or stopped answering within ${STABILITY_SECONDS}s"
             return 1
         fi
