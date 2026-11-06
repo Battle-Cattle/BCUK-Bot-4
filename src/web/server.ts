@@ -318,8 +318,10 @@ app.use(csrfErrorHandler);
  */
 app.use((err: unknown, req: express.Request, res: express.Response, next: express.NextFunction) => {
   if (res.headersSent) {
-    const logAt = isSessionStoreBusyError(err) ? log.warn : log.error;
-    logAt(`Error after ${req.method} ${req.path} was already answered:`, err);
+    // Called as methods: a detached winston level method logs through the root logger, losing the label.
+    const message = `Error after ${req.method} ${req.path} was already answered:`;
+    if (isSessionStoreBusyError(err)) log.warn(message, err);
+    else log.error(message, err);
     next(err);
     return;
   }

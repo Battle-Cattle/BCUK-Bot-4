@@ -775,6 +775,8 @@ describe('session store overload', () => {
       ),
     );
     expect(mockLog.warn).not.toHaveBeenCalledWith(expect.stringContaining('Session store busy'), expect.anything());
+    // Called on the logger itself: a detached winston level method would drop the module label.
+    expect(mockLog.warn.mock.contexts.at(-1)).toBe(mockLog);
   });
 
   it('still answers any other store failure with a 500', async () => {
