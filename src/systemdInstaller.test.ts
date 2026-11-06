@@ -16,7 +16,7 @@ const REPO_ROOT = path.resolve(__dirname, '..');
 const canRunInstaller =
   process.platform === 'linux' &&
   /^\/(home|root)\//.test(`${fs.realpathSync(os.homedir())}/`) &&
-  spawnSync('realpath', ['-m', '/nonexistent/realpath-probe'], { stdio: 'ignore' }).status === 0;
+  spawnSync('bash', ['-c', 'realpath -m /nonexistent/realpath-probe'], { stdio: 'ignore' }).status === 0;
 
 const STUBS: Record<string, string> = {
   // `sudo install -m MODE SRC DEST` keeps SRC (the rendered unit or sudoers rule) for the test.
