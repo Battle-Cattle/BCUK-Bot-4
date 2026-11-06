@@ -779,6 +779,20 @@ describe('session store overload', () => {
     expect(mockLog.warn.mock.contexts.at(-1)).toBe(mockLog);
   });
 
+  it('logs any other failure after the response went out as an error', async () => {
+    storeSet.mockImplementationOnce((_id, _session, cb) => cb?.(new Error('connect ECONNREFUSED')));
+    const res = await request(app).get('/__session_save').set('X-Forwarded-For', '198.51.100.11');
+
+    expect(res.status).toBe(200);
+    await waitFor(() =>
+      expect(mockLog.error).toHaveBeenCalledWith(
+        'Error after GET /__session_save was already answered:',
+        expect.objectContaining({ message: 'connect ECONNREFUSED' }),
+      ),
+    );
+    expect(mockLog.error.mock.contexts.at(-1)).toBe(mockLog);
+  });
+
   it('still answers any other store failure with a 500', async () => {
     storeGet.mockImplementation((_id, cb) => cb(new Error('connect ECONNREFUSED')));
     const res = await request(app)
