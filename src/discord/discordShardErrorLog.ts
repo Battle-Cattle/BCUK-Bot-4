@@ -1,7 +1,8 @@
-// Throttled logging for discord.js `shardError` events, so a burst of gateway retries during a
-// Discord-side outage produces one log line per shard per interval. Owner DMs for a gateway outage
-// come from the health watcher in `ownerAlerts.ts` instead (via the `discord` component), whose
-// grace period keeps a blip that recovers within a minute from paging anyone.
+// Throttled logging for gateway shard errors (`@discordjs/ws` `SocketError`/`Error`), so a burst of
+// gateway retries during a Discord-side outage produces one log line per shard per interval. Owner
+// DMs for a gateway outage come from the health watcher in `ownerAlerts.ts` instead (via the
+// `discord` component), whose grace period keeps a blip that recovers within a minute from paging
+// anyone.
 import { createLogger } from '../shared/logger';
 
 const log = createLogger('Discord');
@@ -13,13 +14,14 @@ const SHARD_ERROR_LOG_INTERVAL_MS = 60_000;
 const shardErrorLogState = new Map<number, { lastLoggedAt: number; suppressedCount: number }>();
 
 /**
- * Logs a `shardError` at `error`, throttled to at most one line per shard per {@link SHARD_ERROR_LOG_INTERVAL_MS}. During a Discord-side gateway hiccup (e.g.
+ * Logs a shard error at `error`, throttled to at most one line per shard per
+ * {@link SHARD_ERROR_LOG_INTERVAL_MS}. During a Discord-side gateway hiccup (e.g.
  * repeated `Unexpected server response: 503`), discord.js's automatic reconnect can retry —
  * and this event can fire — many times a second; logging (and alerting on) every one of those
  * verbatim has filled multiple log files in a single incident without adding any information
  * discord.js's own retry wasn't already handling. Errors swallowed during the throttle window
  * are counted and folded into the next line that does get logged. Logged as an error (unlike
- * 'shardReconnecting') so the cause is on record, but it doesn't DM the owner directly: the
+ * a recoverable shard close) so the cause is on record, but it doesn't DM the owner directly: the
  * health watcher does that once the outage outlasts its grace period, and pairs it with a
  * "recovered" DM.
  * @param shardId - The shard that reported the error.
