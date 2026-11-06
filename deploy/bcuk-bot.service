@@ -1,5 +1,7 @@
 # systemd unit for the bot. Don't copy this by hand: scripts/install-systemd-service.sh fills in
 # the __PLACEHOLDERS__ and installs it as /etc/systemd/system/bcuk-bot.service.
+# deploy.sh doesn't reinstall it: after a release changes this file, re-run the installer as the
+# bot's user and restart the service, or the server keeps running the old unit.
 [Unit]
 Description=BCUK Bot 4 (Discord/Twitch bot and web panel)
 # Ordering only: a remote MySQL simply has no local unit, which systemd ignores.
