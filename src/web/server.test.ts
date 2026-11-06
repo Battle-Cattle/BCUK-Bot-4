@@ -21,10 +21,11 @@ vi.mock('../shared/config', () => ({
 }));
 
 // The session pool server.ts hands the session store, and the store's constructor args/close calls.
-const { mockPool, storeCtorArgs, storeClose, storeClearExpired, storeGet } = vi.hoisted(() => ({
+const { mockPool, storeCtorArgs, storeClose, storeClearExpired, storeGet, storeSet } = vi.hoisted(() => ({
   mockPool: { pool: { marker: 'session-callback-pool' } },
   storeCtorArgs: [] as unknown[][],
   storeGet: vi.fn((_id: string, cb: (err: unknown, session?: unknown) => void) => cb(null, undefined)),
+  storeSet: vi.fn((_id: string, _session: unknown, cb?: (err?: unknown) => void) => cb?.()),
   storeClose: vi.fn().mockResolvedValue(undefined),
   storeClearExpired: vi.fn().mockResolvedValue(undefined),
 }));
@@ -48,8 +49,8 @@ vi.mock('express-mysql-session', () => ({
       get(id: string, cb: (err: unknown, session?: unknown) => void) {
         storeGet(id, cb);
       }
-      set(_id: string, _session: unknown, cb?: (err?: unknown) => void) {
-        cb?.();
+      set(id: string, session: unknown, cb?: (err?: unknown) => void) {
+        storeSet(id, session, cb);
       }
       destroy(_id: string, cb?: (err?: unknown) => void) {
         cb?.();
@@ -105,6 +106,11 @@ function errorTriggerRouter() {
   });
   router.get('/__trigger_bot_pool_queue_error', (_req, _res, next) => {
     next(new Error('Queue limit reached.'));
+  });
+  // Changes the session, so express-session saves it as the response ends.
+  router.get('/__session_save', (req, res) => {
+    (req.session as unknown as Record<string, unknown>).visited = true;
+    res.send('saved');
   });
   return router;
 }
@@ -752,6 +758,22 @@ describe('session store overload', () => {
   it("answers the bot pool's full queue with a 500, not the session-store 503", async () => {
     const res = await request(app).get('/__trigger_bot_pool_queue_error').set('X-Forwarded-For', '198.51.100.9');
     expect(res.status).toBe(500);
+    expect(mockLog.warn).not.toHaveBeenCalledWith(expect.stringContaining('Session store busy'), expect.anything());
+  });
+
+  it('logs a session save that fails after the response went out, instead of rendering an error page into it', async () => {
+    storeSet.mockImplementationOnce((_id, _session, cb) => cb?.(new Error('Queue limit reached.')));
+    const res = await request(app).get('/__session_save').set('X-Forwarded-For', '198.51.100.10');
+
+    // The page itself already went out; the failed save is only logged.
+    expect(res.status).toBe(200);
+    expect(res.text).toBe('saved');
+    await waitFor(() =>
+      expect(mockLog.warn).toHaveBeenCalledWith(
+        'Error after GET /__session_save was already answered:',
+        expect.objectContaining({ message: 'Queue limit reached.' }),
+      ),
+    );
     expect(mockLog.warn).not.toHaveBeenCalledWith(expect.stringContaining('Session store busy'), expect.anything());
   });
 

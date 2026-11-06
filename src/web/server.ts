@@ -307,13 +307,22 @@ app.use(csrfErrorHandler);
  * Centralised error handler — catches anything unhandled by earlier middleware/routes.
  * A full session-store queue gets a 503 and a warning. Client errors (a 4xx `status`, e.g. a
  * corrupt or unsupported-encoding request body from body-parser) get that status and a one-line
- * warning; anything else is logged as an error and answered with a 500.
+ * warning; anything else is logged as an error and answered with a 500. An error that arrives once
+ * the response has gone (express-session saves the session as the response ends, and reports a
+ * failed save here) can't get an error page: rendering one would throw. It is logged and passed to
+ * Express's default handler, which closes the connection.
  * @param err - The unhandled error.
  * @param req - Express request; reads `req.session.user` if present.
  * @param res - Express response; renders the `error` view with a 503, the client-error status or 500.
- * @param _next - Unused, but required for Express to recognize this as an error handler.
+ * @param next - Express's default error handler, for an error that arrives after the response was sent.
  */
-app.use((err: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+app.use((err: unknown, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (res.headersSent) {
+    const logAt = isSessionStoreBusyError(err) ? log.warn : log.error;
+    logAt(`Error after ${req.method} ${req.path} was already answered:`, err);
+    next(err);
+    return;
+  }
   if (isSessionStoreBusyError(err)) {
     log.warn(`Session store busy; answered ${req.method} ${req.path} with 503:`, err);
     renderErrorPage(req, res, 503, 'The panel is busy right now. Please try again in a moment.');
