@@ -4,6 +4,15 @@ import { tryReservePoolSlot, releasePoolSlot, type SseConnectionPool } from './s
 
 const KEEPALIVE_INTERVAL_MS = 25_000;
 
+/**
+ * Most bytes one SSE connection may have queued but not yet flushed to its socket
+ * (`res.writableLength`). `res.write()` never refuses data, so a client that stops reading but keeps
+ * its socket open would otherwise make the process buffer every later event for it without limit.
+ * A client over this cap is disconnected; its `EventSource` reconnects on its own and resumes from
+ * the current state. Well above any single frame these channels send, so only a stalled client trips it.
+ */
+export const SSE_MAX_PENDING_BYTES = 256 * 1024;
+
 // Process-wide cap across every SSE endpoint (reward-video overlay, alerts overlay, companion
 // app, channel-points prices), on top of each endpoint's own per-key `maxPerChannel` limit. Without
 // this, an unauthenticated caller could exhaust sockets/timers/memory by opening connections under
@@ -18,6 +27,42 @@ let totalConnections = 0;
  * `Response` from its Set and leaving the interval/global slot to self-heal on the next ping.
  */
 const connectionCleanups = new WeakMap<Response, () => void>();
+
+/**
+ * Writes one SSE frame to `res`, and reports whether the connection should be evicted: the write
+ * threw, or it left more than {@link SSE_MAX_PENDING_BYTES} queued (the client isn't keeping up).
+ * A client already over the cap is not written to at all, so its buffer stops growing.
+ * @param res - The SSE response to write to.
+ * @param frame - The complete SSE frame (e.g. `data: …\n\n` or a `: ping` comment).
+ * @returns true if the frame was written and the client is within the cap; false if it should be evicted.
+ */
+function writeSseFrame(res: Response, frame: string): boolean {
+  if (isOverPendingLimit(res)) return false;
+  try {
+    res.write(frame);
+  } catch {
+    return false;
+  }
+  return !isOverPendingLimit(res);
+}
+
+/**
+ * Whether `res` has more than {@link SSE_MAX_PENDING_BYTES} written but not yet flushed.
+ * @param res - The SSE response to check.
+ * @returns true once the pending write buffer is over the cap.
+ */
+function isOverPendingLimit(res: Response): boolean {
+  return res.writableLength > SSE_MAX_PENDING_BYTES;
+}
+
+/**
+ * Destroys the socket of a client that fell behind, dropping its queued data. Its registered
+ * cleanup has already run (or runs again idempotently from the resulting 'close' event).
+ * @param res - The SSE response to drop.
+ */
+function dropBackloggedClient(res: Response): void {
+  if (isOverPendingLimit(res)) res.destroy();
+}
 
 /** Listeners registered via {@link onConnectionCountChange}, per connections map. */
 const countChangeListeners = new WeakMap<Map<unknown, Set<Response>>, Set<(key: unknown) => void>>();
@@ -77,7 +122,9 @@ function removeClient<K>(connections: Map<K, Set<Response>>, key: K, res: Respon
 
 /**
  * Serializes `payload` and writes it as an SSE `data:` frame to every client connected under
- * `key`, evicting any client whose write fails (and dropping the map entry if that empties it).
+ * `key`, evicting any client whose write fails or that has more than {@link SSE_MAX_PENDING_BYTES}
+ * queued but unflushed (and dropping the map entry if that empties it). A backlogged client's
+ * socket is destroyed too, so its buffered data is freed; its `EventSource` reconnects on its own.
  * A failed client is torn down via its registered {@link attachSseConnection} cleanup when one
  * exists (clearing its keepalive interval and releasing its `totalConnections` slot immediately,
  * rather than leaving that to the next keepalive tick); falls back to removing it from the Set
@@ -104,13 +151,11 @@ export function broadcastToChannel<K>(
   let evictedUnregistered = false;
   for (const res of clients) {
     if (isEligible && !isEligible(res)) continue;
-    try {
-      res.write(`data: ${serialized}\n\n`);
-    } catch {
-      const cleanup = connectionCleanups.get(res);
-      if (cleanup) cleanup();
-      else evictedUnregistered = clients.delete(res) || evictedUnregistered;
-    }
+    if (writeSseFrame(res, `data: ${serialized}\n\n`)) continue;
+    const cleanup = connectionCleanups.get(res);
+    if (cleanup) cleanup();
+    else evictedUnregistered = clients.delete(res) || evictedUnregistered;
+    dropBackloggedClient(res);
   }
   if (clients.size === 0) connections.delete(key);
   // A registered client's cleanup already notified via removeClient; only the fallback path needs it here.
@@ -135,8 +180,9 @@ function sendSseHandshake(res: Response): void {
 
 /**
  * Starts the periodic keepalive ping for one connection. If a ping write fails (e.g. the client
- * disconnected without any close/error event firing first), runs `cleanup` so nothing is left
- * running for a dead connection.
+ * disconnected without any close/error event firing first) or the client has more than
+ * {@link SSE_MAX_PENDING_BYTES} queued, runs `cleanup` (and drops a backlogged socket) so nothing
+ * is left running or buffering for a dead or stalled connection.
  * @param res - The SSE response to ping.
  * @param cleanup - Idempotent teardown (clears this interval and evicts the client) to run on a
  *   failed ping write.
@@ -144,11 +190,9 @@ function sendSseHandshake(res: Response): void {
  */
 function startKeepalive(res: Response, cleanup: () => void): NodeJS.Timeout {
   return setInterval(() => {
-    try {
-      res.write(': ping\n\n');
-    } catch {
-      cleanup();
-    }
+    if (writeSseFrame(res, ': ping\n\n')) return;
+    cleanup();
+    dropBackloggedClient(res);
   }, KEEPALIVE_INTERVAL_MS);
 }
 

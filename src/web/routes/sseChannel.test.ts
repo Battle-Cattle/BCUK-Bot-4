@@ -14,6 +14,7 @@ vi.mock('../session', () => ({ getSessionUser: vi.fn() }));
 
 import {
   attachSseConnection, broadcastToChannel, chainConnectionCleanup, getConnectionCountListenerCount, onConnectionCountChange,
+  SSE_MAX_PENDING_BYTES,
 } from './sseChannel';
 import {
   createSseEventsHandler, createLoginValidator, createStreamerSseEventsHandler, createOverlayStatusEventsHandler,
@@ -41,6 +42,9 @@ function makeRes() {
     setHeader: vi.fn(),
     flushHeaders: vi.fn(),
     write: vi.fn(),
+    // Bytes queued but not yet flushed; tests raise it to simulate a client that stopped reading.
+    writableLength: 0,
+    destroy: vi.fn(),
     status: vi.fn().mockReturnThis(),
     end: vi.fn(),
     on: vi.fn((event: string, cb: () => void) => { (handlers[event] ??= []).push(cb); }),
@@ -903,6 +907,112 @@ describe('broadcastToChannel', () => {
     expect(attached).toBe(true);
     triggerClose();
     opened.forEach((close) => close());
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Backpressure: per-connection pending-bytes cap
+// ---------------------------------------------------------------------------
+describe('broadcastToChannel — pending write buffer cap', () => {
+  it('evicts and destroys a registered client whose write leaves it over the cap, releasing its slot and notifying listeners', () => {
+    const res = makeRes();
+    const { req } = makeReq('unused');
+    attachSseConnection(req as any, res as any, { connections, key: 'slow', maxPerChannel: 5 });
+    const listener = vi.fn();
+    const unsubscribe = onConnectionCountChange(connections, listener);
+    // A stalled client: write() still accepts data (returns false) and the queue keeps growing.
+    res.write.mockImplementation(() => { res.writableLength += SSE_MAX_PENDING_BYTES + 1; return false; });
+
+    const result = broadcastToChannel(connections, 'slow', { x: 1 });
+
+    expect(result).toBe(0);
+    expect(connections.has('slow')).toBe(false);
+    expect(res.destroy).toHaveBeenCalledTimes(1);
+    expect(listener).toHaveBeenCalledWith('slow');
+    expect(chainConnectionCleanup(res as any, vi.fn())).toBe(false); // cleanup already ran
+    unsubscribe();
+  });
+
+  it('frees the process-wide slot of a backlogged client so a new connection can attach', () => {
+    const opened: Array<() => void> = [];
+    for (let i = 0; i < 9; i++) {
+      const { req, triggerClose } = makeReq('unused');
+      attachSseConnection(req as any, makeRes() as any, { connections, key: `key-${i}`, maxPerChannel: 100 });
+      opened.push(triggerClose);
+    }
+    const slow = makeRes();
+    attachSseConnection(makeReq('unused').req as any, slow as any, { connections, key: 'slow', maxPerChannel: 100 });
+    slow.writableLength = SSE_MAX_PENDING_BYTES + 1;
+
+    broadcastToChannel(connections, 'slow', { x: 1 });
+
+    const { req, triggerClose } = makeReq('unused');
+    expect(attachSseConnection(req as any, makeRes() as any, { connections, key: 'new', maxPerChannel: 100 })).toBe(true);
+    triggerClose();
+    opened.forEach((close) => close());
+  });
+
+  it('does not write to a client already over the cap, so its buffer stops growing', () => {
+    const slow = makeRes();
+    const good = makeRes();
+    slow.writableLength = SSE_MAX_PENDING_BYTES + 1;
+    connections.set('k', new Set([slow as any, good as any]));
+
+    const result = broadcastToChannel(connections, 'k', { x: 1 });
+
+    expect(slow.write).not.toHaveBeenCalled();
+    expect(slow.destroy).toHaveBeenCalledTimes(1);
+    expect(good.write).toHaveBeenCalledWith('data: {"x":1}\n\n');
+    expect(result).toBe(1);
+  });
+
+  it('keeps a client connected while its pending bytes stay within the cap, even when write() reports backpressure', () => {
+    const res = makeRes();
+    const { req, triggerClose } = makeReq('unused');
+    attachSseConnection(req as any, res as any, { connections, key: 'k', maxPerChannel: 5 });
+    res.writableLength = SSE_MAX_PENDING_BYTES; // exactly at the cap is still allowed
+    res.write.mockReturnValue(false);
+
+    expect(broadcastToChannel(connections, 'k', { n: 1 })).toBe(1);
+    res.writableLength = 0; // drained
+    expect(broadcastToChannel(connections, 'k', { n: 2 })).toBe(1);
+
+    expect(res.write).toHaveBeenCalledWith('data: {"n":2}\n\n');
+    expect(res.destroy).not.toHaveBeenCalled();
+    triggerClose();
+  });
+
+  it('does not destroy a client evicted for a failed write when it is not backlogged', () => {
+    const dead = makeRes();
+    dead.write.mockImplementation(() => { throw new Error('broken pipe'); });
+    connections.set('k', new Set([dead as any]));
+
+    broadcastToChannel(connections, 'k', { x: 1 });
+
+    expect(dead.destroy).not.toHaveBeenCalled();
+  });
+});
+
+describe('keepalive — pending write buffer cap', () => {
+  it('evicts, destroys and stops pinging a client that is over the cap on a keepalive tick', () => {
+    vi.useFakeTimers();
+    try {
+      const res = makeRes();
+      attachSseConnection(makeReq('unused').req as any, res as any, { connections, key: 'k', maxPerChannel: 5 });
+      res.write.mockClear();
+      res.writableLength = SSE_MAX_PENDING_BYTES + 1;
+
+      vi.advanceTimersByTime(25_000);
+
+      expect(res.write).not.toHaveBeenCalled();
+      expect(connections.has('k')).toBe(false);
+      expect(res.destroy).toHaveBeenCalledTimes(1);
+
+      vi.advanceTimersByTime(25_000);
+      expect(res.write).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
