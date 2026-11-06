@@ -9,11 +9,14 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 // test user's own home directory, like an nvm install, so the unit has to bind it back in.
 
 const REPO_ROOT = path.resolve(__dirname, '..');
-// The installer is for systemd, so Linux only (it also needs GNU `realpath -m`). It binds a Node
-// install back into the sandbox only from under /home or /root, so the fake one made under the
-// home directory is only bound when the home directory is there too (not, say, HOME=/github/home).
+// The installer is for systemd, so Linux only, and it needs a `realpath` with `-m` (GNU coreutils;
+// BusyBox's may lack it). It binds a Node install back into the sandbox only from under /home or
+// /root, so the fake one made under the home directory is only bound when the home directory is
+// there too (not, say, HOME=/github/home).
 const canRunInstaller =
-  process.platform === 'linux' && /^\/(home|root)\//.test(`${fs.realpathSync(os.homedir())}/`);
+  process.platform === 'linux' &&
+  /^\/(home|root)\//.test(`${fs.realpathSync(os.homedir())}/`) &&
+  spawnSync('realpath', ['-m', '/nonexistent/realpath-probe'], { stdio: 'ignore' }).status === 0;
 
 const STUBS: Record<string, string> = {
   // `sudo install -m MODE SRC DEST` keeps SRC (the rendered unit or sudoers rule) for the test.
