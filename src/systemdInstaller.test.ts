@@ -9,7 +9,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 // test user's own home directory, like an nvm install, so the unit has to bind it back in.
 
 const REPO_ROOT = path.resolve(__dirname, '..');
-const onWindows = process.platform === 'win32';
+// The installer is for systemd, so Linux only (it also needs GNU `realpath -m`). It binds a Node
+// install back into the sandbox only from under /home or /root, so the fake one made under the
+// home directory is only bound when the home directory is there too (not, say, HOME=/github/home).
+const canRunInstaller =
+  process.platform === 'linux' && /^\/(home|root)\//.test(`${fs.realpathSync(os.homedir())}/`);
 
 const STUBS: Record<string, string> = {
   // `sudo install -m MODE SRC DEST` keeps SRC (the rendered unit or sudoers rule) for the test.
@@ -75,7 +79,7 @@ function setting(unit: string, key: string): string | undefined {
   return unit.split('\n').find((line) => line.startsWith(`${key}=`))?.slice(key.length + 1);
 }
 
-describe.skipIf(onWindows)('install-systemd-service.sh', () => {
+describe.skipIf(!canRunInstaller)('install-systemd-service.sh', () => {
   it('hides home directories and binds back only the checkout, the node binary and the writable folders', () => {
     const videos = path.join(root, 'videos');
     const unit = install(`OVERLAY_FOLDER=${videos} # absolute\nSFX_FOLDER=" ./my-sfx "\n`);

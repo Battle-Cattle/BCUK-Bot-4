@@ -1,14 +1,14 @@
 # Helpers shared by deploy.sh and the backup scripts. Sourced, not run: callers set ENV_FILE first.
 
 # Prints a setting from $ENV_FILE the way dotenv reads it: an optional `export ` prefix and spaces
-# around `=` are allowed; last entry wins; a value in double, single or back quotes is taken up to
+# around `=` are allowed, as is dotenv's `NAME: value` form (a colon straight after the name, then
+# whitespace); last entry wins; a value in double, single or back quotes is taken up to
 # its closing quote (so a `#` inside it stays, and so does an escaped quote); an unquoted one ends at
 # the first `#` and loses surrounding spaces. Prints nothing for no entry (grep finding nothing must
 # not trip pipefail) or a blank one.
 env_setting() {
-    local value
-    value="$( { grep -E "^[[:space:]]*(export[[:space:]]+)?$1[[:space:]]*=" "$ENV_FILE" 2>/dev/null || true; } \
-        | tail -n 1 | cut -d= -f2-)"
+    local value prefix="^[[:space:]]*(export[[:space:]]+)?$1([[:space:]]*=|:[[:space:]])"
+    value="$( { grep -E "$prefix" "$ENV_FILE" 2>/dev/null || true; } | tail -n 1 | sed -E "s/$prefix//")"
     value="${value#"${value%%[![:space:]]*}"}"
     # A value in double, single or back quotes runs to the first matching quote not escaped with a
     # backslash, and keeps the escape, as dotenv does (`"p\"ss"` is `p\"ss`). One with no closing

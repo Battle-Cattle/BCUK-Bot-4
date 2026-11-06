@@ -57,12 +57,19 @@ describe.skipIf(onWindows)('env_setting in scripts/lib/dotenv.sh', () => {
     ['NAME="p\\"ss"', 'p\\"ss'],
     ["NAME='it\\'s'", "it\\'s"],
     ['NAME="unterminated', '"unterminated'],
+    ['NAME: colon', 'colon'],
+    ['export NAME:\t"colon # kept" # comment', 'colon # kept'],
+    ['NAME=first\nNAME: last', 'last'],
   ])('reads %j as %j', (line, expected) => {
     expect(run(`${line}\n`, [envSetting()], 'env_setting NAME')).toBe(expected);
   });
 
   it('ignores other settings that merely contain the name', () => {
     expect(run('OTHER_NAME=x\nNAMESPACE=y\n', [envSetting()], 'env_setting NAME')).toBe('');
+  });
+
+  it('ignores colon lines dotenv ignores: no whitespace after the colon, or space before it', () => {
+    expect(run('NAME:x\nNAME : y\n', [envSetting()], 'env_setting NAME')).toBe('');
   });
 });
 
@@ -84,6 +91,7 @@ describe.skipIf(onWindows)('deploy.sh health URL', () => {
     ['WEB_HOST=::', 'http://[::1]:3000/healthz'],
     ['WEB_HOST=::1', 'http://[::1]:3000/healthz'],
     ['WEB_PORT=" 3001 "', 'http://127.0.0.1:3001/healthz'],
+    ['WEB_HOST: 10.0.0.5\nWEB_PORT: 3001', 'http://10.0.0.5:3001/healthz'],
   ])('builds the URL for %j as %s', (env, expected) => {
     expect(run(`${env}\n`, blocks(), 'printf %s "$HEALTH_URL"')).toBe(expected);
   });
