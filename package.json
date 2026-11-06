@@ -34,7 +34,7 @@
     "ejs": "^7.0.2",
     "express": "^5.3.0",
     "express-mysql-session": "^3.0.3",
-    "express-rate-limit": "^8.7.2",
+    "express-rate-limit": "^8.7.3",
     "express-session": "^1.19.0",
     "ffmpeg-static": "^5.2.0",
     "helmet": "^8.3.0",
