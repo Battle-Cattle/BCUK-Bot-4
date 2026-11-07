@@ -168,14 +168,14 @@ Export `registerXRuntime(runtime)` from the handler file to store the platform c
 
 Every issue has two independent ratings:
 
-- **Severity = impact**: how much it matters if it's never done (or how bad the bug is). It goes in both the title prefix and a label, kept in step: `[Critical]`/`[High]`/`[Medium]`/`[Low]` and `severity:critical`/`severity:high`/`severity:medium`/`severity:low`. Add a type label too (`bug`, `enhancement`, `documentation`, `security`, …).
+- **Severity = impact**: how much it matters if it's never done (or how bad the bug is). It's a label: `severity:critical`/`severity:high`/`severity:medium`/`severity:low`. Titles don't need a severity prefix. Add a type label too (`bug`, `enhancement`, `documentation`, `security`, …).
 - **Priority = urgency**: how soon it should be done. It's the org-level **Priority** issue field (`Urgent`/`High`/`Medium`/`Low`), not a label or title prefix. Every open issue has one.
 
 The two can differ (e.g. a low-impact fix that's wanted soon, or a high-impact feature that can wait). Don't "correct" one to match the other.
 
 **Large issues are split into sub-issues**, linked as real GitHub sub-issues (not just mentioned in the body):
 
-- Title: `[Severity] <parent topic> n/N: <what this part does>`, e.g. `[Medium] Faster test suite 2/4: sub-second, configurable polling in deploy.sh`. Mark optional parts `(optional)`.
+- Title: `<parent topic> n/N: <what this part does>`, e.g. `Faster test suite 2/4: sub-second, configurable polling in deploy.sh`. Mark optional parts `(optional)`.
 - Body: which parent it's part of and which step of the parent's plan it covers, its scope, tests, and a "Depends on" list of the other parts it needs. The full design stays in the parent.
 - **Priority matches the parent.** Change the parent's and every open sub-issue's together.
 - **Severity is the same as the parent's or lower**, judged on what that part delivers on its own (e.g. a read-only page that's empty until a later part lands is lower than the parts that deliver the feature). **The parent's severity is the highest of its sub-issues'**: when a sub-issue's severity changes, recheck the parent's.
