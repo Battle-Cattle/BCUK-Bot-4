@@ -436,10 +436,30 @@ Videos a streamer has uploaded for the channel-point video overlay.
 | `name` | `VARCHAR(255)` | Display name shown in the overlay admin page |
 | `filename` | `VARCHAR(255)` | Stored file name, a random UUID plus extension; served without auth, so the name is what keeps it unguessable |
 | `created_at` | `TIMESTAMP` | Defaults to `CURRENT_TIMESTAMP` |
+| `library_entry_id` | `INT` nullable | FK to `overlay_video_library.id` ON DELETE SET NULL; the public library entry this video was imported from. Provenance only: removing the entry keeps the copy |
 
 Expected behavior:
 
 - Deletes are scoped by `streamer_id`, and `deleteVideo` returns the row's `filename` so the caller can remove the file from disk.
+- An imported video is an ordinary row with its own file, like an upload; nothing depends on `library_entry_id`.
+
+## `overlay_video_library`
+
+The public overlay video library: videos streamers have added for every streamer to browse and import as their own `overlay_video` copies. Each entry has its own file in `<videoFolder>/library/`, independent of the contributor's video. Only an Admin removes an entry.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | `INT` PK auto-increment | |
+| `name` | `VARCHAR(255)` | Copied from the contributor's `overlay_video.name` when added |
+| `filename` | `VARCHAR(255)` | The library's own stored file name, a random UUID plus extension |
+| `contributor_streamer_id` | `INT` nullable | FK to `streamer.id` ON DELETE SET NULL; who added it. `NULL` once that streamer row is gone (shown as unknown) |
+| `source_video_id` | `INT` nullable | FK to `overlay_video.id` ON DELETE SET NULL; the video it was added from. `NULL` once the contributor deletes that video, and the entry stays |
+| `created_at` | `TIMESTAMP` | Defaults to `CURRENT_TIMESTAMP` |
+
+Expected constraints and behavior:
+
+- `UNIQUE KEY uq_overlay_video_library_filename (filename)` and `UNIQUE KEY uq_overlay_video_library_source (source_video_id)`; the latter stops the same video being added twice while it exists.
+- Adding checks, in one transaction, that the streamer owns the source video. Removing is not streamer-scoped (the route is Admin only) and returns the row's `filename` for disk cleanup; copies streamers imported are kept.
 
 ## `overlay_reward`
 

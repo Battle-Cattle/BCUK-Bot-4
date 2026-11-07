@@ -145,6 +145,11 @@ export {
   getRewardsForStreamer, saveRewardWithVideos, deleteReward,
   getVideosForReward,
 } from './db/overlayVideos';
+export type { OverlayLibraryVideo, AddVideoToLibraryResult } from './db/overlayVideoLibrary';
+export {
+  addVideoToLibrary, getLibraryVideos, getImportedLibraryEntryIds,
+  importLibraryVideo, removeLibraryVideo,
+} from './db/overlayVideoLibrary';
 
 // ─── Channel point pricing ───────────────────────────────────────────────────
 
