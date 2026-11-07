@@ -44,13 +44,10 @@ import {
 import { makeMockPool } from '../test-utils/mockMysqlPool';
 import { schemaFromMigrations } from '../test-utils/migrationSchema';
 
-/** Builds a duplicate-entry error like mysql2 throws for the given unique key. */
-function duplicateEntryError(key: string) {
-  return Object.assign(new Error(`Duplicate entry 'x' for key 'overlay_video_library.${key}'`), {
-    code: 'ER_DUP_ENTRY',
-    errno: 1062,
-    sqlMessage: `Duplicate entry 'x' for key 'overlay_video_library.${key}'`,
-  });
+/** Builds a duplicate-entry error like mysql2 throws; the message names the colliding value and key. */
+function duplicateEntryError(value: string, key: string) {
+  const message = `Duplicate entry '${value}' for key 'overlay_video_library.${key}'`;
+  return Object.assign(new Error(message), { code: 'ER_DUP_ENTRY', errno: 1062, sqlMessage: message });
 }
 
 beforeEach(() => {
@@ -115,21 +112,38 @@ describe('addVideoToLibrary', () => {
     const pool = makeMockPool();
     pool._conn.execute
       .mockResolvedValueOnce([[{ name: 'Clap', filename: 'src.mp4' }], []])
-      .mockRejectedValueOnce(duplicateEntryError('uq_overlay_video_library_source'));
+      .mockRejectedValueOnce(duplicateEntryError('3', 'uq_overlay_video_library_source'))
+      .mockResolvedValueOnce([[{ id: 2 }], []]);
     vi.mocked(getPool).mockReturnValue(pool as any);
 
     await expect(addVideoToLibrary(3, 5, 'lib.mp4')).resolves.toEqual({ status: 'already_in_library' });
+    const [sql, params] = pool._conn.execute.mock.calls[2]!;
+    expect(sql).toContain('WHERE source_video_id = ? FOR SHARE');
+    expect(params).toEqual([3]);
   });
 
   it('rethrows a duplicate on the filename index, which is a caller bug', async () => {
     const pool = makeMockPool();
     pool._conn.execute
       .mockResolvedValueOnce([[{ name: 'Clap', filename: 'src.mp4' }], []])
-      .mockRejectedValueOnce(duplicateEntryError('uq_overlay_video_library_filename'));
+      .mockRejectedValueOnce(duplicateEntryError('lib.mp4', 'uq_overlay_video_library_filename'))
+      .mockResolvedValueOnce([[], []]);
     vi.mocked(getPool).mockReturnValue(pool as any);
 
     await expect(addVideoToLibrary(3, 5, 'lib.mp4')).rejects.toMatchObject({ code: 'ER_DUP_ENTRY' });
     expect(pool._conn.rollback).toHaveBeenCalled();
+  });
+
+  it('rethrows a filename collision even when the filename contains the source key name', async () => {
+    const pool = makeMockPool();
+    const filename = 'uq_overlay_video_library_source.mp4';
+    pool._conn.execute
+      .mockResolvedValueOnce([[{ name: 'Clap', filename: 'src.mp4' }], []])
+      .mockRejectedValueOnce(duplicateEntryError(filename, 'uq_overlay_video_library_filename'))
+      .mockResolvedValueOnce([[], []]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+
+    await expect(addVideoToLibrary(3, 5, filename)).rejects.toMatchObject({ code: 'ER_DUP_ENTRY' });
   });
 
   it('rethrows other errors and rolls back', async () => {

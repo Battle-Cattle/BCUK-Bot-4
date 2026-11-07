@@ -1,4 +1,4 @@
-import mysql from 'mysql2/promise';
+import mysql, { type PoolConnection } from 'mysql2/promise';
 import { getPool, withTransaction, withTransactionOrNotFound } from './pool';
 import { isMysqlDuplicateEntryError } from './utils';
 
@@ -22,20 +22,22 @@ export type AddVideoToLibraryResult =
   | { status: 'not_owner' }
   | { status: 'already_in_library' };
 
-/** Name of the unique index that stops one video being added to the library twice. */
-const SOURCE_VIDEO_UNIQUE_KEY = 'uq_overlay_video_library_source';
-
 /**
- * Checks whether a duplicate-entry error came from the `source_video_id` unique index, as opposed
- * to the `filename` one (a filename collision is a caller bug, not "already in library").
- * @param err Value caught from the INSERT.
- * @returns True if `err` is a duplicate on `uq_overlay_video_library_source`.
+ * After a duplicate-entry error from the library INSERT, checks whether it was the
+ * `source_video_id` unique index (the video is already in the library) rather than the
+ * `filename` one (a caller bug). Asks the table instead of parsing the error message, whose
+ * text includes the colliding value. A locking read, so it sees a row another transaction just
+ * committed even though this transaction's snapshot predates it.
+ * @param conn Connection with the add's open transaction.
+ * @param videoId Primary key of the contributor's `overlay_video` row.
+ * @returns True if a library entry for `videoId` exists.
  */
-function isDuplicateSourceVideo(err: unknown): boolean {
-  if (!isMysqlDuplicateEntryError(err)) return false;
-  const message = (err as { sqlMessage?: string; message?: string }).sqlMessage
-    ?? (err as { message?: string }).message ?? '';
-  return message.includes(SOURCE_VIDEO_UNIQUE_KEY);
+async function sourceVideoInLibrary(conn: PoolConnection, videoId: number): Promise<boolean> {
+  const [rows] = await conn.execute<mysql.RowDataPacket[]>(
+    `SELECT id FROM overlay_video_library WHERE source_video_id = ? FOR SHARE`,
+    [videoId],
+  );
+  return rows.length > 0;
 }
 
 /**
@@ -70,7 +72,9 @@ export async function addVideoToLibrary(
       );
       return { status: 'added', libraryId: result.insertId, sourceFilename: video.filename };
     } catch (err) {
-      if (isDuplicateSourceVideo(err)) return { status: 'already_in_library' };
+      if (isMysqlDuplicateEntryError(err) && await sourceVideoInLibrary(conn, videoId)) {
+        return { status: 'already_in_library' };
+      }
       throw err;
     }
   });
