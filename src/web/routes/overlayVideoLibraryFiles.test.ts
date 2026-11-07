@@ -188,6 +188,18 @@ describe('removeVideoFile', () => {
     expect(exists('5', 'clip.webm')).toBe(true);
   });
 
+  it('removes a filename that is a symlink, leaving the file it points to', async () => {
+    await writeVideo('5', 'clip.webm');
+    await fs.promises.mkdir(path.join(overlayFolder, LIBRARY_FOLDER), { recursive: true });
+    const link = path.join(overlayFolder, LIBRARY_FOLDER, 'link.webm');
+    await fs.promises.symlink(path.join(overlayFolder, '5', 'clip.webm'), link, 'file');
+
+    await removeLibraryVideoFile('link.webm');
+
+    await expect(fs.promises.lstat(link)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await readVideo('5', 'clip.webm')).toBe('video bytes');
+  });
+
   it('logs instead of throwing when removal fails', async () => {
     const location = await writeVideo('5', 'clip.webm');
     const rm = vi.spyOn(fs.promises, 'rm').mockRejectedValueOnce(Object.assign(new Error('busy'), { code: 'EBUSY' }));

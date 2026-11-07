@@ -112,8 +112,9 @@ export async function linkVideoFile(source: OverlayVideoLocation, destFolder: st
 /**
  * Removes a stored overlay video file, logging instead of throwing (as `removeDeletedVideoFile`
  * does for a deleted video): a leftover file is harmless, a failed request over one isn't worth it.
- * The file's real path must be inside OVERLAY_FOLDER, so a folder linked to somewhere outside it
- * can't be used to delete a file there; a missing file is nothing to remove.
+ * The folder's real path must be inside OVERLAY_FOLDER, so a folder linked to somewhere outside
+ * it can't be used to delete a file there. The directory entry itself is removed (`rm` doesn't
+ * follow a final symlink), so a filename that is a link removes the link, never its target.
  * @param location - The file's folder and filename.
  * @returns Resolves once removal has been attempted; never rejects.
  */
@@ -121,8 +122,8 @@ export async function removeVideoFile(location: OverlayVideoLocation): Promise<v
   const filePath = resolveInOverlayFolder(location.folder, location.filename);
   if (!filePath) return;
   try {
-    const realPath = await realPathWithin(OVERLAY_FOLDER, filePath);
-    if (realPath) await fs.promises.rm(realPath, { force: true });
+    const realDir = await realPathWithin(OVERLAY_FOLDER, path.dirname(filePath));
+    if (realDir) await fs.promises.rm(path.join(realDir, location.filename), { force: true });
   } catch (err) {
     log.error(`Failed to remove overlay video file ${filePath}:`, err);
   }
