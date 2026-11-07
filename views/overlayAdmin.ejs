@@ -25,6 +25,9 @@
         invalid_id:       'Invalid request.',
         file_too_large:   `That file is too large (max ${maxFileMb} MB).`,
         not_found:        'That library video no longer exists.',
+        not_your_video:   'That video is not one of yours.',
+        already_in_library:'That video is already in the public library.',
+        publish_failed:   'Adding the video to the public library failed — please try again.',
       }; %>
       <%= errorMessages[error] ?? `An error occurred (${error}).` %>
     </div>
@@ -38,6 +41,7 @@
         reward_saved:   'Reward assignment saved.',
         reward_deleted: 'Reward assignment removed.',
         library_video_removed: 'Video removed from the public library. Copies streamers already added are kept.',
+        video_published: 'Video added to the public library. Every streamer can now see it and add it to their own videos.',
       }; %>
       <%= successMessages[success] ?? 'Done.' %>
     </div>
@@ -100,6 +104,7 @@
                 <th>File</th>
                 <th>Uploaded</th>
                 <th></th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -108,6 +113,16 @@
                 <td><%= v.name %></td>
                 <td class="mono fs-08em"><%= v.filename %></td>
                 <td><%= new Date(v.created_at).toLocaleDateString() %></td>
+                <td>
+                  <% if (publishedVideoIds.includes(v.id)) { %>
+                  <span class="hint hint-compact">In public library</span>
+                  <% } else { %>
+                  <form method="POST" action="/overlay/settings/videos/<%= v.id %>/publish" class="m-0 js-confirm-publish-video">
+                    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                    <button type="submit" class="btn btn-ghost btn-sm">Add to public library</button>
+                  </form>
+                  <% } %>
+                </td>
                 <td>
                   <form method="POST" action="/overlay/settings/videos/<%= v.id %>/delete" class="m-0 js-confirm-delete-video">
                     <input type="hidden" name="_csrf" value="<%= csrfToken %>">

@@ -186,6 +186,22 @@ describe('GET /settings — public video library', () => {
     vi.mocked(getLibraryVideos).mockResolvedValue([ENTRY]);
   });
 
+  it('marks which of the streamer\'s own videos are already a library entry\'s source', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue({ id: 1, discord_id: '1', twitch_user_id: null } as any);
+    vi.mocked(getVideosForStreamer).mockResolvedValue([
+      { id: 12, streamer_id: 1, name: 'A', filename: 'a.webm', created_at: new Date() },
+      { id: 13, streamer_id: 1, name: 'B', filename: 'b.webm', created_at: new Date() },
+    ]);
+    vi.mocked(getLibraryVideos).mockResolvedValue([ENTRY, { ...ENTRY, id: 5, source_video_id: null }, { ...ENTRY, id: 6, source_video_id: 77 }]);
+    const res = await supertest(buildApp()).get('/settings');
+    expect(res.body.publishedVideoIds).toEqual([12]);
+  });
+
+  it('passes no published videos to a non-streamer', async () => {
+    const res = await supertest(buildApp()).get('/settings');
+    expect(res.body.publishedVideoIds).toEqual([]);
+  });
+
   it('passes every library entry to a streamer', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue({ id: 1, discord_id: '1', twitch_user_id: null } as any);
     const res = await supertest(buildApp()).get('/settings');
@@ -201,6 +217,14 @@ describe('GET /settings — public video library', () => {
 });
 
 describe('GET /settings — library codes and Admin controls', () => {
+  it.each(['not_your_video', 'already_in_library', 'publish_failed'])('passes the publish error %s to the template', async (code) => {
+    expect((await supertest(buildApp()).get(`/settings?error=${code}`)).body.error).toBe(code);
+  });
+
+  it('passes the video_published success code to the template', async () => {
+    expect((await supertest(buildApp()).get('/settings?success=video_published')).body.success).toBe('video_published');
+  });
+
   it('passes the library removal success and not_found error codes to the template', async () => {
     expect((await supertest(buildApp()).get('/settings?success=library_video_removed')).body.success).toBe('library_video_removed');
     expect((await supertest(buildApp()).get('/settings?error=not_found')).body.error).toBe('not_found');

@@ -33,6 +33,7 @@ const KNOWN_ERRORS = new Set([
   'not_a_streamer', 'invalid_file', 'upload_failed', 'delete_failed',
   'invalid_reward_id', 'no_videos_selected', 'save_failed', 'invalid_id', 'invalid_path',
   'file_too_large', 'invalid_weight', 'transcode_failed', 'transcode_busy', 'not_found',
+  'not_your_video', 'already_in_library', 'publish_failed',
   ...CHUNKED_UPLOAD_ERROR_CODES,
 ]);
 // Library files are copies of overlay videos, so they have the same names: a UUID plus .webm/.mp4.
@@ -41,8 +42,23 @@ const LIBRARY_FILENAME_RE = /^[\w-]+\.(webm|mp4)$/i;
 const LIBRARY_DIR = path.posix.join(OVERLAY_FOLDER, LIBRARY_FOLDER);
 
 const KNOWN_SUCCESSES = new Set([
-  'video_uploaded', 'video_deleted', 'reward_saved', 'reward_deleted', 'library_video_removed',
+  'video_uploaded', 'video_deleted', 'reward_saved', 'reward_deleted', 'library_video_removed', 'video_published',
 ]);
+
+/**
+ * Picks out which of a streamer's videos are already in the public library, for the "In public
+ * library" label in place of the "Add to public library" button.
+ * @param videos - The streamer's own overlay videos.
+ * @param libraryVideos - Every public library entry, each with the video it was added from.
+ * @returns Ids of the streamer's videos that are some library entry's `source_video_id`.
+ */
+function publishedVideoIdsOf(
+  videos: ReadonlyArray<{ id: number }>,
+  libraryVideos: ReadonlyArray<{ source_video_id: number | null }>,
+): number[] {
+  const sources = new Set(libraryVideos.map((entry) => entry.source_video_id));
+  return videos.filter((v) => sources.has(v.id)).map((v) => v.id);
+}
 
 /**
  * GET /overlay/settings — renders the overlay settings page with the user's
@@ -73,6 +89,7 @@ router.get('/settings', requireAuth, csrfProtection, async (req, res) => {
       rewards,
       twitchRewards,
       libraryVideos,
+      publishedVideoIds: publishedVideoIdsOf(videos, libraryVideos),
       // Only decides whether the page shows Admin controls. The session's cached level can be
       // stale (no requireGuildContext on this page); the remove route re-derives it before
       // requireAdmin, so a stale value can only show or hide a button, never grant access.

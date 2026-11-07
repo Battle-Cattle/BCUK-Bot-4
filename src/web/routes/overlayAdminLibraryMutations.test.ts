@@ -24,6 +24,9 @@ vi.mock('../../db', () => ({
   AccessLevel: ACCESS_LEVEL_MOCK,
   removeLibraryVideo: vi.fn(),
   deleteVideo: vi.fn(),
+  addVideoToLibrary: vi.fn(),
+  getVideosForStreamer: vi.fn(),
+  getStreamerByDiscordId: vi.fn(),
   findUser: vi.fn(),
   getGuildsForMember: vi.fn(),
   getAllGuilds: vi.fn(),
@@ -34,7 +37,11 @@ vi.mock('../../db', () => ({
 
 import supertest from 'supertest';
 import { router } from './overlayAdminLibraryMutations';
-import { removeLibraryVideo, deleteVideo, findUser, getGuildsForMember } from '../../db';
+import {
+  removeLibraryVideo, deleteVideo, findUser, getGuildsForMember,
+  addVideoToLibrary, getVideosForStreamer, getStreamerByDiscordId,
+} from '../../db';
+import { LIBRARY_PUBLISH_LIMIT } from '../rateLimits';
 import { AccessLevel } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 import { makeSessionUser } from '../../test-utils/fixtures';
@@ -144,5 +151,119 @@ describe('POST /settings/library/:id/remove — as an Admin', () => {
     expect(res.headers.location).toBe('/overlay/settings?error=delete_failed');
     expect(logMock.error).toHaveBeenCalledWith('Overlay library remove error:', expect.any(Error));
     expect(fs.existsSync(file(LIBRARY_FOLDER, LIBRARY_FILE))).toBe(true);
+  });
+});
+
+// ─── Publishing ─────────────────────────────────────────────────────────────
+
+describe('POST /settings/videos/:id/publish', () => {
+  const STREAMER_ID = 5;
+  const SOURCE_FILE = 'own.webm';
+  const UUID_WEBM = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.webm$/;
+  let accounts = 0;
+
+  /**
+   * A test app for a fresh streamer account (its own rate-limit bucket), owning video 3 with a
+   * real file in its folder.
+   */
+  async function publishApp(user = makeSessionUser({ discordId: `2000000000000000${String(accounts++).padStart(2, '0')}` })) {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue({ id: STREAMER_ID } as any);
+    vi.mocked(getVideosForStreamer).mockResolvedValue([
+      { id: 3, streamer_id: STREAMER_ID, name: 'Clap', filename: SOURCE_FILE, created_at: new Date() },
+    ]);
+    await fs.promises.mkdir(path.join(overlayFolder, streamerFolder(STREAMER_ID)), { recursive: true });
+    await fs.promises.writeFile(file(streamerFolder(STREAMER_ID), SOURCE_FILE), 'streamer video');
+    return buildTestApp({ router, session: { user }, mockRender: 'text' });
+  }
+
+  /** Files currently in the library folder, other than the one the outer beforeEach puts there. */
+  async function newLibraryFiles() {
+    return (await fs.promises.readdir(path.join(overlayFolder, LIBRARY_FOLDER))).filter((f) => f !== LIBRARY_FILE);
+  }
+
+  it('links the file into the library and records the entry, which outlives the contributor\'s video', async () => {
+    vi.mocked(addVideoToLibrary).mockResolvedValue({ status: 'added', libraryId: 7, sourceFilename: SOURCE_FILE });
+
+    const res = await supertest(await publishApp()).post('/settings/videos/3/publish');
+
+    expect(res.headers.location).toBe('/overlay/settings?success=video_published');
+    const [libraryFile] = await newLibraryFiles();
+    expect(libraryFile).toMatch(UUID_WEBM);
+    expect(addVideoToLibrary).toHaveBeenCalledWith(3, STREAMER_ID, libraryFile);
+    expect(logMock.info).toHaveBeenCalledWith(`Streamer ${STREAMER_ID} added video 3 to the public library as entry 7`);
+
+    // The contributor deleting their own video removes only their link; the library copy plays on.
+    await fs.promises.rm(file(streamerFolder(STREAMER_ID), SOURCE_FILE));
+    expect(await fs.promises.readFile(file(LIBRARY_FOLDER, libraryFile!), 'utf8')).toBe('streamer video');
+  });
+
+  it('refuses another streamer\'s video before creating any file', async () => {
+    const app = await publishApp();
+    const res = await supertest(app).post('/settings/videos/99/publish');
+    expect(res.headers.location).toBe('/overlay/settings?error=not_your_video');
+    expect(addVideoToLibrary).not.toHaveBeenCalled();
+    expect(await newLibraryFiles()).toEqual([]);
+  });
+
+  it.each([
+    ['not_owner', 'not_your_video'],
+    ['already_in_library', 'already_in_library'],
+  ] as const)('removes the new library file when the DB step returns %s', async (status, code) => {
+    vi.mocked(addVideoToLibrary).mockResolvedValue({ status } as any);
+    const res = await supertest(await publishApp()).post('/settings/videos/3/publish');
+    expect(res.headers.location).toBe(`/overlay/settings?error=${code}`);
+    expect(addVideoToLibrary).toHaveBeenCalledTimes(1);
+    expect(await newLibraryFiles()).toEqual([]);
+  });
+
+  it('removes the new library file and redirects with publish_failed when the DB step fails', async () => {
+    vi.mocked(addVideoToLibrary).mockRejectedValue(new Error('db down'));
+    const res = await supertest(await publishApp()).post('/settings/videos/3/publish');
+    expect(res.headers.location).toBe('/overlay/settings?error=publish_failed');
+    expect(logMock.error).toHaveBeenCalledWith('Overlay library publish error:', expect.any(Error));
+    expect(await newLibraryFiles()).toEqual([]);
+  });
+
+  it('redirects with publish_failed, and logs, when the video has no file on disk', async () => {
+    const app = await publishApp();
+    await fs.promises.rm(file(streamerFolder(STREAMER_ID), SOURCE_FILE));
+    const res = await supertest(app).post('/settings/videos/3/publish');
+    expect(res.headers.location).toBe('/overlay/settings?error=publish_failed');
+    expect(addVideoToLibrary).not.toHaveBeenCalled();
+    expect(logMock.error).toHaveBeenCalledWith(`Overlay video 3 of streamer ${STREAMER_ID} has no file to publish (${SOURCE_FILE})`);
+  });
+
+  it.each([['abc'], ['0'], ['-1']])('redirects with invalid_id for a malformed id %s', async (id) => {
+    const res = await supertest(await publishApp()).post(`/settings/videos/${id}/publish`);
+    expect(res.headers.location).toBe('/overlay/settings?error=invalid_id');
+    expect(addVideoToLibrary).not.toHaveBeenCalled();
+  });
+
+  it('redirects a non-streamer to the not_a_streamer error', async () => {
+    const app = await publishApp();
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(null);
+    const res = await supertest(app).post('/settings/videos/3/publish');
+    expect(res.headers.location).toBe('/overlay/settings?error=not_a_streamer');
+    expect(addVideoToLibrary).not.toHaveBeenCalled();
+  });
+
+  it('redirects to login without a session user', async () => {
+    const res = await supertest(buildTestApp({ router, session: {}, mockRender: 'text' })).post('/settings/videos/3/publish');
+    expect(res.headers.location).toBe('/auth/login');
+    expect(addVideoToLibrary).not.toHaveBeenCalled();
+  });
+
+  it(`stops one account after ${LIBRARY_PUBLISH_LIMIT} publishes in the window, without affecting others`, async () => {
+    vi.mocked(addVideoToLibrary).mockResolvedValue({ status: 'already_in_library' });
+    const app = await publishApp(makeSessionUser({ discordId: '300000000000000001' }));
+    for (let i = 0; i < LIBRARY_PUBLISH_LIMIT; i++) {
+      expect((await supertest(app).post('/settings/videos/3/publish')).status).toBe(302);
+    }
+    const blocked = await supertest(app).post('/settings/videos/3/publish');
+    expect(blocked.status).toBe(429);
+    expect(addVideoToLibrary).toHaveBeenCalledTimes(LIBRARY_PUBLISH_LIMIT);
+
+    const other = await supertest(await publishApp(makeSessionUser({ discordId: '300000000000000002' }))).post('/settings/videos/3/publish');
+    expect(other.status).toBe(302);
   });
 });
