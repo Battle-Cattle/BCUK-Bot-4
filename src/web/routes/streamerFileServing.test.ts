@@ -5,7 +5,6 @@ vi.mock('../../shared/pathUtils', async (importOriginal) => {
   return { ...actual, realPathWithin: vi.fn() };
 });
 
-import path from 'path';
 import type { Response } from 'express';
 import { realPathWithin } from '../../shared/pathUtils';
 import { resolveStreamerFile, resolveSharedFile, sendStreamerFile } from './streamerFileServing';
@@ -35,7 +34,7 @@ describe('resolveStreamerFile', () => {
     const file = await resolveStreamerFile(res as unknown as Response, FOLDER, { streamerId: '12', filename: 'clip.MP4' }, FILENAME_RE);
     expect(file?.realPath).toBe('/srv/files/12/clip.MP4');
     expect(file?.match[1]).toBe('MP4');
-    expect(realPathWithin).toHaveBeenCalledWith(FOLDER, path.resolve(FOLDER, '12', 'clip.MP4'));
+    expect(realPathWithin).toHaveBeenCalledWith(FOLDER, '/srv/files/12/clip.MP4');
     expect(res.status).not.toHaveBeenCalled();
   });
 
@@ -73,7 +72,7 @@ describe('resolveSharedFile', () => {
     const res = mockRes();
     const file = await resolveSharedFile(res as unknown as Response, FOLDER, 'clip.mp4', FILENAME_RE);
     expect(file?.realPath).toBe('/srv/files/clip.mp4');
-    expect(realPathWithin).toHaveBeenCalledWith(FOLDER, path.resolve(FOLDER, 'clip.mp4'));
+    expect(realPathWithin).toHaveBeenCalledWith(FOLDER, '/srv/files/clip.mp4');
     expect(res.status).not.toHaveBeenCalled();
   });
 

@@ -36,7 +36,8 @@ const KNOWN_ERRORS = new Set([
 ]);
 // Library files are copies of overlay videos, so they have the same names: a UUID plus .webm/.mp4.
 const LIBRARY_FILENAME_RE = /^[\w-]+\.(webm|mp4)$/i;
-const LIBRARY_DIR = path.join(OVERLAY_FOLDER, LIBRARY_FOLDER);
+// POSIX join, like safeResolve (which streamerFileServing uses on it) and the bot's Linux target.
+const LIBRARY_DIR = path.posix.join(OVERLAY_FOLDER, LIBRARY_FOLDER);
 
 const KNOWN_SUCCESSES = new Set([
   'video_uploaded', 'video_deleted', 'reward_saved', 'reward_deleted',

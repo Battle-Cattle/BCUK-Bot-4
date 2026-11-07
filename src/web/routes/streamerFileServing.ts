@@ -2,7 +2,6 @@
 // with the path checks both unauthenticated file routes share. Used by overlaySource.ts and
 // alertsOverlaySource.ts; resolveSharedFile does the same for a folder not split per streamer
 // (the overlay video library previews in overlayAdmin.ts).
-import path from 'path';
 import type { Response } from 'express';
 import { safeResolve, realPathWithin } from '../../shared/pathUtils';
 
@@ -85,13 +84,11 @@ async function resolveFolderFile(
   filenamePattern: RegExp,
 ): Promise<ResolvedStreamerFile | null> {
   const match = filenamePattern.exec(filename);
-  if (!match || !safeResolve(folder, ...subfolders, filename)) {
+  const resolved = match ? safeResolve(folder, ...subfolders, filename) : null;
+  if (!match || !resolved) {
     res.status(400).end();
     return null;
   }
-  // safeResolve is the traversal guard; it works in POSIX paths, so the path handed to the
-  // filesystem is built with the platform `path` (the same string on Linux, a real path on Windows).
-  const resolved = path.resolve(folder, ...subfolders, filename);
 
   // safeResolve is purely lexical; also follow symlinks and re-check containment, since
   // sendFile would follow a link under the folder that points outside it. Not atomic with the
