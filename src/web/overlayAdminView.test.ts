@@ -12,6 +12,7 @@ function render(locals: Record<string, unknown> = {}): Promise<string> {
     videos: [{ id: 3, name: 'clip.webm', filename: 'abc.webm', created_at: new Date('2026-01-01T00:00:00Z') }],
     rewards: [],
     twitchRewards: [],
+    libraryVideos: [],
     baseUrl: 'https://bot.example',
     maxFileMb: 100,
     // A non-default limit, so a template that hardcoded 100 would fail these tests.
@@ -41,5 +42,32 @@ describe('views/overlayAdmin.ejs upload progress', () => {
     expect(html).toContain('<div class="upload-progress is-hidden mt-04" data-upload-progress>');
     expect(html).toContain('<progress class="upload-progress-bar" max="100" value="0" aria-label="Upload progress"></progress>');
     expect(html).toContain('data-upload-progress-label role="status" aria-live="polite"');
+  });
+});
+
+describe('views/overlayAdmin.ejs public library', () => {
+  const ENTRY = {
+    id: 4, name: 'Confetti <b>', filename: 'lib.webm', contributor_streamer_id: 9,
+    contributor_login: 'alice', source_video_id: 12, created_at: new Date('2026-11-01T00:00:00Z'),
+  };
+
+  it('shows the empty state when the library has no videos', async () => {
+    const html = await render();
+    expect(html).toContain('<h2 class="section-title">Public library</h2>');
+    expect(html).toContain('No videos in the library yet.');
+  });
+
+  it('lists each entry with its name, contributor, date and a lazy preview', async () => {
+    const html = await render({ libraryVideos: [ENTRY] });
+    expect(html).not.toContain('No videos in the library yet.');
+    expect(html).toContain('<td>Confetti &lt;b&gt;</td>');
+    expect(html).toContain('<td>alice</td>');
+    expect(html).toContain(`<td>${ENTRY.created_at.toLocaleDateString()}</td>`);
+    expect(html).toContain('<video class="library-preview" src="/overlay/library/videos/lib.webm" preload="metadata" controls muted playsinline></video>');
+  });
+
+  it('shows "unknown" when the contributor is gone', async () => {
+    const html = await render({ libraryVideos: [{ ...ENTRY, contributor_streamer_id: null, contributor_login: null }] });
+    expect(html).toContain('<td>unknown</td>');
   });
 });

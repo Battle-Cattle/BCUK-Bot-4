@@ -563,3 +563,6 @@ details[open] > .disclosure-toggle::before { transform: rotate(90deg); }
    style-src without 'unsafe-inline'. */
 .badge-user-hue { color: hsl(var(--hue, 0), 65%, 60%); background: hsla(var(--hue, 0), 65%, 60%, 0.12); }
 .badge-user-hue.badge-user-self { color: hsl(var(--hue, 0), 90%, 78%); background: hsla(var(--hue, 0), 90%, 78%, 0.22); }
+
+/* ── Public video library previews (overlay settings) ─── */
+.library-preview { display: block; width: 10rem; max-width: 100%; aspect-ratio: 16 / 9; background: #000; border-radius: var(--radius); }

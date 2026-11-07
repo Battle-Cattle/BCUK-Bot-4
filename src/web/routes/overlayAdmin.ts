@@ -1,11 +1,12 @@
+import path from 'path';
 import { createLogger } from '../../shared/logger';
 import { Router, type Response } from 'express';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import { getSessionUser } from '../session';
 import { getStreamerByDiscordId } from '../../db';
-import { getVideosForStreamer, getRewardsForStreamer } from '../../db';
-import { PUBLIC_URL, OVERLAY_STATUS_MAX_SSE_PER_STREAMER } from '../../shared/config';
+import { getVideosForStreamer, getRewardsForStreamer, getLibraryVideos } from '../../db';
+import { PUBLIC_URL, OVERLAY_FOLDER, OVERLAY_STATUS_MAX_SSE_PER_STREAMER } from '../../shared/config';
 import { fetchStreamerRewards } from './streamerRewards';
 import { filterQueryParam } from './validation';
 import { renderError, renderView } from './viewHelpers';
@@ -16,6 +17,8 @@ import { connections as overlaySourceConnections } from './overlaySource';
 import { createOverlayStatusEventsHandler } from './sseEventsHandlers';
 import { parseUploadId, getConversionProgress } from './overlayConversionProgress';
 import { CHUNKED_UPLOAD_ERROR_CODES } from './chunkedUploadRoutes';
+import { LIBRARY_FOLDER } from './overlayVideoLibraryFiles';
+import { resolveSharedFile, sendStreamerFile } from './streamerFileServing';
 
 const log = createLogger('OverlayAdmin');
 const router = Router();
@@ -31,14 +34,18 @@ const KNOWN_ERRORS = new Set([
   'file_too_large', 'invalid_weight', 'transcode_failed', 'transcode_busy',
   ...CHUNKED_UPLOAD_ERROR_CODES,
 ]);
+// Library files are copies of overlay videos, so they have the same names: a UUID plus .webm/.mp4.
+const LIBRARY_FILENAME_RE = /^[\w-]+\.(webm|mp4)$/i;
+const LIBRARY_DIR = path.join(OVERLAY_FOLDER, LIBRARY_FOLDER);
+
 const KNOWN_SUCCESSES = new Set([
   'video_uploaded', 'video_deleted', 'reward_saved', 'reward_deleted',
 ]);
 
 /**
  * GET /overlay/settings — renders the overlay settings page with the user's
- * uploaded videos, configured rewards, and live Twitch custom rewards (if the
- * user is a streamer).
+ * uploaded videos, configured rewards, live Twitch custom rewards and the public
+ * video library (if the user is a streamer).
  * @param req - Express request; reads `req.session.user`, `error`, and
  *   `success` query params.
  * @param res - Express response; renders the `overlayAdmin` view, or a 500
@@ -47,13 +54,14 @@ const KNOWN_SUCCESSES = new Set([
 router.get('/settings', requireAuth, csrfProtection, async (req, res) => {
   try {
     const streamer = await getStreamerByDiscordId(getSessionUser(req).discordId);
-    const [videos, rewards, twitchRewards] = streamer
+    const [videos, rewards, twitchRewards, libraryVideos] = streamer
       ? await Promise.all([
           getVideosForStreamer(streamer.id),
           getRewardsForStreamer(streamer.id),
           fetchStreamerRewards(streamer, log),
+          getLibraryVideos(),
         ])
-      : [[], [], []];
+      : [[], [], [], []];
 
     renderView(res, 'overlayAdmin', {
       user: req.session.user,
@@ -62,6 +70,7 @@ router.get('/settings', requireAuth, csrfProtection, async (req, res) => {
       videos,
       rewards,
       twitchRewards,
+      libraryVideos,
       baseUrl: PUBLIC_URL,
       maxFileMb: MAX_UPLOAD_MB,
       maxVideoWeight: MAX_OVERLAY_VIDEO_WEIGHT,
@@ -95,6 +104,21 @@ router.get('/settings/videos/progress/:uploadId', requireAuth, async (req, res) 
     log.error('Overlay conversion progress error:', err);
     res.status(500).json(none);
   }
+});
+
+/**
+ * GET /overlay/library/videos/:filename — serves a public video library file for the settings
+ * page's previews (Range requests included, via `sendFile`). Signed-in users only; playback on a
+ * stream always uses the streamer's own imported copy under `/overlay/videos/...`. Can't clash
+ * with the unauthenticated `/overlay/...` routes in `overlaySource.ts`: `/:login` and
+ * `/:login/events` are one and two segments long, and `/videos/:streamerId/...` needs a numeric id.
+ * @param req - Express request; reads the `filename` route param.
+ * @param res - Express response; sends the file, or replies 400 if `filename` is malformed or
+ *   unsafe, or 404 if the file doesn't exist or its real path is outside the library folder.
+ */
+router.get('/library/videos/:filename', requireAuth, async (req, res) => {
+  const file = await resolveSharedFile(res, LIBRARY_DIR, String(req.params.filename), LIBRARY_FILENAME_RE);
+  if (file) sendStreamerFile(res, file.realPath);
 });
 
 /**
