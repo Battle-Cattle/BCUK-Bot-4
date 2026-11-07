@@ -48,6 +48,11 @@ vi.mock('./overlayAdminMutations', async () => {
   return { router: Router(), MAX_UPLOAD_MB: 100 };
 });
 
+vi.mock('./overlayAdminLibraryMutations', async () => {
+  const { Router } = await import('express');
+  return { router: Router() };
+});
+
 import supertest from 'supertest';
 import router, { statusConnections } from './overlayAdmin';
 import { getStreamerByDiscordId, getVideosForStreamer, getRewardsForStreamer, getLibraryVideos } from '../../db';
@@ -192,6 +197,22 @@ describe('GET /settings — public video library', () => {
     const res = await supertest(buildApp()).get('/settings');
     expect(res.body.libraryVideos).toEqual([]);
     expect(getLibraryVideos).not.toHaveBeenCalled();
+  });
+});
+
+describe('GET /settings — library codes and Admin controls', () => {
+  it('passes the library removal success and not_found error codes to the template', async () => {
+    expect((await supertest(buildApp()).get('/settings?success=library_video_removed')).body.success).toBe('library_video_removed');
+    expect((await supertest(buildApp()).get('/settings?error=not_found')).body.error).toBe('not_found');
+  });
+
+  it.each([
+    [AccessLevel.ADMIN, true],
+    [AccessLevel.MANAGER, false],
+    [AccessLevel.USER, false],
+  ])('passes isAdmin for a session access level of %s as %s', async (accessLevel, expected) => {
+    const res = await supertest(buildApp(makeSessionUser({ accessLevel }))).get('/settings');
+    expect(res.body.isAdmin).toBe(expected);
   });
 });
 

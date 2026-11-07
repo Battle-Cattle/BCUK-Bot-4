@@ -1,5 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import fs from 'fs';
 import path from 'path';
+import vm from 'vm';
 import ejs from 'ejs';
 
 const viewPath = path.join(__dirname, '../../views/overlayAdmin.ejs');
@@ -13,6 +15,7 @@ function render(locals: Record<string, unknown> = {}): Promise<string> {
     rewards: [],
     twitchRewards: [],
     libraryVideos: [],
+    isAdmin: false,
     baseUrl: 'https://bot.example',
     maxFileMb: 100,
     // A non-default limit, so a template that hardcoded 100 would fail these tests.
@@ -69,5 +72,68 @@ describe('views/overlayAdmin.ejs public library', () => {
   it('shows "unknown" when the contributor is gone', async () => {
     const html = await render({ libraryVideos: [{ ...ENTRY, contributor_streamer_id: null, contributor_login: null }] });
     expect(html).toContain('<td>unknown</td>');
+  });
+});
+
+describe('views/overlayAdmin.ejs library removal', () => {
+  const ENTRY = {
+    id: 4, name: 'Confetti', filename: 'lib.webm', contributor_streamer_id: 9,
+    contributor_login: 'alice', source_video_id: 12, created_at: new Date('2026-11-01T00:00:00Z'),
+  };
+
+  it('renders a "Remove from library" form on each entry for an Admin', async () => {
+    const html = await render({ libraryVideos: [ENTRY], isAdmin: true });
+    expect(html).toContain('<form method="POST" action="/overlay/settings/library/4/remove" class="m-0 js-confirm-remove-library-video">');
+    expect(html).toContain('Remove from library');
+  });
+
+  it('renders no removal form for anyone else', async () => {
+    const html = await render({ libraryVideos: [ENTRY], isAdmin: false });
+    expect(html).not.toContain('/overlay/settings/library/4/remove');
+    expect(html).not.toContain('Remove from library');
+  });
+
+  it('explains the removal success and not_found messages', async () => {
+    expect(await render({ success: 'library_video_removed' })).toContain('Video removed from the public library. Copies streamers already added are kept.');
+    expect(await render({ error: 'not_found' })).toContain('That library video no longer exists.');
+  });
+});
+
+describe('public/overlayAdmin.js', () => {
+  /** Runs utils.js and overlayAdmin.js in a fake page and submits a form with `className`. */
+  function submitForm(className: string, confirmResult: boolean) {
+    class TestForm {
+      classList = { contains: (name: string) => name === className };
+    }
+    const handlers: Array<(event: unknown) => void> = [];
+    const confirm = vi.fn(() => confirmResult);
+    const context = {
+      HTMLFormElement: TestForm,
+      window: { confirm },
+      registerUploadFormHandler: vi.fn(),
+      document: { addEventListener: (type: string, listener: (event: unknown) => void) => { if (type === 'submit') handlers.push(listener); } },
+    };
+    vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../../public/utils.js'), 'utf8'), context);
+    vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../../public/overlayAdmin.js'), 'utf8'), context);
+    const event = { target: new TestForm(), preventDefault: vi.fn() };
+    handlers.forEach((h) => h(event));
+    return { confirm, event };
+  }
+
+  it('confirms before an Admin removes a library video, saying imported copies are kept', () => {
+    const { confirm, event } = submitForm('js-confirm-remove-library-video', false);
+    expect(confirm).toHaveBeenCalledWith('Remove this video from the public library? Streamers who already added it to their own videos keep their copies.');
+    expect(event.preventDefault).toHaveBeenCalled();
+  });
+
+  it('lets the removal submit once confirmed', () => {
+    const { confirm, event } = submitForm('js-confirm-remove-library-video', true);
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(event.preventDefault).not.toHaveBeenCalled();
+  });
+
+  it('still confirms video deletes with their own message', () => {
+    const { confirm } = submitForm('js-confirm-delete-video', false);
+    expect(confirm).toHaveBeenCalledWith('Delete this video? Any reward assignments using it will be removed.');
   });
 });
