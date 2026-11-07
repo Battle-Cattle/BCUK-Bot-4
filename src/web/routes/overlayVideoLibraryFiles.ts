@@ -80,14 +80,17 @@ async function linkOrCopy(source: string, dest: string): Promise<void> {
 
 /**
  * Gives a stored overlay video a second, independent name in another video folder: resolves and
- * checks the source (following symlinks, so a link pointing outside OVERLAY_FOLDER is refused),
- * creates the destination folder, then hard-links the file under a new UUID filename keeping its
- * extension, or copies it where linking fails. Used for contributor → library and library →
- * streamer.
+ * checks the source, creates the destination folder, then hard-links the file under a new UUID
+ * filename keeping its extension, or copies it where linking fails. Used for contributor → library
+ * and library → streamer. Both the source and the destination folder are checked after following
+ * symlinks, so a link under OVERLAY_FOLDER pointing outside it can't be read from or written to.
+ * As with serving (`streamerFileServing.ts`), a folder swapped for a link between the check and
+ * the write would still be followed; keeping OVERLAY_FOLDER writable only by the bot's user is
+ * what closes that.
  * @param source - The existing video's folder and filename.
  * @param destFolder - Folder to put the new file in ({@link streamerFolder} or {@link LIBRARY_FOLDER}).
- * @returns The new file's filename (inside `destFolder`), or null if the source is missing,
- *   outside OVERLAY_FOLDER, or either location isn't a video folder.
+ * @returns The new file's filename (inside `destFolder`), or null if the source is missing, either
+ *   location isn't a video folder, or either one's real path is outside OVERLAY_FOLDER.
  * @throws Filesystem errors from creating the folder or the file.
  */
 export async function linkVideoFile(source: OverlayVideoLocation, destFolder: string): Promise<string | null> {
@@ -97,15 +100,20 @@ export async function linkVideoFile(source: OverlayVideoLocation, destFolder: st
   const realSource = await realPathWithin(OVERLAY_FOLDER, sourcePath);
   if (!realSource) return null;
 
-  const filename = `${randomUUID()}${path.extname(source.filename)}`;
   await fs.promises.mkdir(destDir, { recursive: true });
-  await linkOrCopy(realSource, path.join(destDir, filename));
+  const realDestDir = await realPathWithin(OVERLAY_FOLDER, destDir);
+  if (!realDestDir) return null;
+
+  const filename = `${randomUUID()}${path.extname(source.filename)}`;
+  await linkOrCopy(realSource, path.join(realDestDir, filename));
   return filename;
 }
 
 /**
  * Removes a stored overlay video file, logging instead of throwing (as `removeDeletedVideoFile`
  * does for a deleted video): a leftover file is harmless, a failed request over one isn't worth it.
+ * The file's real path must be inside OVERLAY_FOLDER, so a folder linked to somewhere outside it
+ * can't be used to delete a file there; a missing file is nothing to remove.
  * @param location - The file's folder and filename.
  * @returns Resolves once removal has been attempted; never rejects.
  */
@@ -113,7 +121,8 @@ export async function removeVideoFile(location: OverlayVideoLocation): Promise<v
   const filePath = resolveInOverlayFolder(location.folder, location.filename);
   if (!filePath) return;
   try {
-    await fs.promises.rm(filePath, { force: true });
+    const realPath = await realPathWithin(OVERLAY_FOLDER, filePath);
+    if (realPath) await fs.promises.rm(realPath, { force: true });
   } catch (err) {
     log.error(`Failed to remove overlay video file ${filePath}:`, err);
   }
@@ -128,40 +137,48 @@ export async function removeLibraryVideoFile(filename: string): Promise<void> {
   await removeVideoFile({ folder: LIBRARY_FOLDER, filename });
 }
 
+/** What a {@link withLinkedVideoFile} DB step reports: whether it recorded the file, and its result. */
+export interface LinkedVideoDbStepResult<T> {
+  /** True if the step wrote the row that refers to the file; false leaves no row, so the file goes. */
+  keepFile: boolean;
+  /** The step's own result, handed back to the caller. */
+  result: T;
+}
+
 /** Outcome of {@link withLinkedVideoFile}. */
 export type LinkedVideoFileResult<T> =
-  | { status: 'linked'; filename: string; result: T }
+  | { status: 'linked'; filename: string; keptFile: boolean; result: T }
   | { status: 'source_missing' };
 
 /**
  * Creates the file first, then runs the DB step that records it, and removes the file again if
- * the DB step throws or its result says the row wasn't written — so a failure can't leave a row
- * without its file, nor (beyond a failed removal, which is logged) a file without its row.
+ * the step throws or reports it wrote no row, so a failure can't leave a row without its file,
+ * nor (beyond a failed removal, which is logged) a file without its row. The step decides whether
+ * the file stays in the same value it returns, so nothing can fail between the DB write and that
+ * decision.
  * @param source - The existing video to link from.
  * @param destFolder - Folder for the new file.
- * @param dbStep - Records the new file, given its filename; its rejection is rethrown after the
- *   file is removed.
- * @param keep - Decides from the DB step's result whether the file stays; defaults to always.
- * @returns `linked` with the new filename and the DB step's result (the file kept or removed per
- *   `keep`), or `source_missing` if {@link linkVideoFile} refused the source (the DB step isn't run).
+ * @param dbStep - Records the new file, given its filename. It must only throw when it wrote no
+ *   row (e.g. a rolled-back transaction); its rejection is rethrown after the file is removed.
+ * @returns `linked` with the new filename, whether it was kept, and the DB step's result, or
+ *   `source_missing` if {@link linkVideoFile} refused the source (the DB step isn't run).
  * @throws The DB step's error, or a filesystem error from creating the file.
  */
 export async function withLinkedVideoFile<T>(
   source: OverlayVideoLocation,
   destFolder: string,
-  dbStep: (filename: string) => Promise<T>,
-  keep: (result: T) => boolean = () => true,
+  dbStep: (filename: string) => Promise<LinkedVideoDbStepResult<T>>,
 ): Promise<LinkedVideoFileResult<T>> {
   const filename = await linkVideoFile(source, destFolder);
   if (!filename) return { status: 'source_missing' };
   const created = { folder: destFolder, filename };
-  let result: T;
+  let step: LinkedVideoDbStepResult<T>;
   try {
-    result = await dbStep(filename);
+    step = await dbStep(filename);
   } catch (err) {
     await removeVideoFile(created);
     throw err;
   }
-  if (!keep(result)) await removeVideoFile(created);
-  return { status: 'linked', filename, result };
+  if (!step.keepFile) await removeVideoFile(created);
+  return { status: 'linked', filename, keptFile: step.keepFile, result: step.result };
 }

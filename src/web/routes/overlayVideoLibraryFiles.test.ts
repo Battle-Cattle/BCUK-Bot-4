@@ -150,6 +150,36 @@ describe('linkVideoFile', () => {
   });
 });
 
+describe('linkVideoFile and removeVideoFile through a folder linked outside OVERLAY_FOLDER', () => {
+  let outside: string;
+
+  beforeEach(async () => {
+    outside = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'overlay-library-outside-'));
+    await fs.promises.mkdir(overlayFolder, { recursive: true });
+    // The library folder itself is a directory link ('junction': no elevated privileges on Windows).
+    await fs.promises.symlink(outside, path.join(overlayFolder, LIBRARY_FOLDER), 'junction');
+  });
+
+  afterEach(async () => {
+    await fs.promises.rm(outside, { recursive: true, force: true });
+  });
+
+  it('refuses to write into a destination folder whose real path is outside', async () => {
+    const source = await writeVideo('5', 'clip.webm');
+
+    await expect(linkVideoFile(source, LIBRARY_FOLDER)).resolves.toBeNull();
+    expect(await fs.promises.readdir(outside)).toEqual([]);
+  });
+
+  it('refuses to delete a file reached through that folder', async () => {
+    await fs.promises.writeFile(path.join(outside, 'kept.webm'), 'not ours');
+
+    await removeLibraryVideoFile('kept.webm');
+
+    expect(await fs.promises.readFile(path.join(outside, 'kept.webm'), 'utf8')).toBe('not ours');
+  });
+});
+
 describe('removeVideoFile', () => {
   it('ignores a missing file and a traversing path', async () => {
     await writeVideo('5', 'clip.webm');
@@ -159,19 +189,22 @@ describe('removeVideoFile', () => {
   });
 
   it('logs instead of throwing when removal fails', async () => {
-    vi.spyOn(fs.promises, 'rm').mockRejectedValueOnce(Object.assign(new Error('busy'), { code: 'EBUSY' }));
-    await expect(removeVideoFile({ folder: '5', filename: 'clip.webm' })).resolves.toBeUndefined();
+    const location = await writeVideo('5', 'clip.webm');
+    const rm = vi.spyOn(fs.promises, 'rm').mockRejectedValueOnce(Object.assign(new Error('busy'), { code: 'EBUSY' }));
+
+    await expect(removeVideoFile(location)).resolves.toBeUndefined();
+    expect(rm).toHaveBeenCalledTimes(1);
   });
 });
 
 describe('withLinkedVideoFile', () => {
-  it('keeps the new file and returns the DB result when the DB step succeeds', async () => {
+  it('keeps the new file and returns the DB result when the DB step records it', async () => {
     const source = await writeVideo('5', 'clip.webm');
-    const dbStep = vi.fn().mockResolvedValue(31);
+    const dbStep = vi.fn().mockResolvedValue({ keepFile: true, result: 31 });
 
     const outcome = await withLinkedVideoFile(source, LIBRARY_FOLDER, dbStep);
 
-    expect(outcome).toEqual({ status: 'linked', filename: expect.stringMatching(UUID_WEBM), result: 31 });
+    expect(outcome).toEqual({ status: 'linked', filename: expect.stringMatching(UUID_WEBM), keptFile: true, result: 31 });
     if (outcome.status !== 'linked') throw new Error('expected linked');
     expect(dbStep).toHaveBeenCalledWith(outcome.filename);
     expect(exists(LIBRARY_FOLDER, outcome.filename)).toBe(true);
@@ -191,12 +224,15 @@ describe('withLinkedVideoFile', () => {
     expect(exists('5', 'clip.webm')).toBe(true);
   });
 
-  it('removes the new file when keep() says the row was not written', async () => {
+  it('removes the new file when the DB step reports it wrote no row', async () => {
     const source = await writeVideo('5', 'clip.webm');
 
-    const outcome = await withLinkedVideoFile(source, LIBRARY_FOLDER, async () => ({ status: 'already_in_library' }), (r) => r.status === 'added');
+    const outcome = await withLinkedVideoFile(source, LIBRARY_FOLDER, async () => ({
+      keepFile: false, result: { status: 'already_in_library' },
+    }));
 
     if (outcome.status !== 'linked') throw new Error('expected linked');
+    expect(outcome.keptFile).toBe(false);
     expect(outcome.result).toEqual({ status: 'already_in_library' });
     expect(exists(LIBRARY_FOLDER, outcome.filename)).toBe(false);
   });
