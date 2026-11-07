@@ -16,13 +16,23 @@ function getDeleteRewardConfirmationMessage() {
 }
 
 /**
- * Confirms destructive deletions before allowing the video/reward-assignment delete forms to submit.
+ * Returns the confirmation message for an Admin removing a video from the public library.
+ * @returns {string} The text shown in the remove-from-library confirm() prompt.
+ */
+function getRemoveLibraryVideoConfirmationMessage() {
+  return 'Remove this video from the public library? Streamers who already added it to their own videos keep their copies.';
+}
+
+/**
+ * Confirms destructive deletions before allowing the video, reward-assignment and library-removal
+ * forms to submit.
  * @param {SubmitEvent} event - The form submit event.
  * @returns {void}
  */
 function handleOverlayAdminSubmit(event) {
   if (confirmSubmit(event, 'js-confirm-delete-video', getDeleteVideoConfirmationMessage)) return;
-  confirmSubmit(event, 'js-confirm-delete-reward', getDeleteRewardConfirmationMessage);
+  if (confirmSubmit(event, 'js-confirm-delete-reward', getDeleteRewardConfirmationMessage)) return;
+  confirmSubmit(event, 'js-confirm-remove-library-video', getRemoveLibraryVideoConfirmationMessage);
 }
 
 document.addEventListener('submit', handleOverlayAdminSubmit);

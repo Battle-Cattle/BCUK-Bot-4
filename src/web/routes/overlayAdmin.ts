@@ -4,7 +4,7 @@ import { Router, type Response } from 'express';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import { getSessionUser } from '../session';
-import { getStreamerByDiscordId } from '../../db';
+import { AccessLevel, getStreamerByDiscordId } from '../../db';
 import { getVideosForStreamer, getRewardsForStreamer, getLibraryVideos } from '../../db';
 import { PUBLIC_URL, OVERLAY_FOLDER, OVERLAY_STATUS_MAX_SSE_PER_STREAMER } from '../../shared/config';
 import { fetchStreamerRewards } from './streamerRewards';
@@ -12,6 +12,7 @@ import { filterQueryParam } from './validation';
 import { renderError, renderView } from './viewHelpers';
 import { router as mutationsRouter, MAX_UPLOAD_MB } from './overlayAdminMutations';
 import { router as rewardMutationsRouter } from './overlayAdminRewardMutations';
+import { router as libraryMutationsRouter } from './overlayAdminLibraryMutations';
 import { MAX_OVERLAY_VIDEO_WEIGHT } from './overlayAdminShared';
 import { connections as overlaySourceConnections } from './overlaySource';
 import { createOverlayStatusEventsHandler } from './sseEventsHandlers';
@@ -31,7 +32,7 @@ export const statusConnections = new Map<number, Set<Response>>();
 const KNOWN_ERRORS = new Set([
   'not_a_streamer', 'invalid_file', 'upload_failed', 'delete_failed',
   'invalid_reward_id', 'no_videos_selected', 'save_failed', 'invalid_id', 'invalid_path',
-  'file_too_large', 'invalid_weight', 'transcode_failed', 'transcode_busy',
+  'file_too_large', 'invalid_weight', 'transcode_failed', 'transcode_busy', 'not_found',
   ...CHUNKED_UPLOAD_ERROR_CODES,
 ]);
 // Library files are copies of overlay videos, so they have the same names: a UUID plus .webm/.mp4.
@@ -40,7 +41,7 @@ const LIBRARY_FILENAME_RE = /^[\w-]+\.(webm|mp4)$/i;
 const LIBRARY_DIR = path.posix.join(OVERLAY_FOLDER, LIBRARY_FOLDER);
 
 const KNOWN_SUCCESSES = new Set([
-  'video_uploaded', 'video_deleted', 'reward_saved', 'reward_deleted',
+  'video_uploaded', 'video_deleted', 'reward_saved', 'reward_deleted', 'library_video_removed',
 ]);
 
 /**
@@ -72,6 +73,10 @@ router.get('/settings', requireAuth, csrfProtection, async (req, res) => {
       rewards,
       twitchRewards,
       libraryVideos,
+      // Only decides whether the page shows Admin controls. The session's cached level can be
+      // stale (no requireGuildContext on this page); the remove route re-derives it before
+      // requireAdmin, so a stale value can only show or hide a button, never grant access.
+      isAdmin: (req.session.user?.accessLevel ?? AccessLevel.USER) >= AccessLevel.ADMIN,
       baseUrl: PUBLIC_URL,
       maxFileMb: MAX_UPLOAD_MB,
       maxVideoWeight: MAX_OVERLAY_VIDEO_WEIGHT,
@@ -158,5 +163,6 @@ router.get('/settings/events', requireAuth, createOverlayStatusEventsHandler({
 
 router.use(mutationsRouter);
 router.use(rewardMutationsRouter);
+router.use(libraryMutationsRouter);
 
 export default router;

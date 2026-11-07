@@ -24,6 +24,7 @@
         save_failed:      'Failed to save — please try again.',
         invalid_id:       'Invalid request.',
         file_too_large:   `That file is too large (max ${maxFileMb} MB).`,
+        not_found:        'That library video no longer exists.',
       }; %>
       <%= errorMessages[error] ?? `An error occurred (${error}).` %>
     </div>
@@ -36,6 +37,7 @@
         video_deleted:  'Video deleted.',
         reward_saved:   'Reward assignment saved.',
         reward_deleted: 'Reward assignment removed.',
+        library_video_removed: 'Video removed from the public library. Copies streamers already added are kept.',
       }; %>
       <%= successMessages[success] ?? 'Done.' %>
     </div>
@@ -146,6 +148,7 @@
                 <th>Name</th>
                 <th>Added by</th>
                 <th>Added</th>
+                <% if (isAdmin) { %><th></th><% } %>
               </tr>
             </thead>
             <tbody>
@@ -158,6 +161,15 @@
                 <td><%= entry.name %></td>
                 <td><%= entry.contributor_login ?? 'unknown' %></td>
                 <td><%= new Date(entry.created_at).toLocaleDateString() %></td>
+                <% if (isAdmin) { %>
+                <td>
+                  <%# Shown to Admins only; the route checks Admin itself (requireGuildContext → requireAdmin). %>
+                  <form method="POST" action="/overlay/settings/library/<%= entry.id %>/remove" class="m-0 js-confirm-remove-library-video">
+                    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                    <button type="submit" class="btn btn-ghost btn-sm">Remove from library</button>
+                  </form>
+                </td>
+                <% } %>
               </tr>
               <% } %>
             </tbody>
