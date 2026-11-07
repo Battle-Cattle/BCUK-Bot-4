@@ -5,6 +5,7 @@ vi.mock('../../db', () => ({
   getStreamerByDiscordId: vi.fn(),
   getVideosForStreamer: vi.fn(),
   getRewardsForStreamer: vi.fn(),
+  getLibraryVideos: vi.fn(),
   AccessLevel: ACCESS_LEVEL_MOCK,
 }));
 
@@ -49,7 +50,7 @@ vi.mock('./overlayAdminMutations', async () => {
 
 import supertest from 'supertest';
 import router, { statusConnections } from './overlayAdmin';
-import { getStreamerByDiscordId, getVideosForStreamer, getRewardsForStreamer } from '../../db';
+import { getStreamerByDiscordId, getVideosForStreamer, getRewardsForStreamer, getLibraryVideos } from '../../db';
 import { getValidToken } from '../../twitch/twitchUserTokens';
 import { getCustomRewards } from '../../twitch/twitchRewardsApi';
 import { AccessLevel } from '../../db';
@@ -165,6 +166,32 @@ describe('GET /settings — query param filtering', () => {
   it('passes the overlay video weight limit to the template as maxVideoWeight', async () => {
     const res = await supertest(buildApp()).get('/settings');
     expect(res.body.maxVideoWeight).toBe(100);
+  });
+});
+
+describe('GET /settings — public video library', () => {
+  const ENTRY = {
+    id: 4, name: 'Confetti', filename: 'lib.webm', contributor_streamer_id: 9,
+    contributor_login: 'alice', source_video_id: 12, created_at: new Date('2026-11-01T00:00:00Z'),
+  };
+
+  beforeEach(() => {
+    vi.mocked(getVideosForStreamer).mockResolvedValue([]);
+    vi.mocked(getRewardsForStreamer).mockResolvedValue([]);
+    vi.mocked(getLibraryVideos).mockResolvedValue([ENTRY]);
+  });
+
+  it('passes every library entry to a streamer', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue({ id: 1, discord_id: '1', twitch_user_id: null } as any);
+    const res = await supertest(buildApp()).get('/settings');
+    expect(res.status).toBe(200);
+    expect(res.body.libraryVideos).toEqual([{ ...ENTRY, created_at: ENTRY.created_at.toISOString() }]);
+  });
+
+  it('passes an empty library to a non-streamer without loading it', async () => {
+    const res = await supertest(buildApp()).get('/settings');
+    expect(res.body.libraryVideos).toEqual([]);
+    expect(getLibraryVideos).not.toHaveBeenCalled();
   });
 });
 

@@ -1,6 +1,7 @@
 // Serves a file a streamer uploaded (overlay videos, alert assets) from `<folder>/<streamerId>/<filename>`,
 // with the path checks both unauthenticated file routes share. Used by overlaySource.ts and
-// alertsOverlaySource.ts.
+// alertsOverlaySource.ts; resolveSharedFile does the same for a folder not split per streamer
+// (the overlay video library previews in overlayAdmin.ts).
 import type { Response } from 'express';
 import { safeResolve, realPathWithin } from '../../shared/pathUtils';
 
@@ -37,9 +38,53 @@ export async function resolveStreamerFile(
   params: StreamerFileParams,
   filenamePattern: RegExp,
 ): Promise<ResolvedStreamerFile | null> {
-  const { streamerId, filename } = params;
-  const match = /^\d+$/.test(streamerId) ? filenamePattern.exec(filename) : null;
-  const resolved = match ? safeResolve(folder, streamerId, filename) : null;
+  if (!/^\d+$/.test(params.streamerId)) {
+    res.status(400).end();
+    return null;
+  }
+  return resolveFolderFile(res, folder, [params.streamerId], params.filename, filenamePattern);
+}
+
+/**
+ * Resolves a file directly inside a folder that isn't split per streamer (e.g. the overlay
+ * video library), with the same checks and replies as {@link resolveStreamerFile}: 400 for a
+ * filename not matching `filenamePattern` or a lexically unsafe path, 404 when the file doesn't
+ * exist or its real path is outside `folder`.
+ * @param res - Express response; only used to reply 400/404.
+ * @param folder - Folder holding the files.
+ * @param filename - The raw `filename` route param.
+ * @param filenamePattern - Allowed filenames; its first capture group should be the extension.
+ * @returns The resolved file, or null once a 400/404 has been sent.
+ */
+export async function resolveSharedFile(
+  res: Response,
+  folder: string,
+  filename: string,
+  filenamePattern: RegExp,
+): Promise<ResolvedStreamerFile | null> {
+  return resolveFolderFile(res, folder, [], filename, filenamePattern);
+}
+
+/**
+ * Shared body of {@link resolveStreamerFile} and {@link resolveSharedFile}: checks `filename`
+ * against `filenamePattern`, resolves `folder/...subfolders/filename` lexically, then follows
+ * symlinks and re-checks containment.
+ * @param res - Express response; only used to reply 400/404.
+ * @param folder - Base folder the file must stay inside.
+ * @param subfolders - Already-validated path segments between `folder` and the file.
+ * @param filename - The raw `filename` route param.
+ * @param filenamePattern - Allowed filenames; its first capture group should be the extension.
+ * @returns The resolved file, or null once a 400/404 has been sent.
+ */
+async function resolveFolderFile(
+  res: Response,
+  folder: string,
+  subfolders: string[],
+  filename: string,
+  filenamePattern: RegExp,
+): Promise<ResolvedStreamerFile | null> {
+  const match = filenamePattern.exec(filename);
+  const resolved = match ? safeResolve(folder, ...subfolders, filename) : null;
   if (!match || !resolved) {
     res.status(400).end();
     return null;

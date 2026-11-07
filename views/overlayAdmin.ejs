@@ -123,6 +123,50 @@
       <% } %>
     </section>
 
+    <!-- ── Public library ─────────────────────────────────────────── -->
+    <section class="section">
+      <h2 class="section-title">Public library</h2>
+      <p class="hint mb-075">
+        Videos streamers have shared with every streamer.
+      </p>
+
+      <% if (libraryVideos.length === 0) { %>
+      <div class="card">
+        <div class="card-body">
+          <p class="hint">No videos in the library yet.</p>
+        </div>
+      </div>
+      <% } else { %>
+      <div class="card">
+        <div class="table-scroll">
+          <table class="table full-width">
+            <thead>
+              <tr>
+                <th>Preview</th>
+                <th>Name</th>
+                <th>Added by</th>
+                <th>Added</th>
+              </tr>
+            </thead>
+            <tbody>
+              <% for (const entry of libraryVideos) { %>
+              <tr>
+                <td>
+                  <%# preload="metadata": the page shouldn't download every library video just to list them. %>
+                  <video class="library-preview" src="/overlay/library/videos/<%= entry.filename %>" preload="metadata" controls muted playsinline></video>
+                </td>
+                <td><%= entry.name %></td>
+                <td><%= entry.contributor_login ?? 'unknown' %></td>
+                <td><%= new Date(entry.created_at).toLocaleDateString() %></td>
+              </tr>
+              <% } %>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <% } %>
+    </section>
+
     <!-- ── Reward Assignments ─────────────────────────────────────── -->
     <section class="section">
       <h2 class="section-title">Reward Assignments</h2>
