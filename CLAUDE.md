@@ -164,6 +164,27 @@ Export `registerXRuntime(runtime)` from the handler file to store the platform c
 
 ---
 
+## GitHub Issues
+
+Every issue has two independent ratings:
+
+- **Severity = impact**: how much it matters if it's never done (or how bad the bug is). It's a label: `severity:critical`/`severity:high`/`severity:medium`/`severity:low`. Titles don't need a severity prefix. Add a type label too (`bug`, `enhancement`, `documentation`, `security`, …).
+- **Priority = urgency**: how soon it should be done. It's the org-level **Priority** issue field (`Urgent`/`High`/`Medium`/`Low`), not a label or title prefix. Every open issue has one.
+
+The two can differ (e.g. a low-impact fix that's wanted soon, or a high-impact feature that can wait). Don't "correct" one to match the other.
+
+**Large issues are split into sub-issues**, linked as real GitHub sub-issues (not just mentioned in the body):
+
+- Title: `<parent topic> n/N: <what this part does>`, e.g. `Faster test suite 2/4: sub-second, configurable polling in deploy.sh`. Mark optional parts `(optional)`.
+- Body: which parent it's part of and which step of the parent's plan it covers, its scope, tests, and a "Depends on" list of the other parts it needs. The full design stays in the parent.
+- **Priority matches the parent.** Change the parent's and every open sub-issue's together.
+- **Severity is the same as the parent's or lower**, judged on what that part delivers on its own (e.g. a read-only page that's empty until a later part lands is lower than the parts that deliver the feature). **The parent's severity is the highest of its sub-issues'**: when a sub-issue's severity changes, recheck the parent's.
+- Closing the last open sub-issue completes the parent. Close a part that turned out not to be needed as "not planned", with a note on the parent.
+
+**Keeping issues up to date:** an issue says which commit it was checked against (``checked against `main` @ `<sha>` ``). When you recheck one, add a dated note with the new sha rather than silently rewriting it. Mark finished items as done (strike through or tick them, saying when and in which PR) instead of deleting them. When an issue's premise has changed (e.g. the code it describes was rewritten), re-scope it and keep the original description in a collapsed `<details>` block at the bottom. Before starting on an issue, check its file paths, line counts and defaults against current `main`.
+
+---
+
 ## Related repos
 
 `BCUK-Companion-Core`, `BCUK-Companion-ExpiredMinotaur` and `BCUK-StreamDeck-Plugin` follow the same code standards, adapted to their language: tests with every change, docstrings on every function, Qlty's complexity limits. The plugin's `eslint.config.js` is a port of this repo's; the .NET repos enforce docs with StyleCop's SA1600 rules. Their `CLAUDE.md` files carry the same "PR Reviews (Qlty)" and "PR Reviews (CodeRabbit)" sections, word for word. When you change a shared rule here, make the same change in those three files.
