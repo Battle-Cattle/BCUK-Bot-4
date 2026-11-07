@@ -225,3 +225,23 @@ export const streamdeckAuthFailureLimiter = rateLimit({
   message: 'Too many failed authentication attempts, please try again later.',
   handler: limitReachedHandler('streamdeck-auth-failure'),
 });
+
+/** Most videos one account can add to the public overlay video library per window. */
+export const LIBRARY_PUBLISH_LIMIT = 10;
+
+/**
+ * Per-account cap on adding videos to the public overlay video library (#907), applied to
+ * `POST /overlay/settings/videos/:id/publish` after `requireAuth`. The session limiter's 600
+ * requests per 15 minutes would still let one account fill the library with hundreds of entries
+ * every Admin then has to remove by hand; nobody publishes more than a few videos at a time.
+ * Keyed by Discord ID like the session limiter, so accounts behind one IP don't share a bucket.
+ */
+export const libraryPublishLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: LIBRARY_PUBLISH_LIMIT,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  keyGenerator: sessionLimiterKey,
+  message: 'You have added a lot of videos to the public library recently. Please try again in an hour.',
+  handler: limitReachedHandler('library-publish'),
+});

@@ -15,6 +15,7 @@ function render(locals: Record<string, unknown> = {}): Promise<string> {
     rewards: [],
     twitchRewards: [],
     libraryVideos: [],
+    publishedVideoIds: [],
     isAdmin: false,
     baseUrl: 'https://bot.example',
     maxFileMb: 100,
@@ -126,6 +127,12 @@ describe('public/overlayAdmin.js', () => {
     expect(event.preventDefault).toHaveBeenCalled();
   });
 
+  it('confirms before a streamer adds a video to the public library, saying only an Admin can remove it', () => {
+    const { confirm, event } = submitForm('js-confirm-publish-video', false);
+    expect(confirm).toHaveBeenCalledWith('Add this video to the public library? Every streamer will be able to see it and add it to their own videos, and only an Admin can remove it afterwards.');
+    expect(event.preventDefault).toHaveBeenCalled();
+  });
+
   it('lets the removal submit once confirmed', () => {
     const { confirm, event } = submitForm('js-confirm-remove-library-video', true);
     expect(confirm).toHaveBeenCalledTimes(1);
@@ -135,5 +142,27 @@ describe('public/overlayAdmin.js', () => {
   it('still confirms video deletes with their own message', () => {
     const { confirm } = submitForm('js-confirm-delete-video', false);
     expect(confirm).toHaveBeenCalledWith('Delete this video? Any reward assignments using it will be removed.');
+  });
+});
+
+describe('views/overlayAdmin.ejs publishing', () => {
+  it('offers "Add to public library" on a video that is not in the library', async () => {
+    const html = await render();
+    expect(html).toContain('<form method="POST" action="/overlay/settings/videos/3/publish" class="m-0 js-confirm-publish-video">');
+    expect(html).toContain('Add to public library');
+    expect(html).not.toContain('In public library');
+  });
+
+  it('shows "In public library" instead once the video is in it', async () => {
+    const html = await render({ publishedVideoIds: [3] });
+    expect(html).toContain('In public library');
+    expect(html).not.toContain('/overlay/settings/videos/3/publish');
+  });
+
+  it('explains the publish outcomes', async () => {
+    expect(await render({ success: 'video_published' })).toContain('Video added to the public library. Every streamer can now see it and add it to their own videos.');
+    expect(await render({ error: 'not_your_video' })).toContain('That video is not one of yours.');
+    expect(await render({ error: 'already_in_library' })).toContain('That video is already in the public library.');
+    expect(await render({ error: 'publish_failed' })).toContain('Adding the video to the public library failed — please try again.');
   });
 });
