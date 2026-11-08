@@ -38,6 +38,7 @@ import {
   addVideoToLibrary,
   getLibraryVideos,
   getImportedLibraryEntryIds,
+  getLibraryVideoFilename,
   importLibraryVideo,
   removeLibraryVideo,
 } from './overlayVideoLibrary';
@@ -183,6 +184,22 @@ describe('getLibraryVideos', () => {
 });
 
 // ─── getImportedLibraryEntryIds ──────────────────────────────────────────────
+
+describe('getLibraryVideoFilename', () => {
+  it('returns the filename of the entry with that id', async () => {
+    const pool = makeMockPool({ rows: [{ filename: 'lib.webm' }] });
+    vi.mocked(getPool).mockReturnValue(pool as any);
+
+    await expect(getLibraryVideoFilename(4)).resolves.toBe('lib.webm');
+    expect(pool.execute.mock.calls[0]![0]).toContain('FROM overlay_video_library WHERE id = ?');
+    expect(pool.execute.mock.calls[0]![1]).toEqual([4]);
+  });
+
+  it('returns null when no entry has that id', async () => {
+    vi.mocked(getPool).mockReturnValue(makeMockPool({ rows: [] }) as any);
+    await expect(getLibraryVideoFilename(4)).resolves.toBeNull();
+  });
+});
 
 describe('getImportedLibraryEntryIds', () => {
   it('returns the given streamer\'s imported entry ids only', async () => {

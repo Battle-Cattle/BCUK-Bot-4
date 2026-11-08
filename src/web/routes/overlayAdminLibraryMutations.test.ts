@@ -26,7 +26,7 @@ vi.mock('../../db', () => ({
   deleteVideo: vi.fn(),
   addVideoToLibrary: vi.fn(),
   getVideosForStreamer: vi.fn(),
-  getLibraryVideos: vi.fn(),
+  getLibraryVideoFilename: vi.fn(),
   importLibraryVideo: vi.fn(),
   getStreamerByDiscordId: vi.fn(),
   findUser: vi.fn(),
@@ -41,7 +41,7 @@ import supertest from 'supertest';
 import { router } from './overlayAdminLibraryMutations';
 import {
   removeLibraryVideo, deleteVideo, findUser, getGuildsForMember,
-  addVideoToLibrary, getVideosForStreamer, getStreamerByDiscordId, getLibraryVideos, importLibraryVideo,
+  addVideoToLibrary, getVideosForStreamer, getStreamerByDiscordId, getLibraryVideoFilename, importLibraryVideo,
 } from '../../db';
 import { LIBRARY_IMPORT_LIMIT, LIBRARY_PUBLISH_LIMIT } from '../rateLimits';
 import { AccessLevel } from '../../db';
@@ -275,20 +275,15 @@ describe('POST /settings/videos/:id/publish', () => {
 describe('POST /settings/library/:id/import', () => {
   const STREAMER_ID = 9;
   const UUID_WEBM = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.webm$/;
-  const ENTRY = {
-    id: 4, name: 'Confetti', filename: LIBRARY_FILE, contributor_streamer_id: 5,
-    contributor_login: 'alice', source_video_id: 3, created_at: new Date(),
-  };
-
   let importAccounts = 0;
 
   /**
-   * A test app for streamer 9 on a fresh account (its own import rate-limit bucket), with library
-   * entry 4 (backed by the real library file) listed.
+   * A test app for streamer 9 on a fresh account (its own import rate-limit bucket), where library
+   * entry 4 exists (backed by the real library file) and any other id doesn't.
    */
   function importApp(user = makeSessionUser({ discordId: `4000000000000000${String(importAccounts++).padStart(2, '0')}` })) {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue({ id: STREAMER_ID } as any);
-    vi.mocked(getLibraryVideos).mockResolvedValue([ENTRY]);
+    vi.mocked(getLibraryVideoFilename).mockImplementation(async (id) => (id === 4 ? LIBRARY_FILE : null));
     return buildTestApp({ router, session: { user }, mockRender: 'text' });
   }
 
@@ -365,8 +360,8 @@ describe('POST /settings/library/:id/import', () => {
 
   it('redirects with not_found when an Admin removes the entry and its file mid-import', async () => {
     const app = importApp();
-    // First lookup still lists the entry; by the time the file is linked, both are gone.
-    vi.mocked(getLibraryVideos).mockResolvedValueOnce([ENTRY]).mockResolvedValueOnce([]);
+    // The first lookup still finds the entry; by the time the file is linked, both are gone.
+    vi.mocked(getLibraryVideoFilename).mockResolvedValueOnce(LIBRARY_FILE).mockResolvedValueOnce(null);
     await fs.promises.rm(file(LIBRARY_FOLDER, LIBRARY_FILE));
 
     const res = await supertest(app).post('/settings/library/4/import');
@@ -411,6 +406,8 @@ describe('POST /settings/library/:id/import', () => {
     expect(importLibraryVideo).toHaveBeenCalledTimes(LIBRARY_IMPORT_LIMIT);
     // Every allowed import made a copy; the blocked one made none.
     expect(await streamerFiles()).toHaveLength(LIBRARY_IMPORT_LIMIT);
+    // Pinned separately, so changing the limit is a deliberate edit to this test too.
+    expect(LIBRARY_IMPORT_LIMIT).toBe(20);
 
     const other = await supertest(importApp(makeSessionUser({ discordId: '500000000000000002' }))).post('/settings/library/4/import');
     expect(other.status).toBe(302);

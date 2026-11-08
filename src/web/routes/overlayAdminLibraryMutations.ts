@@ -4,7 +4,7 @@ import { csrfProtection } from '../csrf';
 import { requireAuth, requireGuildContext, requireAdmin } from '../middleware';
 import { getSessionUser } from '../session';
 import {
-  addVideoToLibrary, getLibraryVideos, getVideosForStreamer, importLibraryVideo, removeLibraryVideo,
+  addVideoToLibrary, getLibraryVideoFilename, getVideosForStreamer, importLibraryVideo, removeLibraryVideo,
   type AddVideoToLibraryResult,
 } from '../../db';
 import { libraryImportLimiter, libraryPublishLimiter } from '../rateLimits';
@@ -113,15 +113,6 @@ router.post('/settings/videos/:id/publish', requireAuth, libraryPublishLimiter, 
 });
 
 /**
- * Looks up a public library entry by id.
- * @param libraryId - Primary key of the `overlay_video_library` row.
- * @returns The entry, or undefined if it isn't (or is no longer) in the library.
- */
-async function findLibraryEntry(libraryId: number): Promise<{ filename: string } | undefined> {
-  return (await getLibraryVideos()).find((e) => e.id === libraryId);
-}
-
-/**
  * Imports a public library entry as the streamer's own video: links the library file into the
  * streamer's folder under a new name (a hard link, or a copy across filesystems), then inserts
  * their `overlay_video` row with `importLibraryVideo`. The copy is an ordinary video of theirs from
@@ -135,11 +126,11 @@ async function findLibraryEntry(libraryId: number): Promise<{ filename: string }
  * @returns The redirect URL for the outcome.
  */
 async function importVideo(libraryId: number, streamerId: number): Promise<string> {
-  const entry = await findLibraryEntry(libraryId);
-  if (!entry) return '/overlay/settings?error=not_found';
+  const libraryFilename = await getLibraryVideoFilename(libraryId);
+  if (libraryFilename === null) return '/overlay/settings?error=not_found';
 
   const linked = await withLinkedVideoFile(
-    { folder: LIBRARY_FOLDER, filename: entry.filename },
+    { folder: LIBRARY_FOLDER, filename: libraryFilename },
     streamerFolder(streamerId),
     async (filename) => {
       const videoId = await importLibraryVideo(libraryId, streamerId, filename);
@@ -148,8 +139,8 @@ async function importVideo(libraryId: number, streamerId: number): Promise<strin
   );
   if (linked.status === 'source_missing') {
     // Removed by an Admin since the lookup above (row, then file): it's gone, not a failure.
-    if (!(await findLibraryEntry(libraryId))) return '/overlay/settings?error=not_found';
-    log.error(`Library video ${libraryId} has no file to import (${entry.filename})`);
+    if ((await getLibraryVideoFilename(libraryId)) === null) return '/overlay/settings?error=not_found';
+    log.error(`Library video ${libraryId} has no file to import (${libraryFilename})`);
     return '/overlay/settings?error=import_failed';
   }
   if (linked.result === null) return '/overlay/settings?error=not_found';
