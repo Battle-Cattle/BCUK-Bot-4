@@ -416,6 +416,17 @@ describe('POST /settings/library/:id/import', () => {
     expect(other.status).toBe(302);
   });
 
+  it('counts failed imports toward the limit too', async () => {
+    const app = importApp(makeSessionUser({ discordId: '500000000000000003' }));
+    for (let i = 0; i < LIBRARY_IMPORT_LIMIT; i++) {
+      expect((await supertest(app).post('/settings/library/99/import')).headers.location).toBe('/overlay/settings?error=not_found');
+    }
+    const blocked = await supertest(app).post('/settings/library/4/import');
+    expect(blocked.status).toBe(429);
+    expect(importLibraryVideo).not.toHaveBeenCalled();
+    expect(await streamerFiles()).toEqual([]);
+  });
+
   it('redirects to login without a session user', async () => {
     const res = await supertest(buildTestApp({ router, session: {}, mockRender: 'text' })).post('/settings/library/4/import');
     expect(res.headers.location).toBe('/auth/login');
