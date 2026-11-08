@@ -28,6 +28,7 @@
         not_your_video:   'That video is not one of yours.',
         already_in_library:'That video is already in the public library.',
         publish_failed:   'Adding the video to the public library failed — please try again.',
+        import_failed:    'Adding the library video to your videos failed — please try again.',
       }; %>
       <%= errorMessages[error] ?? `An error occurred (${error}).` %>
     </div>
@@ -42,6 +43,7 @@
         reward_deleted: 'Reward assignment removed.',
         library_video_removed: 'Video removed from the public library. Copies streamers already added are kept.',
         video_published: 'Video added to the public library. Every streamer can now see it and add it to their own videos.',
+        video_imported: 'Library video added to your videos. You can now assign it to rewards and advanced commands.',
       }; %>
       <%= successMessages[success] ?? 'Done.' %>
     </div>
@@ -163,6 +165,7 @@
                 <th>Name</th>
                 <th>Added by</th>
                 <th>Added</th>
+                <th></th>
                 <% if (isAdmin) { %><th></th><% } %>
               </tr>
             </thead>
@@ -176,6 +179,15 @@
                 <td><%= entry.name %></td>
                 <td><%= entry.contributor_login ?? 'unknown' %></td>
                 <td><%= new Date(entry.created_at).toLocaleDateString() %></td>
+                <td>
+                  <%# Importing again is allowed (it's another copy), so the button stays once added. %>
+                  <% const alreadyAdded = importedLibraryIds.includes(entry.id); %>
+                  <% if (alreadyAdded) { %><span class="hint hint-compact">Already added</span><% } %>
+                  <form method="POST" action="/overlay/settings/library/<%= entry.id %>/import" class="m-0">
+                    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                    <button type="submit" class="btn btn-ghost btn-sm"><%= alreadyAdded ? 'Add another copy' : 'Add to my videos' %></button>
+                  </form>
+                </td>
                 <% if (isAdmin) { %>
                 <td>
                   <%# Shown to Admins only; the route checks Admin itself (requireGuildContext → requireAdmin). %>

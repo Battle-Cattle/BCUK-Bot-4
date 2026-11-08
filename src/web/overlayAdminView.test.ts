@@ -16,6 +16,7 @@ function render(locals: Record<string, unknown> = {}): Promise<string> {
     twitchRewards: [],
     libraryVideos: [],
     publishedVideoIds: [],
+    importedLibraryIds: [],
     isAdmin: false,
     baseUrl: 'https://bot.example',
     maxFileMb: 100,
@@ -164,5 +165,31 @@ describe('views/overlayAdmin.ejs publishing', () => {
     expect(await render({ error: 'not_your_video' })).toContain('That video is not one of yours.');
     expect(await render({ error: 'already_in_library' })).toContain('That video is already in the public library.');
     expect(await render({ error: 'publish_failed' })).toContain('Adding the video to the public library failed — please try again.');
+  });
+});
+
+describe('views/overlayAdmin.ejs importing', () => {
+  const ENTRY = {
+    id: 4, name: 'Confetti', filename: 'lib.webm', contributor_streamer_id: 9,
+    contributor_login: 'alice', source_video_id: 12, created_at: new Date('2026-11-01T00:00:00Z'),
+  };
+
+  it('offers "Add to my videos" on a library entry the streamer has not imported', async () => {
+    const html = await render({ libraryVideos: [ENTRY] });
+    expect(html).toContain('<form method="POST" action="/overlay/settings/library/4/import" class="m-0">');
+    expect(html).toContain('>Add to my videos</button>');
+    expect(html).not.toContain('Already added');
+  });
+
+  it('marks an entry already imported, and still lets the streamer add another copy', async () => {
+    const html = await render({ libraryVideos: [ENTRY], importedLibraryIds: [4] });
+    expect(html).toContain('<span class="hint hint-compact">Already added</span>');
+    expect(html).toContain('/overlay/settings/library/4/import');
+    expect(html).toContain('>Add another copy</button>');
+  });
+
+  it('explains the import outcomes', async () => {
+    expect(await render({ success: 'video_imported' })).toContain('Library video added to your videos. You can now assign it to rewards and advanced commands.');
+    expect(await render({ error: 'import_failed' })).toContain('Adding the library video to your videos failed — please try again.');
   });
 });

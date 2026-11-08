@@ -26,6 +26,8 @@ vi.mock('../../db', () => ({
   deleteVideo: vi.fn(),
   addVideoToLibrary: vi.fn(),
   getVideosForStreamer: vi.fn(),
+  getLibraryVideos: vi.fn(),
+  importLibraryVideo: vi.fn(),
   getStreamerByDiscordId: vi.fn(),
   findUser: vi.fn(),
   getGuildsForMember: vi.fn(),
@@ -39,7 +41,7 @@ import supertest from 'supertest';
 import { router } from './overlayAdminLibraryMutations';
 import {
   removeLibraryVideo, deleteVideo, findUser, getGuildsForMember,
-  addVideoToLibrary, getVideosForStreamer, getStreamerByDiscordId,
+  addVideoToLibrary, getVideosForStreamer, getStreamerByDiscordId, getLibraryVideos, importLibraryVideo,
 } from '../../db';
 import { LIBRARY_PUBLISH_LIMIT } from '../rateLimits';
 import { AccessLevel } from '../../db';
@@ -265,5 +267,122 @@ describe('POST /settings/videos/:id/publish', () => {
 
     const other = await supertest(await publishApp(makeSessionUser({ discordId: '300000000000000002' }))).post('/settings/videos/3/publish');
     expect(other.status).toBe(302);
+  });
+});
+
+// ─── Importing ──────────────────────────────────────────────────────────────
+
+describe('POST /settings/library/:id/import', () => {
+  const STREAMER_ID = 9;
+  const UUID_WEBM = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.webm$/;
+  const ENTRY = {
+    id: 4, name: 'Confetti', filename: LIBRARY_FILE, contributor_streamer_id: 5,
+    contributor_login: 'alice', source_video_id: 3, created_at: new Date(),
+  };
+
+  /** A test app for streamer 9, with library entry 4 (backed by the real library file) listed. */
+  function importApp() {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue({ id: STREAMER_ID } as any);
+    vi.mocked(getLibraryVideos).mockResolvedValue([ENTRY]);
+    return buildTestApp({ router, session: { user: makeSessionUser() }, mockRender: 'text' });
+  }
+
+  /** Files currently in the importing streamer's folder. */
+  async function streamerFiles() {
+    return fs.promises.readdir(path.join(overlayFolder, streamerFolder(STREAMER_ID))).catch(() => [] as string[]);
+  }
+
+  it('creates the streamer\'s own copy and row, independent of the library entry', async () => {
+    vi.mocked(importLibraryVideo).mockResolvedValue(31);
+
+    const res = await supertest(importApp()).post('/settings/library/4/import');
+
+    expect(res.headers.location).toBe('/overlay/settings?success=video_imported');
+    const [copy] = await streamerFiles();
+    expect(copy).toMatch(UUID_WEBM);
+    expect(importLibraryVideo).toHaveBeenCalledWith(4, STREAMER_ID, copy);
+    expect(await fs.promises.readFile(file(streamerFolder(STREAMER_ID), copy!), 'utf8')).toBe('library video');
+    expect(logMock.info).toHaveBeenCalledWith(`Streamer ${STREAMER_ID} imported library video 4 as video 31`);
+
+    // Deleting the imported copy keeps the library file.
+    await fs.promises.rm(file(streamerFolder(STREAMER_ID), copy!));
+    expect(await fs.promises.readFile(file(LIBRARY_FOLDER, LIBRARY_FILE), 'utf8')).toBe('library video');
+  });
+
+  it('keeps the imported copy when an Admin then removes the library entry', async () => {
+    vi.mocked(importLibraryVideo).mockResolvedValue(31);
+    await supertest(importApp()).post('/settings/library/4/import');
+    const [copy] = await streamerFiles();
+
+    vi.mocked(removeLibraryVideo).mockResolvedValue(LIBRARY_FILE);
+    const removed = await supertest(app(AccessLevel.ADMIN)).post('/settings/library/4/remove');
+
+    expect(removed.headers.location).toBe('/overlay/settings?success=library_video_removed');
+    expect(fs.existsSync(file(LIBRARY_FOLDER, LIBRARY_FILE))).toBe(false);
+    expect(await fs.promises.readFile(file(streamerFolder(STREAMER_ID), copy!), 'utf8')).toBe('library video');
+  });
+
+  it('makes a second, independent copy when the same entry is imported twice', async () => {
+    vi.mocked(importLibraryVideo).mockResolvedValueOnce(31).mockResolvedValueOnce(32);
+    const app = importApp();
+
+    await supertest(app).post('/settings/library/4/import');
+    const second = await supertest(app).post('/settings/library/4/import');
+
+    expect(second.headers.location).toBe('/overlay/settings?success=video_imported');
+    const copies = await streamerFiles();
+    expect(copies).toHaveLength(2);
+    expect(copies[0]).not.toBe(copies[1]);
+  });
+
+  it('redirects with not_found, creating no file, for an entry that is not in the library', async () => {
+    const res = await supertest(importApp()).post('/settings/library/99/import');
+    expect(res.headers.location).toBe('/overlay/settings?error=not_found');
+    expect(importLibraryVideo).not.toHaveBeenCalled();
+    expect(await streamerFiles()).toEqual([]);
+  });
+
+  it('removes the new file and redirects with not_found when the entry is removed mid-import', async () => {
+    vi.mocked(importLibraryVideo).mockResolvedValue(null);
+    const res = await supertest(importApp()).post('/settings/library/4/import');
+    expect(res.headers.location).toBe('/overlay/settings?error=not_found');
+    expect(importLibraryVideo).toHaveBeenCalledTimes(1);
+    expect(await streamerFiles()).toEqual([]);
+  });
+
+  it('removes the new file and redirects with import_failed when the DB step fails', async () => {
+    vi.mocked(importLibraryVideo).mockRejectedValue(new Error('db down'));
+    const res = await supertest(importApp()).post('/settings/library/4/import');
+    expect(res.headers.location).toBe('/overlay/settings?error=import_failed');
+    expect(logMock.error).toHaveBeenCalledWith('Overlay library import error:', expect.any(Error));
+    expect(await streamerFiles()).toEqual([]);
+  });
+
+  it('redirects with import_failed, and logs, when the library file is missing on disk', async () => {
+    await fs.promises.rm(file(LIBRARY_FOLDER, LIBRARY_FILE));
+    const res = await supertest(importApp()).post('/settings/library/4/import');
+    expect(res.headers.location).toBe('/overlay/settings?error=import_failed');
+    expect(importLibraryVideo).not.toHaveBeenCalled();
+    expect(logMock.error).toHaveBeenCalledWith(`Library video 4 has no file to import (${LIBRARY_FILE})`);
+  });
+
+  it.each([['abc'], ['0'], ['-1']])('redirects with invalid_id for a malformed id %s', async (id) => {
+    const res = await supertest(importApp()).post(`/settings/library/${id}/import`);
+    expect(res.headers.location).toBe('/overlay/settings?error=invalid_id');
+    expect(importLibraryVideo).not.toHaveBeenCalled();
+  });
+
+  it('redirects a non-streamer to the not_a_streamer error', async () => {
+    const app = importApp();
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(null);
+    const res = await supertest(app).post('/settings/library/4/import');
+    expect(res.headers.location).toBe('/overlay/settings?error=not_a_streamer');
+    expect(importLibraryVideo).not.toHaveBeenCalled();
+  });
+
+  it('redirects to login without a session user', async () => {
+    const res = await supertest(buildTestApp({ router, session: {}, mockRender: 'text' })).post('/settings/library/4/import');
+    expect(res.headers.location).toBe('/auth/login');
+    expect(importLibraryVideo).not.toHaveBeenCalled();
   });
 });

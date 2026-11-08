@@ -3,7 +3,10 @@ import { Router } from 'express';
 import { csrfProtection } from '../csrf';
 import { requireAuth, requireGuildContext, requireAdmin } from '../middleware';
 import { getSessionUser } from '../session';
-import { addVideoToLibrary, getVideosForStreamer, removeLibraryVideo, type AddVideoToLibraryResult } from '../../db';
+import {
+  addVideoToLibrary, getLibraryVideos, getVideosForStreamer, importLibraryVideo, removeLibraryVideo,
+  type AddVideoToLibraryResult,
+} from '../../db';
 import { libraryPublishLimiter } from '../rateLimits';
 import { parsePositiveIntId } from './validation';
 import { logAndRedirectError } from './errorHandling';
@@ -106,5 +109,62 @@ router.post('/settings/videos/:id/publish', requireAuth, libraryPublishLimiter, 
     res.redirect(await publishVideo(videoId, streamer.id));
   } catch (err) {
     logAndRedirectError({ res, log, logLabel: 'Overlay library publish error:', err, basePath: '/overlay/settings', errorCode: 'publish_failed' });
+  }
+});
+
+/**
+ * Imports a public library entry as the streamer's own video: links the library file into the
+ * streamer's folder under a new name (a hard link, or a copy across filesystems), then inserts
+ * their `overlay_video` row with `importLibraryVideo`. The copy is an ordinary video of theirs from
+ * then on (renamed, deleted or assigned to rewards and advanced commands like an upload), and it
+ * outlives the library entry. The new file is removed again if the entry was removed in the
+ * meantime or the DB step fails, so no file is left without its row. Importing the same entry
+ * twice just makes a second copy.
+ * @param libraryId - Primary key of the `overlay_video_library` row.
+ * @param streamerId - DB row ID of the importing streamer.
+ * @returns The redirect URL for the outcome.
+ */
+async function importVideo(libraryId: number, streamerId: number): Promise<string> {
+  const entry = (await getLibraryVideos()).find((e) => e.id === libraryId);
+  if (!entry) return '/overlay/settings?error=not_found';
+
+  const linked = await withLinkedVideoFile(
+    { folder: LIBRARY_FOLDER, filename: entry.filename },
+    streamerFolder(streamerId),
+    async (filename) => {
+      const videoId = await importLibraryVideo(libraryId, streamerId, filename);
+      return { keepFile: videoId !== null, result: videoId };
+    },
+  );
+  if (linked.status === 'source_missing') {
+    log.error(`Library video ${libraryId} has no file to import (${entry.filename})`);
+    return '/overlay/settings?error=import_failed';
+  }
+  if (linked.result === null) return '/overlay/settings?error=not_found';
+  log.info(`Streamer ${streamerId} imported library video ${libraryId} as video ${linked.result}`);
+  return '/overlay/settings?success=video_imported';
+}
+
+/**
+ * POST /overlay/settings/library/:id/import — adds a public library video to the requesting
+ * streamer's own videos as an independent copy, which they can then assign to rewards and
+ * advanced commands like an upload.
+ * @param req - Express request; reads the `id` route param and the session user.
+ * @param res - Express response; redirects to `/overlay/settings?success=video_imported`, or to
+ *   `/overlay/settings?error=<code>` if the requester isn't a streamer (`not_a_streamer`), `id` is
+ *   malformed (`invalid_id`), the entry no longer exists (`not_found`) or importing fails
+ *   (`import_failed`).
+ */
+router.post('/settings/library/:id/import', requireAuth, csrfProtection, async (req, res) => {
+  try {
+    const streamer = await requireStreamer(req, res, NOT_A_STREAMER_REDIRECT);
+    if (!streamer) return;
+
+    const libraryId = parsePositiveIntId(req.params.id);
+    if (libraryId === null) return res.redirect('/overlay/settings?error=invalid_id');
+
+    res.redirect(await importVideo(libraryId, streamer.id));
+  } catch (err) {
+    logAndRedirectError({ res, log, logLabel: 'Overlay library import error:', err, basePath: '/overlay/settings', errorCode: 'import_failed' });
   }
 });
