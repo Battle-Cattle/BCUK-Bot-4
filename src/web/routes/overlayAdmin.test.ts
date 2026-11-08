@@ -6,6 +6,7 @@ vi.mock('../../db', () => ({
   getVideosForStreamer: vi.fn(),
   getRewardsForStreamer: vi.fn(),
   getLibraryVideos: vi.fn(),
+  getImportedLibraryEntryIds: vi.fn(),
   AccessLevel: ACCESS_LEVEL_MOCK,
 }));
 
@@ -55,7 +56,7 @@ vi.mock('./overlayAdminLibraryMutations', async () => {
 
 import supertest from 'supertest';
 import router, { statusConnections } from './overlayAdmin';
-import { getStreamerByDiscordId, getVideosForStreamer, getRewardsForStreamer, getLibraryVideos } from '../../db';
+import { getStreamerByDiscordId, getVideosForStreamer, getRewardsForStreamer, getLibraryVideos, getImportedLibraryEntryIds } from '../../db';
 import { getValidToken } from '../../twitch/twitchUserTokens';
 import { getCustomRewards } from '../../twitch/twitchRewardsApi';
 import { AccessLevel } from '../../db';
@@ -202,6 +203,20 @@ describe('GET /settings — public video library', () => {
     expect(res.body.publishedVideoIds).toEqual([]);
   });
 
+  it('passes the library entries the streamer has already imported', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue({ id: 1, discord_id: '1', twitch_user_id: null } as any);
+    vi.mocked(getImportedLibraryEntryIds).mockResolvedValue([4, 8]);
+    const res = await supertest(buildApp()).get('/settings');
+    expect(getImportedLibraryEntryIds).toHaveBeenCalledWith(1);
+    expect(res.body.importedLibraryIds).toEqual([4, 8]);
+  });
+
+  it('passes no imported entries to a non-streamer without loading them', async () => {
+    const res = await supertest(buildApp()).get('/settings');
+    expect(res.body.importedLibraryIds).toEqual([]);
+    expect(getImportedLibraryEntryIds).not.toHaveBeenCalled();
+  });
+
   it('passes every library entry to a streamer', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue({ id: 1, discord_id: '1', twitch_user_id: null } as any);
     const res = await supertest(buildApp()).get('/settings');
@@ -219,6 +234,11 @@ describe('GET /settings — public video library', () => {
 describe('GET /settings — library codes and Admin controls', () => {
   it.each(['not_your_video', 'already_in_library', 'publish_failed'])('passes the publish error %s to the template', async (code) => {
     expect((await supertest(buildApp()).get(`/settings?error=${code}`)).body.error).toBe(code);
+  });
+
+  it('passes the import codes to the template', async () => {
+    expect((await supertest(buildApp()).get('/settings?success=video_imported')).body.success).toBe('video_imported');
+    expect((await supertest(buildApp()).get('/settings?error=import_failed')).body.error).toBe('import_failed');
   });
 
   it('passes the video_published success code to the template', async () => {

@@ -147,7 +147,7 @@ export {
 } from './db/overlayVideos';
 export type { OverlayLibraryVideo, AddVideoToLibraryResult } from './db/overlayVideoLibrary';
 export {
-  addVideoToLibrary, getLibraryVideos, getImportedLibraryEntryIds,
+  addVideoToLibrary, getLibraryVideos, getLibraryVideoFilename, getImportedLibraryEntryIds,
   importLibraryVideo, removeLibraryVideo,
 } from './db/overlayVideoLibrary';
 

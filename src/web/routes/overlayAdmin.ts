@@ -5,7 +5,7 @@ import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import { getSessionUser } from '../session';
 import { AccessLevel, getStreamerByDiscordId } from '../../db';
-import { getVideosForStreamer, getRewardsForStreamer, getLibraryVideos } from '../../db';
+import { getVideosForStreamer, getRewardsForStreamer, getLibraryVideos, getImportedLibraryEntryIds } from '../../db';
 import { PUBLIC_URL, OVERLAY_FOLDER, OVERLAY_STATUS_MAX_SSE_PER_STREAMER } from '../../shared/config';
 import { fetchStreamerRewards } from './streamerRewards';
 import { filterQueryParam } from './validation';
@@ -33,7 +33,7 @@ const KNOWN_ERRORS = new Set([
   'not_a_streamer', 'invalid_file', 'upload_failed', 'delete_failed',
   'invalid_reward_id', 'no_videos_selected', 'save_failed', 'invalid_id', 'invalid_path',
   'file_too_large', 'invalid_weight', 'transcode_failed', 'transcode_busy', 'not_found',
-  'not_your_video', 'already_in_library', 'publish_failed',
+  'not_your_video', 'already_in_library', 'publish_failed', 'import_failed',
   ...CHUNKED_UPLOAD_ERROR_CODES,
 ]);
 // Library files are copies of overlay videos, so they have the same names: a UUID plus .webm/.mp4.
@@ -42,7 +42,7 @@ const LIBRARY_FILENAME_RE = /^[\w-]+\.(webm|mp4)$/i;
 const LIBRARY_DIR = path.posix.join(OVERLAY_FOLDER, LIBRARY_FOLDER);
 
 const KNOWN_SUCCESSES = new Set([
-  'video_uploaded', 'video_deleted', 'reward_saved', 'reward_deleted', 'library_video_removed', 'video_published',
+  'video_uploaded', 'video_deleted', 'reward_saved', 'reward_deleted', 'library_video_removed', 'video_published', 'video_imported',
 ]);
 
 /**
@@ -72,14 +72,15 @@ function publishedVideoIdsOf(
 router.get('/settings', requireAuth, csrfProtection, async (req, res) => {
   try {
     const streamer = await getStreamerByDiscordId(getSessionUser(req).discordId);
-    const [videos, rewards, twitchRewards, libraryVideos] = streamer
+    const [videos, rewards, twitchRewards, libraryVideos, importedLibraryIds] = streamer
       ? await Promise.all([
           getVideosForStreamer(streamer.id),
           getRewardsForStreamer(streamer.id),
           fetchStreamerRewards(streamer, log),
           getLibraryVideos(),
+          getImportedLibraryEntryIds(streamer.id),
         ])
-      : [[], [], [], []];
+      : [[], [], [], [], []];
 
     renderView(res, 'overlayAdmin', {
       user: req.session.user,
@@ -90,6 +91,7 @@ router.get('/settings', requireAuth, csrfProtection, async (req, res) => {
       twitchRewards,
       libraryVideos,
       publishedVideoIds: publishedVideoIdsOf(videos, libraryVideos),
+      importedLibraryIds,
       // Only decides whether the page shows Admin controls. The session's cached level can be
       // stale (no requireGuildContext on this page); the remove route re-derives it before
       // requireAdmin, so a stale value can only show or hide a button, never grant access.

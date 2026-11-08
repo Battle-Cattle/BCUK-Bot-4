@@ -105,6 +105,20 @@ export async function getLibraryVideos(): Promise<OverlayLibraryVideo[]> {
 }
 
 /**
+ * Looks up one library entry's stored filename by primary key, for routes that act on a single
+ * entry and don't need the full listing `getLibraryVideos` builds.
+ * @param libraryId - Primary key of the `overlay_video_library` row.
+ * @returns The entry's filename, or null if no such entry exists.
+ */
+export async function getLibraryVideoFilename(libraryId: number): Promise<string | null> {
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+    `SELECT filename FROM overlay_video_library WHERE id = ?`,
+    [libraryId],
+  );
+  return rows[0]?.filename ?? null;
+}
+
+/**
  * Lists the library entries a streamer has imported at least one copy of, for the "already
  * added" markers.
  * @param streamerId DB row ID of the importing streamer.
