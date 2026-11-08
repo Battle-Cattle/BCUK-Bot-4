@@ -113,13 +113,28 @@ router.post('/settings/videos/:id/publish', requireAuth, libraryPublishLimiter, 
 });
 
 /**
+ * Works out the redirect when an import found the library entry but not its file: an entry an
+ * Admin removed since the first lookup (row, then file) is simply gone, so `not_found`; one still
+ * listed with its file missing is a real failure, logged, so `import_failed`.
+ * @param libraryId - Primary key of the `overlay_video_library` row.
+ * @param libraryFilename - The entry's stored filename, from the first lookup.
+ * @returns The redirect URL for the outcome.
+ */
+async function missingSourceRedirect(libraryId: number, libraryFilename: string): Promise<string> {
+  if ((await getLibraryVideoFilename(libraryId)) === null) return '/overlay/settings?error=not_found';
+  log.error(`Library video ${libraryId} has no file to import (${libraryFilename})`);
+  return '/overlay/settings?error=import_failed';
+}
+
+/**
  * Imports a public library entry as the streamer's own video: links the library file into the
  * streamer's folder under a new name (a hard link, or a copy across filesystems), then inserts
  * their `overlay_video` row with `importLibraryVideo`. The copy is an ordinary video of theirs from
  * then on (renamed, deleted or assigned to rewards and advanced commands like an upload), and it
  * outlives the library entry. The new file is removed again if the entry was removed in the
  * meantime or the DB step fails, so no file is left without its row. An entry an Admin removes
- * mid-import (row and file) reads as `not_found`, not a failure to retry. Importing the same entry
+ * mid-import (row and file) reads as `not_found`, not a failure to retry
+ * ({@link missingSourceRedirect}). Importing the same entry
  * twice just makes a second copy.
  * @param libraryId - Primary key of the `overlay_video_library` row.
  * @param streamerId - DB row ID of the importing streamer.
@@ -137,12 +152,7 @@ async function importVideo(libraryId: number, streamerId: number): Promise<strin
       return { keepFile: videoId !== null, result: videoId };
     },
   );
-  if (linked.status === 'source_missing') {
-    // Removed by an Admin since the lookup above (row, then file): it's gone, not a failure.
-    if ((await getLibraryVideoFilename(libraryId)) === null) return '/overlay/settings?error=not_found';
-    log.error(`Library video ${libraryId} has no file to import (${libraryFilename})`);
-    return '/overlay/settings?error=import_failed';
-  }
+  if (linked.status === 'source_missing') return missingSourceRedirect(libraryId, libraryFilename);
   if (linked.result === null) return '/overlay/settings?error=not_found';
   log.info(`Streamer ${streamerId} imported library video ${libraryId} as video ${linked.result}`);
   return '/overlay/settings?success=video_imported';
