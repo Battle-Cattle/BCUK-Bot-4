@@ -113,19 +113,29 @@ router.post('/settings/videos/:id/publish', requireAuth, libraryPublishLimiter, 
 });
 
 /**
+ * Looks up a public library entry by id.
+ * @param libraryId - Primary key of the `overlay_video_library` row.
+ * @returns The entry, or undefined if it isn't (or is no longer) in the library.
+ */
+async function findLibraryEntry(libraryId: number): Promise<{ filename: string } | undefined> {
+  return (await getLibraryVideos()).find((e) => e.id === libraryId);
+}
+
+/**
  * Imports a public library entry as the streamer's own video: links the library file into the
  * streamer's folder under a new name (a hard link, or a copy across filesystems), then inserts
  * their `overlay_video` row with `importLibraryVideo`. The copy is an ordinary video of theirs from
  * then on (renamed, deleted or assigned to rewards and advanced commands like an upload), and it
  * outlives the library entry. The new file is removed again if the entry was removed in the
- * meantime or the DB step fails, so no file is left without its row. Importing the same entry
+ * meantime or the DB step fails, so no file is left without its row. An entry an Admin removes
+ * mid-import (row and file) reads as `not_found`, not a failure to retry. Importing the same entry
  * twice just makes a second copy.
  * @param libraryId - Primary key of the `overlay_video_library` row.
  * @param streamerId - DB row ID of the importing streamer.
  * @returns The redirect URL for the outcome.
  */
 async function importVideo(libraryId: number, streamerId: number): Promise<string> {
-  const entry = (await getLibraryVideos()).find((e) => e.id === libraryId);
+  const entry = await findLibraryEntry(libraryId);
   if (!entry) return '/overlay/settings?error=not_found';
 
   const linked = await withLinkedVideoFile(
@@ -137,6 +147,8 @@ async function importVideo(libraryId: number, streamerId: number): Promise<strin
     },
   );
   if (linked.status === 'source_missing') {
+    // Removed by an Admin since the lookup above (row, then file): it's gone, not a failure.
+    if (!(await findLibraryEntry(libraryId))) return '/overlay/settings?error=not_found';
     log.error(`Library video ${libraryId} has no file to import (${entry.filename})`);
     return '/overlay/settings?error=import_failed';
   }

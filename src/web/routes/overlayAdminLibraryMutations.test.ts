@@ -363,6 +363,20 @@ describe('POST /settings/library/:id/import', () => {
     expect(await streamerFiles()).toEqual([]);
   });
 
+  it('redirects with not_found when an Admin removes the entry and its file mid-import', async () => {
+    const app = importApp();
+    // First lookup still lists the entry; by the time the file is linked, both are gone.
+    vi.mocked(getLibraryVideos).mockResolvedValueOnce([ENTRY]).mockResolvedValueOnce([]);
+    await fs.promises.rm(file(LIBRARY_FOLDER, LIBRARY_FILE));
+
+    const res = await supertest(app).post('/settings/library/4/import');
+
+    expect(res.headers.location).toBe('/overlay/settings?error=not_found');
+    expect(importLibraryVideo).not.toHaveBeenCalled();
+    expect(logMock.error).not.toHaveBeenCalled();
+    expect(await streamerFiles()).toEqual([]);
+  });
+
   it('redirects with import_failed, and logs, when the library file is missing on disk', async () => {
     await fs.promises.rm(file(LIBRARY_FOLDER, LIBRARY_FILE));
     const res = await supertest(importApp()).post('/settings/library/4/import');
@@ -386,7 +400,8 @@ describe('POST /settings/library/:id/import', () => {
   });
 
   it(`stops one account after ${LIBRARY_IMPORT_LIMIT} imports in the window, without affecting others`, async () => {
-    vi.mocked(importLibraryVideo).mockResolvedValue(null);
+    let nextId = 100;
+    vi.mocked(importLibraryVideo).mockImplementation(async () => nextId++);
     const app = importApp(makeSessionUser({ discordId: '500000000000000001' }));
     for (let i = 0; i < LIBRARY_IMPORT_LIMIT; i++) {
       expect((await supertest(app).post('/settings/library/4/import')).status).toBe(302);
@@ -394,7 +409,8 @@ describe('POST /settings/library/:id/import', () => {
     const blocked = await supertest(app).post('/settings/library/4/import');
     expect(blocked.status).toBe(429);
     expect(importLibraryVideo).toHaveBeenCalledTimes(LIBRARY_IMPORT_LIMIT);
-    expect(await streamerFiles()).toEqual([]);
+    // Every allowed import made a copy; the blocked one made none.
+    expect(await streamerFiles()).toHaveLength(LIBRARY_IMPORT_LIMIT);
 
     const other = await supertest(importApp(makeSessionUser({ discordId: '500000000000000002' }))).post('/settings/library/4/import');
     expect(other.status).toBe(302);
