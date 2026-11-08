@@ -245,3 +245,24 @@ export const libraryPublishLimiter = rateLimit({
   message: 'You have added a lot of videos to the public library recently. Please try again in an hour.',
   handler: limitReachedHandler('library-publish'),
 });
+
+/** Most public library videos one account can import into its own videos per window. */
+export const LIBRARY_IMPORT_LIMIT = 20;
+
+/**
+ * Per-account cap on importing public overlay library videos into the streamer's own videos
+ * (#907), applied to `POST /overlay/settings/library/:id/import` after `requireAuth`. Importing
+ * the same entry again is allowed (each import is a separate copy), so without this the session
+ * limiter's 600 requests per 15 minutes would let one account add thousands of rows and files a
+ * day — full copies where the library and streamer folders are on different filesystems. A total
+ * per-streamer storage cap is #904's. Keyed by Discord ID like the session limiter.
+ */
+export const libraryImportLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: LIBRARY_IMPORT_LIMIT,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  keyGenerator: sessionLimiterKey,
+  message: 'You have added a lot of library videos recently. Please try again in an hour.',
+  handler: limitReachedHandler('library-import'),
+});

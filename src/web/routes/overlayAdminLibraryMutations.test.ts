@@ -43,7 +43,7 @@ import {
   removeLibraryVideo, deleteVideo, findUser, getGuildsForMember,
   addVideoToLibrary, getVideosForStreamer, getStreamerByDiscordId, getLibraryVideos, importLibraryVideo,
 } from '../../db';
-import { LIBRARY_PUBLISH_LIMIT } from '../rateLimits';
+import { LIBRARY_IMPORT_LIMIT, LIBRARY_PUBLISH_LIMIT } from '../rateLimits';
 import { AccessLevel } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 import { makeSessionUser } from '../../test-utils/fixtures';
@@ -280,11 +280,16 @@ describe('POST /settings/library/:id/import', () => {
     contributor_login: 'alice', source_video_id: 3, created_at: new Date(),
   };
 
-  /** A test app for streamer 9, with library entry 4 (backed by the real library file) listed. */
-  function importApp() {
+  let importAccounts = 0;
+
+  /**
+   * A test app for streamer 9 on a fresh account (its own import rate-limit bucket), with library
+   * entry 4 (backed by the real library file) listed.
+   */
+  function importApp(user = makeSessionUser({ discordId: `4000000000000000${String(importAccounts++).padStart(2, '0')}` })) {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue({ id: STREAMER_ID } as any);
     vi.mocked(getLibraryVideos).mockResolvedValue([ENTRY]);
-    return buildTestApp({ router, session: { user: makeSessionUser() }, mockRender: 'text' });
+    return buildTestApp({ router, session: { user }, mockRender: 'text' });
   }
 
   /** Files currently in the importing streamer's folder. */
@@ -378,6 +383,21 @@ describe('POST /settings/library/:id/import', () => {
     const res = await supertest(app).post('/settings/library/4/import');
     expect(res.headers.location).toBe('/overlay/settings?error=not_a_streamer');
     expect(importLibraryVideo).not.toHaveBeenCalled();
+  });
+
+  it(`stops one account after ${LIBRARY_IMPORT_LIMIT} imports in the window, without affecting others`, async () => {
+    vi.mocked(importLibraryVideo).mockResolvedValue(null);
+    const app = importApp(makeSessionUser({ discordId: '500000000000000001' }));
+    for (let i = 0; i < LIBRARY_IMPORT_LIMIT; i++) {
+      expect((await supertest(app).post('/settings/library/4/import')).status).toBe(302);
+    }
+    const blocked = await supertest(app).post('/settings/library/4/import');
+    expect(blocked.status).toBe(429);
+    expect(importLibraryVideo).toHaveBeenCalledTimes(LIBRARY_IMPORT_LIMIT);
+    expect(await streamerFiles()).toEqual([]);
+
+    const other = await supertest(importApp(makeSessionUser({ discordId: '500000000000000002' }))).post('/settings/library/4/import');
+    expect(other.status).toBe(302);
   });
 
   it('redirects to login without a session user', async () => {

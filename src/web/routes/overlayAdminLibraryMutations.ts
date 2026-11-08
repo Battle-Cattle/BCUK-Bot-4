@@ -7,7 +7,7 @@ import {
   addVideoToLibrary, getLibraryVideos, getVideosForStreamer, importLibraryVideo, removeLibraryVideo,
   type AddVideoToLibraryResult,
 } from '../../db';
-import { libraryPublishLimiter } from '../rateLimits';
+import { libraryImportLimiter, libraryPublishLimiter } from '../rateLimits';
 import { parsePositiveIntId } from './validation';
 import { logAndRedirectError } from './errorHandling';
 import { removeLibraryVideoFile, withLinkedVideoFile, LIBRARY_FOLDER, streamerFolder } from './overlayVideoLibraryFiles';
@@ -148,14 +148,14 @@ async function importVideo(libraryId: number, streamerId: number): Promise<strin
 /**
  * POST /overlay/settings/library/:id/import — adds a public library video to the requesting
  * streamer's own videos as an independent copy, which they can then assign to rewards and
- * advanced commands like an upload.
+ * advanced commands like an upload. Rate-limited per account by `libraryImportLimiter`.
  * @param req - Express request; reads the `id` route param and the session user.
  * @param res - Express response; redirects to `/overlay/settings?success=video_imported`, or to
  *   `/overlay/settings?error=<code>` if the requester isn't a streamer (`not_a_streamer`), `id` is
  *   malformed (`invalid_id`), the entry no longer exists (`not_found`) or importing fails
- *   (`import_failed`).
+ *   (`import_failed`). Over the rate limit, replies 429.
  */
-router.post('/settings/library/:id/import', requireAuth, csrfProtection, async (req, res) => {
+router.post('/settings/library/:id/import', requireAuth, libraryImportLimiter, csrfProtection, async (req, res) => {
   try {
     const streamer = await requireStreamer(req, res, NOT_A_STREAMER_REDIRECT);
     if (!streamer) return;
