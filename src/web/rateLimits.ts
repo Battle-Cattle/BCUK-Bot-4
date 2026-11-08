@@ -242,7 +242,7 @@ export const libraryPublishLimiter = rateLimit({
   standardHeaders: 'draft-8',
   legacyHeaders: false,
   keyGenerator: sessionLimiterKey,
-  message: 'You have added a lot of videos to the public library recently. Please try again in an hour.',
+  message: 'Too many requests to add videos to the public library. Please try again in an hour.',
   handler: limitReachedHandler('library-publish'),
 });
 
@@ -263,6 +263,6 @@ export const libraryImportLimiter = rateLimit({
   standardHeaders: 'draft-8',
   legacyHeaders: false,
   keyGenerator: sessionLimiterKey,
-  message: 'You have added a lot of library videos recently. Please try again in an hour.',
+  message: 'Too many requests to add library videos to your videos. Please try again in an hour.',
   handler: limitReachedHandler('library-import'),
 });

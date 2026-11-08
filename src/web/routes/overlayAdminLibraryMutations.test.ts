@@ -263,6 +263,8 @@ describe('POST /settings/videos/:id/publish', () => {
     }
     const blocked = await supertest(app).post('/settings/videos/3/publish');
     expect(blocked.status).toBe(429);
+    // Every request counts, failed ones included, so the message speaks of requests, not videos added.
+    expect(blocked.text).toBe('Too many requests to add videos to the public library. Please try again in an hour.');
     expect(addVideoToLibrary).toHaveBeenCalledTimes(LIBRARY_PUBLISH_LIMIT);
 
     const other = await supertest(await publishApp(makeSessionUser({ discordId: '300000000000000002' }))).post('/settings/videos/3/publish');
@@ -403,6 +405,7 @@ describe('POST /settings/library/:id/import', () => {
     }
     const blocked = await supertest(app).post('/settings/library/4/import');
     expect(blocked.status).toBe(429);
+    expect(blocked.text).toBe('Too many requests to add library videos to your videos. Please try again in an hour.');
     expect(importLibraryVideo).toHaveBeenCalledTimes(LIBRARY_IMPORT_LIMIT);
     // Every allowed import made a copy; the blocked one made none.
     expect(await streamerFiles()).toHaveLength(LIBRARY_IMPORT_LIMIT);
