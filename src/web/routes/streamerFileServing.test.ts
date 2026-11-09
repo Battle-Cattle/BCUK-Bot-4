@@ -7,7 +7,7 @@ vi.mock('../../shared/pathUtils', async (importOriginal) => {
 
 import type { Response } from 'express';
 import { realPathWithin } from '../../shared/pathUtils';
-import { resolveStreamerFile, sendStreamerFile } from './streamerFileServing';
+import { resolveStreamerFile, resolveSharedFile, sendStreamerFile } from './streamerFileServing';
 
 const FOLDER = '/srv/files';
 const FILENAME_RE = /^[\w-]+\.(png|mp4)$/i;
@@ -62,6 +62,35 @@ describe('resolveStreamerFile', () => {
     vi.mocked(realPathWithin).mockRejectedValue(Object.assign(new Error('denied'), { code: 'EACCES' }));
     const res = mockRes();
     expect(await resolveStreamerFile(res as unknown as Response, FOLDER, { streamerId: '12', filename: 'clip.mp4' }, FILENAME_RE)).toBeNull();
+    expect(res.status).toHaveBeenCalledWith(404);
+  });
+});
+
+describe('resolveSharedFile', () => {
+  it('resolves a file directly inside the folder', async () => {
+    vi.mocked(realPathWithin).mockResolvedValue('/srv/files/clip.mp4');
+    const res = mockRes();
+    const file = await resolveSharedFile(res as unknown as Response, FOLDER, 'clip.mp4', FILENAME_RE);
+    expect(file?.realPath).toBe('/srv/files/clip.mp4');
+    expect(realPathWithin).toHaveBeenCalledWith(FOLDER, '/srv/files/clip.mp4');
+    expect(res.status).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['a filename outside the pattern', 'clip.exe'],
+    ['a traversal filename', '../clip.mp4'],
+    ['a dot-dot filename', '..'],
+  ])('replies 400 for %s without touching the filesystem', async (_label, filename) => {
+    const res = mockRes();
+    expect(await resolveSharedFile(res as unknown as Response, FOLDER, filename, FILENAME_RE)).toBeNull();
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(realPathWithin).not.toHaveBeenCalled();
+  });
+
+  it('replies 404 when the file is missing or its real path escapes the folder', async () => {
+    vi.mocked(realPathWithin).mockResolvedValue(null);
+    const res = mockRes();
+    expect(await resolveSharedFile(res as unknown as Response, FOLDER, 'clip.mp4', FILENAME_RE)).toBeNull();
     expect(res.status).toHaveBeenCalledWith(404);
   });
 });

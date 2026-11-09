@@ -272,7 +272,7 @@ async function connectBot(): Promise<void> {
 }
 
 /** Builds a minimal fake Twurple `ChatMessage` with the given userInfo/shared-chat overrides. */
-function makeChatMessage(overrides: {
+function makeChatMessage(user: string, overrides: {
   isMod?: boolean;
   isVip?: boolean;
   isBroadcaster?: boolean;
@@ -290,7 +290,8 @@ function makeChatMessage(overrides: {
       isBroadcaster: overrides.isBroadcaster ?? false,
       isSubscriber: overrides.isSubscriber ?? false,
       isFounder: overrides.isFounder ?? false,
-      displayName: overrides.displayName,
+      // Twurple's ChatUser.displayName falls back to the login when the display-name tag is unset.
+      displayName: overrides.displayName ?? user,
       userId: overrides.userId ?? 'user-id',
     },
     channelId: overrides.channelId ?? null,
@@ -308,10 +309,10 @@ function sendMessage(
   channel: string,
   user: string,
   message: string,
-  msgOverrides: Parameters<typeof makeChatMessage>[0] = {},
+  msgOverrides: Parameters<typeof makeChatMessage>[1] = {},
 ): void {
   const normalizedChannel = channel.replace(/^#/, '');
-  handlers.messageHandlers.slice().forEach((h) => h(normalizedChannel, user, message, makeChatMessage(msgOverrides)));
+  handlers.messageHandlers.slice().forEach((h) => h(normalizedChannel, user, message, makeChatMessage(user, msgOverrides)));
 }
 
 /**
@@ -584,7 +585,7 @@ describe('handleTwitchMessage', () => {
     expect(executeCustomCommandForTwitch).toHaveBeenCalledWith('streamer', '!clap', 'Alice', '!clap');
   });
 
-  it('falls back to the login username when userInfo.displayName is absent', () => {
+  it('uses the login username as the display name when Twurple reports no display-name tag', () => {
     vi.mocked(executeCustomCommandForTwitch).mockResolvedValue(undefined);
     sendMessage('#streamer', 'alice', '!hi');
     expect(executeCustomCommandForTwitch).toHaveBeenCalledWith('streamer', '!hi', 'alice', '!hi');

@@ -6,6 +6,7 @@ vi.mock('mysql2/promise', () => ({ default: {} }));
 let mockSecret: string | undefined = 'a'.repeat(64);
 vi.mock('../shared/config', () => ({
   get EVENTSUB_TOKEN_SECRET() { return mockSecret; },
+  EVENTSUB_TOKEN_SECRET_PREVIOUS: 'b'.repeat(64),
 }));
 vi.mock('../shared/crypto', () => ({
   encryptToken: vi.fn((value: string) => `enc:${value}`),
@@ -62,6 +63,8 @@ describe('getBotChatToken', () => {
       tokenExpiry: 1234567890,
       connectionId: 1,
     });
+    // Both keys go to decryptToken, so tokens from before a key rotation still decrypt.
+    expect(decryptToken).toHaveBeenCalledWith(expect.any(String), 'a'.repeat(64), 'b'.repeat(64));
   });
 
   it('coerces connection_id to a number', async () => {

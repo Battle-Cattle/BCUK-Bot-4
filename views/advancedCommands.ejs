@@ -1,11 +1,4 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BCUK Bot — Advanced Commands</title>
-  <link rel="stylesheet" href="/style.css">
-  <%- include('partials/pwa-head') %>
+<%- include('partials/head', { pageTitle: 'BCUK Bot — Advanced Commands' }) %>
 </head>
 <body data-csrf-token="<%= csrfToken %>">
   <%- include('partials/nav') %>
@@ -44,6 +37,10 @@
         invalid_path:            'Couldn\'t store that file.',
         file_too_large:          'That file is too large.',
         upload_failed:           'Upload failed — please try again.',
+        upload_busy: 'Another upload is already in progress. Try again once it finishes.',
+        upload_incomplete: 'The upload did not finish arriving — please try again.',
+        upload_expired: 'The upload expired before it finished — please try again.',
+        invalid_upload: 'No valid file was chosen.',
         no_alert:                'Turn on and save the command\'s alert before uploading files for it.',
         test_failed:             'Failed to send the test.',
         command_disabled:        'That command is disabled — enable it first.',
@@ -232,6 +229,10 @@
     </section>
   </main>
   <script src="/utils.js"></script>
+  <script src="/chunkedUpload.js"></script>
+  <script src="/chunkedUploadResume.js"></script>
+  <script src="/chunkedUploadOutcome.js"></script>
+  <script src="/chunkedUploadPacing.js"></script>
   <script src="/advancedCommands.js"></script>
   <%- include('partials/pwa-register') %>
   <%- include('partials/footer') %>

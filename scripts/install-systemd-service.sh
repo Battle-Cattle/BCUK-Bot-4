@@ -7,7 +7,8 @@
 set -euo pipefail
 
 SERVICE_NAME="bcuk-bot"
-REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+# The physical path (no symlinks), as the unit binds it into the service's view of the filesystem.
+REPO_DIR="$(cd "$(dirname "$0")/.." && pwd -P)"
 RUN_USER="$(id -un)"
 
 if [ "$RUN_USER" = "root" ]; then
@@ -38,10 +39,77 @@ if [ -z "$SYSTEMCTL_BIN" ]; then
     exit 1
 fi
 
+# env_setting and trim: .env read the way dotenv (and so the bot) reads it, shared with deploy.sh
+# and the backup scripts.
+ENV_FILE="$REPO_DIR/.env"
+# shellcheck source=lib/dotenv.sh
+source "$REPO_DIR/scripts/lib/dotenv.sh"
+
+# Prints the absolute path of an upload folder setting, falling back to config.ts's default. A
+# relative path is relative to the checkout, which is the unit's WorkingDirectory.
+folder_path() {
+    local value
+    # Trimmed, and blank counts as unset, exactly as config.ts reads these settings.
+    value="$(trim "$(env_setting "$1")")"
+    value="${value:-$2}"
+    case "$value" in
+        /*) ;;
+        *) value="$REPO_DIR/$value" ;;
+    esac
+    realpath -m "$value"
+}
+
+# Fails unless a path can be written into the unit as is: inside double quotes, with no % specifiers,
+# and no colon (which BindPaths= reads as the split between source, destination and options).
+check_unit_path() {
+    if [[ "$1" == *'"'* || "$1" == *'\'* || "$1" == *%* || "$1" == *:* ]]; then
+        echo "ERROR: $1 contains a quote, backslash, % or colon, which the unit can't express." >&2
+        exit 1
+    fi
+}
+
+# The unit hides every home directory (ProtectHome=tmpfs) and binds back, read-only, the checkout
+# and the node binary the service runs: the path the unit names and the file it resolves to (nvm's
+# links, say), each when it lives in a home directory (one elsewhere, e.g. /usr, stays visible
+# anyway). Only the binary, never the folder it's in: node needs nothing else from its install at
+# runtime (npm runs from the deploy shell, not the service), and its folder can be shared with
+# unrelated files (~/bin, ~/.local) that the sandbox is there to hide.
+READONLY_BINDS=("$REPO_DIR")
+for node_path in "$NODE_BIN" "$(realpath "$NODE_BIN")"; do
+    case "$node_path" in
+        /home/*|/root/*)
+            [[ " ${READONLY_BINDS[*]} " == *" $node_path "* ]] || READONLY_BINDS+=("$node_path") ;;
+    esac
+done
+READONLY_PATHS=""
+for dir in "${READONLY_BINDS[@]}"; do
+    check_unit_path "$dir"
+    READONLY_PATHS+="${READONLY_PATHS:+ }\"${dir}\""
+done
+
+# The unit's filesystem is read-only apart from these (BindPaths): logs/, the upload folders and the
+# folder chunked uploads are assembled in (overlay videos assemble inside OVERLAY_FOLDER instead).
+# Created now, as this user, so the bot never has to create one under a read-only parent.
+WRITABLE_DIRS=(
+    "$REPO_DIR/logs"
+    "$(folder_path OVERLAY_FOLDER ./overlay-videos)"
+    "$(folder_path ALERT_ASSETS_FOLDER ./alert-assets)"
+    "$(folder_path SFX_FOLDER ./sfx)"
+    "$(folder_path UPLOAD_INCOMING_FOLDER ./upload-incoming)"
+)
+WRITABLE_PATHS=""
+for dir in "${WRITABLE_DIRS[@]}"; do
+    check_unit_path "$dir"
+    mkdir -p "$dir"
+    WRITABLE_PATHS+="${WRITABLE_PATHS:+ }\"-${dir}\""
+done
+
 echo "==> Installing /etc/systemd/system/${SERVICE_NAME}.service"
 echo "    user:      $RUN_USER"
 echo "    directory: $REPO_DIR"
 echo "    node:      $NODE_BIN (v$("$NODE_BIN" -v | tr -d v))"
+echo "    read-only: ${READONLY_BINDS[*]}"
+echo "    writable:  ${WRITABLE_DIRS[*]}"
 UNIT_TMP="$(mktemp)"
 trap 'rm -f "$UNIT_TMP" "${SUDOERS_TMP:-}"' EXIT
 # Escapes a value for the replacement side of `s|...|...|`: backslash, the `|` delimiter and `&`
@@ -50,6 +118,8 @@ sed_escape() { printf '%s' "$1" | sed -e 's/[\\|&]/\\&/g'; }
 sed -e "s|__USER__|$(sed_escape "$RUN_USER")|" \
     -e "s|__REPO_DIR__|$(sed_escape "$REPO_DIR")|" \
     -e "s|__NODE_BIN__|$(sed_escape "$NODE_BIN")|" \
+    -e "s|__READONLY_PATHS__|$(sed_escape "$READONLY_PATHS")|" \
+    -e "s|__WRITABLE_PATHS__|$(sed_escape "$WRITABLE_PATHS")|" \
     "$REPO_DIR/deploy/bcuk-bot.service" > "$UNIT_TMP"
 sudo install -m 644 "$UNIT_TMP" "/etc/systemd/system/${SERVICE_NAME}.service"
 sudo "$SYSTEMCTL_BIN" daemon-reload

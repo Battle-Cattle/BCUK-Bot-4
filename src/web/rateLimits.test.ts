@@ -1,16 +1,24 @@
 import { createHash } from 'crypto';
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import express, { type Request, type Response } from 'express';
+import rateLimit from 'express-rate-limit';
 import supertest from 'supertest';
 import type { SessionUser } from '../types/express';
 import { ACCESS_LEVEL_MOCK } from '../test-utils/accessLevelMock';
+import { waitFor } from '../test-utils/waitFor';
 
 vi.mock('../db/users', () => ({ AccessLevel: ACCESS_LEVEL_MOCK }));
+const mockLog = vi.hoisted(() => ({ error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() }));
+vi.mock('../shared/logger', () => ({ createLogger: () => mockLog }));
 
 import { AccessLevel } from '../db/users';
 import {
   ipKey,
   generalLimiterSkip,
+  isSessionStoreBusyError,
+  limitReachedHandler,
+  markSessionStoreError,
+  preSessionLimiterSkip,
   sessionLimiterKey,
   sessionLimiterSkip,
   streamdeckLimiterKey,
@@ -92,6 +100,56 @@ describe('generalLimiterSkip', () => {
 // ---------------------------------------------------------------------------
 // sessionLimiterSkip
 // ---------------------------------------------------------------------------
+describe('preSessionLimiterSkip', () => {
+  it('skips a Streamdeck API call that carries no session cookie', () => {
+    expect(preSessionLimiterSkip(makeReq({ path: '/api/streamdeck/sfx' }))).toBe(true);
+  });
+
+  it('counts a Streamdeck API call that carries a session cookie, since it still hits the store', () => {
+    const req = makeReq({ path: '/api/streamdeck/sfx' });
+    req.headers.cookie = 'theme=dark; connect.sid=s%3Aabc.def';
+    expect(preSessionLimiterSkip(req)).toBe(false);
+  });
+
+  it.each(['connect.sid =s%3Aabc.def', 'theme=dark;connect.sid\t= s%3Aabc.def'])(
+    'counts a Streamdeck API call whose session cookie has spaces around its name (%s)',
+    (cookie) => {
+      const req = makeReq({ path: '/api/streamdeck/sfx' });
+      req.headers.cookie = cookie;
+      expect(preSessionLimiterSkip(req)).toBe(false);
+    },
+  );
+
+  it('still skips a Streamdeck API call whose only cookie merely ends in connect.sid', () => {
+    const req = makeReq({ path: '/api/streamdeck/sfx' });
+    req.headers.cookie = 'xconnect.sid=1';
+    expect(preSessionLimiterSkip(req)).toBe(true);
+  });
+
+  it('counts every other request, authenticated or not', () => {
+    expect(preSessionLimiterSkip(makeReq({ path: '/dashboard' }))).toBe(false);
+    expect(preSessionLimiterSkip(makeReq({ path: '/dashboard', sessionUser: authedUser }))).toBe(false);
+  });
+});
+
+describe('isSessionStoreBusyError', () => {
+  it("recognises mysql2's full-queue rejection from the session store", () => {
+    expect(isSessionStoreBusyError(markSessionStoreError(new Error('Queue limit reached.')))).toBe(true);
+  });
+
+  it('ignores the same rejection from any other pool (e.g. the bot pool)', () => {
+    expect(isSessionStoreBusyError(new Error('Queue limit reached.'))).toBe(false);
+  });
+
+  it.each([markSessionStoreError(new Error('connect ECONNREFUSED')), 'Queue limit reached.', null, undefined])('ignores %s', (err) => {
+    expect(isSessionStoreBusyError(err)).toBe(false);
+  });
+
+  it('leaves a non-object error as it is', () => {
+    expect(markSessionStoreError('boom')).toBe('boom');
+  });
+});
+
 describe('sessionLimiterSkip', () => {
   it('skips (true) for /api/streamdeck path even when authenticated', () => {
     expect(sessionLimiterSkip(makeReq({ path: '/api/streamdeck/sfx', sessionUser: authedUser }))).toBe(true);
@@ -223,5 +281,65 @@ describe('streamdeckAuthFailureLimiter', () => {
         .set('Authorization', 'Bearer valid-key');
       expect(res.status).toBe(200);
     }
+  });
+});
+
+describe('limitReachedHandler', () => {
+  beforeEach(() => {
+    mockLog.error.mockClear();
+  });
+
+  /** An app behind a 1-request limiter keyed by the `x-key` header, using the logging handler. */
+  function limitedApp(name: string, message: string | ((req: Request) => string) = 'Slow down') {
+    const app = express();
+    app.use(rateLimit({
+      windowMs: 60_000,
+      limit: 1,
+      keyGenerator: (req) => String(req.headers['x-key']),
+      message,
+      handler: limitReachedHandler(name),
+    }));
+    app.get('/thing', (_req, res) => { res.send('ok'); });
+    return supertest(app);
+  }
+
+  it('answers with the limiter\'s 429 and message, and logs the first block as an error', async () => {
+    const agent = limitedApp('unit-a');
+
+    expect((await agent.get('/thing').set('x-key', 'one')).status).toBe(200);
+    const blocked = await agent.get('/thing').set('x-key', 'one');
+
+    expect(blocked.status).toBe(429);
+    expect(blocked.text).toBe('Slow down');
+    expect(mockLog.error).toHaveBeenCalledTimes(1);
+    expect(mockLog.error).toHaveBeenCalledWith('unit-a rate limit reached for one (2/1 requests in the window), last GET /thing');
+  });
+
+  it('logs each limiter and key once per window, not on every blocked request', async () => {
+    const agent = limitedApp('unit-b');
+    for (const key of ['one', 'one', 'one', 'two', 'two']) await agent.get('/thing').set('x-key', key);
+
+    expect(mockLog.error).toHaveBeenCalledTimes(2);
+    expect(mockLog.error.mock.calls.map(([line]) => String(line).split(' (')[0])).toEqual([
+      'unit-b rate limit reached for one',
+      'unit-b rate limit reached for two',
+    ]);
+  });
+
+  it('logs, rather than crashing, when the limit response itself fails', async () => {
+    const failure = new Error('message lookup failed');
+    const agent = limitedApp('unit-d', () => { throw failure; });
+    await agent.get('/thing').set('x-key', 'one');
+
+    // The response never goes out, so don't wait for one: the request is left to time out.
+    agent.get('/thing').set('x-key', 'one').timeout(200).catch(() => {});
+    await waitFor(() => expect(mockLog.error).toHaveBeenCalledWith('Failed to send the unit-d rate-limit response', failure));
+  });
+
+  it('sends a message the limiter computes per request', async () => {
+    const agent = limitedApp('unit-c', (req) => `Too fast on ${req.path}`);
+    await agent.get('/thing').set('x-key', 'one');
+
+    expect((await agent.get('/thing').set('x-key', 'one')).text).toBe('Too fast on /thing');
   });
 });

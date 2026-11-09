@@ -20,3 +20,4 @@ public/downloads/*
 !.claude/skills
 logs/*
 !logs/.gitkeep
+node_modules.old/

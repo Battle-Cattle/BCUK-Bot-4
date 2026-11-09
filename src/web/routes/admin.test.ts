@@ -245,7 +245,7 @@ describe('POST /users/add', () => {
       .send({ discord_id: VALID_ID, discord_name: 'TestUser', access_level: '0', twitch_name: 'streamer' });
     expect(res.headers.location).toBe('/admin/users');
     expect(vi.mocked(addOrUpdateUserMutation)).toHaveBeenCalledWith(
-      expect.objectContaining({ discordId: VALID_ID, discordName: 'TestUser', level: 0, normalizedTwitchName: 'streamer' }),
+      expect.objectContaining({ discordId: VALID_ID, discordName: 'TestUser', normalizedTwitchName: 'streamer' }),
     );
     expect(vi.mocked(setMemberAccessLevel)).toHaveBeenCalledWith(GUILD_ID, VALID_ID, 0);
     expect(vi.mocked(reloadGuildRegistry)).toHaveBeenCalled();

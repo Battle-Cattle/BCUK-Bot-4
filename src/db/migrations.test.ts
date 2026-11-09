@@ -16,7 +16,7 @@ vi.mock('../shared/config', () => ({
 vi.mock('../shared/logger', () => ({ createLogger: mockLogger }));
 
 import { runMigrations } from './migrations';
-import { migrationChecksum } from './migrationFiles';
+import { migrationChecksum } from '../shared/migrationFiles';
 
 const BASELINE_SQL = 'CREATE TABLE IF NOT EXISTS `user` (id INT);\nCREATE TABLE IF NOT EXISTS guild (id INT);\n';
 
@@ -130,7 +130,7 @@ describe('runMigrations', () => {
     const conn = makeConn(db);
     createConnection.mockResolvedValue(conn);
 
-    await expect(runMigrations(dir)).rejects.toThrow(/missing baseline tables \(guild\)\. It predates the baseline/);
+    await expect(runMigrations(dir)).rejects.toThrow(/missing baseline tables \(guild\)\. Refusing to adopt a partial schema: bring it in line with migrations\/0001_baseline\.sql/);
     expect(db.applied.size).toBe(0);
     expect(conn.executed).toEqual([]);
   });

@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockLogger } from '../../test-utils/loggerMock';
 
+vi.mock('../chunkedUploadStore', async (importOriginal) =>
+  (await import('../../test-utils/chunkedUploadTest.js')).mockChunkedUploadStoreModule(await importOriginal<object>()));
+vi.mock('./chunkedUploadRoutes', async (importOriginal) =>
+  (await import('../../test-utils/chunkedUploadTest.js')).mockChunkedUploadRoutesModule(await importOriginal<object>()));
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
 vi.mock('../../db', () => ({
@@ -36,10 +40,10 @@ vi.mock('../middleware', () => ({
   requireOwnerJson: vi.fn((_req: any, _res: any, next: any) => next()),
 }));
 
-vi.mock('../../shared/config', () => ({
+vi.mock('../../shared/config', () => ({ UPLOAD_INCOMING_FOLDER: '/app/upload-incoming',
   SFX_FOLDER: '/app/sfx',
-  // 1 MB so the oversized-upload test can trigger Multer's LIMIT_FILE_SIZE with a
-  // just-over-1 MB buffer. Every other upload test uses a few-byte buffer.
+  // 1 MB so the oversized-upload test can exceed the limit with a just-over-1 MB
+  // buffer. Every other upload test uses a few-byte buffer.
   SFX_MAX_FILE_MB: 1,
   // Unused here — suggest-description isn't exercised by this file's tests.
   OPENAI_API_KEY: '',
@@ -56,6 +60,7 @@ vi.mock('fs', () => ({
   },
 }));
 
+import { uploadRequest } from '../../test-utils/chunkedUploadTest';
 import supertest from 'supertest';
 import router from './sfxMutations';
 import {
@@ -261,20 +266,21 @@ describe('POST /sfx/trigger/remove', () => {
 
 describe('POST /sfx/file/upload', () => {
   it('rejects when trigger_id is invalid', async () => {
-    const res = await supertest(buildApp())
+    const res = await uploadRequest(buildApp())
       .post('/sfx/file/upload')
       .field('trigger_id', 'x')
       .attach('sound', MP3_ID3, { filename: 'clap.mp3', contentType: 'audio/mpeg' });
     expect(res.headers.location).toBe('/sfx?error=invalid_id');
   });
 
-  it('rejects when no file is uploaded', async () => {
-    const res = await supertest(buildApp()).post('/sfx/file/upload').field('trigger_id', '5');
-    expect(res.headers.location).toBe('/sfx?error=invalid_file');
+  it('redirects a completion with no upload behind it to upload_expired', async () => {
+    const res = await uploadRequest(buildApp()).post('/sfx/file/upload').field('trigger_id', '5');
+    expect(res.headers.location).toBe('/sfx?error=upload_expired');
+    expect(vi.mocked(addSfxFile)).not.toHaveBeenCalled();
   });
 
   it('rejects a file with no recognised magic bytes', async () => {
-    const res = await supertest(buildApp())
+    const res = await uploadRequest(buildApp())
       .post('/sfx/file/upload')
       .field('trigger_id', '5')
       .field('weight', '1')
@@ -284,7 +290,7 @@ describe('POST /sfx/file/upload', () => {
   });
 
   it('uploads a valid mp3, preserving the filename', async () => {
-    const res = await supertest(buildApp())
+    const res = await uploadRequest(buildApp())
       .post('/sfx/file/upload')
       .field('trigger_id', '5')
       .field('weight', '3')
@@ -297,7 +303,7 @@ describe('POST /sfx/file/upload', () => {
 
   it('accepts valid audio sent with a generic application/octet-stream content type', async () => {
     // Browsers sometimes send octet-stream for audio; the magic bytes are authoritative.
-    const res = await supertest(buildApp())
+    const res = await uploadRequest(buildApp())
       .post('/sfx/file/upload')
       .field('trigger_id', '5')
       .field('weight', '1')
@@ -311,7 +317,7 @@ describe('POST /sfx/file/upload', () => {
     vi.mocked(fs.promises.writeFile).mockRejectedValueOnce(
       Object.assign(new Error('exists'), { code: 'EEXIST' }),
     );
-    await supertest(buildApp())
+    await uploadRequest(buildApp())
       .post('/sfx/file/upload')
       .field('trigger_id', '5')
       .field('weight', '1')
@@ -321,7 +327,7 @@ describe('POST /sfx/file/upload', () => {
 
   it('removes the written file when the DB insert fails', async () => {
     vi.mocked(addSfxFile).mockRejectedValue(new Error('DB error'));
-    const res = await supertest(buildApp())
+    const res = await uploadRequest(buildApp())
       .post('/sfx/file/upload')
       .field('trigger_id', '5')
       .field('weight', '1')
@@ -335,7 +341,7 @@ describe('POST /sfx/file/upload', () => {
     vi.mocked(fs.promises.writeFile).mockRejectedValue(
       Object.assign(new Error('exists'), { code: 'EEXIST' }),
     );
-    const res = await supertest(buildApp())
+    const res = await uploadRequest(buildApp())
       .post('/sfx/file/upload')
       .field('trigger_id', '5')
       .field('weight', '1')
@@ -348,7 +354,7 @@ describe('POST /sfx/file/upload', () => {
     vi.mocked(fs.promises.writeFile).mockRejectedValue(
       Object.assign(new Error('disk full'), { code: 'ENOSPC' }),
     );
-    const res = await supertest(buildApp())
+    const res = await uploadRequest(buildApp())
       .post('/sfx/file/upload')
       .field('trigger_id', '5')
       .field('weight', '1')
@@ -360,7 +366,7 @@ describe('POST /sfx/file/upload', () => {
   it('still redirects with upload_failed when the rollback cleanup itself throws', async () => {
     vi.mocked(addSfxFile).mockRejectedValue(new Error('DB error'));
     vi.mocked(fs.promises.rm).mockRejectedValue(new Error('rm failed'));
-    const res = await supertest(buildApp())
+    const res = await uploadRequest(buildApp())
       .post('/sfx/file/upload')
       .field('trigger_id', '5')
       .field('weight', '1')
@@ -371,19 +377,20 @@ describe('POST /sfx/file/upload', () => {
 
   // End-to-end: locks the uploadSound → handleUploadError wiring so the route still
   // redirects (rather than 500s) if the middleware chain or ordering ever changes.
-  it('redirects an oversized upload to file_too_large via the route middleware', async () => {
+  it('refuses to start an upload over the size limit with file_too_large', async () => {
     const oversized = Buffer.alloc(1024 * 1024 + 1024, 1); // > 1 MB limit set in the config mock
-    const res = await supertest(buildApp())
+    const res = await uploadRequest(buildApp())
       .post('/sfx/file/upload')
       .field('trigger_id', '5')
       .attach('sound', oversized, { filename: 'big.mp3', contentType: 'audio/mpeg' });
-    expect(res.headers.location).toBe('/sfx?error=file_too_large');
+    expect(res.status).toBe(413);
+    expect(res.body).toEqual({ error: 'file_too_large' });
     expect(vi.mocked(fs.promises.writeFile)).not.toHaveBeenCalled();
     expect(vi.mocked(addSfxFile)).not.toHaveBeenCalled();
   });
 
   it('rejects a non-positive weight before writing the file', async () => {
-    const res = await supertest(buildApp())
+    const res = await uploadRequest(buildApp())
       .post('/sfx/file/upload')
       .field('trigger_id', '5')
       .field('weight', '0')
@@ -516,6 +523,24 @@ describe('category routes', () => {
     expect(res.headers.location).toBe('/sfx?error=update_failed');
   });
 
+  it('redirects rename with invalid_id when category_id is not a positive integer', async () => {
+    const res = await supertest(buildApp()).post('/sfx/category/rename').send('category_id=abc&name=Alerts');
+    expect(res.headers.location).toBe('/sfx?error=invalid_id');
+    expect(vi.mocked(renameCategory)).not.toHaveBeenCalled();
+  });
+
+  it('redirects rename with missing_fields when the new name is blank', async () => {
+    const res = await supertest(buildApp()).post('/sfx/category/rename').send('category_id=3&name=%20%20');
+    expect(res.headers.location).toBe('/sfx?error=missing_fields');
+    expect(vi.mocked(renameCategory)).not.toHaveBeenCalled();
+  });
+
+  it('redirects remove with invalid_id when category_id is not a positive integer', async () => {
+    const res = await supertest(buildApp()).post('/sfx/category/remove').send('category_id=0');
+    expect(res.headers.location).toBe('/sfx?error=invalid_id');
+    expect(vi.mocked(deleteCategory)).not.toHaveBeenCalled();
+  });
+
   it('redirects with remove_failed when deleteCategory throws', async () => {
     vi.mocked(deleteCategory).mockRejectedValue(new Error('boom'));
     const res = await supertest(buildApp()).post('/sfx/category/remove').send('category_id=3');
@@ -533,20 +558,12 @@ describe('access control', () => {
     expect(vi.mocked(createSfxTrigger)).not.toHaveBeenCalled();
   });
 
-  it('uploads run csrfProtection before Multer buffers the file', async () => {
-    vi.mocked(csrfProtection).mockImplementationOnce((req: any, res: any) => {
-      // Drain the still-arriving upload body before responding. csrfProtection short-circuits
-      // ahead of Multer, so nothing else reads this request — if the 403 lands (and the socket
-      // closes) while the client is still writing the multipart body, the client sees a
-      // connection reset instead of the response. That race is timing-dependent and was flaky
-      // on Windows CI (ECONNRESET); consuming the body first lets the write finish cleanly.
-      req.resume();
-      req.on('end', () => res.status(403).send('bad csrf'));
+  it('uploads run csrfProtection before any upload is started', async () => {
+    vi.mocked(csrfProtection).mockImplementationOnce((_req: any, res: any) => {
+      res.status(403).send('bad csrf');
     });
-    // Oversized so the assertion actually distinguishes ordering: if Multer ran first,
-    // it would reject with LIMIT_FILE_SIZE (a different status) instead of csrfProtection's 403.
     const oversized = Buffer.alloc(1024 * 1024 + 1024, 1);
-    const res = await supertest(buildApp())
+    const res = await uploadRequest(buildApp())
       .post('/sfx/file/upload')
       .field('trigger_id', '5')
       .attach('sound', oversized, { filename: 'clap.mp3', contentType: 'audio/mpeg' });

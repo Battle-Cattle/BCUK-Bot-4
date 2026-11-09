@@ -97,7 +97,7 @@ Registry of every Discord server the bot serves, plus per-guild configuration. P
 
 ## `guild_member`
 
-Per-guild access levels. Replaces the single global `user.access_level`. A user with no row in a given guild is treated as access level `0` (User).
+Per-guild access levels. Replaces the single global `user.access_level` column, which `0008_drop_user_access_level.sql` drops. A user with no row in a given guild is treated as access level `0` (User).
 
 | Column | Type | Notes |
 | --- | --- | --- |
@@ -121,7 +121,6 @@ Stores web/admin users plus Twitch bot participation state.
 | `is_twitch_bot_enabled` | `BIT(1)` or `TINYINT(1)` | Whether the Twitch bot should join this user's Twitch channel |
 | `twitch_name` | `VARCHAR(...)` nullable | Twitch channel name; should be unique when non-null |
 | `twitchoauth` | `VARCHAR(...)` nullable | Legacy/optional Twitch auth storage |
-| `access_level` | `INT` | `0=USER`, `1=MOD`, `2=MANAGER`, `3=ADMIN`. **Deprecated** — per-guild access lives in `guild_member`; this column is migrated into `guild_member` and dropped in a later migration |
 | `is_owner` | `TINYINT(1)` | Global super-admin flag. Set manually in the DB only; never settable through the web panel |
 
 Expected constraints and behavior:
@@ -437,10 +436,30 @@ Videos a streamer has uploaded for the channel-point video overlay.
 | `name` | `VARCHAR(255)` | Display name shown in the overlay admin page |
 | `filename` | `VARCHAR(255)` | Stored file name, a random UUID plus extension; served without auth, so the name is what keeps it unguessable |
 | `created_at` | `TIMESTAMP` | Defaults to `CURRENT_TIMESTAMP` |
+| `library_entry_id` | `INT` nullable | FK to `overlay_video_library.id` ON DELETE SET NULL; the public library entry this video was imported from. Provenance only: removing the entry keeps the copy |
 
 Expected behavior:
 
 - Deletes are scoped by `streamer_id`, and `deleteVideo` returns the row's `filename` so the caller can remove the file from disk.
+- An imported video is an ordinary row with its own file, like an upload; nothing depends on `library_entry_id`.
+
+## `overlay_video_library`
+
+The public overlay video library: videos streamers have added for every streamer to browse and import as their own `overlay_video` copies. Each entry has its own file in `<videoFolder>/library/`, independent of the contributor's video. Only an Admin removes an entry.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | `INT` PK auto-increment | |
+| `name` | `VARCHAR(255)` | Copied from the contributor's `overlay_video.name` when added |
+| `filename` | `VARCHAR(255)` | The library's own stored file name, a random UUID plus extension |
+| `contributor_streamer_id` | `INT` nullable | FK to `streamer.id` ON DELETE SET NULL; who added it. `NULL` once that streamer row is gone (shown as unknown) |
+| `source_video_id` | `INT` nullable | FK to `overlay_video.id` ON DELETE SET NULL; the video it was added from. `NULL` once the contributor deletes that video, and the entry stays |
+| `created_at` | `TIMESTAMP` | Defaults to `CURRENT_TIMESTAMP` |
+
+Expected constraints and behavior:
+
+- `UNIQUE KEY uq_overlay_video_library_filename (filename)` and `UNIQUE KEY uq_overlay_video_library_source (source_video_id)`; the latter stops the same video being added twice while it exists.
+- Adding checks, in one transaction, that the streamer owns the source video. Removing is not streamer-scoped (the route is Admin only) and returns the row's `filename` for disk cleanup; copies streamers imported are kept.
 
 ## `overlay_reward`
 
@@ -691,35 +710,9 @@ Expected constraints and behavior:
 - Both command columns should store single-token commands including any prefix.
 - The admin panel (CRUD and manual reset of `current_value`) and runtime chat-command matching/increment are both guild-scoped by `guild_id`.
 
-Per-guild uniqueness:
+Per-guild uniqueness: `0001_baseline.sql` creates `uq_counter_guild_trigger UNIQUE (guild_id, trigger_command)` and `uq_counter_guild_check UNIQUE (guild_id, check_command)`, plus the indexes `idx_counter_trigger` and `idx_counter_check`, which speed up the per-message lookup that scans both command columns.
 
-```sql
-ALTER TABLE counter
-    ADD CONSTRAINT uq_counter_guild_trigger UNIQUE (guild_id, trigger_command),
-    ADD CONSTRAINT uq_counter_guild_check   UNIQUE (guild_id, check_command);
-
-CREATE INDEX idx_counter_trigger ON counter(trigger_command);
-CREATE INDEX idx_counter_check   ON counter(check_command);
-```
-
-The two indexes accelerate per-message trigger lookups that scan both command columns on every incoming chat message.
-
-Deployment note:
-
-- **Recommended (defense-in-depth):** Apply these UNIQUE constraints during deployment/bootstrap. They provide DB-level protection against duplicate `trigger_command` and duplicate `check_command` rows, especially for direct DB writes, manual SQL, or future regressions.
-- For current application requests, counter writes are already serialized through `runSerializedCommandWrite()` + MySQL named locks and guarded by `isAnyCommandTakenAcrossTables()` before writes, so concurrent app requests should not create duplicates even without these two column-level UNIQUE constraints.
-
-**Important limitation:** The column-level UNIQUE constraints do **not** prevent **cross-column collisions** within the same table — for example, one row's `trigger_command` could equal another row's `check_command`. Since the application treats the union of both columns as a shared command namespace with `custom_command.trigger_string`, this is a potential consistency gap.
-
-**Runtime protection:** The application layer mitigates this risk via `isAnyCommandTakenAcrossTables()` in `src/db.ts`. This function is called within `runSerializedCommandWrite()`, which acquires MySQL advisory locks and queries both `trigger_command` and `check_command` (as well as `custom_command.trigger_string`) in a single atomic check before writing. This prevents concurrent collisions across the entire command namespace. The DB-level UNIQUE constraints provide an additional fallback in case of application-layer bugs or direct DB access.
-
-**Optional DB-level enforcement:** For additional safety at the database level, you can:
-
-1. Add a database trigger that validates both `trigger_command` and `check_command` against the union of all command columns, or
-2. Create a separate `command_registry` table with a `UNIQUE KEY` on the command string, then add foreign keys from both `trigger_command` and `check_command` to that table, or
-3. Use a generated column approach (MySQL 8.0.13+): add a generated column that represents the command token and enforce uniqueness on it.
-
-For now, the recommended migration is the two separate UNIQUE constraints above; the application-layer atomic checks provide sufficient protection for typical operations.
+**Cross-column collisions:** the UNIQUE constraints don't stop one row's `trigger_command` matching another row's `check_command`, or either matching a `custom_command.trigger_string`, though the application treats all three as one command namespace. `isAnyCommandTakenAcrossTables()` (`src/db.ts`) closes that gap: it runs inside `runSerializedCommandWrite()`, under MySQL named locks, and checks all three columns before every counter or custom-command write.
 
 ## `counter_archive_run`
 

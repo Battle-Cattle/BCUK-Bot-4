@@ -144,7 +144,7 @@ async function provisionGuildOwner(guild: Guild): Promise<void> {
   await runUserMutation(owner.id, async () => {
     const existingUser = await findUser(owner.id);
     if (!existingUser) {
-      await upsertUser(owner.id, owner.user.username, AccessLevel.USER);
+      await upsertUser(owner.id, owner.user.username);
     }
     await setMemberAccessLevel(guild.id, owner.id, AccessLevel.ADMIN);
   });

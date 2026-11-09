@@ -1,11 +1,4 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BCUK Bot — SFX</title>
-  <link rel="stylesheet" href="/style.css">
-  <%- include('partials/pwa-head') %>
+<%- include('partials/head', { pageTitle: 'BCUK Bot — SFX' }) %>
 </head>
 <body data-csrf-token="<%= csrfToken %>">
   <%- include('partials/nav') %>
@@ -25,6 +18,10 @@
       update_failed: 'Failed to update the item.',
       remove_failed: 'Failed to remove the item.',
       upload_failed: 'Failed to upload the sound file.',
+      upload_busy: 'Another upload is already in progress. Try again once it finishes.',
+      upload_incomplete: 'The upload did not finish arriving — please try again.',
+      upload_expired: 'The upload expired before it finished — please try again.',
+      invalid_upload: 'No valid file was chosen.',
     }; %>
     <div class="card card-alert-danger" role="alert" aria-live="assertive" aria-atomic="true">
       <span class="text-danger">&#9888; <%= errorMessages[error] || `Operation failed: ${error.replace(/_/g, ' ')}` %></span>
@@ -319,9 +316,11 @@
 
   </main>
 
-  <%- include('partials/pwa-register') %>
-  <%- include('partials/footer') %>
-  <script src="/utils.js"></script>
+  <%- include('partials/page-end') %>
+  <script src="/chunkedUpload.js"></script>
+  <script src="/chunkedUploadResume.js"></script>
+  <script src="/chunkedUploadOutcome.js"></script>
+  <script src="/chunkedUploadPacing.js"></script>
   <script src="/sfx.js"></script>
   <script src="/sfx-suggest-description.js"></script>
 </body>

@@ -1,11 +1,4 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BCUK Bot — Commands</title>
-  <link rel="stylesheet" href="/style.css">
-  <%- include('partials/pwa-head') %>
+<%- include('partials/head', { pageTitle: 'BCUK Bot — Commands' }) %>
 </head>
 <body>
   <%- include('partials/nav') %>
@@ -129,23 +122,7 @@
                   <% } %>
                 </td>
                 <td class="assigned-users-cell">
-                  <% if (command.assigned_users.length > 0) { %>
-                    <div class="badge-list-wrap">
-                      <% command.assigned_users.forEach(function(assignedUser) { %>
-                        <% const isSelf = user && assignedUser.discord_id === user.discordId; %>
-                        <span class="badge badge-user-hue<%= isSelf ? ' badge-user-self' : '' %>" data-user-hue="<%= assignedUser.discord_id %>">
-                          <%= assignedUser.discord_name || assignedUser.discord_id %>
-                          <% if (assignedUser.twitch_name) { %>
-                            (<%= assignedUser.twitch_name %>)
-                          <% } else if (assignedUser.is_orphaned_user) { %>
-                            (missing user)
-                          <% } %>
-                        </span>
-                      <% }) %>
-                    </div>
-                  <% } else { %>
-                    <span class="muted">No Twitch assignments</span>
-                  <% } %>
+                  <%- include('partials/assignedUserBadges', { assignedUsers: command.assigned_users, emptyText: 'No Twitch assignments' }) %>
                 </td>
                 <td>
                   <div class="actions">
@@ -298,9 +275,7 @@
     </section>
   </main>
 
-  <%- include('partials/pwa-register') %>
-  <%- include('partials/footer') %>
-  <script src="/utils.js"></script>
+  <%- include('partials/page-end') %>
   <script src="/commands.js"></script>
 </body>
 </html>

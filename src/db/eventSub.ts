@@ -1,7 +1,7 @@
 import mysql from 'mysql2/promise';
 import { getPool } from './pool';
 import { fromBit } from './utils';
-import { EVENTSUB_TOKEN_SECRET } from '../shared/config';
+import { EVENTSUB_TOKEN_SECRET, EVENTSUB_TOKEN_SECRET_PREVIOUS } from '../shared/config';
 import { encryptToken, decryptToken } from '../shared/crypto';
 
 export interface EventSubConfig {
@@ -56,7 +56,7 @@ function maybeDecrypt(value: string | null): string | null {
   if (!value) return null;
   if (!EVENTSUB_TOKEN_SECRET) return null; // secret absent — treat stored value as unusable
   try {
-    return decryptToken(value, EVENTSUB_TOKEN_SECRET);
+    return decryptToken(value, EVENTSUB_TOKEN_SECRET, EVENTSUB_TOKEN_SECRET_PREVIOUS);
   } catch {
     return null; // corrupted or wrong key — treat as missing
   }

@@ -15,6 +15,7 @@ vi.mock('./db', () => ({
   closePool: vi.fn().mockResolvedValue(undefined),
   pingDb: vi.fn().mockResolvedValue(true),
   runMigrations: vi.fn().mockResolvedValue(undefined),
+  reencryptStoredTokens: vi.fn().mockResolvedValue({ reencrypted: 0, unreadable: 0, pending: 0 }),
 }));
 vi.mock('./shared/healthStore', () => ({
   recordDbPing: vi.fn(),
@@ -68,6 +69,7 @@ vi.mock('./twitch/eventsub/twitchEventSubReconciliation', () => ({
   stopEventSubReconciliation: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('./web/server', () => ({ startWebPanel: vi.fn(), stopWebPanel: vi.fn() }));
+vi.mock('./web/routes/overlayVideoTranscode', () => ({ stopWebmTranscodes: vi.fn() }));
 vi.mock('./audio/audioPlayer', () => ({ disconnect: vi.fn() }));
 vi.mock('./commands/customCommandHandler', () => ({ registerTwitchChatRuntime: vi.fn() }));
 vi.mock('./commands/counterHandler', () => ({ registerCounterTwitchRuntime: vi.fn() }));
@@ -318,6 +320,35 @@ describe('startup — guild registry preload', () => {
       .toBeLessThan(vi.mocked(db.runMigrations).mock.invocationCallOrder[0]!);
     expect(vi.mocked(db.runMigrations).mock.invocationCallOrder[0])
       .toBeLessThan(vi.mocked(reloadGuildRegistry).mock.invocationCallOrder[0]!);
+  });
+
+  it('re-encrypts stored tokens after the migrations and before loading the guild registry', async () => {
+    const db = await import('./db.js');
+    const { reloadGuildRegistry } = await import('./discord/guildRegistry.js');
+
+    await runMain();
+
+    expect(vi.mocked(db.reencryptStoredTokens)).toHaveBeenCalledOnce();
+    expect(vi.mocked(db.runMigrations).mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(db.reencryptStoredTokens).mock.invocationCallOrder[0]!);
+    expect(vi.mocked(db.reencryptStoredTokens).mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(reloadGuildRegistry).mock.invocationCallOrder[0]!);
+  });
+
+  it('keeps starting when re-encrypting stored tokens fails', async () => {
+    const db = await import('./db.js');
+    const { startDiscordBot } = await import('./discord/discordBot.js');
+    const failure = new Error('DB hiccup');
+    vi.mocked(db.reencryptStoredTokens).mockRejectedValueOnce(failure);
+
+    await runMain();
+
+    expect(exitSpy).not.toHaveBeenCalled();
+    expect(lastBotLogger!.warn).toHaveBeenCalledWith(
+      'Re-encrypting stored tokens under the active key failed; will retry on the next start:',
+      failure,
+    );
+    expect(vi.mocked(startDiscordBot)).toHaveBeenCalledOnce();
   });
 
   it('calls process.exit(1) and does not start the bot when a migration fails', async () => {
@@ -602,6 +633,23 @@ describe('shutdown', () => {
     const [stopTwitchOrder] = vi.mocked(stopTwitchBot).mock.invocationCallOrder;
     expect(announceOrder).toBeLessThan(stopWebOrder!);
     expect(stopWebOrder).toBeLessThan(stopTwitchOrder!);
+  });
+
+  it('stops overlay video conversions once the web panel has stopped taking uploads', async () => {
+    const { stopWebPanel } = await import('./web/server.js');
+    const { stopWebmTranscodes } = await import('./web/routes/overlayVideoTranscode.js');
+    const { closePool } = await import('./db.js');
+
+    await runMain();
+    process.emit('SIGINT');
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(vi.mocked(stopWebmTranscodes)).toHaveBeenCalledOnce();
+    const [stopWebOrder] = vi.mocked(stopWebPanel).mock.invocationCallOrder;
+    const [stopTranscodesOrder] = vi.mocked(stopWebmTranscodes).mock.invocationCallOrder;
+    const [closePoolOrder] = vi.mocked(closePool).mock.invocationCallOrder;
+    expect(stopWebOrder).toBeLessThan(stopTranscodesOrder!);
+    expect(stopTranscodesOrder).toBeLessThan(closePoolOrder!);
   });
 
   it('still closes the pool and exits(0) when a teardown step rejects', async () => {

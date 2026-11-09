@@ -47,17 +47,32 @@ export function getPool(): mysql.Pool {
   return pool;
 }
 
+/** Size of the session-store pool: mysql2's default, the size express-mysql-session's own pool had. */
+const SESSION_POOL_CONNECTION_LIMIT = 10;
+/**
+ * Most session lookups that may wait for a connection. mysql2's default is unbounded, so a flood of
+ * cookie-carrying requests could queue lookups without limit and grow memory; past this, mysql2
+ * rejects a lookup at once ("Queue limit reached."), which the panel answers with a 503.
+ */
+const SESSION_POOL_QUEUE_LIMIT = 50;
+
 /**
  * Returns the web panel's session-store pool, creating it on first use. It is kept apart from
  * {@link getPool}'s on purpose: express-session looks a session up on every request that carries
- * a cookie, ahead of the rate limiters, so on the shared pool a burst of panel requests could fill
- * its bounded queue and make the bot's own queries fail. Its size and queue are mysql2's defaults,
- * the same as the pool express-mysql-session used to open for itself; what it adds is the shared
- * connection settings and keepalive, and being ended by {@link closePool} at shutdown.
+ * a cookie, so on the shared pool a burst of panel requests could fill its bounded queue and make
+ * the bot's own queries fail. Its own queue is bounded too ({@link SESSION_POOL_QUEUE_LIMIT}), and
+ * the panel's IP-keyed pre-session limiter caps how often one client can reach it. It also gets the
+ * shared connection settings and keepalive, and is ended by {@link closePool} at shutdown.
  * @returns The process-wide mysql2 pool for session storage.
  */
 export function getSessionPool(): mysql.Pool {
-  sessionPool ??= mysql.createPool({ ...connectionOptions(), ...KEEPALIVE_OPTIONS });
+  sessionPool ??= mysql.createPool({
+    ...connectionOptions(),
+    waitForConnections: true,
+    connectionLimit: SESSION_POOL_CONNECTION_LIMIT,
+    queueLimit: SESSION_POOL_QUEUE_LIMIT,
+    ...KEEPALIVE_OPTIONS,
+  });
   return sessionPool;
 }
 

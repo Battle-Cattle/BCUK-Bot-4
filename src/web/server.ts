@@ -7,7 +7,7 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import path from 'path';
 import type { Server } from 'http';
-import { WEB_PORT, SESSION_SECRET } from '../shared/config';
+import { WEB_HOST, WEB_PORT, SESSION_SECRET } from '../shared/config';
 import { getSessionPool } from '../db';
 
 const log = createLogger('Web');
@@ -21,6 +21,10 @@ import { renderView } from './routes/viewHelpers';
 import {
   ipKey,
   generalLimiterSkip,
+  isSessionStoreBusyError,
+  limitReachedHandler,
+  markSessionStoreError,
+  preSessionLimiterSkip,
   sessionLimiterKey,
   sessionLimiterSkip,
   streamdeckLimiterKey,
@@ -119,6 +123,7 @@ const generalLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: ipKey,
   skip: generalLimiterSkip,
+  handler: limitReachedHandler('general'),
 });
 // Generous limit for the Streamdeck API — keyed by Bearer token so each API key gets
 // its own bucket regardless of which IP the request originates from.
@@ -129,6 +134,7 @@ const streamdeckLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: streamdeckLimiterKey,
   message: 'Too many requests, please try again shortly.',
+  handler: limitReachedHandler('streamdeck'),
 });
 // Per-account limit for session-authenticated panel users. Dashboard polling alone
 // can reach a few hundred req/15 min (status + streams-live), so 600 gives headroom
@@ -141,6 +147,23 @@ const sessionLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: sessionLimiterKey,
   skip: sessionLimiterSkip,
+  handler: limitReachedHandler('session'),
+});
+// Coarse per-IP cap that runs ahead of the session middleware. The limiters above run after it
+// (sessionLimiter's key needs req.session), so without this, a replayed validly signed cookie
+// (an unauthenticated visitor can get one from /auth/*) would cost a session-store SELECT on every
+// request with nothing limiting how often. Set well above what any legitimate client sends: the
+// session limiter caps one account at 600 per 15 min, so three accounts behind one NAT can each
+// poll up to that cap and still leave headroom (server.test.ts holds this in place). A fourth
+// account at full cap would share the IP's 2000; normal dashboard polling is a few hundred.
+const preSessionLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 2000,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  keyGenerator: ipKey,
+  skip: preSessionLimiterSkip,
+  handler: limitReachedHandler('pre-session'),
 });
 // Body parsers
 app.use(express.urlencoded({ extended: false }));
@@ -150,8 +173,11 @@ app.use(express.json());
 // Always trust exactly one proxy hop (Caddy). Without this, req.ip resolves to
 // Caddy's loopback address and all users share a single rate-limit bucket.
 app.set('trust proxy', 1);
+app.use(preSessionLimiter);
 // Runs on its own pool (getSessionPool), kept apart from the bot's: session lookups happen on every
-// cookie-carrying request ahead of the rate limiters, and must not be able to queue out bot queries.
+// cookie-carrying request ahead of the general/session limiters (only preSessionLimiter is in front),
+// and must not be able to queue out bot queries. That pool's wait queue is bounded; a full queue
+// reaches the error handler below as a 503.
 // The store takes mysql2's callback API, so it gets the callback pool the promise pool wraps
 // (`.pool`). Handed a pool, the store leaves it open on close(); closePool() ends it at shutdown.
 // The table comes from migrations/0007_sessions_table.sql, which startup applies before the panel
@@ -165,15 +191,26 @@ const sessionStore = new (MySQLStore(session))(
   },
   getSessionPool().pool,
 );
-app.use(
-  session({
-    secret: SESSION_SECRET,
-    resave: false,
-    saveUninitialized: false,
-    store: sessionStore,
-    cookie: { secure: isProduction, httpOnly: true, sameSite: 'lax', maxAge: 24 * 60 * 60 * 1000 },
-  }),
-);
+const sessionMiddleware = session({
+  secret: SESSION_SECRET,
+  resave: false,
+  saveUninitialized: false,
+  store: sessionStore,
+  cookie: { secure: isProduction, httpOnly: true, sameSite: 'lax', maxAge: 24 * 60 * 60 * 1000 },
+});
+/**
+ * Runs the session middleware, marking any error it passes on as a session-store failure so the
+ * error handler can answer a full session-pool queue with a 503 (and only that queue).
+ * @param req - Express request.
+ * @param res - Express response.
+ * @param next - Continues the chain, with the marked error if the session lookup failed.
+ */
+app.use((req, res, next) => {
+  sessionMiddleware(req, res, (err?: unknown) => {
+    if (err) next(markSessionStoreError(err));
+    else next();
+  });
+});
 
 // Rate limiters — placed after session middleware so req.session is populated
 app.use(generalLimiter);
@@ -268,15 +305,31 @@ app.use(csrfErrorHandler);
 
 /**
  * Centralised error handler — catches anything unhandled by earlier middleware/routes.
- * Client errors (a 4xx `status`, e.g. a corrupt or unsupported-encoding request body from
- * body-parser) get that status and a one-line warning; anything else is logged as an error
- * and answered with a 500.
+ * A full session-store queue gets a 503 and a warning. Client errors (a 4xx `status`, e.g. a
+ * corrupt or unsupported-encoding request body from body-parser) get that status and a one-line
+ * warning; anything else is logged as an error and answered with a 500. An error that arrives once
+ * the response has gone (express-session saves the session as the response ends, and reports a
+ * failed save here) can't get an error page: rendering one would throw. It is logged and passed to
+ * Express's default handler, which closes the connection.
  * @param err - The unhandled error.
  * @param req - Express request; reads `req.session.user` if present.
- * @param res - Express response; renders the `error` view with the client-error status or 500.
- * @param _next - Unused, but required for Express to recognize this as an error handler.
+ * @param res - Express response; renders the `error` view with a 503, the client-error status or 500.
+ * @param next - Express's default error handler, for an error that arrives after the response was sent.
  */
-app.use((err: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+app.use((err: unknown, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (res.headersSent) {
+    // Called as methods: a detached winston level method logs through the root logger, losing the label.
+    const message = `Error after ${req.method} ${req.path} was already answered:`;
+    if (isSessionStoreBusyError(err)) log.warn(message, err);
+    else log.error(message, err);
+    next(err);
+    return;
+  }
+  if (isSessionStoreBusyError(err)) {
+    log.warn(`Session store busy; answered ${req.method} ${req.path} with 503:`, err);
+    renderErrorPage(req, res, 503, 'The panel is busy right now. Please try again in a moment.');
+    return;
+  }
   const status = clientErrorStatus(err);
   if (status !== undefined) {
     // `status` is only set on objects, so `err` is one here.
@@ -297,7 +350,7 @@ export { app };
 // that each got paired with the correct keyGenerator/skip function and that hitting the
 // threshold actually enforces a 429 — without looping enough real requests through the
 // entire app to reach the 100/600 thresholds via every other mounted route.
-export { generalLimiter, sessionLimiter };
+export { generalLimiter, preSessionLimiter, sessionLimiter };
 
 /** The panel's listening server, kept so {@link stopWebPanel} can close it on shutdown. */
 let webServer: Server | null = null;
@@ -337,22 +390,26 @@ function stopSessionCleanup(): void {
 }
 
 /**
- * Starts the Express app listening on {@link WEB_PORT}.
+ * Starts the Express app listening on {@link WEB_HOST}:{@link WEB_PORT}, with Node's default request
+ * timeouts: large uploads arrive as many short chunked-upload requests, so none needs longer. The
+ * host defaults to loopback so the panel is only reachable through the reverse proxy it trusts one
+ * hop of.
  * @param port - Port to listen on; defaults to {@link WEB_PORT} (tests pass 0 for a free port).
+ * @param host - Interface to bind; defaults to {@link WEB_HOST}.
  * @returns Resolves with the listening server. Rejects with the listen error (e.g.
  *   `EADDRINUSE`) instead — Express 5 hands that error to the listen callback, so ignoring the
- *   callback's argument would log "Panel available" for a panel that never came up.
+ *   callback's argument would log "Panel listening" for a panel that never came up.
  */
-export function startWebPanel(port: number = WEB_PORT): Promise<Server> {
+export function startWebPanel(port: number = WEB_PORT, host: string = WEB_HOST): Promise<Server> {
   return new Promise((resolve, reject) => {
-    const server = app.listen(port, (err?: Error) => {
+    const server = app.listen(port, host, (err?: Error) => {
       if (err) {
         reject(err);
         return;
       }
       webServer = server;
       startSessionCleanup();
-      log.info(`Panel available at http://localhost:${port}`);
+      log.info(`Panel listening on ${host}:${port}`);
       resolve(server);
     });
   });

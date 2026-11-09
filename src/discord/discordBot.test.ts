@@ -283,7 +283,7 @@ describe('startDiscordBot — guildCreate handler', () => {
 
     expect(vi.mocked(guilds.upsertGuild)).toHaveBeenCalledWith('new-guild', 'New Server');
     expect(vi.mocked(guilds.findUser)).toHaveBeenCalledWith('owner-id');
-    expect(vi.mocked(guilds.upsertUser)).toHaveBeenCalledWith('owner-id', 'OwnerName', guilds.AccessLevel.USER);
+    expect(vi.mocked(guilds.upsertUser)).toHaveBeenCalledWith('owner-id', 'OwnerName');
     expect(vi.mocked(guilds.setMemberAccessLevel)).toHaveBeenCalledWith('new-guild', 'owner-id', guilds.AccessLevel.ADMIN);
     expect(vi.mocked(registry.reloadGuildRegistry)).toHaveBeenCalled();
 

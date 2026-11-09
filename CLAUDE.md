@@ -75,10 +75,10 @@ Tests run in Vitest's `vmThreads` pool (each file gets a fresh VM context on a r
 
 ## Startup Sequence (`src/index.ts`)
 
-Boot order in `main()`: verify DB connectivity (ping, exit 1 on failure) → apply pending schema migrations (exit 1 on failure) → wire Twitch/EventSub runtime callbacks → `reloadGuildRegistry()` (must complete before Discord connects, exit 1 on failure) → start Discord bot → start Twitch bot → start web panel (a listen failure such as `EADDRINUSE` exits 1 — most likely an old process still running) → start schedulers (counter/reward-pricing/timer) → start Twitch monitor + EventSub (fire-and-forget, catch-and-log only, doesn't crash the process).
+Boot order in `main()`: verify DB connectivity (ping, exit 1 on failure) → apply pending schema migrations (exit 1 on failure) → re-encrypt stored OAuth tokens under the active `EVENTSUB_TOKEN_SECRET` (`reencryptStoredTokens`; catch-and-log only, see the README's "Rotating EVENTSUB_TOKEN_SECRET") → wire Twitch/EventSub runtime callbacks → `reloadGuildRegistry()` (must complete before Discord connects, exit 1 on failure) → start Discord bot → start Twitch bot → start web panel (a listen failure such as `EADDRINUSE` exits 1 — most likely an old process still running) → start schedulers (counter/reward-pricing/timer) → start Twitch monitor + EventSub (fire-and-forget, catch-and-log only, doesn't crash the process).
 
 - **`uncaughtException`/`unhandledRejection`** both log and `process.exit(1)` — deliberate: the app fails loudly instead of limping on with a corrupted state, and production's systemd unit (`deploy/bcuk-bot.service`, `Restart=on-failure`) brings it back up from a clean start. Exit 1 for fatal errors and 0 only after a deliberate `shutdown()`, so systemd can tell them apart. Don't add a handler that swallows and continues.
-- **`GET /healthz`** (`src/web/server.ts`) answers once the web panel is listening, which `main()` reaches only after the DB ping, guild registry and bot startup. `deploy.sh` polls it after restarting the service to confirm the deploy came up. Keep it unauthenticated, ahead of the session and rate-limit middleware, and free of any detail beyond "ok".
+- **`GET /healthz`** (`src/web/server.ts`) answers once the web panel is listening, which `main()` reaches only after the DB ping, guild registry and bot startup. `deploy.sh` polls it after restarting the service, then checks the bot stays up for 30s; if either fails it rolls back to the previous build (see the README's "Deployment"). Keep it unauthenticated, ahead of the session and rate-limit middleware, and free of any detail beyond "ok".
 - **`shutdown()`** runs on `SIGINT`/`SIGTERM`: closes the web panel (dropping open SSE connections), stops schedulers/EventSub/monitor/bots, disconnects audio, closes the DB pool, then exits 0.
 - **Single instance only.** Production runs exactly one bot process against the database. Several subsystems rely on that: the redemption reconciliation cursors (`twitchEventSubReconciliationCursors.ts`) and the WebSocket/redemption dedup caches are in-memory per process, the schedulers (counter/reward-pricing/timer) assume they're the only ticker, and the `redemption_handled` ledger is a check-then-act guard, not a cross-process lock. Don't design for horizontal scaling without first revisiting those; a change that assumes more than one instance needs a design decision, not a drive-by fix.
 
@@ -86,7 +86,7 @@ Boot order in `main()`: verify DB connectivity (ping, exit 1 on failure) → app
 
 ## Web Server (`src/web/server.ts`)
 
-Middleware order: `helmet` (custom CSP) → `GET /healthz` → EJS views → static → body parsers → `trust proxy: 1` → session (`express-mysql-session`, backed by the `sessions` MySQL table) → rate limiters (general/session; `streamdeckLimiter` is applied per-route instead) → `res.locals.user`/csrfToken → feature routes (`mountRoutes` in `src/web/routes/index.ts`, which keeps their mount order) → 404 and error handlers. The general/session rate limiters run after session middleware deliberately — `sessionLimiter`'s key generator needs `req.session` populated.
+Middleware order: `helmet` (custom CSP) → `GET /healthz` → EJS views → static → body parsers → `trust proxy: 1` → `preSessionLimiter` (coarse per-IP cap, so a replayed session cookie can't hit the session store unthrottled) → session (`express-mysql-session`, backed by the `sessions` MySQL table, on its own bounded pool from `getSessionPool`; a full queue answers 503) → rate limiters (general/session; `streamdeckLimiter` is applied per-route instead) → `res.locals.user`/csrfToken → feature routes (`mountRoutes` in `src/web/routes/index.ts`, which keeps their mount order) → 404 and error handlers. The general/session rate limiters run after session middleware deliberately — `sessionLimiter`'s key generator needs `req.session` populated.
 
 Auth middleware (`src/web/middleware.ts`), applied in this order:
 1. **`requireAuth`** — session check.
@@ -133,7 +133,7 @@ Auth middleware (`src/web/middleware.ts`), applied in this order:
 
 **MySQL 8 upsert:** Row-alias form only: `VALUES (...) AS new_row`. Deprecated `VALUES(col)` not used.
 
-**Migrations:** the bot applies pending `migrations/NNNN_*.sql` files on startup (`src/db/migrations.ts`, tracked in `schema_migrations`; see the README's "Database migrations"). `0001_baseline.sql` is the full schema at the switch. Any schema change is a new numbered file plus a matching `DATABASE-SCHEMA.md` update (a test replays the migrations against the doc). Never edit an applied migration — startup fails on a checksum mismatch.
+**Migrations:** the bot applies pending `migrations/NNNN_*.sql` files on startup (`src/db/migrations.ts`, tracked in `schema_migrations`; see the README's "Database migrations"). `0001_baseline.sql` is the full schema at the switch. Any schema change is a new numbered file plus a matching `DATABASE-SCHEMA.md` update (a test replays the migrations against the doc). Never edit an applied migration — startup fails on a checksum mismatch. A deploy that brings new migrations and then fails its health check doesn't roll back automatically (the previous build refuses to start against a migration it has no file for, and a migration that failed part way leaves unrecorded DDL behind), so `deploy.sh` stops and prints the manual steps, starting with the database backup it takes before every restart (`scripts/backup-db.sh`).
 
 **Docs:** `DATABASE-SCHEMA.md` is the schema reference. `.devin/wiki.json` is a purpose-only architecture outline (no full prose) — useful as a map before diving into source, not a substitute for reading it.
 
@@ -161,6 +161,27 @@ Auth middleware (`src/web/middleware.ts`), applied in this order:
 ## New Command Handler Pattern
 
 Export `registerXRuntime(runtime)` from the handler file to store the platform client — avoids circular imports with `src/index.ts`. Build the slot with `createRuntimeRegistry()` from `src/shared/runtimeRegistry.ts`. Call it from `index.ts` after the client is ready.
+
+---
+
+## GitHub Issues
+
+Every issue has two independent ratings:
+
+- **Severity = impact**: how much it matters if it's never done (or how bad the bug is). It's a label: `severity:critical`/`severity:high`/`severity:medium`/`severity:low`. Titles don't need a severity prefix. Add a type label too (`bug`, `enhancement`, `documentation`, `security`, …).
+- **Priority = urgency**: how soon it should be done. It's the org-level **Priority** issue field (`Urgent`/`High`/`Medium`/`Low`), not a label or title prefix. Every open issue has one.
+
+The two can differ (e.g. a low-impact fix that's wanted soon, or a high-impact feature that can wait). Don't "correct" one to match the other.
+
+**Large issues are split into sub-issues**, linked as real GitHub sub-issues (not just mentioned in the body):
+
+- Title: `<parent topic> n/N: <what this part does>`, e.g. `Faster test suite 2/4: sub-second, configurable polling in deploy.sh`. Mark optional parts `(optional)`.
+- Body: which parent it's part of and which step of the parent's plan it covers, its scope, tests, and a "Depends on" list of the other parts it needs. The full design stays in the parent.
+- **Priority matches the parent.** Change the parent's and every open sub-issue's together.
+- **Severity is the same as the parent's or lower**, judged on what that part delivers on its own (e.g. a read-only page that's empty until a later part lands is lower than the parts that deliver the feature). **The parent's severity is the highest of its sub-issues'**: when a sub-issue's severity changes, recheck the parent's.
+- Closing the last open sub-issue completes the parent. Close a part that turned out not to be needed as "not planned", with a note on the parent.
+
+**Keeping issues up to date:** an issue says which commit it was checked against (``checked against `main` @ `<sha>` ``). When you recheck one, add a dated note with the new sha rather than silently rewriting it. Mark finished items as done (strike through or tick them, saying when and in which PR) instead of deleting them. When an issue's premise has changed (e.g. the code it describes was rewritten), re-scope it and keep the original description in a collapsed `<details>` block at the bottom. Before starting on an issue, check its file paths, line counts and defaults against current `main`.
 
 ---
 

@@ -9,6 +9,8 @@ export {
 } from './db/lookupCache';
 export { getPool, getSessionPool, closePool } from './db/pool';
 export { runMigrations } from './db/migrations';
+export { reencryptStoredTokens } from './db/tokenReencryption';
+export type { TokenReencryptionResult } from './db/tokenReencryption';
 export { pingDb } from './db/health';
 
 // ─── Guilds ──────────────────────────────────────────────────────────────────
@@ -34,7 +36,7 @@ export {
   findUser, findUsersByIds, findUserByTwitchName, findOwnerUser, getGuildMemberUsers,
   updateDiscordName, getTwitchEnabledChannels, getAllTwitchLinkedUsers,
 } from './db/users';
-export type { AccessLevelValue, DbUser } from './db/users';
+export type { AccessLevelValue, DbUser, DbGuildMemberUser } from './db/users';
 export { upsertUser, updateTwitchBotEnabled, deleteUnlinkedUser } from './db/userWrites';
 
 // ─── Custom commands ────────────────────────────────────────────────────────
@@ -143,6 +145,11 @@ export {
   getRewardsForStreamer, saveRewardWithVideos, deleteReward,
   getVideosForReward,
 } from './db/overlayVideos';
+export type { OverlayLibraryVideo, AddVideoToLibraryResult } from './db/overlayVideoLibrary';
+export {
+  addVideoToLibrary, getLibraryVideos, getLibraryVideoFilename, getImportedLibraryEntryIds,
+  importLibraryVideo, removeLibraryVideo,
+} from './db/overlayVideoLibrary';
 
 // ─── Channel point pricing ───────────────────────────────────────────────────
 
@@ -229,7 +236,6 @@ export {
   requestGuildAccessForExistingKey,
   rotateApiKey,
   keyVersionFromHash,
-  keyVersionFromPlaintext,
   getApiKeyVersion,
   findKeyByHash,
   isKeyApprovedForGuild,

@@ -77,11 +77,10 @@ describe('getSessionPool', () => {
     }));
   });
 
-  it("uses mysql2's default size and queue rather than the shared pool's limits", () => {
+  it('bounds its size and its wait queue', () => {
     getSessionPool();
     const [options] = createPool.mock.calls[0]! as [Record<string, unknown>]; // getSessionPool() just created it
-    expect(options).not.toHaveProperty('connectionLimit');
-    expect(options).not.toHaveProperty('queueLimit');
+    expect(options).toMatchObject({ waitForConnections: true, connectionLimit: 10, queueLimit: 50 });
   });
 
   it('returns the same pool instance on repeated calls (singleton)', () => {

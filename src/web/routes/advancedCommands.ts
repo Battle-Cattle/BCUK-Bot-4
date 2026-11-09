@@ -23,6 +23,7 @@ import { renderView, renderError } from './viewHelpers';
 import { filterQueryParam } from './validation';
 import { router as mutationsRouter } from './advancedCommandMutations';
 import { router as alertAssetsRouter } from './advancedCommandAlertAssets';
+import { CHUNKED_UPLOAD_ERROR_CODES } from './chunkedUploadRoutes';
 
 const log = createLogger('Web');
 const router = Router();
@@ -37,6 +38,7 @@ const KNOWN_ERRORS = new Set([
   'duplicate_trigger', 'trigger_taken', 'reserved_trigger', 'too_many_params', 'invalid_param',
   'invalid_alert_message', 'invalid_alert_duration', 'invalid_alert_animation', 'invalid_file', 'invalid_path',
   'file_too_large', 'upload_failed', 'no_alert', 'test_failed', 'command_disabled',
+  ...CHUNKED_UPLOAD_ERROR_CODES,
 ]);
 
 /** Every `?success=` code the page shows a confirmation for. */

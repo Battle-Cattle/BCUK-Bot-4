@@ -1,11 +1,4 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BCUK Bot — Timers</title>
-  <link rel="stylesheet" href="/style.css">
-  <%- include('partials/pwa-head') %>
+<%- include('partials/head', { pageTitle: 'BCUK Bot — Timers' }) %>
 </head>
 <body data-csrf-token="<%= csrfToken %>">
   <%- include('partials/nav') %>
@@ -134,23 +127,7 @@
                   <% } %>
                 </td>
                 <td class="assigned-users-cell">
-                  <% if (timer.assigned_users.length > 0) { %>
-                    <div class="badge-list-wrap">
-                      <% timer.assigned_users.forEach(function(assignedUser) { %>
-                        <% const isSelf = user && assignedUser.discord_id === user.discordId; %>
-                        <span class="badge badge-user-hue<%= isSelf ? ' badge-user-self' : '' %>" data-user-hue="<%= assignedUser.discord_id %>">
-                          <%= assignedUser.discord_name || assignedUser.discord_id %>
-                          <% if (assignedUser.twitch_name) { %>
-                            (<%= assignedUser.twitch_name %>)
-                          <% } else if (assignedUser.is_orphaned_user) { %>
-                            (missing user)
-                          <% } %>
-                        </span>
-                      <% }) %>
-                    </div>
-                  <% } else { %>
-                    <span class="muted">No streamers assigned</span>
-                  <% } %>
+                  <%- include('partials/assignedUserBadges', { assignedUsers: timer.assigned_users, emptyText: 'No streamers assigned' }) %>
                 </td>
                 <td>
                   <div class="actions">
@@ -269,9 +246,7 @@
     </section>
   </main>
 
-  <%- include('partials/pwa-register') %>
-  <%- include('partials/footer') %>
-  <script src="/utils.js"></script>
+  <%- include('partials/page-end') %>
   <script src="/timers.js"></script>
 </body>
 </html>

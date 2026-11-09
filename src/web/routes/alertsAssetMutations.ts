@@ -1,18 +1,21 @@
+import path from 'path';
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
 import type { Request, Response } from 'express';
-import multer from 'multer';
 import fs from 'fs';
 import { randomUUID } from 'crypto';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import { setAlertImage, setAlertSound } from '../../db';
 import type { AlertEventType, DbStreamerEventSub } from '../../db';
-import { ALERT_ASSETS_FOLDER, ALERT_MAX_IMAGE_MB, ALERT_MAX_SOUND_MB } from '../../shared/config';
+import { ALERT_ASSETS_FOLDER, ALERT_MAX_IMAGE_MB, ALERT_MAX_SOUND_MB, UPLOAD_INCOMING_FOLDER } from '../../shared/config';
+import { ChunkedUploadStore } from '../chunkedUploadStore';
+import { mountChunkedUploadRoutes, toMemoryFile } from './chunkedUploadRoutes';
 import { safeResolve } from '../../shared/pathUtils';
 import { requireStreamer } from './viewHelpers';
 import { logAndRedirectError } from './errorHandling';
-import { createMulterErrorRedirectHandler, makeUploadMiddleware, makeRequireStreamerBeforeUpload, writeFileOrCleanup } from './uploadMiddleware';
+import { makeRequireStreamerBeforeUpload, writeFileOrCleanup } from './uploadMiddleware';
+import type { UploadedFile } from '../uploadedFile';
 import { detectAudioType, detectImageType } from './uploadFileTypes';
 import { NOT_A_STREAMER_REDIRECT, parseEventType } from './alertsShared';
 
@@ -22,9 +25,6 @@ export const router = Router();
 /** Maximum upload sizes in megabytes, passed to templates to avoid direct process.env access in EJS. */
 export const MAX_IMAGE_MB = ALERT_MAX_IMAGE_MB;
 export const MAX_SOUND_MB = ALERT_MAX_SOUND_MB;
-
-const imageUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_IMAGE_MB * 1024 * 1024 } });
-const soundUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_SOUND_MB * 1024 * 1024 } });
 
 /**
  * Removes a previously-stored asset file, tolerating it already being gone. Always called after
@@ -54,8 +54,8 @@ interface SaveUploadedAssetOptions {
   streamer: DbStreamerEventSub;
   /** Which alert event type the upload is for. */
   eventType: AlertEventType;
-  /** The uploaded file from Multer, or undefined if none was attached. */
-  file: Express.Multer.File | undefined;
+  /** The finished upload, or undefined if none was attached. */
+  file: UploadedFile | undefined;
   /** Magic-byte detector returning the file's extension, or null if unrecognised. */
   detect: (buf: Buffer) => string | null;
   /** DB setter (`setAlertImage`/`setAlertSound`) to persist the new filename. */
@@ -68,7 +68,7 @@ interface SaveUploadedAssetOptions {
  * Validates (via `detect`), writes, and persists an uploaded asset file (image or sound) for
  * one of a streamer's alert event types, removing any previously-uploaded file of the same kind
  * on disk. Shared by the image and sound upload routes below, which differ only in their magic-byte
- * detector, DB setter, and multer field/label names.
+ * detector, DB setter, and field/label names.
  * @param options - See {@link SaveUploadedAssetOptions}.
  * @returns An error code to redirect with, or a success code to redirect with.
  */
@@ -114,12 +114,46 @@ async function deleteAsset(streamerId: number, eventType: AlertEventType, setAss
   await removeOldAsset(streamerId, previous);
 }
 
+/** What {@link makeAlertAssetHandler} needs to build one asset route's handler. */
+interface AlertAssetHandlerOptions {
+  /** Log label for a thrown error, e.g. `Alert image upload error:`. */
+  logLabel: string;
+  /** Error code the route redirects with when `handle` throws. */
+  errorCode: string;
+  /**
+   * Does the route's own work once the requester is confirmed as a streamer and `:eventType` is
+   * valid, and sends the response.
+   */
+  handle: (req: Request, res: Response, streamer: DbStreamerEventSub, eventType: AlertEventType) => Promise<void>;
+}
+
+/**
+ * Builds an alert-asset route handler: verifies the requester is a streamer, validates
+ * `:eventType` (redirecting with `invalid_event_type` if it isn't one), runs `handle`, and turns a
+ * thrown error into a logged `?error=` redirect. Shared by the upload and delete handlers.
+ * @param options - Log label, error code and the route-specific work; see {@link AlertAssetHandlerOptions}.
+ * @returns An Express route handler.
+ */
+function makeAlertAssetHandler({ logLabel, errorCode, handle }: AlertAssetHandlerOptions): (req: Request, res: Response) => Promise<void> {
+  return async (req, res) => {
+    try {
+      const streamer = await requireStreamer(req, res, NOT_A_STREAMER_REDIRECT);
+      if (!streamer) return;
+
+      const eventType = parseEventType(req.params.eventType);
+      if (!eventType) return res.redirect('/alerts/settings?error=invalid_event_type');
+
+      await handle(req, res, streamer, eventType);
+    } catch (err) {
+      logAndRedirectError({ res, log, logLabel, err, basePath: '/alerts/settings', errorCode });
+    }
+  };
+}
+
 /**
  * Builds the POST /settings/:eventType/<image|sound> route handler for one asset kind: verifies
  * the requester is a streamer, validates `:eventType`, delegates to {@link saveUploadedAsset},
- * and redirects based on the result. Shared by the image and sound upload routes, which
- * previously differed only in their detector/setter/field name — this collapses that remaining
- * boilerplate down to a single factory call per route.
+ * and redirects based on the result. Shared by the image and sound upload routes.
  * @param detect - Magic-byte detector for this asset kind.
  * @param setAsset - DB setter (`setAlertImage`/`setAlertSound`) for this asset kind.
  * @param assetLabel - `'image'` or `'sound'`, used for error/log labelling.
@@ -130,21 +164,15 @@ function makeUploadHandler(
   setAsset: AssetSetter,
   assetLabel: 'image' | 'sound',
 ): (req: Request, res: Response) => Promise<void> {
-  return async (req, res) => {
-    try {
-      const streamer = await requireStreamer(req, res, NOT_A_STREAMER_REDIRECT);
-      if (!streamer) return;
-
-      const eventType = parseEventType(req.params.eventType);
-      if (!eventType) return res.redirect('/alerts/settings?error=invalid_event_type');
-
+  return makeAlertAssetHandler({
+    logLabel: `Alert ${assetLabel} upload error:`,
+    errorCode: 'upload_failed',
+    handle: async (req, res, streamer, eventType) => {
       const result = await saveUploadedAsset({ streamer, eventType, file: req.file, detect, setAsset, assetLabel });
       if ('errorCode' in result) return res.redirect(`/alerts/settings?error=${result.errorCode}`);
       res.redirect(`/alerts/settings?success=${result.successCode}`);
-    } catch (err) {
-      logAndRedirectError({ res, log, logLabel: `Alert ${assetLabel} upload error:`, err, basePath: '/alerts/settings', errorCode: 'upload_failed' });
-    }
-  };
+    },
+  });
 }
 
 /**
@@ -159,29 +187,17 @@ function makeDeleteHandler(
   setAsset: AssetSetter,
   assetLabel: 'image' | 'sound',
 ): (req: Request, res: Response) => Promise<void> {
-  return async (req, res) => {
-    try {
-      const streamer = await requireStreamer(req, res, NOT_A_STREAMER_REDIRECT);
-      if (!streamer) return;
-
-      const eventType = parseEventType(req.params.eventType);
-      if (!eventType) return res.redirect('/alerts/settings?error=invalid_event_type');
-
+  return makeAlertAssetHandler({
+    logLabel: `Alert ${assetLabel} delete error:`,
+    errorCode: 'delete_failed',
+    handle: async (_req, res, streamer, eventType) => {
       await deleteAsset(streamer.id, eventType, setAsset);
       res.redirect(`/alerts/settings?success=${assetLabel}_deleted`);
-    } catch (err) {
-      logAndRedirectError({ res, log, logLabel: `Alert ${assetLabel} delete error:`, err, basePath: '/alerts/settings', errorCode: 'delete_failed' });
-    }
-  };
+    },
+  });
 }
 
-/**
- * Translate a Multer error into a user-facing redirect. An oversized file (`LIMIT_FILE_SIZE`)
- * gets the `file_too_large` code; any other error falls back to `upload_failed`.
- */
-const handleUploadError = createMulterErrorRedirectHandler('/alerts/settings', log, 'Alert upload middleware error:');
-
-/** Redirects non-streamers before Multer buffers the upload (see `makeRequireStreamerBeforeUpload`). */
+/** Redirects non-streamers before any chunked-upload route runs (see `makeRequireStreamerBeforeUpload`). */
 const requireStreamerBeforeUpload = makeRequireStreamerBeforeUpload({
   notAStreamerRedirect: NOT_A_STREAMER_REDIRECT,
   basePath: '/alerts/settings',
@@ -189,17 +205,12 @@ const requireStreamerBeforeUpload = makeRequireStreamerBeforeUpload({
   logLabel: 'Alert upload streamer check error:',
 });
 
-/** Express middleware running Multer's single-file (`image`) parser, redirecting on error. */
-const uploadImage = makeUploadMiddleware(imageUpload, 'image', handleUploadError);
-
-/** Express middleware running Multer's single-file (`sound`) parser, redirecting on error. */
-const uploadSound = makeUploadMiddleware(soundUpload, 'sound', handleUploadError);
-
 /**
- * POST /alerts/settings/:eventType/image — uploads an image/GIF (magic-byte validated) for one
- * of the requesting streamer's alert event types, replacing (and removing on disk) any
- * previously-uploaded image. csrfProtection and requireStreamerBeforeUpload run BEFORE
- * uploadImage so a bad token or a non-streamer is rejected before Multer buffers the file; the client sends the token in an X-CSRF-Token header.
+ * Handles a finished alert image upload (`POST /alerts/settings/:eventType/image/:uploadId/complete`):
+ * an image/GIF (magic-byte validated) for one of the requesting streamer's alert event types,
+ * replacing (and removing on disk) any previously-uploaded image. csrfProtection and
+ * requireStreamerBeforeUpload guard every chunked-upload route; the client sends the token in an
+ * X-CSRF-Token header.
  * @param req - Express request; reads the `eventType` route param and the `image` file.
  * @param res - Express response; redirects to `/alerts/settings?success=image_uploaded` on
  *   success, or to `/alerts/settings?error=<code>` if the requester isn't a streamer
@@ -208,10 +219,11 @@ const uploadSound = makeUploadMiddleware(soundUpload, 'sound', handleUploadError
  *   (`invalid_path`), the file exceeds the size limit (`file_too_large`), or saving fails
  *   (`upload_failed`).
  */
-router.post('/settings/:eventType/image', requireAuth, csrfProtection, requireStreamerBeforeUpload, uploadImage, makeUploadHandler(detectImageType, setAlertImage, 'image'));
+const handleImageUpload = makeUploadHandler(detectImageType, setAlertImage, 'image');
 
 /**
- * POST /alerts/settings/:eventType/sound — uploads a sound (magic-byte validated, via the
+ * Handles a finished alert sound upload (`POST /alerts/settings/:eventType/sound/:uploadId/complete`):
+ * a sound (magic-byte validated, via the
  * shared `detectAudioType` used by SFX uploads) for one of the requesting streamer's alert
  * event types, replacing (and removing on disk) any previously-uploaded sound.
  * @param req - Express request; reads the `eventType` route param and the `sound` file.
@@ -219,7 +231,31 @@ router.post('/settings/:eventType/image', requireAuth, csrfProtection, requireSt
  *   success, or to `/alerts/settings?error=<code>` with the same error codes as the image
  *   upload route above.
  */
-router.post('/settings/:eventType/sound', requireAuth, csrfProtection, requireStreamerBeforeUpload, uploadSound, makeUploadHandler(detectAudioType, setAlertSound, 'sound'));
+const handleSoundUpload = makeUploadHandler(detectAudioType, setAlertSound, 'sound');
+
+/** Chunked, resumable alert image uploads under `/settings/:eventType/image/…` (see `mountChunkedUploadRoutes`). */
+mountChunkedUploadRoutes(router, {
+  path: '/settings/:eventType/image',
+  store: new ChunkedUploadStore({ dir: path.join(UPLOAD_INCOMING_FOLDER, 'alert-image'), maxBytes: MAX_IMAGE_MB * 1024 * 1024 }),
+  guards: [requireAuth, csrfProtection, requireStreamerBeforeUpload],
+  field: 'image',
+  toFile: toMemoryFile,
+  complete: [handleImageUpload],
+  basePath: '/alerts/settings',
+  log,
+});
+
+/** Chunked, resumable alert sound uploads under `/settings/:eventType/sound/…`; as for images. */
+mountChunkedUploadRoutes(router, {
+  path: '/settings/:eventType/sound',
+  store: new ChunkedUploadStore({ dir: path.join(UPLOAD_INCOMING_FOLDER, 'alert-sound'), maxBytes: MAX_SOUND_MB * 1024 * 1024 }),
+  guards: [requireAuth, csrfProtection, requireStreamerBeforeUpload],
+  field: 'sound',
+  toFile: toMemoryFile,
+  complete: [handleSoundUpload],
+  basePath: '/alerts/settings',
+  log,
+});
 
 /**
  * POST /alerts/settings/:eventType/image/delete — removes the requesting streamer's uploaded

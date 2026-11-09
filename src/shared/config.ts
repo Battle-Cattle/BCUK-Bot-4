@@ -66,13 +66,26 @@ function parsePositiveIntEnv(envVar: string | undefined, fallback: number): numb
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-export const SFX_FOLDER = process.env.SFX_FOLDER ?? './sfx';
+// Upload folders. A blank setting means the default, the same way scripts/install-systemd-service.sh
+// reads them when it grants the sandboxed service write access to each one.
+export const SFX_FOLDER = process.env.SFX_FOLDER?.trim() || './sfx';
+/**
+ * Where chunked uploads of SFX sounds and alert images/sounds are assembled before they're
+ * checked and stored. Overlay videos use `OVERLAY_FOLDER/.incoming/chunked` instead, so finishing
+ * one is a rename on the same disk.
+ */
+export const UPLOAD_INCOMING_FOLDER = process.env.UPLOAD_INCOMING_FOLDER?.trim() || './upload-incoming';
 export const SFX_MAX_FILE_MB = parsePositiveIntEnv(process.env.SFX_MAX_FILE_MB, 10);
-export const OVERLAY_FOLDER = process.env.OVERLAY_FOLDER ?? './overlay-videos';
-export const OVERLAY_MAX_FILE_MB = parsePositiveIntEnv(process.env.OVERLAY_MAX_FILE_MB, 100);
+export const OVERLAY_FOLDER = process.env.OVERLAY_FOLDER?.trim() || './overlay-videos';
+export const OVERLAY_MAX_FILE_MB = parsePositiveIntEnv(process.env.OVERLAY_MAX_FILE_MB, 500);
+/**
+ * Longest one MOV → WebM overlay conversion may run before ffmpeg is killed. Encoding transparent
+ * VP9 from a few hundred MB of ProRes 4444 can take well over five minutes on a small server.
+ */
+export const OVERLAY_TRANSCODE_TIMEOUT_MINUTES = parsePositiveIntEnv(process.env.OVERLAY_TRANSCODE_TIMEOUT_MINUTES, 30);
 export const COMPANION_MAX_SSE_PER_TOKEN = parsePositiveIntEnv(process.env.COMPANION_MAX_SSE_PER_TOKEN, 3);
 export const OVERLAY_MAX_SSE_PER_CHANNEL = parsePositiveIntEnv(process.env.OVERLAY_MAX_SSE_PER_CHANNEL, 10);
-export const ALERT_ASSETS_FOLDER = process.env.ALERT_ASSETS_FOLDER ?? './alert-assets';
+export const ALERT_ASSETS_FOLDER = process.env.ALERT_ASSETS_FOLDER?.trim() || './alert-assets';
 export const ALERT_MAX_IMAGE_MB = parsePositiveIntEnv(process.env.ALERT_MAX_IMAGE_MB, 10);
 export const ALERT_MAX_SOUND_MB = parsePositiveIntEnv(process.env.ALERT_MAX_SOUND_MB, 5);
 export const ALERT_MAX_SSE_PER_CHANNEL = parsePositiveIntEnv(process.env.ALERT_MAX_SSE_PER_CHANNEL, 10);
@@ -86,6 +99,11 @@ export const GLOBAL_COOLDOWN_MS = parseIntEnvInRange('GLOBAL_COOLDOWN_MS', 3000,
 
 // Web panel
 export const WEB_PORT = parseIntEnvInRange('WEB_PORT', 3000, 1, MAX_PORT);
+// Interface the panel binds to. Loopback by default: the app trusts exactly one X-Forwarded-For
+// hop (`trust proxy: 1`, set for Caddy), so a client able to reach the port directly could spoof
+// its IP and dodge the IP-keyed rate limiters. Set it to a private interface only when the
+// reverse proxy runs on another host or in a container.
+export const WEB_HOST = process.env.WEB_HOST?.trim() || '127.0.0.1';
 export const SESSION_SECRET = require_env('SESSION_SECRET');
 if (SESSION_SECRET === '__REQUIRED_GENERATE_LONG_RANDOM_SECRET__') {
   throw new Error('SESSION_SECRET has not been set — replace the placeholder in .env with a long random string');
@@ -116,6 +134,18 @@ export const EVENTSUB_TOKEN_SECRET = process.env.EVENTSUB_TOKEN_SECRET ?? '';
 // surfaces as a generic error the first time a streamer connects EventSub.
 if (EVENTSUB_TOKEN_SECRET !== '' && !/^[0-9a-fA-F]{64}$/.test(EVENTSUB_TOKEN_SECRET)) {
   throw new Error('EVENTSUB_TOKEN_SECRET must be exactly 64 hex characters (32 bytes)');
+}
+// The key EVENTSUB_TOKEN_SECRET replaced, kept only during a rotation: tokens written under it still
+// decrypt, and startup re-encrypts them under the active key (see the README's "Rotating
+// EVENTSUB_TOKEN_SECRET"). Never used to encrypt. Remove it once startup reports nothing left.
+export const EVENTSUB_TOKEN_SECRET_PREVIOUS = process.env.EVENTSUB_TOKEN_SECRET_PREVIOUS ?? '';
+if (EVENTSUB_TOKEN_SECRET_PREVIOUS !== '') {
+  if (!/^[0-9a-fA-F]{64}$/.test(EVENTSUB_TOKEN_SECRET_PREVIOUS)) {
+    throw new Error('EVENTSUB_TOKEN_SECRET_PREVIOUS must be exactly 64 hex characters (32 bytes)');
+  }
+  if (EVENTSUB_TOKEN_SECRET === '') {
+    throw new Error('EVENTSUB_TOKEN_SECRET_PREVIOUS is set but EVENTSUB_TOKEN_SECRET is not — set the new key as EVENTSUB_TOKEN_SECRET');
+  }
 }
 
 // OpenAI API key, used only for the owner-only "Suggest description" SFX feature.

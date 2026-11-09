@@ -1,31 +1,22 @@
 import { createLogger } from '../../shared/logger';
-import { Router } from 'express';
-import multer from 'multer';
+import { Router, type Request, type Response } from 'express';
 import path from 'path';
 import fs from 'fs';
 import { addSfxFile } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireMod } from '../middleware';
-import { SFX_FOLDER, SFX_MAX_FILE_MB } from '../../shared/config';
+import { SFX_FOLDER, SFX_MAX_FILE_MB, UPLOAD_INCOMING_FOLDER } from '../../shared/config';
+import { ChunkedUploadStore } from '../chunkedUploadStore';
+import { mountChunkedUploadRoutes, toMemoryFile } from './chunkedUploadRoutes';
 import { safeResolve } from '../../shared/pathUtils';
 import { parsePositiveIntId, parsePositiveBigIntId, parseCheckboxField } from './validation';
 import { detectAudioType } from './uploadFileTypes';
-import { createMulterErrorRedirectHandler, makeUploadMiddleware } from './uploadMiddleware';
+import type { UploadedFile } from '../uploadedFile';
 
 const log = createLogger('Web');
 const router = Router();
 
 const MAX_FILE_BYTES = SFX_MAX_FILE_MB * 1024 * 1024;
-
-// No MIME-based fileFilter: the client-supplied Content-Type is unreliable
-// (browsers send `application/octet-stream` for some audio files), and
-// storeUploadedSound() validates the actual bytes via detectAudioType. Filtering
-// on mimetype here would reject valid audio with a generic/incorrect header.
-/** Multer instance buffering a single uploaded sound in memory, capped at SFX_MAX_FILE_MB. */
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: MAX_FILE_BYTES },
-});
 
 /**
  * Build a safe stored filename from the upload's original name, preserving it so
@@ -83,11 +74,11 @@ async function writeUniqueSound(name: string, buffer: Buffer): Promise<string | 
  * Validate an uploaded buffer's audio type and write it to disk under a unique,
  * sanitized name. Isolates the upload route's file-storage branch so the route
  * handler itself only deals with the trigger/weight validation and persistence.
- * @param file Multer's in-memory file (buffer + originalname).
+ * @param file The finished upload, read into memory (buffer + originalname).
  * @returns The stored relative filename, or an error code for the caller to redirect with.
  */
 async function storeUploadedSound(
-  file: Express.Multer.File,
+  file: UploadedFile,
 ): Promise<{ storedName: string } | { errorCode: 'invalid_file' | 'invalid_path' | 'upload_failed' }> {
   const ext = detectAudioType(file.buffer);
   if (!ext) return { errorCode: 'invalid_file' };
@@ -137,31 +128,14 @@ async function persistUploadedSound(
 }
 
 /**
- * Translate a Multer error into a user-facing redirect, instead of letting it
- * reach the centralised 500 handler. An oversized file (`LIMIT_FILE_SIZE`) gets
- * its own `file_too_large` code; any other error falls back to `upload_failed`.
- * @param err - The error passed by Multer's callback, or null/undefined if none.
- * @param res - Express response used to issue the redirect when an error occurred.
- * @returns true when `err` was an error and a redirect was sent (caller should
- *   stop); false when there was no error (caller should continue).
+ * Validates and stores an uploaded sound, then inserts its DB row: the handler behind
+ * `POST /sfx/file/upload/:uploadId/complete`. Rejects a missing/invalid trigger id, file or
+ * weight with the matching error code, and redirects `success=file_uploaded` on success.
+ * @param req - Express request; reads `trigger_id`, `weight`, `file_hidden` and `req.file`.
+ * @param res - Express response; always issues a redirect.
+ * @returns Resolves once the redirect has been sent.
  */
-export const handleUploadError = createMulterErrorRedirectHandler('/sfx', log, 'SFX upload middleware error:');
-
-/** Express middleware running Multer's single-file (`sound`) parser, redirecting on error. */
-const uploadSound = makeUploadMiddleware(upload, 'sound', handleUploadError);
-
-// csrfProtection runs BEFORE uploadSound so a bad token is rejected before Multer
-// buffers the file. The client (sfx.js) sends the token in an X-CSRF-Token header
-// — available before body parsing and never placed in the URL.
-/**
- * POST /sfx/file/upload — validate and store an uploaded sound, then insert its
- * DB row. Rejects a missing/invalid trigger id, file, or weight with the matching
- * error code, stores the buffer via `storeUploadedSound`, persists the row via
- * `persistUploadedSound`, and redirects `success=file_uploaded` on success.
- * @param req Express request; reads `trigger_id`, `weight`, `file_hidden` and `req.file`.
- * @param res Express response; always issues a redirect.
- */
-router.post('/sfx/file/upload', requireMod, csrfProtection, uploadSound, async (req, res) => {
+async function handleSoundUpload(req: Request, res: Response): Promise<void> {
   const triggerId = parsePositiveBigIntId(req.body.trigger_id);
   if (triggerId === null) return res.redirect('/sfx?error=invalid_id');
   if (!req.file) return res.redirect('/sfx?error=invalid_file');
@@ -178,6 +152,23 @@ router.post('/sfx/file/upload', requireMod, csrfProtection, uploadSound, async (
 
   log.info(`SFX file uploaded for trigger ${triggerId}: ${stored.storedName}`);
   res.redirect('/sfx?success=file_uploaded');
+}
+
+/**
+ * Chunked, resumable SFX uploads under `/sfx/file/upload/…` (see `mountChunkedUploadRoutes`).
+ * No MIME-based filter: browsers send `application/octet-stream` for some audio files, and
+ * storeUploadedSound() validates the actual bytes via detectAudioType. The client (sfx.js via
+ * chunkedUpload.js) sends the CSRF token in an X-CSRF-Token header.
+ */
+mountChunkedUploadRoutes(router, {
+  path: '/sfx/file/upload',
+  store: new ChunkedUploadStore({ dir: path.join(UPLOAD_INCOMING_FOLDER, 'sfx'), maxBytes: MAX_FILE_BYTES }),
+  guards: [requireMod, csrfProtection],
+  field: 'sound',
+  toFile: toMemoryFile,
+  complete: [handleSoundUpload],
+  basePath: '/sfx',
+  log,
 });
 
 export default router;

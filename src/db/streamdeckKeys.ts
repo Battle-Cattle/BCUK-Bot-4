@@ -69,13 +69,14 @@ export async function hasApiKey(discordId: string): Promise<boolean> {
  * @param discordId Requesting user's Discord snowflake.
  * @param accessLevel The user's effective access level in `guildId`, used to decide auto-approval.
  * @param guildId The first guild this key will act on.
- * @returns The plaintext key (only ever returned here — only the hash is stored) and its status.
+ * @returns The plaintext key (only ever returned here — only the hash is stored), its
+ *   {@link keyVersionFromHash} marker, and its status.
  */
 export async function createApiKeyAndRequestGuildAccess(
   discordId: string,
   accessLevel: number,
   guildId: string,
-): Promise<{ plain: string; status: 'pending' | 'approved' }> {
+): Promise<{ plain: string; version: string; status: 'pending' | 'approved' }> {
   const { secret: plain, hash } = generateSecretAndHash();
   const status = initialStatus(accessLevel);
   const now = new Date();
@@ -96,7 +97,7 @@ export async function createApiKeyAndRequestGuildAccess(
     );
   });
 
-  return { plain, status };
+  return { plain, version: keyVersionFromHash(hash), status };
 }
 
 /**
@@ -146,15 +147,15 @@ export async function requestGuildAccessForExistingKey(
  * (hash) changes, so the old key stops working everywhere immediately.
  *
  * @param discordId User's Discord snowflake; must already have a key.
- * @returns The new plaintext key.
+ * @returns The new plaintext key and its {@link keyVersionFromHash} marker.
  */
-export async function rotateApiKey(discordId: string): Promise<{ plain: string }> {
+export async function rotateApiKey(discordId: string): Promise<{ plain: string; version: string }> {
   const { secret: plain, hash } = generateSecretAndHash();
   await getPool().execute(
     'UPDATE streamdeck_api_keys SET key_hash = ?, created_at = ? WHERE discord_id = ?',
     [hash, new Date(), discordId],
   );
-  return { plain };
+  return { plain, version: keyVersionFromHash(hash) };
 }
 
 /**
@@ -167,16 +168,6 @@ export async function rotateApiKey(discordId: string): Promise<{ plain: string }
  */
 export function keyVersionFromHash(keyHash: string): string {
   return createHash('sha256').update(`streamdeck-key-version:${keyHash}`).digest('hex').slice(0, 32);
-}
-
-/**
- * The {@link keyVersionFromHash} marker for a plaintext key, e.g. one just generated, without
- * reading it back from the database.
- * @param plain The plaintext key.
- * @returns A 32-character hex marker.
- */
-export function keyVersionFromPlaintext(plain: string): string {
-  return keyVersionFromHash(createHash('sha256').update(plain).digest('hex'));
 }
 
 /**

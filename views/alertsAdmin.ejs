@@ -1,11 +1,4 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BCUK Bot — Alerts</title>
-  <link rel="stylesheet" href="/style.css">
-  <%- include('partials/pwa-head') %>
+<%- include('partials/head', { pageTitle: 'BCUK Bot — Alerts' }) %>
 </head>
 <body data-csrf-token="<%= csrfToken %>">
   <%- include('partials/nav') %>
@@ -20,6 +13,10 @@
         invalid_file:       'No valid file was uploaded, or the file type is not supported.',
         invalid_message:    'The on-screen message cannot be blank.',
         upload_failed:      'Upload failed — please try again.',
+        upload_busy: 'Another upload is already in progress. Try again once it finishes.',
+        upload_incomplete: 'The upload did not finish arriving — please try again.',
+        upload_expired: 'The upload expired before it finished — please try again.',
+        invalid_upload: 'No valid file was chosen.',
         delete_failed:      'Delete failed — please try again.',
         save_failed:        'Failed to save — please try again.',
         invalid_path:       'Invalid request.',
@@ -44,36 +41,10 @@
     <% } %>
 
     <% if (!streamer) { %>
-    <section class="section">
-      <div class="card">
-        <div class="card-body">
-          <p class="hint">You are not configured as a monitored streamer. Contact a Manager or Admin.</p>
-        </div>
-      </div>
-    </section>
+    <%- include('partials/notStreamerCard') %>
     <% } else { %>
 
-    <!-- ── Browser Source URL ──────────────────────────────────────── -->
-    <section class="section">
-      <h2 class="section-title">OBS Browser Source</h2>
-      <div class="card">
-        <div class="card-body">
-          <p class="hint hint-compact">Add this URL as a Browser Source in OBS (1920×1080, transparent background):</p>
-          <% const login = streamer.twitch_name ? streamer.twitch_name.toLowerCase() : ''; %>
-          <code class="mono overlay-url-display"><%= baseUrl %>/alerts/<%= login %></code>
-          <p class="hint mt-05">In OBS: Sources → Add → Browser → check "Local file" OFF, paste the URL above.</p>
-          <div class="overlay-status">
-            <span class="dot dot--offline" id="overlay-status-dot"></span>
-            <span id="overlay-status-text"><%= login ? 'Checking…' : 'Not connected' %></span>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <% if (login) { %>
-    <script src="/sseClient.js"></script>
-    <script src="/overlayConnectionStatus.js" data-events-url="/alerts/settings/events"></script>
-    <% } %>
+    <%- include('partials/obsBrowserSource', { overlayPath: 'alerts' }) %>
 
     <!-- ── Per-event-type alert configuration ─────────────────────── -->
     <% const labels = { follow: 'Follow', sub: 'Sub', resub: 'Resub', giftsub: 'Gift Sub', raid: 'Raid' };
@@ -180,9 +151,11 @@
 
   </main>
 
-  <%- include('partials/pwa-register') %>
-  <%- include('partials/footer') %>
-  <script src="/utils.js"></script>
+  <%- include('partials/page-end') %>
+  <script src="/chunkedUpload.js"></script>
+  <script src="/chunkedUploadResume.js"></script>
+  <script src="/chunkedUploadOutcome.js"></script>
+  <script src="/chunkedUploadPacing.js"></script>
   <script src="/alertsAdmin.js"></script>
 </body>
 </html>

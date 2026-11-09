@@ -1,11 +1,4 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BCUK Bot — Video Overlay</title>
-  <link rel="stylesheet" href="/style.css">
-  <%- include('partials/pwa-head') %>
+<%- include('partials/head', { pageTitle: 'BCUK Bot — Video Overlay' }) %>
 </head>
 <body data-csrf-token="<%= csrfToken %>">
   <%- include('partials/nav') %>
@@ -16,7 +9,13 @@
     <div class="card card-alert-danger">
       <% const errorMessages = {
         not_a_streamer:   'You are not configured as a monitored streamer.',
-        invalid_file:     'No valid file was uploaded. Accepted formats: WebM, MP4.',
+        invalid_file:     'No valid file was uploaded. Accepted formats: WebM, MP4, MOV.',
+        transcode_failed: 'The MOV file could not be converted to WebM. Check it plays locally, or export it as WebM.',
+        transcode_busy:   'Other videos are being converted right now. Try again in a few minutes.',
+        upload_busy:      'Another upload is already in progress. Try again once it finishes.',
+        upload_incomplete:'The upload did not finish arriving — please try again.',
+        upload_expired:   'The upload expired before it finished — please try again.',
+        invalid_upload:   'No valid file was chosen.',
         upload_failed:    'Upload failed — please try again.',
         delete_failed:    'Delete failed — please try again.',
         invalid_reward_id:'Invalid reward ID format. Paste the UUID from your Twitch dashboard.',
@@ -25,6 +24,11 @@
         save_failed:      'Failed to save — please try again.',
         invalid_id:       'Invalid request.',
         file_too_large:   `That file is too large (max ${maxFileMb} MB).`,
+        not_found:        'That library video no longer exists.',
+        not_your_video:   'That video is not one of yours.',
+        already_in_library:'That video is already in the public library.',
+        publish_failed:   'Adding the video to the public library failed — please try again.',
+        import_failed:    'Adding the library video to your videos failed — please try again.',
       }; %>
       <%= errorMessages[error] ?? `An error occurred (${error}).` %>
     </div>
@@ -37,42 +41,19 @@
         video_deleted:  'Video deleted.',
         reward_saved:   'Reward assignment saved.',
         reward_deleted: 'Reward assignment removed.',
+        library_video_removed: 'Video removed from the public library. Copies streamers already added are kept.',
+        video_published: 'Video added to the public library. Every streamer can now see it and add it to their own videos.',
+        video_imported: 'Library video added to your videos. You can now assign it to rewards and advanced commands.',
       }; %>
       <%= successMessages[success] ?? 'Done.' %>
     </div>
     <% } %>
 
     <% if (!streamer) { %>
-    <section class="section">
-      <div class="card">
-        <div class="card-body">
-          <p class="hint">You are not configured as a monitored streamer. Contact a Manager or Admin.</p>
-        </div>
-      </div>
-    </section>
+    <%- include('partials/notStreamerCard') %>
     <% } else { %>
 
-    <!-- ── Browser Source URL ──────────────────────────────────────── -->
-    <section class="section">
-      <h2 class="section-title">OBS Browser Source</h2>
-      <div class="card">
-        <div class="card-body">
-          <p class="hint hint-compact">Add this URL as a Browser Source in OBS (1920×1080, transparent background):</p>
-          <% const login = streamer.twitch_name ? streamer.twitch_name.toLowerCase() : ''; %>
-          <code class="mono overlay-url-display"><%= baseUrl %>/overlay/<%= login %></code>
-          <p class="hint mt-05">In OBS: Sources → Add → Browser → check "Local file" OFF, paste the URL above.</p>
-          <div class="overlay-status">
-            <span class="dot dot--offline" id="overlay-status-dot"></span>
-            <span id="overlay-status-text"><%= login ? 'Checking…' : 'Not connected' %></span>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <% if (login) { %>
-    <script src="/sseClient.js"></script>
-    <script src="/overlayConnectionStatus.js" data-events-url="/overlay/settings/events"></script>
-    <% } %>
+    <%- include('partials/obsBrowserSource', { overlayPath: 'overlay' }) %>
 
     <!-- ── Video Library ──────────────────────────────────────────── -->
     <section class="section">
@@ -80,24 +61,31 @@
 
       <div class="card card-spaced">
         <div class="card-body">
-          <!-- Submitted via fetch in overlayAdmin.js with the CSRF token in an
-               X-CSRF-Token header, so the session token is never placed in the URL
-               (browser history / Referer). -->
-          <form method="POST" action="/overlay/settings/videos/upload" enctype="multipart/form-data" class="js-overlay-upload">
+          <!-- Sent by registerUploadFormHandler (utils.js, via chunkedUpload.js) as a chunked,
+               resumable upload to the routes under its action, with the CSRF token in an
+               X-CSRF-Token header, so the session token is never placed in the URL (browser
+               history / Referer). It fills the progress bar below as pieces arrive, then polls
+               data-progress-url while a MOV converts. -->
+          <form method="POST" action="/overlay/settings/videos/upload" enctype="multipart/form-data" class="js-overlay-upload"
+                data-progress-url="/overlay/settings/videos/progress" data-processing-label="Saving…">
             <div class="form-row-wrap items-end">
               <div class="flex-1">
                 <label class="hint hint-compact" for="video-name">Name</label>
                 <input id="video-name" class="input" type="text" name="name" maxlength="100" placeholder="e.g. Confetti Explosion">
               </div>
               <div class="flex-1">
-                <label class="hint hint-compact" for="video-file">Video file (WebM or MP4)</label>
-                <input id="video-file" class="input" type="file" name="video" accept="video/webm,video/mp4" required>
+                <label class="hint hint-compact" for="video-file">Video file (WebM, MP4 or MOV)</label>
+                <input id="video-file" class="input" type="file" name="video" accept="video/webm,video/mp4,video/quicktime,.mov" required>
               </div>
               <div>
                 <button type="submit" class="btn">Upload</button>
               </div>
             </div>
-            <p class="hint mt-04">WebM with alpha channel recommended for transparent overlays. Max <%= maxFileMb %> MB.</p>
+            <div class="upload-progress is-hidden mt-04" data-upload-progress>
+              <progress class="upload-progress-bar" max="100" value="0" aria-label="Upload progress"></progress>
+              <span class="hint" data-upload-progress-label role="status" aria-live="polite"></span>
+            </div>
+            <p class="hint mt-04">For transparent overlays, upload WebM with an alpha channel or a MOV (e.g. ProRes 4444): MOV files are converted to WebM on upload, keeping transparency, which can take a minute. Max <%= maxFileMb %> MB.</p>
           </form>
         </div>
       </div>
@@ -118,6 +106,7 @@
                 <th>File</th>
                 <th>Uploaded</th>
                 <th></th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -127,6 +116,16 @@
                 <td class="mono fs-08em"><%= v.filename %></td>
                 <td><%= new Date(v.created_at).toLocaleDateString() %></td>
                 <td>
+                  <% if (publishedVideoIds.includes(v.id)) { %>
+                  <span class="hint hint-compact">In public library</span>
+                  <% } else { %>
+                  <form method="POST" action="/overlay/settings/videos/<%= v.id %>/publish" class="m-0 js-confirm-publish-video">
+                    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                    <button type="submit" class="btn btn-ghost btn-sm">Add to public library</button>
+                  </form>
+                  <% } %>
+                </td>
+                <td>
                   <form method="POST" action="/overlay/settings/videos/<%= v.id %>/delete" class="m-0 js-confirm-delete-video">
                     <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                     <button type="submit" class="btn btn-ghost btn-sm">
@@ -134,6 +133,70 @@
                     </button>
                   </form>
                 </td>
+              </tr>
+              <% } %>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <% } %>
+    </section>
+
+    <!-- ── Public library ─────────────────────────────────────────── -->
+    <section class="section">
+      <h2 class="section-title">Public library</h2>
+      <p class="hint mb-075">
+        Videos streamers have shared with every streamer.
+      </p>
+
+      <% if (libraryVideos.length === 0) { %>
+      <div class="card">
+        <div class="card-body">
+          <p class="hint">No videos in the library yet.</p>
+        </div>
+      </div>
+      <% } else { %>
+      <div class="card">
+        <div class="table-scroll">
+          <table class="table full-width">
+            <thead>
+              <tr>
+                <th>Preview</th>
+                <th>Name</th>
+                <th>Added by</th>
+                <th>Added</th>
+                <th></th>
+                <% if (isAdmin) { %><th></th><% } %>
+              </tr>
+            </thead>
+            <tbody>
+              <% for (const entry of libraryVideos) { %>
+              <tr>
+                <td>
+                  <%# preload="metadata": the page shouldn't download every library video just to list them. %>
+                  <video class="library-preview" src="/overlay/library/videos/<%= entry.filename %>" preload="metadata" controls muted playsinline></video>
+                </td>
+                <td><%= entry.name %></td>
+                <td><%= entry.contributor_login ?? 'unknown' %></td>
+                <td><%= new Date(entry.created_at).toLocaleDateString() %></td>
+                <td>
+                  <%# Importing again is allowed (it's another copy), so the button stays once added. %>
+                  <% const alreadyAdded = importedLibraryIds.includes(entry.id); %>
+                  <% if (alreadyAdded) { %><span class="hint hint-compact">Already added</span><% } %>
+                  <form method="POST" action="/overlay/settings/library/<%= entry.id %>/import" class="m-0">
+                    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                    <button type="submit" class="btn btn-ghost btn-sm"><%= alreadyAdded ? 'Add another copy' : 'Add to my videos' %></button>
+                  </form>
+                </td>
+                <% if (isAdmin) { %>
+                <td>
+                  <%# Shown to Admins only; the route checks Admin itself (requireGuildContext → requireAdmin). %>
+                  <form method="POST" action="/overlay/settings/library/<%= entry.id %>/remove" class="m-0 js-confirm-remove-library-video">
+                    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                    <button type="submit" class="btn btn-ghost btn-sm">Remove from library</button>
+                  </form>
+                </td>
+                <% } %>
               </tr>
               <% } %>
             </tbody>
@@ -248,9 +311,11 @@
 
   </main>
 
-  <%- include('partials/pwa-register') %>
-  <%- include('partials/footer') %>
-  <script src="/utils.js"></script>
+  <%- include('partials/page-end') %>
+  <script src="/chunkedUpload.js"></script>
+  <script src="/chunkedUploadResume.js"></script>
+  <script src="/chunkedUploadOutcome.js"></script>
+  <script src="/chunkedUploadPacing.js"></script>
   <script src="/overlayAdmin.js"></script>
 </body>
 </html>

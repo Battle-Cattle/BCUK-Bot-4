@@ -1,5 +1,7 @@
 # systemd unit for the bot. Don't copy this by hand: scripts/install-systemd-service.sh fills in
 # the __PLACEHOLDERS__ and installs it as /etc/systemd/system/bcuk-bot.service.
+# deploy.sh doesn't reinstall it: after a release changes this file, re-run the installer as the
+# bot's user and restart the service, or the server keeps running the old unit.
 [Unit]
 Description=BCUK Bot 4 (Discord/Twitch bot and web panel)
 # Ordering only: a remote MySQL simply has no local unit, which systemd ignores.
@@ -28,6 +30,35 @@ RestartMaxDelaySec=300
 KillSignal=SIGTERM
 # shutdown() announces itself to the owner and closes Discord/Twitch/DB cleanly first.
 TimeoutStopSec=30
+
+# Sandboxing (defence in depth): limits what a compromised Node process (a dependency, or ffmpeg
+# parsing an upload) could reach. Check with `systemd-analyze security bcuk-bot`.
+NoNewPrivileges=true
+PrivateTmp=true
+# The whole filesystem is read-only to the bot, and /home, /root and /run/user are replaced with
+# empty directories, so a compromised process can't read the account's other files (SSH keys,
+# credentials, other projects). Only what the bot needs is put back, by the two Bind lines below.
+ProtectSystem=strict
+ProtectHome=tmpfs
+# Read-only: the checkout (code, node_modules and .env) and the node binary (just the file, not the
+# folder it's in), which usually live in a home directory. The installer fills these in.
+BindReadOnlyPaths=__READONLY_PATHS__
+# Read-write: everywhere the bot writes at runtime, logs/ (log files and the debug-logging state
+# file), the three upload folders (MOV-to-WebM conversion writes its temporary files there too) and
+# UPLOAD_INCOMING_FOLDER, where chunked uploads are assembled.
+# The installer fills these in from .env and creates them; `-` keeps a missing one from stopping the
+# service.
+BindPaths=__WRITABLE_PATHS__
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+# Not MemoryDenyWriteExecute=true: V8's JIT needs writable+executable memory, and node would crash.
 
 [Install]
 WantedBy=multi-user.target

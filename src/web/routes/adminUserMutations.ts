@@ -6,7 +6,6 @@ import {
   upsertUser,
   updateTwitchBotEnabled,
   deleteUnlinkedUser,
-  AccessLevelValue,
 } from '../../db';
 import { joinTwitchChannel, partTwitchChannel } from '../../twitch/twitchChannelMembership';
 import { normalizeTwitchChannelName } from '../../twitch/twitchChannelName';
@@ -51,7 +50,6 @@ export function isDuplicateTwitchNameDbError(error: unknown): boolean {
  * user's DB row and bot-enabled flag back to their pre-edit values.
  * @param discordId Discord snowflake of the user being edited.
  * @param discordName Discord display name to restore on rollback.
- * @param level Access level to restore on rollback.
  * @param previousChannel The user's Twitch channel before this edit, or null.
  * @param wasBotEnabled Whether the Twitch bot was enabled for this user before this edit.
  * @returns Resolves once the channel part (if any) completes; rejects (after best-effort rollback) if either step fails.
@@ -59,7 +57,6 @@ export function isDuplicateTwitchNameDbError(error: unknown): boolean {
 async function handleClearTwitchChannel(
   discordId: string,
   discordName: string,
-  level: AccessLevelValue,
   previousChannel: string | null,
   wasBotEnabled: boolean,
 ): Promise<void> {
@@ -72,7 +69,7 @@ async function handleClearTwitchChannel(
     }
   } catch (err) {
     try {
-      await upsertUser(discordId, discordName, level, previousChannel ?? null);
+      await upsertUser(discordId, discordName, previousChannel ?? null);
       await updateTwitchBotEnabled(discordId, wasBotEnabled);
     } catch (rollbackErr) {
       log.error('Add user clear Twitch rollback failed:', rollbackErr);
@@ -84,7 +81,6 @@ async function handleClearTwitchChannel(
 interface ChangeTwitchChannelParams {
   discordId: string;
   discordName: string;
-  level: AccessLevelValue;
   previousChannel: string | null;
   committedChannel: string;
   wasBotEnabled: boolean;
@@ -101,13 +97,13 @@ interface ChangeTwitchChannelParams {
  * @returns Resolves once the row is restored; rejects if a DB write fails.
  */
 async function rollbackUserRow({
-  discordId, discordName, level, previousChannel, wasBotEnabled, isNewUser,
+  discordId, discordName, previousChannel, wasBotEnabled, isNewUser,
 }: ChangeTwitchChannelParams): Promise<void> {
   if (isNewUser) {
     if (await deleteUnlinkedUser(discordId)) return;
     log.warn(`Add user rollback: new user ${discordId} is already referenced elsewhere; clearing Twitch fields instead of deleting`);
   }
-  await upsertUser(discordId, discordName, level, previousChannel ?? null);
+  await upsertUser(discordId, discordName, previousChannel ?? null);
   await updateTwitchBotEnabled(discordId, wasBotEnabled);
 }
 
@@ -182,7 +178,6 @@ async function assertTwitchNameAvailable(twitchName: string, discordId: string):
 export interface AddOrUpdateParams {
   discordId: string;
   discordName: string;
-  level: AccessLevelValue;
   normalizedTwitchName: string | null;
   shouldClearTwitchName: boolean;
 }
@@ -198,7 +193,6 @@ export interface AddOrUpdateParams {
 export async function addOrUpdateUserMutation({
   discordId,
   discordName,
-  level,
   normalizedTwitchName,
   shouldClearTwitchName,
 }: AddOrUpdateParams): Promise<void> {
@@ -212,7 +206,7 @@ export async function addOrUpdateUserMutation({
     await assertTwitchNameAvailable(normalizedTwitchName, discordId);
   }
 
-  await upsertUser(discordId, discordName, level, nextTwitchName);
+  await upsertUser(discordId, discordName, nextTwitchName);
 
   const committedChannel = channelOf(await findUser(discordId));
   const wasBotEnabled = existingUser?.is_twitch_bot_enabled ?? false;
@@ -225,12 +219,12 @@ export async function addOrUpdateUserMutation({
   }
 
   if (!committedChannel) {
-    await handleClearTwitchChannel(discordId, discordName, level, previousChannel, wasBotEnabled);
+    await handleClearTwitchChannel(discordId, discordName, previousChannel, wasBotEnabled);
     return;
   }
 
   await handleChangeTwitchChannel({
-    discordId, discordName, level, previousChannel, committedChannel, wasBotEnabled, isNewUser: !existingUser,
+    discordId, discordName, previousChannel, committedChannel, wasBotEnabled, isNewUser: !existingUser,
   });
 }
 
