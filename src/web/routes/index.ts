@@ -39,7 +39,7 @@ import privacyRouter from './privacy';
 import tosRouter from './tos';
 import healthRouter from './health';
 import healthStatusEventsRouter from './healthStatusEvents';
-import { requireAuth, requireGuildContext } from '../middleware';
+import { requireAuth, requireAuthJson, requireGuildContext } from '../middleware';
 import { authLimiter, streamdeckAuthFailureLimiter } from '../rateLimits';
 
 // Every feature route, mounted in one place so server.ts keeps only the app-wide middleware
@@ -87,7 +87,8 @@ export function mountRoutes(app: Express, { streamdeckLimiter }: MountRoutesOpti
   app.use('/api/companion', companionRewardsRouter);
   app.use('/api/companion', companionCommandsRouter);
   app.use('/guild', requireAuth, guildRouter);
-  app.use('/api', requireAuth, apiRouter);
+  // JSON 401 rather than requireAuth's login redirect: these are fetch()ed by the panel's scripts.
+  app.use('/api', requireAuthJson, apiRouter);
 
   // Health isn't guild-scoped (unlike the '/admin'-mounted routers below), so it's mounted here,
   // ahead of the '/'-mounted routers' requireGuildContext gate — matching '/guild'/'/api' above —

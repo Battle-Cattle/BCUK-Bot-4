@@ -15,7 +15,7 @@ vi.mock('./csrf', () => ({
 }));
 
 import { createHash } from 'crypto';
-import { requireAuth, requireManager, requireMod, requireAdmin, requireOwner, requireOwnerJson, requireModJson, requireManagerJson, requireAdminJson, requireApiKey, requireCompanionKey, requireGuildContext } from './middleware';
+import { requireAuth, requireAuthJson, requireManager, requireMod, requireAdmin, requireOwner, requireOwnerJson, requireModJson, requireManagerJson, requireAdminJson, requireApiKey, requireCompanionKey, requireGuildContext } from './middleware';
 import { findKeyByHash, findDiscordIdByTokenHash, getEffectiveAccessLevelForUser, findUser, getAllGuilds, getGuildsForMember, AccessLevel } from '../db';
 
 function makeReq(overrides: object = {}): any {
@@ -56,6 +56,25 @@ describe('requireAuth', () => {
     const res = makeRes();
     requireAuth(req, res, next);
     expect(res.redirect).toHaveBeenCalledWith('/auth/login');
+    expect(next).not.toHaveBeenCalled();
+  });
+});
+
+// ─── requireAuthJson ─────────────────────────────────────────────────────────
+
+describe('requireAuthJson', () => {
+  it('calls next() when session.user is set', () => {
+    const req = makeReq({ session: { user: { accessLevel: AccessLevel.USER } } });
+    requireAuthJson(req, makeRes(), next);
+    expect(next).toHaveBeenCalledOnce();
+  });
+
+  it('answers 401 JSON instead of redirecting when session.user is absent', () => {
+    const res = makeRes();
+    requireAuthJson(makeReq({ session: {} }), res, next);
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(res.json).toHaveBeenCalledWith({ ok: false, error: 'unauthenticated' });
+    expect(res.redirect).not.toHaveBeenCalled();
     expect(next).not.toHaveBeenCalled();
   });
 });

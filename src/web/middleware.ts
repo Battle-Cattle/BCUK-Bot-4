@@ -26,6 +26,24 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
 }
 
 /**
+ * JSON counterpart to {@link requireAuth}, for the `/api` routes the panel's scripts poll with
+ * `fetch`: answers `401 { ok: false, error: 'unauthenticated' }` instead of redirecting. A
+ * redirect sent a dashboard tab left open past its session's expiry to the HTML login page on
+ * every poll, which the script took for a failed load and retried every few seconds, until the
+ * tab's IP hit the auth and general rate limiters.
+ * @param req - Express request; checked for `req.session.user`.
+ * @param res - Express response; used to send the 401 when no session user is present.
+ * @param next - Called when a session user is present.
+ */
+export function requireAuthJson(req: Request, res: Response, next: NextFunction): void {
+  if (req.session.user) {
+    next();
+  } else {
+    res.status(401).json({ ok: false, error: 'unauthenticated' });
+  }
+}
+
+/**
  * Ensures the session has a current guild selected before a guild-scoped route runs.
  * Assumes `requireAuth` ran first. Auto-selects when the user has exactly one guild
  * (so single-guild deployments never see the picker); redirects to the picker when a
