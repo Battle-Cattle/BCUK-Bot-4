@@ -44,8 +44,23 @@ document.addEventListener('submit', function (event) {
 });
 
 var liveNowInflight = false;
+var liveNowPollTimer = null;
 
-/** Fetches the currently-live streams and re-renders the live table (skips if one is in flight). */
+/**
+ * Tells whether a live-streams response means the session has expired: requireAuth redirects the
+ * request to the login page (which fetch follows), or a JSON gate answers 401.
+ * @param {Response} r - The /admin/streams/live response.
+ * @returns {boolean} True when the panel session is gone and further polls would fail the same way.
+ */
+function isSessionExpiredResponse(r) {
+  return r.status === 401 || (r.redirected && new URL(r.url).pathname === '/auth/login');
+}
+
+/**
+ * Fetches the currently-live streams and re-renders the live table (skips if one is in flight).
+ * Stops polling once the session has expired, so a tab left open overnight doesn't keep hitting
+ * the login page every 15s until its IP reaches the panel's rate limits.
+ */
 function refreshLiveNow() {
   if (liveNowInflight) return;
   liveNowInflight = true;
@@ -53,10 +68,16 @@ function refreshLiveNow() {
   var timeoutId = setTimeout(function() { controller.abort(); }, 10000);
   fetch('/admin/streams/live', { signal: controller.signal })
     .then(function(r) {
+      if (isSessionExpiredResponse(r)) {
+        clearInterval(liveNowPollTimer);
+        setLiveTableMessage('Session expired \u2014 reload to log in.');
+        return null;
+      }
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.json();
     })
     .then(function(data) {
+      if (!data) return;
       var streams = data.streams;
       if (!streams || !streams.length) {
         expandedLiveRows = Object.create(null);
@@ -78,4 +99,4 @@ function refreshLiveNow() {
 }
 
 refreshLiveNow();
-setInterval(refreshLiveNow, 15000);
+liveNowPollTimer = setInterval(refreshLiveNow, 15000);
