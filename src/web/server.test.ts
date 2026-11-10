@@ -70,6 +70,7 @@ vi.mock('./csrf', () => ({
 
 vi.mock('./middleware', () => ({
   requireAuth: vi.fn((_req: unknown, _res: unknown, next: () => void) => next()),
+  requireAuthJson: vi.fn((_req: unknown, _res: unknown, next: () => void) => next()),
   requireGuildContext: vi.fn((_req: unknown, _res: unknown, next: () => void) => next()),
   requireMod: vi.fn((_req: unknown, _res: unknown, next: () => void) => next()),
   requireOwner: vi.fn((_req: unknown, _res: unknown, next: () => void) => next()),
@@ -163,7 +164,7 @@ vi.mock('./routes/healthStatusEvents', () => ({ default: emptyRouter() }));
 
 import { app, generalLimiter, preSessionLimiter, sessionLimiter, startWebPanel, stopWebPanel } from './server';
 import { createHmac } from 'crypto';
-import { requireAuth, requireGuildContext } from './middleware';
+import { requireAuth, requireAuthJson, requireGuildContext } from './middleware';
 
 describe('server route wiring', () => {
   beforeEach(() => {
@@ -176,6 +177,11 @@ describe('server route wiring', () => {
     expect(res.body).toEqual({ label: 'guild' });
     expect(requireAuth).toHaveBeenCalled();
     expect(requireGuildContext).not.toHaveBeenCalled();
+  });
+
+  it('mounts /api behind requireAuthJson, so a poll from an expired session gets a 401 instead of the login page', async () => {
+    await request(app).get('/api/__trigger_error');
+    expect(requireAuthJson).toHaveBeenCalled();
   });
 
   it('mounts /admin behind both requireAuth and requireGuildContext', async () => {
