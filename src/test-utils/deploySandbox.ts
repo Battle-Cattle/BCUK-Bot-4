@@ -246,7 +246,10 @@ export function createSandbox(): Sandbox {
     STATE: state,
     GIT_CONFIG_GLOBAL: gitConfig,
     GIT_CONFIG_NOSYSTEM: '1',
-    DEPLOY_HEALTH_TIMEOUT_SECONDS: '1',
+    // Short, so a build that never comes up fails in a fraction of a second. deploy.sh's own
+    // defaults (1s poll, 90s health, 30s stability) are pinned in deploy.health.test.ts.
+    DEPLOY_POLL_INTERVAL_SECONDS: '0.05',
+    DEPLOY_HEALTH_TIMEOUT_SECONDS: '0.3',
     DEPLOY_STABILITY_SECONDS: '0',
     TZ: 'UTC',
   };

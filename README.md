@@ -49,7 +49,7 @@ The unit keeps running the `node` it was installed with, so after upgrading Node
 3. Swaps the new build in, keeping the previous one (and, if the dependencies changed, the previous `node_modules`) beside it.
 4. Backs up the database (see [Backups](#backups)).
 5. Restarts the service.
-6. Waits up to 90 seconds for `GET /healthz` on the web panel to answer from the service's own process, then 30 more to check it stays up: the same process, no restarts, still answering.
+6. Waits up to 90 seconds for `GET /healthz` on the web panel to answer from the service's own process, then 30 more to check it stays up: the same process, no restarts, still answering. It probes once a second; `DEPLOY_POLL_INTERVAL_SECONDS`, `DEPLOY_HEALTH_TIMEOUT_SECONDS` and `DEPLOY_STABILITY_SECONDS` change the interval and the two waits (whole or decimal seconds, e.g. `0.3`; the tests shorten them). The deploy needs bash 5 or later, which supplies the clock it times these with.
 
 If any step fails, the deploy rolls back: the previous code, build and dependencies go back in place and, if the service had already restarted, it restarts onto the previous build and checks that comes up. It then prints a report, also saved to `logs/last-deploy-failure.log`: what failed, the command, both commits, the service status and its log since the restart, and whether the rolled-back bot is healthy. A failed rollback says so in capitals: the bot is down.
 

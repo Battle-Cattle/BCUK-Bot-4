@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'fs';
 import path from 'path';
-import { SCRIPT_TEST_TIMEOUT_MS, deploy, failureReport, notLinux, pushV2, read, restarts, sandbox, useSandbox } from './test-utils/deploySandbox';
+import { SCRIPT_TEST_TIMEOUT_MS, deploy, failureReport, notLinux, pushV2, read, restarts, sandbox, useSandbox, workHead } from './test-utils/deploySandbox';
 
 /** End-to-end tests for deploy.sh: health. Linux only; see deploySandbox.ts. */
 describe.skipIf(notLinux)('deploy.sh (health)', { timeout: SCRIPT_TEST_TIMEOUT_MS }, () => {
@@ -52,11 +52,44 @@ describe.skipIf(notLinux)('deploy.sh (health)', { timeout: SCRIPT_TEST_TIMEOUT_M
   it('catches an outage inside the stability window, not just at its end', () => {
     pushV2();
     // Call 1 is the first health check; call 2 is the stability loop's first probe.
-    const result = deploy({ DEPLOY_STABILITY_SECONDS: '3', CURL_FAIL_CALL: '2' });
+    const result = deploy({ DEPLOY_STABILITY_SECONDS: '0.3', CURL_FAIL_CALL: '2' });
 
     expect(result.status).toBe(1);
-    expect(failureReport()).toContain('stopped answering within 3s');
+    expect(failureReport()).toContain('stopped answering within 0.3s');
     expect(restarts()).toEqual(['v2', 'v1']);
     expect(failureReport()).toContain('Rolled back');
+  });
+
+  it('honours a fractional health timeout instead of rounding it to whole seconds', () => {
+    pushV2();
+    const started = Date.now();
+    const result = deploy({ UNHEALTHY_BUILDS: 'v1 v2', DEPLOY_HEALTH_TIMEOUT_SECONDS: '0.4' });
+
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain("didn't answer http://127.0.0.1:3000/healthz within 0.4s");
+    // Two waits (the new build, then the previous one) of 0.4s each: far below the 1-2s each that
+    // whole-second deadlines cost.
+    expect(Date.now() - started).toBeLessThan(4_000);
+  });
+
+  it.each(['abc', '-1', '1e3', '1.2.3'])("refuses a timeout or interval of '%s' before changing anything", (bad) => {
+    const before = workHead();
+    pushV2();
+    for (const name of ['DEPLOY_HEALTH_TIMEOUT_SECONDS', 'DEPLOY_STABILITY_SECONDS', 'DEPLOY_POLL_INTERVAL_SECONDS']) {
+      const result = deploy({ [name]: bad });
+
+      expect(result.status).toBe(1);
+      expect(result.stdout).toContain(`'${bad}' isn't a number of seconds`);
+      expect(restarts()).toEqual([]);
+      expect(workHead()).toBe(before);
+    }
+  });
+
+  it("keeps deploy.sh's production defaults: 1s poll, 90s health timeout, 30s stability window", () => {
+    const script = fs.readFileSync(path.join(sandbox.work, 'deploy.sh'), 'utf8');
+
+    expect(script).toMatch(/^POLL_INTERVAL_SECONDS="\$\{DEPLOY_POLL_INTERVAL_SECONDS:-1\}"$/m);
+    expect(script).toMatch(/^HEALTH_TIMEOUT_SECONDS="\$\{DEPLOY_HEALTH_TIMEOUT_SECONDS:-90\}"$/m);
+    expect(script).toMatch(/^STABILITY_SECONDS="\$\{DEPLOY_STABILITY_SECONDS:-30\}"$/m);
   });
 });
