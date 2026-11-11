@@ -9,7 +9,7 @@ A multi-platform community bot connecting Twitch and Discord. Features custom co
 
 ## Requirements
 
-- **Node.js 24.22.1 or later**, matching `engines` in `package.json` and CI. `.npmrc` sets `engine-strict=true`, so `npm install`/`npm ci` (and so `deploy.sh`) stop on an older Node. Use the npm 11 that Node 24 ships with: npm 10 has failed `npm ci` on this lockfile with a spurious `Missing: <pkg> from lock file` error (it handles the `overrides` entries differently), so check `npm -v` if you installed npm separately.
+- **Node.js 24.22.3 or later**, matching `engines` in `package.json` and CI. `.npmrc` sets `engine-strict=true`, so `npm install`/`npm ci` (and so `deploy.sh`) stop on an older Node. Use the npm 11 that Node 24 ships with: npm 10 has failed `npm ci` on this lockfile with a spurious `Missing: <pkg> from lock file` error (it handles the `overrides` entries differently), so check `npm -v` if you installed npm separately.
 - **MySQL 8.0.19 or later.** Upserts use the `INSERT … VALUES (…) AS new_row` row-alias form, which older versions reject. For a fresh install, create an empty `utf8mb4` database: the bot creates the tables on first start (see [Database migrations](#database-migrations)). `DATABASE-SCHEMA.md` documents each table.
 - A `.env` file with credentials for each platform. Copy `.env.example` and fill it in; it lists every setting the bot reads.
 
