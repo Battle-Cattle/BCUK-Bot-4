@@ -136,14 +136,35 @@ async function missingSourceRedirect(libraryId: number, libraryFilename: string)
 }
 
 /**
- * Imports a public library entry as the streamer's own video: links the library file into the
- * streamer's folder under a new name (a hard link, or a copy across filesystems), then inserts
- * their `overlay_video` row with `importLibraryVideo`. The copy is an ordinary video of theirs from
- * then on (renamed, deleted or assigned to rewards and advanced commands like an upload), and it
- * outlives the library entry. The new file is removed again if the entry was removed in the
- * meantime or the DB step fails, so no file is left without its row. An entry an Admin removes
- * mid-import (row and file) reads as `not_found`, not a failure to retry
- * ({@link missingSourceRedirect}). Importing the same entry
+ * Links a library file into the streamer's folder under a new name (a hard link, or a copy across
+ * filesystems), then inserts their `overlay_video` row with `importLibraryVideo`. The new file is
+ * removed again if the entry was removed in the meantime or the DB step fails, so no file is left
+ * without its row. An entry an Admin removes mid-import (row and file) reads as `not_found`, not a
+ * failure to retry ({@link missingSourceRedirect}).
+ * @param libraryId - Primary key of the `overlay_video_library` row.
+ * @param libraryFilename - The entry's stored filename.
+ * @param streamerId - DB row ID of the importing streamer.
+ * @returns The redirect URL for the outcome.
+ */
+async function linkLibraryVideo(libraryId: number, libraryFilename: string, streamerId: number): Promise<string> {
+  const linked = await withLinkedVideoFile(
+    { folder: LIBRARY_FOLDER, filename: libraryFilename },
+    streamerFolder(streamerId),
+    async (filename) => {
+      const videoId = await importLibraryVideo(libraryId, streamerId, filename);
+      return { keepFile: videoId !== null, result: videoId };
+    },
+  );
+  if (linked.status === 'source_missing') return missingSourceRedirect(libraryId, libraryFilename);
+  if (linked.result === null) return '/overlay/settings?error=not_found';
+  log.info(`Streamer ${streamerId} imported library video ${libraryId} as video ${linked.result}`);
+  return '/overlay/settings?success=video_imported';
+}
+
+/**
+ * Imports a public library entry as the streamer's own video (see {@link linkLibraryVideo}). The
+ * copy is an ordinary video of theirs from then on (renamed, deleted or assigned to rewards and
+ * advanced commands like an upload), and it outlives the library entry. Importing the same entry
  * twice just makes a second copy. Refused with `storage_limit`, before anything is linked, if the
  * library file's full size would take the streamer over their storage cap: an import counts in
  * full even though it's usually a hard link. Callers run it under `withStreamerQuota`.
@@ -155,23 +176,11 @@ async function importVideo(libraryId: number, streamerId: number): Promise<strin
   const libraryFilename = await getLibraryVideoFilename(libraryId);
   if (libraryFilename === null) return '/overlay/settings?error=not_found';
 
-  const source = { folder: LIBRARY_FOLDER, filename: libraryFilename };
-  // A missing file (null) is reported by the link step below.
-  const size = await videoFileSize(source);
+  // A missing file (null) is reported by the link step.
+  const size = await videoFileSize({ folder: LIBRARY_FOLDER, filename: libraryFilename });
   if (size !== null && await exceedsStreamerStorage(streamerId, size)) return '/overlay/settings?error=storage_limit';
 
-  const linked = await withLinkedVideoFile(
-    source,
-    streamerFolder(streamerId),
-    async (filename) => {
-      const videoId = await importLibraryVideo(libraryId, streamerId, filename);
-      return { keepFile: videoId !== null, result: videoId };
-    },
-  );
-  if (linked.status === 'source_missing') return missingSourceRedirect(libraryId, libraryFilename);
-  if (linked.result === null) return '/overlay/settings?error=not_found';
-  log.info(`Streamer ${streamerId} imported library video ${libraryId} as video ${linked.result}`);
-  return '/overlay/settings?success=video_imported';
+  return linkLibraryVideo(libraryId, libraryFilename, streamerId);
 }
 
 /**
