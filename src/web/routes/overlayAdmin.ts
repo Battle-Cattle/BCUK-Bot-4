@@ -6,7 +6,9 @@ import { requireAuth } from '../middleware';
 import { getSessionUser } from '../session';
 import { AccessLevel, getStreamerByDiscordId } from '../../db';
 import { getVideosForStreamer, getRewardsForStreamer, getLibraryVideos, getImportedLibraryEntryIds } from '../../db';
-import { PUBLIC_URL, OVERLAY_FOLDER, OVERLAY_STATUS_MAX_SSE_PER_STREAMER } from '../../shared/config';
+import {
+  PUBLIC_URL, OVERLAY_FOLDER, OVERLAY_STATUS_MAX_SSE_PER_STREAMER, OVERLAY_MAX_TOTAL_MB_PER_STREAMER, OVERLAY_LIBRARY_MAX_TOTAL_MB,
+} from '../../shared/config';
 import { fetchStreamerRewards } from './streamerRewards';
 import { filterQueryParam } from './validation';
 import { renderError, renderView } from './viewHelpers';
@@ -33,7 +35,7 @@ const KNOWN_ERRORS = new Set([
   'not_a_streamer', 'invalid_file', 'upload_failed', 'delete_failed',
   'invalid_reward_id', 'no_videos_selected', 'save_failed', 'invalid_id', 'invalid_path',
   'file_too_large', 'invalid_weight', 'transcode_failed', 'transcode_busy', 'not_found',
-  'not_your_video', 'already_in_library', 'publish_failed', 'import_failed',
+  'not_your_video', 'already_in_library', 'publish_failed', 'import_failed', 'storage_limit', 'library_full',
   ...CHUNKED_UPLOAD_ERROR_CODES,
 ]);
 // Library files are copies of overlay videos, so they have the same names: a UUID plus .webm/.mp4.
@@ -98,6 +100,8 @@ router.get('/settings', requireAuth, csrfProtection, async (req, res) => {
       isAdmin: (req.session.user?.accessLevel ?? AccessLevel.USER) >= AccessLevel.ADMIN,
       baseUrl: PUBLIC_URL,
       maxFileMb: MAX_UPLOAD_MB,
+      maxTotalMb: OVERLAY_MAX_TOTAL_MB_PER_STREAMER,
+      libraryMaxTotalMb: OVERLAY_LIBRARY_MAX_TOTAL_MB,
       maxVideoWeight: MAX_OVERLAY_VIDEO_WEIGHT,
       error:   filterQueryParam(req.query.error,   KNOWN_ERRORS),
       success: filterQueryParam(req.query.success, KNOWN_SUCCESSES),

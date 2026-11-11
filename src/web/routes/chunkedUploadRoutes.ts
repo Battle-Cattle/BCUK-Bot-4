@@ -46,8 +46,11 @@ export interface ChunkedUploadRouteOptions {
   guards: RequestHandler[];
   /** Name of the form's file field, given to `req.file.fieldname`. */
   field: string;
-  /** Optional per-area check at start; returns an error code (answered with 409) or null. */
-  checkStart?: (declared: ChunkedUploadDeclaration) => string | null;
+  /**
+   * Optional per-area check at start, given the declaration and the request (for the requester);
+   * returns an error code (answered with 409) or null, directly or as a promise.
+   */
+  checkStart?: (declared: ChunkedUploadDeclaration, req: Request) => string | null | Promise<string | null>;
   /** Turns a finished upload into the `req.file` the area's handler expects. */
   toFile: (finished: FinishedChunkedUpload, field: string) => Promise<UploadedFile>;
   /** The area's existing handlers, run once `req.file` is set; they redirect as they do today. */
@@ -222,7 +225,7 @@ function startHandler(options: ChunkedUploadRouteOptions): JsonHandler {
     // Each start also clears abandoned sessions, so they never outlive the next upload by long.
     void store.sweep();
     const declared = parseDeclaration(req.body);
-    const refused = declared ? checkStart?.(declared) : null;
+    const refused = declared ? await checkStart?.(declared, req) : null;
     if (!declared || refused) {
       res.status(declared ? 409 : 400).json({ error: refused ?? 'invalid_upload' });
       return;

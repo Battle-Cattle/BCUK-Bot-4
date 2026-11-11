@@ -13,7 +13,7 @@ vi.mock('../../shared/config', async () => {
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
 import {
-  LIBRARY_FOLDER, streamerFolder, linkVideoFile, removeVideoFile, removeLibraryVideoFile, withLinkedVideoFile,
+  LIBRARY_FOLDER, streamerFolder, linkVideoFile, removeVideoFile, removeLibraryVideoFile, withLinkedVideoFile, videoFileSize,
 } from './overlayVideoLibraryFiles';
 import { OVERLAY_FOLDER as overlayFolder } from '../../shared/config';
 
@@ -255,5 +255,51 @@ describe('withLinkedVideoFile', () => {
     await expect(withLinkedVideoFile({ folder: '5', filename: 'missing.webm' }, LIBRARY_FOLDER, dbStep))
       .resolves.toEqual({ status: 'source_missing' });
     expect(dbStep).not.toHaveBeenCalled();
+  });
+});
+
+describe('videoFileSize', () => {
+  it('reports a stored file\'s size, and a hard link\'s as the full size of the data', async () => {
+    const source = await writeVideo(LIBRARY_FOLDER, 'lib.webm', 'twelve bytes');
+    expect(await videoFileSize(source)).toBe(12);
+    const filename = await linkVideoFile(source, streamerFolder(5));
+    expect(await videoFileSize({ folder: streamerFolder(5), filename: filename! })).toBe(12);
+  });
+
+  it('is null for a missing file or folder', async () => {
+    await writeVideo(streamerFolder(5), 'a.webm');
+    expect(await videoFileSize({ folder: streamerFolder(5), filename: 'gone.webm' })).toBeNull();
+    expect(await videoFileSize({ folder: streamerFolder(6), filename: 'a.webm' })).toBeNull();
+  });
+
+  it('is null for a folder that isn\'t a video folder or a filename that leaves it', async () => {
+    await writeVideo(streamerFolder(5), 'a.webm');
+    await writeVideo('.incoming', 'b.webm');
+    expect(await videoFileSize({ folder: '.incoming', filename: 'b.webm' })).toBeNull();
+    expect(await videoFileSize({ folder: streamerFolder(6), filename: '../5/a.webm' })).toBeNull();
+  });
+
+  it('is null for a file linked to somewhere outside the overlay folder', async () => {
+    const outside = path.join(os.tmpdir(), `overlay-size-outside-${process.pid}-${Date.now()}.webm`);
+    await fs.promises.writeFile(outside, 'outside');
+    try {
+      await fs.promises.mkdir(path.join(overlayFolder, '5'), { recursive: true });
+      await fs.promises.symlink(outside, path.join(overlayFolder, '5', 'link.webm'));
+      expect(await videoFileSize({ folder: streamerFolder(5), filename: 'link.webm' })).toBeNull();
+    } finally {
+      await fs.promises.rm(outside, { force: true });
+    }
+  });
+
+  it('passes on a filesystem error other than a missing file', async () => {
+    const location = await writeVideo(streamerFolder(5), 'a.webm');
+    vi.spyOn(fs.promises, 'stat').mockRejectedValueOnce(Object.assign(new Error('denied'), { code: 'EACCES' }));
+    await expect(videoFileSize(location)).rejects.toThrow('denied');
+  });
+
+  it('is null when the file disappears between the path check and the measurement', async () => {
+    const location = await writeVideo(streamerFolder(5), 'a.webm');
+    vi.spyOn(fs.promises, 'stat').mockRejectedValueOnce(Object.assign(new Error('gone'), { code: 'ENOENT' }));
+    expect(await videoFileSize(location)).toBeNull();
   });
 });

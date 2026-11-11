@@ -29,6 +29,8 @@
         already_in_library:'That video is already in the public library.',
         publish_failed:   'Adding the video to the public library failed — please try again.',
         import_failed:    'Adding the library video to your videos failed — please try again.',
+        storage_limit:    `That would take your videos over your ${maxTotalMb} MB storage limit. Delete some videos to make room.`,
+        library_full:     `The public library is full (${libraryMaxTotalMb} MB). An Admin needs to remove some videos before more can be added.`,
       }; %>
       <%= errorMessages[error] ?? `An error occurred (${error}).` %>
     </div>
@@ -85,7 +87,7 @@
               <progress class="upload-progress-bar" max="100" value="0" aria-label="Upload progress"></progress>
               <span class="hint" data-upload-progress-label role="status" aria-live="polite"></span>
             </div>
-            <p class="hint mt-04">For transparent overlays, upload WebM with an alpha channel or a MOV (e.g. ProRes 4444): MOV files are converted to WebM on upload, keeping transparency, which can take a minute. Max <%= maxFileMb %> MB.</p>
+            <p class="hint mt-04">For transparent overlays, upload WebM with an alpha channel or a MOV (e.g. ProRes 4444): MOV files are converted to WebM on upload, keeping transparency, which can take a minute. Max <%= maxFileMb %> MB per file, <%= maxTotalMb %> MB for all your videos together (videos added from the public library count too).</p>
           </form>
         </div>
       </div>

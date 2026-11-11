@@ -15,7 +15,7 @@ import {
 let dir: string;
 let store: ChunkedUploadStore;
 let received: { file?: UploadedFile; body?: unknown };
-const checkStart = vi.fn((): string | null => null);
+const checkStart = vi.fn<NonNullable<ChunkedUploadRouteOptions['checkStart']>>(() => null);
 
 function makeApp(user: unknown = { discordId: 'u1' }, toFile: ChunkedUploadRouteOptions['toFile'] = toMemoryFile) {
   const router = Router();
@@ -50,6 +50,7 @@ beforeEach(async () => {
   dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'chunked-routes-'));
   store = new ChunkedUploadStore({ dir, maxBytes: 10 });
   received = {};
+  checkStart.mockReset();
   checkStart.mockReturnValue(null);
 });
 
@@ -96,6 +97,20 @@ describe('mountChunkedUploadRoutes', () => {
     const refused = await app.post('/upload/start').send({ name: 'a', size: 1 });
     expect(refused.status).toBe(409);
     expect(refused.body).toEqual({ error: 'transcode_busy' });
+  });
+
+  it('gives the per-area check the declaration and the request, and waits for an asynchronous answer', async () => {
+    checkStart.mockImplementation(async (_declared, req) => (req.session.user?.discordId === 'u1' ? 'storage_limit' : null));
+    const refused = await makeApp().post('/upload/start').send({ name: 'a', size: 1, type: 'video/webm' });
+    expect(refused.status).toBe(409);
+    expect(refused.body).toEqual({ error: 'storage_limit' });
+    expect(checkStart.mock.calls[0]![0]).toEqual({ name: 'a', size: 1, type: 'video/webm' });
+    expect((await makeApp({ discordId: 'u2' }).post('/upload/start').send({ name: 'a', size: 1 })).status).toBe(200);
+  });
+
+  it('answers 500 when the per-area check fails', async () => {
+    checkStart.mockRejectedValue(new Error('db down'));
+    expect((await makeApp().post('/upload/start').send({ name: 'a', size: 1 })).status).toBe(500);
   });
 
   it('refuses a second upload by the same user, naming the first', async () => {

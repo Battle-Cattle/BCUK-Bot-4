@@ -110,6 +110,27 @@ export async function linkVideoFile(source: OverlayVideoLocation, destFolder: st
 }
 
 /**
+ * Measures a stored overlay video file, following the same folder checks as {@link linkVideoFile}.
+ * A hard link reports the full size of the data it shares.
+ * @param location - The file's folder and filename.
+ * @returns The file's size in bytes, or null if it's missing, the folder isn't a video folder, or
+ *   its real path is outside OVERLAY_FOLDER.
+ * @throws Filesystem errors other than a missing file.
+ */
+export async function videoFileSize(location: OverlayVideoLocation): Promise<number | null> {
+  const filePath = resolveInOverlayFolder(location.folder, location.filename);
+  if (!filePath) return null;
+  const realPath = await realPathWithin(OVERLAY_FOLDER, filePath);
+  if (!realPath) return null;
+  try {
+    return (await fs.promises.stat(realPath)).size;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw err;
+  }
+}
+
+/**
  * Removes a stored overlay video file, logging instead of throwing (as `removeDeletedVideoFile`
  * does for a deleted video): a leftover file is harmless, a failed request over one isn't worth it.
  * The folder's real path must be inside OVERLAY_FOLDER, so a folder linked to somewhere outside

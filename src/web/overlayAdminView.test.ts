@@ -20,6 +20,8 @@ function render(locals: Record<string, unknown> = {}): Promise<string> {
     isAdmin: false,
     baseUrl: 'https://bot.example',
     maxFileMb: 100,
+    maxTotalMb: 1024,
+    libraryMaxTotalMb: 10240,
     // A non-default limit, so a template that hardcoded 100 would fail these tests.
     maxVideoWeight: 42,
     error: null,
@@ -191,5 +193,16 @@ describe('views/overlayAdmin.ejs importing', () => {
   it('explains the import outcomes', async () => {
     expect(await render({ success: 'video_imported' })).toContain('Library video added to your videos. You can now assign it to rewards and advanced commands.');
     expect(await render({ error: 'import_failed' })).toContain('Adding the library video to your videos failed — please try again.');
+  });
+
+  it('explains the storage cap errors, naming the configured limits', async () => {
+    expect(await render({ error: 'storage_limit', maxTotalMb: 2048 }))
+      .toContain('That would take your videos over your 2048 MB storage limit. Delete some videos to make room.');
+    expect(await render({ error: 'library_full', libraryMaxTotalMb: 4096 }))
+      .toContain('The public library is full (4096 MB). An Admin needs to remove some videos before more can be added.');
+  });
+
+  it('tells the streamer their total storage limit next to the upload form', async () => {
+    expect(await render({ maxTotalMb: 2048 })).toContain('2048 MB for all your videos together');
   });
 });

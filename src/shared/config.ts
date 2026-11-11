@@ -79,6 +79,13 @@ export const SFX_MAX_FILE_MB = parsePositiveIntEnv(process.env.SFX_MAX_FILE_MB, 
 export const OVERLAY_FOLDER = process.env.OVERLAY_FOLDER?.trim() || './overlay-videos';
 export const OVERLAY_MAX_FILE_MB = parsePositiveIntEnv(process.env.OVERLAY_MAX_FILE_MB, 500);
 /**
+ * Most megabytes of overlay video one streamer may store: their uploads (as stored, so after a
+ * MOV's conversion) plus the videos they imported from the public library, each counted in full.
+ */
+export const OVERLAY_MAX_TOTAL_MB_PER_STREAMER = parsePositiveIntEnv(process.env.OVERLAY_MAX_TOTAL_MB_PER_STREAMER, 1024);
+/** Most megabytes the public overlay video library's own files may add up to. */
+export const OVERLAY_LIBRARY_MAX_TOTAL_MB = parsePositiveIntEnv(process.env.OVERLAY_LIBRARY_MAX_TOTAL_MB, 10240);
+/**
  * Longest one MOV → WebM overlay conversion may run before ffmpeg is killed. Encoding transparent
  * VP9 from a few hundred MB of ProRes 4444 can take well over five minutes on a small server.
  */
