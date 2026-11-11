@@ -13,6 +13,8 @@ npm -v    # expect 11.x
 
 (If `$NVM_DIR/nvm.sh` doesn't exist in a given sandbox, find whatever installs/switches Node there instead — the point is Node 24.22.1+ / npm 11+, not this exact path.) `.npmrc` sets `engine-strict=true`, so npm refuses to install on an older Node.
 
+`@types/node` stays on the same major as `engines` (Dependabot ignores its major updates), so type-checking rejects APIs newer than the Node the bot runs on. Bump it in the same change that moves `engines` and CI to a new Node major.
+
 Do this once per session before `npm install`/`npm ci`/`npm test`/etc. — don't debug an `npm ci` failure by fighting the lockfile before first checking `node -v`/`npm -v`.
 
 ## ALWAYS: Before Committing

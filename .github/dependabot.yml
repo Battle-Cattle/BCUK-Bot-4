@@ -16,6 +16,11 @@ updates:
       # already run on 7.x through the `typescript7` alias. See CLAUDE.md "TypeScript 6 + 7".
       - dependency-name: "typescript"
         update-types: ["version-update:semver-major"]
+      # `@types/node` tracks the Node major the bot runs on (`engines` in package.json, CI's
+      # node-version), so the type-checker rejects APIs that would crash at runtime. Bump its
+      # major together with the Node upgrade, not ahead of it.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     groups:
       vitest:
         patterns:
