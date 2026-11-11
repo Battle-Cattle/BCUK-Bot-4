@@ -34,6 +34,8 @@ vi.mock('../../shared/config', () => ({
   OVERLAY_STATUS_MAX_SSE_PER_STREAMER: 3,
   OVERLAY_MAX_SSE_PER_CHANNEL: 10,
   OVERLAY_FOLDER: './overlay-videos',
+  OVERLAY_MAX_TOTAL_MB_PER_STREAMER: 1024,
+  OVERLAY_LIBRARY_MAX_TOTAL_MB: 10240,
   SSE_MAX_TOTAL_CONNECTIONS: 1000,
 }));
 
@@ -167,6 +169,17 @@ describe('GET /settings — query param filtering', () => {
     const res = await supertest(buildApp()).get('/settings');
     expect(res.status).toBe(200);
     expect(res.body.maxFileMb).toBe(100);
+  });
+
+  it('passes the storage caps to the template as maxTotalMb and libraryMaxTotalMb', async () => {
+    const res = await supertest(buildApp()).get('/settings');
+    expect(res.body.maxTotalMb).toBe(1024);
+    expect(res.body.libraryMaxTotalMb).toBe(10240);
+  });
+
+  it.each(['storage_limit', 'library_full'])('passes the storage cap error %s to the template', async (code) => {
+    const res = await supertest(buildApp()).get(`/settings?error=${code}`);
+    expect(res.body.error).toBe(code);
   });
 
   it('passes the overlay video weight limit to the template as maxVideoWeight', async () => {

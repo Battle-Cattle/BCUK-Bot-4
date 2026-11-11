@@ -6,7 +6,8 @@ import { randomUUID } from 'crypto';
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import type { DbStreamerEventSub } from '../../db';
-import { addVideo, deleteVideo } from '../../db';
+import { addVideo, deleteVideo, getStreamerByDiscordId } from '../../db';
+import { getSessionUser } from '../session';
 import { OVERLAY_FOLDER, OVERLAY_MAX_FILE_MB } from '../../shared/config';
 import { parsePositiveIntId } from './validation';
 import { requireStreamer } from './viewHelpers';
@@ -24,6 +25,8 @@ import { parseUploadId, claimConversionProgress, setConversionProgress, releaseC
 import {
   adoptChunkedUpload, INCOMING_DIR, detectUploadedVideoType, placeUpload, discardUpload, sweepStaleIncomingUploads, type OverlayVideoType,
 } from './overlayUploadStorage';
+import { streamerFolder, videoFileSize } from './overlayVideoLibraryFiles';
+import { exceedsStreamerStorage, isStreamerStorageFull, withStreamerQuota } from './overlayStorageQuota';
 
 const log = createLogger('OverlayAdmin');
 
@@ -38,7 +41,7 @@ export const MAX_CONCURRENT_OVERLAY_UPLOADS = 3;
 let activeUploads = 0;
 
 /** Error codes `saveVideoFile` throws that the upload route reports as themselves. */
-const UPLOAD_ERROR_CODES = new Set(['invalid_path', 'invalid_file', 'transcode_failed', 'transcode_busy']);
+const UPLOAD_ERROR_CODES = new Set(['invalid_path', 'invalid_file', 'transcode_failed', 'transcode_busy', 'storage_limit']);
 export const router = Router();
 
 /** Maximum upload size in megabytes, passed to templates to avoid direct process.env access in EJS. */
@@ -103,15 +106,45 @@ async function storeWithProgress(
 }
 
 /**
+ * Records a stored overlay video in the DB if it fits the streamer's storage cap, deleting the
+ * file again if it doesn't or the DB insert fails. The cap is checked here, on the file as stored
+ * (a MOV is already its much smaller WebM), not on the size the upload declared. Check and insert
+ * run under {@link withStreamerQuota}, so two of the streamer's videos can't both fit at once.
+ * @param streamerId - DB row ID of the owning streamer.
+ * @param name - Display name for the video.
+ * @param filename - The stored file's name within the streamer's folder.
+ * @param fullPath - Absolute path of the stored file.
+ * @returns Resolves once the video is recorded.
+ * @throws With `code: 'storage_limit'` if the file would take the streamer over the cap, or the
+ *   error from measuring or recording it. Either way the file is removed first.
+ */
+async function recordVideoWithinQuota(streamerId: number, name: string, filename: string, fullPath: string): Promise<void> {
+  try {
+    await withStreamerQuota(streamerId, async () => {
+      const size = (await videoFileSize({ folder: streamerFolder(streamerId), filename })) ?? 0;
+      if (await exceedsStreamerStorage(streamerId, size)) {
+        throw Object.assign(new Error('Overlay storage limit reached'), { code: 'storage_limit' });
+      }
+      await addVideo(streamerId, name, filename);
+    });
+  } catch (e) {
+    await fs.promises.rm(fullPath, { force: true });
+    throw e;
+  }
+}
+
+/**
  * Stores an uploaded overlay video in the streamer's folder (see {@link storeVideoFile}) and
- * records it in the DB, deleting the file again if the DB insert fails.
+ * records it in the DB (see {@link recordVideoWithinQuota}), deleting the file again if it's over
+ * the streamer's storage cap or the DB insert fails.
  * @param streamer - Owning streamer.
  * @param file - The finished upload, kept on disk in the incoming folder (see `adoptChunkedUpload`).
  * @param name - Display name for the video.
  * @param uploadId - The page's ID for this upload (`X-Upload-Id`), or null when it sent none.
  * @returns Resolves once the file is saved and recorded.
- * @throws With `code: 'invalid_path'`, `'invalid_file'`, `'transcode_busy'` or `'transcode_failed'`
- *   for a bad path, a non-video upload, a full conversion queue or a MOV that couldn't be converted.
+ * @throws With `code: 'invalid_path'`, `'invalid_file'`, `'transcode_busy'`, `'transcode_failed'`
+ *   or `'storage_limit'` for a bad path, a non-video upload, a full conversion queue, a MOV that
+ *   couldn't be converted or a stored file that would take the streamer over their storage cap.
  */
 async function saveVideoFile(streamer: DbStreamerEventSub, file: UploadedFile, name: string, uploadId: string | null): Promise<void> {
   const dir = safeResolve(OVERLAY_FOLDER, String(streamer.id));
@@ -120,13 +153,7 @@ async function saveVideoFile(streamer: DbStreamerEventSub, file: UploadedFile, n
   if (!type) throw Object.assign(new Error('Invalid file type'), { code: 'invalid_file' });
   await fs.promises.mkdir(dir, { recursive: true });
   const filename = await storeWithProgress(streamer, dir, file, { type, uploadId });
-  const fullPath = path.join(dir, filename);
-  try {
-    await addVideo(streamer.id, name, filename);
-  } catch (e) {
-    await fs.promises.rm(fullPath, { force: true });
-    throw e;
-  }
+  await recordVideoWithinQuota(streamer.id, name, filename, path.join(dir, filename));
   log.info(`Overlay video uploaded for ${streamer.twitch_name}: ${filename}${type === 'mov' ? ' (converted from MOV)' : ''}`);
 }
 
@@ -215,14 +242,20 @@ const chunkedVideoStore = new ChunkedUploadStore({
 /**
  * Turns an upload away before any of it is sent: with `upload_busy` while the most finished
  * uploads are already being processed (completion checks again, for races), or a declared MOV
- * with `transcode_busy` while the conversion queue is full.
+ * with `transcode_busy` while the conversion queue is full, or with `storage_limit` when the
+ * streamer's stored videos are already at or over their cap. The declared size isn't held against
+ * the cap here: a MOV is stored as a much smaller WebM, so completion checks the stored file.
  * @param declared - The upload's declared name and type.
- * @returns `upload_busy`, `transcode_busy`, or null to let the upload start.
+ * @param req - Express request, for the session user whose streamer record is checked.
+ * @returns `upload_busy`, `transcode_busy`, `storage_limit`, or null to let the upload start.
  */
-function checkChunkedVideoStart(declared: ChunkedUploadDeclaration): string | null {
+async function checkChunkedVideoStart(declared: ChunkedUploadDeclaration, req: Request): Promise<string | null> {
   // Turned away now rather than at completion, so the user doesn't send the whole file first.
   if (activeUploads >= MAX_CONCURRENT_OVERLAY_UPLOADS) return 'upload_busy';
-  return declaresMov(declared.name, declared.type) && isWebmTranscodeQueueFull() ? 'transcode_busy' : null;
+  if (declaresMov(declared.name, declared.type) && isWebmTranscodeQueueFull()) return 'transcode_busy';
+  // The guards already turned non-streamers away; one deleted since then is refused at completion.
+  const streamer = await getStreamerByDiscordId(getSessionUser(req).discordId);
+  return streamer && await isStreamerStorageFull(streamer.id) ? 'storage_limit' : null;
 }
 
 /**
@@ -234,8 +267,9 @@ function checkChunkedVideoStart(declared: ChunkedUploadDeclaration): string | nu
  * guard every route; the page sends the token in an X-CSRF-Token header. Completing redirects to
  * `/overlay/settings?success=video_uploaded`, or `?error=<code>`: `not_a_streamer`,
  * `invalid_file` (failed magic-byte validation), `transcode_failed`/`transcode_busy` (a MOV
- * couldn't be converted, now or at all), `upload_busy` (too many being processed), `invalid_path`
- * or `upload_failed`. The finished file is always removed from the incoming folder afterwards.
+ * couldn't be converted, now or at all), `upload_busy` (too many being processed),
+ * `storage_limit` (the streamer's stored videos are at their cap, or this one would take them
+ * over it), `invalid_path` or `upload_failed`. The finished file is always removed from the incoming folder afterwards.
  */
 mountChunkedUploadRoutes(router, {
   path: '/settings/videos/upload',

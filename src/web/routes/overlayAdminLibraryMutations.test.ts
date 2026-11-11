@@ -10,7 +10,12 @@ import { ACCESS_LEVEL_MOCK } from '../../test-utils/accessLevelMock';
 vi.mock('../../shared/config', async () => {
   const nodeOs = await import('os');
   const nodePath = await import('path');
-  return { OVERLAY_FOLDER: nodePath.join(nodeOs.tmpdir(), `overlay-library-remove-${process.pid}-${Date.now()}`) };
+  return {
+    OVERLAY_FOLDER: nodePath.join(nodeOs.tmpdir(), `overlay-library-remove-${process.pid}-${Date.now()}`),
+    // 40 bytes per streamer and 60 for the library, so the small test files reach the caps.
+    OVERLAY_MAX_TOTAL_MB_PER_STREAMER: 40 / (1024 * 1024),
+    OVERLAY_LIBRARY_MAX_TOTAL_MB: 60 / (1024 * 1024),
+  };
 });
 const { logMock } = vi.hoisted(() => ({
   logMock: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
@@ -26,6 +31,7 @@ vi.mock('../../db', () => ({
   deleteVideo: vi.fn(),
   addVideoToLibrary: vi.fn(),
   getVideosForStreamer: vi.fn(),
+  getLibraryVideos: vi.fn(),
   getLibraryVideoFilename: vi.fn(),
   importLibraryVideo: vi.fn(),
   getStreamerByDiscordId: vi.fn(),
@@ -41,7 +47,7 @@ import supertest from 'supertest';
 import { router } from './overlayAdminLibraryMutations';
 import {
   removeLibraryVideo, deleteVideo, findUser, getGuildsForMember,
-  addVideoToLibrary, getVideosForStreamer, getStreamerByDiscordId, getLibraryVideoFilename, importLibraryVideo,
+  addVideoToLibrary, getVideosForStreamer, getLibraryVideos, getStreamerByDiscordId, getLibraryVideoFilename, importLibraryVideo,
 } from '../../db';
 import { LIBRARY_IMPORT_LIMIT, LIBRARY_PUBLISH_LIMIT } from '../rateLimits';
 import { AccessLevel } from '../../db';
@@ -75,7 +81,16 @@ beforeEach(async () => {
   await fs.promises.rm(overlayFolder, { recursive: true, force: true });
   await fs.promises.mkdir(path.join(overlayFolder, LIBRARY_FOLDER), { recursive: true });
   await fs.promises.writeFile(file(LIBRARY_FOLDER, LIBRARY_FILE), 'library video');
+  // The storage caps are summed from these rows; by default nobody has stored anything.
+  vi.mocked(getVideosForStreamer).mockResolvedValue([]);
+  vi.mocked(getLibraryVideos).mockResolvedValue([]);
 });
+
+/** Writes a file of `bytes` bytes into an OVERLAY_FOLDER subfolder. */
+async function writeSized(folder: string, filename: string, bytes: number) {
+  await fs.promises.mkdir(path.join(overlayFolder, folder), { recursive: true });
+  await fs.promises.writeFile(file(folder, filename), Buffer.alloc(bytes));
+}
 
 afterAll(async () => {
   await fs.promises.rm(overlayFolder, { recursive: true, force: true });
@@ -199,6 +214,59 @@ describe('POST /settings/videos/:id/publish', () => {
     expect(await fs.promises.readFile(file(LIBRARY_FOLDER, libraryFile!), 'utf8')).toBe('streamer video');
   });
 
+  it('refuses with library_full, leaving no library file or row, when the video would take the library over its cap', async () => {
+    const app = await publishApp();
+    // 13 + 40 bytes in the library already; the 14-byte video would make 67 of the 60 allowed.
+    await writeSized(LIBRARY_FOLDER, 'big.webm', 40);
+    vi.mocked(getLibraryVideos).mockResolvedValue([{ filename: LIBRARY_FILE }, { filename: 'big.webm' }] as any);
+
+    const res = await supertest(app).post('/settings/videos/3/publish');
+
+    expect(res.headers.location).toBe('/overlay/settings?error=library_full');
+    expect(addVideoToLibrary).not.toHaveBeenCalled();
+    expect(await newLibraryFiles()).toEqual(['big.webm']);
+  });
+
+  it('accepts the video again once an Admin has removed a library entry', async () => {
+    vi.mocked(addVideoToLibrary).mockResolvedValue({ status: 'added', libraryId: 7, sourceFilename: SOURCE_FILE });
+    const publisher = await publishApp();
+    await writeSized(LIBRARY_FOLDER, 'big.webm', 40);
+    vi.mocked(getLibraryVideos).mockResolvedValue([{ filename: LIBRARY_FILE }, { filename: 'big.webm' }] as any);
+    expect((await supertest(publisher).post('/settings/videos/3/publish')).headers.location).toBe('/overlay/settings?error=library_full');
+
+    vi.mocked(removeLibraryVideo).mockResolvedValue('big.webm');
+    await supertest(app(AccessLevel.ADMIN)).post('/settings/library/8/remove');
+    vi.mocked(getLibraryVideos).mockResolvedValue([{ filename: LIBRARY_FILE }] as any);
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue({ id: STREAMER_ID } as any);
+
+    const res = await supertest(publisher).post('/settings/videos/3/publish');
+    expect(res.headers.location).toBe('/overlay/settings?success=video_published');
+    expect(await newLibraryFiles()).toHaveLength(1);
+  });
+
+  it('fills the library cap exactly', async () => {
+    vi.mocked(addVideoToLibrary).mockResolvedValue({ status: 'added', libraryId: 7, sourceFilename: SOURCE_FILE });
+    const app = await publishApp();
+    // 13 + 33 + the 14-byte video = 60, the cap.
+    await writeSized(LIBRARY_FOLDER, 'big.webm', 33);
+    vi.mocked(getLibraryVideos).mockResolvedValue([{ filename: LIBRARY_FILE }, { filename: 'big.webm' }] as any);
+    const res = await supertest(app).post('/settings/videos/3/publish');
+    expect(res.headers.location).toBe('/overlay/settings?success=video_published');
+  });
+
+  it('does not count a publish against the contributor\'s own cap', async () => {
+    vi.mocked(addVideoToLibrary).mockResolvedValue({ status: 'added', libraryId: 7, sourceFilename: SOURCE_FILE });
+    const app = await publishApp();
+    // The contributor's own videos are over their 40-byte cap already.
+    await writeSized(streamerFolder(STREAMER_ID), 'more.webm', 40);
+    vi.mocked(getVideosForStreamer).mockResolvedValue([
+      { id: 3, streamer_id: STREAMER_ID, name: 'Clap', filename: SOURCE_FILE, created_at: new Date() },
+      { id: 4, streamer_id: STREAMER_ID, name: 'More', filename: 'more.webm', created_at: new Date() },
+    ]);
+    const res = await supertest(app).post('/settings/videos/3/publish');
+    expect(res.headers.location).toBe('/overlay/settings?success=video_published');
+  });
+
   it('refuses another streamer\'s video before creating any file', async () => {
     const app = await publishApp();
     const res = await supertest(app).post('/settings/videos/99/publish');
@@ -309,6 +377,35 @@ describe('POST /settings/library/:id/import', () => {
     // Deleting the imported copy keeps the library file.
     await fs.promises.rm(file(streamerFolder(STREAMER_ID), copy!));
     expect(await fs.promises.readFile(file(LIBRARY_FOLDER, LIBRARY_FILE), 'utf8')).toBe('library video');
+  });
+
+  it('refuses with storage_limit, leaving no file or row, when the import would take the streamer over their cap', async () => {
+    const app = importApp();
+    // 28 bytes stored already; the 13-byte library video would make 41 of the 40 allowed.
+    await writeSized(streamerFolder(STREAMER_ID), 'own.webm', 28);
+    vi.mocked(getVideosForStreamer).mockResolvedValue([{ filename: 'own.webm' }] as any);
+
+    const res = await supertest(app).post('/settings/library/4/import');
+
+    expect(res.headers.location).toBe('/overlay/settings?error=storage_limit');
+    expect(importLibraryVideo).not.toHaveBeenCalled();
+    expect(await streamerFiles()).toEqual(['own.webm']);
+    expect(getVideosForStreamer).toHaveBeenCalledWith(STREAMER_ID);
+  });
+
+  it('accepts an import that fills the streamer\'s cap exactly, and one made after deleting a video', async () => {
+    vi.mocked(importLibraryVideo).mockResolvedValue(31);
+    const app = importApp();
+    await writeSized(streamerFolder(STREAMER_ID), 'own.webm', 27);
+    vi.mocked(getVideosForStreamer).mockResolvedValue([{ filename: 'own.webm' }] as any);
+    expect((await supertest(app).post('/settings/library/4/import')).headers.location).toBe('/overlay/settings?success=video_imported');
+
+    // Now at the cap: a second copy is refused until the streamer deletes their own video.
+    const [copy] = (await streamerFiles()).filter((f) => f !== 'own.webm');
+    vi.mocked(getVideosForStreamer).mockResolvedValue([{ filename: 'own.webm' }, { filename: copy }] as any);
+    expect((await supertest(app).post('/settings/library/4/import')).headers.location).toBe('/overlay/settings?error=storage_limit');
+    vi.mocked(getVideosForStreamer).mockResolvedValue([{ filename: copy }] as any);
+    expect((await supertest(app).post('/settings/library/4/import')).headers.location).toBe('/overlay/settings?success=video_imported');
   });
 
   it('keeps the imported copy when an Admin then removes the library entry', async () => {

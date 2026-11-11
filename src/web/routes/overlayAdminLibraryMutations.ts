@@ -10,7 +10,8 @@ import {
 import { libraryImportLimiter, libraryPublishLimiter } from '../rateLimits';
 import { parsePositiveIntId } from './validation';
 import { logAndRedirectError } from './errorHandling';
-import { removeLibraryVideoFile, withLinkedVideoFile, LIBRARY_FOLDER, streamerFolder } from './overlayVideoLibraryFiles';
+import { removeLibraryVideoFile, withLinkedVideoFile, videoFileSize, LIBRARY_FOLDER, streamerFolder } from './overlayVideoLibraryFiles';
+import { exceedsLibraryStorage, exceedsStreamerStorage, withLibraryQuota, withStreamerQuota } from './overlayStorageQuota';
 import { requireStreamer } from './viewHelpers';
 import { NOT_A_STREAMER_REDIRECT } from './overlayAdminShared';
 
@@ -60,7 +61,10 @@ const PUBLISH_REDIRECTS: Record<AddVideoToLibraryResult['status'], string> = {
  * folder under a new name (a hard link, or a copy across filesystems), then records the entry with
  * `addVideoToLibrary`, which re-checks ownership in its transaction. The new library file is
  * removed again unless the entry was added (another streamer's video, one already in the library,
- * or a DB failure), so no file is left without its row.
+ * or a DB failure), so no file is left without its row. Refused with `library_full`, before
+ * anything is linked, if the file would take the library over its storage cap; the library is its
+ * own pool, so publishing doesn't count against the contributor's cap. Callers run it under
+ * `withLibraryQuota`.
  * @param videoId - Primary key of the streamer's `overlay_video` row.
  * @param streamerId - DB row ID of the publishing streamer.
  * @returns The redirect URL for the outcome.
@@ -69,8 +73,13 @@ async function publishVideo(videoId: number, streamerId: number): Promise<string
   const video = (await getVideosForStreamer(streamerId)).find((v) => v.id === videoId);
   if (!video) return PUBLISH_REDIRECTS.not_owner;
 
+  const source = { folder: streamerFolder(streamerId), filename: video.filename };
+  // A missing file (null) is reported by the link step below.
+  const size = await videoFileSize(source);
+  if (size !== null && await exceedsLibraryStorage(size)) return '/overlay/settings?error=library_full';
+
   const linked = await withLinkedVideoFile(
-    { folder: streamerFolder(streamerId), filename: video.filename },
+    source,
     LIBRARY_FOLDER,
     async (libraryFilename) => {
       const result = await addVideoToLibrary(videoId, streamerId, libraryFilename);
@@ -95,8 +104,8 @@ async function publishVideo(videoId: number, streamerId: number): Promise<string
  * @param res - Express response; redirects to `/overlay/settings?success=video_published`, or to
  *   `/overlay/settings?error=<code>` if the requester isn't a streamer (`not_a_streamer`), `id` is
  *   malformed (`invalid_id`), the video isn't theirs (`not_your_video`), it's already in the
- *   library (`already_in_library`) or publishing fails (`publish_failed`). Over the rate limit,
- *   replies 429.
+ *   library (`already_in_library`), the library is at its storage cap (`library_full`) or
+ *   publishing fails (`publish_failed`). Over the rate limit, replies 429.
  */
 router.post('/settings/videos/:id/publish', requireAuth, libraryPublishLimiter, csrfProtection, async (req, res) => {
   try {
@@ -106,7 +115,7 @@ router.post('/settings/videos/:id/publish', requireAuth, libraryPublishLimiter, 
     const videoId = parsePositiveIntId(req.params.id);
     if (videoId === null) return res.redirect('/overlay/settings?error=invalid_id');
 
-    res.redirect(await publishVideo(videoId, streamer.id));
+    res.redirect(await withLibraryQuota(() => publishVideo(videoId, streamer.id)));
   } catch (err) {
     logAndRedirectError({ res, log, logLabel: 'Overlay library publish error:', err, basePath: '/overlay/settings', errorCode: 'publish_failed' });
   }
@@ -135,7 +144,9 @@ async function missingSourceRedirect(libraryId: number, libraryFilename: string)
  * meantime or the DB step fails, so no file is left without its row. An entry an Admin removes
  * mid-import (row and file) reads as `not_found`, not a failure to retry
  * ({@link missingSourceRedirect}). Importing the same entry
- * twice just makes a second copy.
+ * twice just makes a second copy. Refused with `storage_limit`, before anything is linked, if the
+ * library file's full size would take the streamer over their storage cap: an import counts in
+ * full even though it's usually a hard link. Callers run it under `withStreamerQuota`.
  * @param libraryId - Primary key of the `overlay_video_library` row.
  * @param streamerId - DB row ID of the importing streamer.
  * @returns The redirect URL for the outcome.
@@ -144,8 +155,13 @@ async function importVideo(libraryId: number, streamerId: number): Promise<strin
   const libraryFilename = await getLibraryVideoFilename(libraryId);
   if (libraryFilename === null) return '/overlay/settings?error=not_found';
 
+  const source = { folder: LIBRARY_FOLDER, filename: libraryFilename };
+  // A missing file (null) is reported by the link step below.
+  const size = await videoFileSize(source);
+  if (size !== null && await exceedsStreamerStorage(streamerId, size)) return '/overlay/settings?error=storage_limit';
+
   const linked = await withLinkedVideoFile(
-    { folder: LIBRARY_FOLDER, filename: libraryFilename },
+    source,
     streamerFolder(streamerId),
     async (filename) => {
       const videoId = await importLibraryVideo(libraryId, streamerId, filename);
@@ -165,8 +181,9 @@ async function importVideo(libraryId: number, streamerId: number): Promise<strin
  * @param req - Express request; reads the `id` route param and the session user.
  * @param res - Express response; redirects to `/overlay/settings?success=video_imported`, or to
  *   `/overlay/settings?error=<code>` if the requester isn't a streamer (`not_a_streamer`), `id` is
- *   malformed (`invalid_id`), the entry no longer exists (`not_found`) or importing fails
- *   (`import_failed`). Over the rate limit, replies 429.
+ *   malformed (`invalid_id`), the entry no longer exists (`not_found`), it would take the
+ *   streamer over their storage cap (`storage_limit`) or importing fails (`import_failed`). Over
+ *   the rate limit, replies 429.
  */
 router.post('/settings/library/:id/import', requireAuth, libraryImportLimiter, csrfProtection, async (req, res) => {
   try {
@@ -176,7 +193,7 @@ router.post('/settings/library/:id/import', requireAuth, libraryImportLimiter, c
     const libraryId = parsePositiveIntId(req.params.id);
     if (libraryId === null) return res.redirect('/overlay/settings?error=invalid_id');
 
-    res.redirect(await importVideo(libraryId, streamer.id));
+    res.redirect(await withStreamerQuota(streamer.id, () => importVideo(libraryId, streamer.id)));
   } catch (err) {
     logAndRedirectError({ res, log, logLabel: 'Overlay library import error:', err, basePath: '/overlay/settings', errorCode: 'import_failed' });
   }
