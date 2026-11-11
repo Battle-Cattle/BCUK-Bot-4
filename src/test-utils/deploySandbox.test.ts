@@ -1,4 +1,4 @@
-import { describe, it, expect, afterAll } from 'vitest';
+import { describe, it, expect, afterAll, vi } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 import { spawn } from 'child_process';
@@ -82,5 +82,27 @@ describe.skipIf(notLinux)('deploySandbox', { timeout: SCRIPT_TEST_TIMEOUT_MS }, 
     await new Promise((resolve) => child.once('exit', resolve));
 
     expect(isRunning(pid)).toBe(false);
+  });
+
+  it.each(['ENOENT', 'ESRCH'])('treats a process that vanishes during the /proc read (%s) as not running', (code) => {
+    const read = vi.spyOn(fs, 'readFileSync').mockImplementationOnce(() => {
+      throw Object.assign(new Error(code), { code });
+    });
+    try {
+      expect(isRunning(process.pid)).toBe(false);
+    } finally {
+      read.mockRestore();
+    }
+  });
+
+  it('does not hide other errors reading /proc', () => {
+    const read = vi.spyOn(fs, 'readFileSync').mockImplementationOnce(() => {
+      throw Object.assign(new Error('EACCES'), { code: 'EACCES' });
+    });
+    try {
+      expect(() => isRunning(process.pid)).toThrow('EACCES');
+    } finally {
+      read.mockRestore();
+    }
   });
 });

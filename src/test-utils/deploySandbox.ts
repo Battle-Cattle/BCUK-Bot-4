@@ -196,9 +196,15 @@ export function write(file: string, content: string, mode?: number): void {
  */
 export function isRunning(pid: number): boolean {
   const stat = path.join('/proc', String(pid), 'stat');
-  if (!fs.existsSync(stat)) return false;
-  // The state letter follows the parenthesised command name.
-  return fs.readFileSync(stat, 'utf8').split(') ')[1]?.[0] !== 'Z';
+  try {
+    // The state letter follows the parenthesised command name.
+    return fs.readFileSync(stat, 'utf8').split(') ')[1]?.[0] !== 'Z';
+  } catch (error) {
+    // Gone, including reaped between a check and the read: not running. Anything else is a real error.
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ESRCH') return false;
+    throw error;
+  }
 }
 
 /**

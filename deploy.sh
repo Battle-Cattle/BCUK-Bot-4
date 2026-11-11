@@ -142,6 +142,18 @@ for setting in "$HEALTH_TIMEOUT_SECONDS" "$STABILITY_SECONDS" "$JOB_STOP_TIMEOUT
     seconds_to_micros "$setting" || exit 1
 done
 
+# Sleeps one POLL_INTERVAL_SECONDS, but never past DEADLINE_MICROS, so a long interval can't stretch
+# a health or stability window. Returns at once when the deadline has passed.
+poll_sleep() {
+    local remaining
+    seconds_to_micros "$POLL_INTERVAL_SECONDS"
+    now_micros
+    remaining=$((DEADLINE_MICROS - NOW_MICROS))
+    [ "$remaining" -gt 0 ] || return 0
+    [ "$MICROS" -le "$remaining" ] || MICROS=$remaining
+    sleep "$((MICROS / 1000000)).$(printf '%06d' $((MICROS % 1000000)))"
+}
+
 # Prints a line and appends it to the failure report.
 report() {
     printf '%s\n' "$*" | tee -a "$FAILURE_LOG"
@@ -658,7 +670,7 @@ wait_for_health() {
             HEALTH_PROBLEM="systemd reports $SERVICE_NAME as failed"
             return 1
         fi
-        sleep "$POLL_INTERVAL_SECONDS"
+        poll_sleep
         now_micros
     done
     return 1
@@ -674,7 +686,7 @@ wait_for_stability() {
     # window still counts.
     set_deadline "$STABILITY_SECONDS"
     while [ "$NOW_MICROS" -lt "$DEADLINE_MICROS" ]; do
-        sleep "$POLL_INTERVAL_SECONDS"
+        poll_sleep
         if [ "$("$SYSTEMCTL_BIN" show -p MainPID --value "$SERVICE_NAME")" != "$main_pid" ] \
             || [ "$("$SYSTEMCTL_BIN" show -p NRestarts --value "$SERVICE_NAME")" != "$restarts" ] \
             || ! curl -fsS --noproxy '*' --max-time 2 "$HEALTH_URL" > /dev/null 2>&1; then

@@ -72,6 +72,27 @@ describe.skipIf(notLinux)('deploy.sh (health)', { timeout: SCRIPT_TEST_TIMEOUT_M
     expect(Date.now() - started).toBeLessThan(4_000);
   });
 
+  it('never sleeps past the health timeout, however long the poll interval', () => {
+    pushV2();
+    const started = Date.now();
+    // Without the cap each wait would sleep the full 5s before noticing its 0.3s deadline had passed.
+    const result = deploy({ UNHEALTHY_BUILDS: 'v1 v2', DEPLOY_POLL_INTERVAL_SECONDS: '5' });
+
+    expect(result.status).toBe(1);
+    expect(Date.now() - started).toBeLessThan(4_000);
+  });
+
+  it('ends the stability window on time, however long the poll interval, and still checks at its end', () => {
+    pushV2();
+    const started = Date.now();
+    // Call 1 is the health check; call 2 is the check at the end of the 0.3s window, which fails.
+    const result = deploy({ DEPLOY_STABILITY_SECONDS: '0.3', DEPLOY_POLL_INTERVAL_SECONDS: '5', CURL_FAIL_CALL: '2' });
+
+    expect(result.status).toBe(1);
+    expect(failureReport()).toContain('stopped answering within 0.3s');
+    expect(Date.now() - started).toBeLessThan(4_000);
+  });
+
   it.each(['abc', '-1', '1e3', '1.2.3'])("refuses a timeout or interval of '%s' before changing anything", (bad) => {
     const before = workHead();
     pushV2();
