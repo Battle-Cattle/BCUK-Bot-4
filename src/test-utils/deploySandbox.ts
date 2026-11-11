@@ -22,10 +22,11 @@ export const SCRIPT_TEST_TIMEOUT_MS = 30_000;
 /** Stub commands, keyed by name. `$STATE` is the state directory. */
 const STUBS: Record<string, string> = {
   // The real mv, then (with MV_INTERRUPT naming the folder being moved) a TERM to deploy.sh: an
-  // interrupt landing right after the move, before the script can note that it happened.
+  // interrupt landing right after the move, before the script can note that it happened. bash holds
+  // a trap until its foreground command (this stub) exits, so there is nothing to wait for here.
   mv: `#!/usr/bin/env bash
 /bin/mv "$@" || exit
-if [ -n "\${MV_INTERRUPT:-}" ] && [ "$1" = "$MV_INTERRUPT" ]; then kill -TERM "$PPID"; sleep 1; fi
+if [ -n "\${MV_INTERRUPT:-}" ] && [ "$1" = "$MV_INTERRUPT" ]; then kill -TERM "$PPID"; fi
 `,
   systemctl: `#!/usr/bin/env bash
 case "$1" in
@@ -78,9 +79,12 @@ case "$1" in
       # With a hanging build, wait (up to 10s) until its child is running, so the interrupt lands
       # while there is something for the rollback to stop.
       if [ -n "\${NPM_BUILD_HANG:-}" ]; then
-        for _ in $(seq 100); do [ -s "$STATE/build-child" ] && break; sleep 0.1; done
+        for _ in $(seq 500); do [ -s "$STATE/build-child" ] && break; sleep 0.02; done
       fi
-      kill -TERM "$PPID"; sleep 1
+      kill -TERM "$PPID"
+      # Stay running until deploy.sh's rollback has started (it truncates the failure report first),
+      # so the interrupt lands while this job is still going. Capped at 10s so it can't hang.
+      for _ in $(seq 500); do [ -e logs/last-deploy-failure.log ] && break; sleep 0.02; done
     fi
     exit "\${NPM_TEST_EXIT:-0}" ;;
   run)
