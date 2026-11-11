@@ -15,6 +15,9 @@ JOB_STOP_TIMEOUT_SECONDS="${DEPLOY_JOB_STOP_TIMEOUT_SECONDS:-10}"
 # answering) before the deploy counts as good. Catches a build that comes up and then crashes, e.g.
 # when a Discord/Twitch login fails a few seconds after the panel starts listening.
 STABILITY_SECONDS="${DEPLOY_STABILITY_SECONDS:-30}"
+# Pause between health probes and between stability checks. Whole or fractional seconds; the tests
+# shorten it so a deploy that has to wait finishes quickly. The timeouts above take fractions too.
+POLL_INTERVAL_SECONDS="${DEPLOY_POLL_INTERVAL_SECONDS:-1}"
 # Where a failed deploy's report is saved (logs/ is gitignored).
 FAILURE_LOG="logs/last-deploy-failure.log"
 # Longest debug window `deploy.sh debug <hours>` accepts. Matches MAX_DEBUG_LOGGING_HOURS in
@@ -70,6 +73,7 @@ if ! sudo -n -l "$SYSTEMCTL_BIN" restart "$SERVICE_NAME" > /dev/null 2>&1; then
 fi
 command -v curl > /dev/null || { echo "ERROR: curl is required for the post-restart health check."; exit 1; }
 command -v ss > /dev/null || { echo "ERROR: ss (iproute2) is required for the post-restart health check."; exit 1; }
+[ -n "${EPOCHREALTIME:-}" ] || { echo "ERROR: bash 5 or later is required (the health check times itself with EPOCHREALTIME)."; exit 1; }
 
 PREVIOUS_SHA=$(git rev-parse HEAD)
 PREVIOUS_SHORT=$(git rev-parse --short HEAD)
@@ -102,6 +106,59 @@ FAILED_COMMAND=""
 BACKUP_FILE=""
 # Migration files this deploy adds (set after the pull).
 NEW_MIGRATIONS=""
+
+# Converts a number of seconds, whole or with a decimal part ("90", "0.3"), to whole microseconds in
+# MICROS (a variable, not output, so callers need no subshell). Anything else is an error, since a
+# timeout that silently became 0 would fail a healthy deploy.
+MICROS=0
+seconds_to_micros() {
+    local whole fraction
+    if ! [[ "$1" =~ ^([0-9]+)(\.([0-9]{1,6})[0-9]*)?$ ]]; then
+        echo "ERROR: '$1' isn't a number of seconds (like 90 or 0.3)."
+        return 1
+    fi
+    whole="${BASH_REMATCH[1]}"
+    fraction="${BASH_REMATCH[3]:-}000000"
+    MICROS=$((10#$whole * 1000000 + 10#${fraction:0:6}))
+}
+
+# Sets NOW_MICROS to the current time in whole microseconds. EPOCHREALTIME (bash 5+) uses the
+# locale's decimal separator, hence the pattern accepting a comma too.
+NOW_MICROS=0
+now_micros() {
+    NOW_MICROS=$((10#${EPOCHREALTIME/[.,]/}))
+}
+
+# Sets DEADLINE_MICROS to $1 seconds (whole or fractional) from now.
+DEADLINE_MICROS=0
+set_deadline() {
+    seconds_to_micros "$1" || return 1
+    now_micros
+    DEADLINE_MICROS=$((NOW_MICROS + MICROS))
+}
+
+# Fail now on a bad timeout or interval rather than after the new build is in place.
+for setting in "$HEALTH_TIMEOUT_SECONDS" "$STABILITY_SECONDS" "$JOB_STOP_TIMEOUT_SECONDS" "$POLL_INTERVAL_SECONDS"; do
+    seconds_to_micros "$setting" || exit 1
+done
+# A zero (or tiny) interval would run curl and systemctl back to back for the whole window.
+seconds_to_micros "$POLL_INTERVAL_SECONDS"
+if [ "$MICROS" -lt 10000 ]; then
+    echo "ERROR: DEPLOY_POLL_INTERVAL_SECONDS must be at least 0.01 (got '$POLL_INTERVAL_SECONDS')."
+    exit 1
+fi
+
+# Sleeps one POLL_INTERVAL_SECONDS, but never past DEADLINE_MICROS, so a long interval can't stretch
+# a health or stability window. Returns at once when the deadline has passed.
+poll_sleep() {
+    local remaining
+    seconds_to_micros "$POLL_INTERVAL_SECONDS"
+    now_micros
+    remaining=$((DEADLINE_MICROS - NOW_MICROS))
+    [ "$remaining" -gt 0 ] || return 0
+    [ "$MICROS" -le "$remaining" ] || MICROS=$remaining
+    sleep "$((MICROS / 1000000)).$(printf '%06d' $((MICROS % 1000000)))"
+}
 
 # Prints a line and appends it to the failure report.
 report() {
@@ -266,11 +323,12 @@ any_alive() {
 # running JOB_STOP_TIMEOUT_SECONDS later (a process ignoring TERM) is killed, so the rollback can't
 # hang on it. Then the jobs are reaped.
 stop_background_jobs() {
-    local pid deadline signalled=""
+    local pid signalled=""
     for pid in $BUILD_PID $TEST_PID; do signalled="$signalled $(signal_tree TERM "$pid" | tr '\n' ' ')"; done
-    deadline=$((SECONDS + JOB_STOP_TIMEOUT_SECONDS))
+    set_deadline "$JOB_STOP_TIMEOUT_SECONDS" || DEADLINE_MICROS=0
+    now_micros
     # shellcheck disable=SC2086 # word-splitting the PID list is intended
-    while [ "$SECONDS" -lt "$deadline" ] && any_alive $signalled; do sleep 0.2; done
+    while [ "$NOW_MICROS" -lt "$DEADLINE_MICROS" ] && any_alive $signalled; do sleep 0.2; now_micros; done
     for pid in $signalled; do process_alive "$pid" && kill -KILL "$pid" 2>/dev/null; done
     for pid in $BUILD_PID $TEST_PID; do wait "$pid" 2>/dev/null; done
     BUILD_PID=""
@@ -589,12 +647,12 @@ port_listener_pids() {
 # Waits up to HEALTH_TIMEOUT_SECONDS for /healthz to answer from the unit's own process. Returns 1
 # with HEALTH_PROBLEM set to why when it doesn't.
 wait_for_health() {
-    local deadline main_pid listener_pids foreign_pids
+    local main_pid listener_pids foreign_pids
     HEALTH_PROBLEM="it didn't answer $HEALTH_URL within ${HEALTH_TIMEOUT_SECONDS}s (crash-looping or stuck starting?)"
-    # A deadline on elapsed time (bash's SECONDS), not a count of attempts: each curl can take up
-    # to its own 2s timeout on top of the 1s sleep.
-    deadline=$((SECONDS + HEALTH_TIMEOUT_SECONDS))
-    while [ "$SECONDS" -lt "$deadline" ]; do
+    # A deadline on elapsed time, not a count of attempts: each curl can take up to its own 2s
+    # timeout on top of the sleep.
+    set_deadline "$HEALTH_TIMEOUT_SECONDS"
+    while [ "$NOW_MICROS" -lt "$DEADLINE_MICROS" ]; do
         if curl -fsS --noproxy '*' --max-time 2 "$HEALTH_URL" > /dev/null 2>&1; then
             # A 200 only counts if it came from the unit's own process. Something else on the port,
             # such as the old screen-session bot left running, would answer while the new one
@@ -618,28 +676,30 @@ wait_for_health() {
             HEALTH_PROBLEM="systemd reports $SERVICE_NAME as failed"
             return 1
         fi
-        sleep 1
+        poll_sleep
+        now_micros
     done
     return 1
 }
 
-# After the first healthy answer, checks every second for STABILITY_SECONDS that the bot stays up:
+# After the first healthy answer, checks every POLL_INTERVAL_SECONDS for STABILITY_SECONDS that the bot stays up:
 # the same process, no restarts, still answering. Returns 1 with HEALTH_PROBLEM set when it doesn't.
 wait_for_stability() {
-    local main_pid restarts deadline
+    local main_pid restarts
     main_pid="$("$SYSTEMCTL_BIN" show -p MainPID --value "$SERVICE_NAME")"
     restarts="$("$SYSTEMCTL_BIN" show -p NRestarts --value "$SERVICE_NAME")"
-    # Checked every second, not just at the end, so an outage that comes and goes inside the window
-    # still counts.
-    deadline=$((SECONDS + STABILITY_SECONDS))
-    while [ "$SECONDS" -lt "$deadline" ]; do
-        sleep 1
+    # Checked every interval, not just at the end, so an outage that comes and goes inside the
+    # window still counts.
+    set_deadline "$STABILITY_SECONDS"
+    while [ "$NOW_MICROS" -lt "$DEADLINE_MICROS" ]; do
+        poll_sleep
         if [ "$("$SYSTEMCTL_BIN" show -p MainPID --value "$SERVICE_NAME")" != "$main_pid" ] \
             || [ "$("$SYSTEMCTL_BIN" show -p NRestarts --value "$SERVICE_NAME")" != "$restarts" ] \
             || ! curl -fsS --noproxy '*' --max-time 2 "$HEALTH_URL" > /dev/null 2>&1; then
             HEALTH_PROBLEM="it came up but crashed, restarted or stopped answering within ${STABILITY_SECONDS}s"
             return 1
         fi
+        now_micros
     done
 }
 

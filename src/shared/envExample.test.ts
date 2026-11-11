@@ -8,11 +8,11 @@ const REPO_ROOT = path.resolve(__dirname, '../..');
 // the test runner, and FFMPEG_PATH is written by sfxPlayer.ts itself (from ffmpeg-static).
 const NOT_USER_SETTINGS = new Set(['NODE_ENV', 'VITEST', 'FFMPEG_PATH']);
 
-/** Every non-test .ts file under src/, as repo-relative paths. */
+/** Every non-test .ts file under src/ except the shared test helpers in test-utils/, as absolute paths. */
 function sourceFiles(dir = path.join(REPO_ROOT, 'src')): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) return sourceFiles(full);
+    if (entry.isDirectory()) return entry.name === 'test-utils' ? [] : sourceFiles(full);
     return entry.name.endsWith('.ts') && !entry.name.endsWith('.test.ts') ? [full] : [];
   });
 }
