@@ -28,7 +28,7 @@
     "@simplewebauthn/server": "^14.1.0",
     "@twurple/auth": "^8.2.0",
     "@twurple/chat": "^8.2.0",
-    "discord-api-types": "^0.38.57",
+    "discord-api-types": "^0.38.58",
     "discord.js": "^14.28.1",
     "dotenv": "^18.0.9",
     "ejs": "^7.0.2",
