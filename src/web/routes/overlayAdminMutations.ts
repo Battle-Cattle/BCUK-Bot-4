@@ -115,13 +115,15 @@ async function storeWithProgress(
  * @param filename - The stored file's name within the streamer's folder.
  * @param fullPath - Absolute path of the stored file.
  * @returns Resolves once the video is recorded.
- * @throws With `code: 'storage_limit'` if the file would take the streamer over the cap, or the
- *   error from measuring or recording it. Either way the file is removed first.
+ * @throws With `code: 'storage_limit'` if the file would take the streamer over the cap, or an
+ *   error if it can't be measured (missing included) or recorded. Either way the file is removed first.
  */
 async function recordVideoWithinQuota(streamerId: number, name: string, filename: string, fullPath: string): Promise<void> {
   try {
     await withStreamerQuota(streamerId, async () => {
-      const size = (await videoFileSize({ folder: streamerFolder(streamerId), filename })) ?? 0;
+      const size = await videoFileSize({ folder: streamerFolder(streamerId), filename });
+      // Gone already, or its real path is outside the overlay folder: there's nothing to record.
+      if (size === null) throw new Error(`Stored overlay video ${filename} cannot be measured`);
       if (await exceedsStreamerStorage(streamerId, size)) {
         throw Object.assign(new Error('Overlay storage limit reached'), { code: 'storage_limit' });
       }

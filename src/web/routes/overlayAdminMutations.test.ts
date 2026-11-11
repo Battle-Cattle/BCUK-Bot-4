@@ -469,6 +469,18 @@ describe('POST /settings/videos/upload', () => {
     expect(vi.mocked(fs.promises.rm)).toHaveBeenCalled();
   });
 
+  it('records nothing and reports upload_failed when the stored file is no longer there to measure', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    vi.mocked(videoFileSize).mockResolvedValue(null);
+    const res = await uploadRequest(buildApp())
+      .post('/settings/videos/upload')
+      .attach('video', WEBM_BUF, { filename: 'clip.webm', contentType: 'video/webm' });
+    expect(res.headers.location).toBe('/overlay/settings?error=upload_failed');
+    expect(vi.mocked(addVideo)).not.toHaveBeenCalled();
+    const [, storedPath] = vi.mocked(placeUpload).mock.calls[0]!;
+    expect(vi.mocked(fs.promises.rm)).toHaveBeenCalledWith(storedPath, { force: true });
+  });
+
   it('still accepts WebM and MP4 uploads while the conversion queue is full', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
     vi.mocked(isWebmTranscodeQueueFull).mockReturnValue(true);

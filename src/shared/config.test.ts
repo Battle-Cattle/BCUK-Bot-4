@@ -145,6 +145,24 @@ describe('config — parsePositiveIntEnv-backed values', () => {
     expect(config.OVERLAY_MAX_FILE_MB).toBe(500);
   });
 
+  it('defaults the overlay storage caps to 1024 MB per streamer and 10240 MB for the library when unset', async () => {
+    const config = await loadConfig({ OVERLAY_MAX_TOTAL_MB_PER_STREAMER: undefined, OVERLAY_LIBRARY_MAX_TOTAL_MB: undefined });
+    expect(config.OVERLAY_MAX_TOTAL_MB_PER_STREAMER).toBe(1024);
+    expect(config.OVERLAY_LIBRARY_MAX_TOTAL_MB).toBe(10240);
+  });
+
+  it('reads the overlay storage caps from their own environment variables', async () => {
+    const config = await loadConfig({ OVERLAY_MAX_TOTAL_MB_PER_STREAMER: '2048', OVERLAY_LIBRARY_MAX_TOTAL_MB: '4096' });
+    expect(config.OVERLAY_MAX_TOTAL_MB_PER_STREAMER).toBe(2048);
+    expect(config.OVERLAY_LIBRARY_MAX_TOTAL_MB).toBe(4096);
+  });
+
+  it('falls back to the default overlay storage caps for values that aren\'t positive integers', async () => {
+    const config = await loadConfig({ OVERLAY_MAX_TOTAL_MB_PER_STREAMER: '0', OVERLAY_LIBRARY_MAX_TOTAL_MB: '10GB' });
+    expect(config.OVERLAY_MAX_TOTAL_MB_PER_STREAMER).toBe(1024);
+    expect(config.OVERLAY_LIBRARY_MAX_TOTAL_MB).toBe(10240);
+  });
+
   it('defaults COMPANION_MAX_SSE_PER_TOKEN to 3 when unset', async () => {
     const config = await loadConfig({ COMPANION_MAX_SSE_PER_TOKEN: undefined });
     expect(config.COMPANION_MAX_SSE_PER_TOKEN).toBe(3);
