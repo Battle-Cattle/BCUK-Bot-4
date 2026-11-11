@@ -1,7 +1,8 @@
 import { describe, it, expect, afterAll } from 'vitest';
 import fs from 'fs';
 import path from 'path';
-import { SCRIPT_TEST_TIMEOUT_MS, commitVersion, createSandbox, notLinux, read, removeTemplate, run, write } from './deploySandbox';
+import { spawn } from 'child_process';
+import { SCRIPT_TEST_TIMEOUT_MS, commitVersion, createSandbox, isRunning, notLinux, read, removeTemplate, run, write } from './deploySandbox';
 
 describe.skipIf(notLinux)('deploySandbox', { timeout: SCRIPT_TEST_TIMEOUT_MS }, () => {
   const roots: string[] = [];
@@ -67,5 +68,19 @@ describe.skipIf(notLinux)('deploySandbox', { timeout: SCRIPT_TEST_TIMEOUT_MS }, 
     expect(fs.existsSync(first.root)).toBe(true);
     expect(second.root).not.toBe(first.root);
     expect(run('git', ['config', 'remote.origin.url'], second.work, second.env).trim()).toBe(second.origin);
+  });
+
+  it('reports a live process as running and a missing one as not', () => {
+    expect(isRunning(process.pid)).toBe(true);
+    // PIDs above the kernel's maximum (2^22) can't exist.
+    expect(isRunning(2 ** 22 + 1)).toBe(false);
+  });
+
+  it('reports a process that has exited as not running, whether or not it has been reaped yet', async () => {
+    const child = spawn('true');
+    const pid = child.pid!;
+    await new Promise((resolve) => child.once('exit', resolve));
+
+    expect(isRunning(pid)).toBe(false);
   });
 });
