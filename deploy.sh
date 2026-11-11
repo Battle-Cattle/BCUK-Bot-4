@@ -141,6 +141,12 @@ set_deadline() {
 for setting in "$HEALTH_TIMEOUT_SECONDS" "$STABILITY_SECONDS" "$JOB_STOP_TIMEOUT_SECONDS" "$POLL_INTERVAL_SECONDS"; do
     seconds_to_micros "$setting" || exit 1
 done
+# A zero (or tiny) interval would run curl and systemctl back to back for the whole window.
+seconds_to_micros "$POLL_INTERVAL_SECONDS"
+if [ "$MICROS" -lt 10000 ]; then
+    echo "ERROR: DEPLOY_POLL_INTERVAL_SECONDS must be at least 0.01 (got '$POLL_INTERVAL_SECONDS')."
+    exit 1
+fi
 
 # Sleeps one POLL_INTERVAL_SECONDS, but never past DEADLINE_MICROS, so a long interval can't stretch
 # a health or stability window. Returns at once when the deadline has passed.

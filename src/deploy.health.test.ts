@@ -106,6 +106,23 @@ describe.skipIf(notLinux)('deploy.sh (health)', { timeout: SCRIPT_TEST_TIMEOUT_M
     }
   });
 
+  it.each(['0', '0.0', '0.009'])("refuses a poll interval of '%s', which would spin on the probes", (bad) => {
+    const before = workHead();
+    pushV2();
+    const result = deploy({ DEPLOY_POLL_INTERVAL_SECONDS: bad });
+
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain(`DEPLOY_POLL_INTERVAL_SECONDS must be at least 0.01 (got '${bad}')`);
+    expect(restarts()).toEqual([]);
+    expect(workHead()).toBe(before);
+  });
+
+  it('accepts the smallest poll interval, 0.01', () => {
+    pushV2();
+
+    expect(deploy({ DEPLOY_POLL_INTERVAL_SECONDS: '0.01' }).status).toBe(0);
+  });
+
   it("keeps deploy.sh's production defaults: 1s poll, 90s health timeout, 30s stability window", () => {
     const script = fs.readFileSync(path.join(sandbox.work, 'deploy.sh'), 'utf8');
 
