@@ -1,4 +1,4 @@
-import { beforeEach, afterEach } from 'vitest';
+import { beforeEach, afterEach, afterAll } from 'vitest';
 import { spawnSync, type SpawnSyncReturns } from 'child_process';
 import fs from 'fs';
 import os from 'os';
@@ -232,23 +232,17 @@ export function commitVersion(version: string, changes: (dev: string) => void = 
 }
 
 /**
- * Builds the sandbox: origin with v1 deployed in `work` (its dist/ and node_modules/ marked v1),
- * and a `dev` clone to push later versions from.
- * @returns The new sandbox, also stored in `sandbox`.
+ * The paths and environment of a sandbox rooted at `root`. Creates nothing on disk.
+ * @param root - Directory the sandbox lives in.
+ * @returns The sandbox description.
  */
-export function createSandbox(): Sandbox {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bcuk-deploy-'));
-  const stubs = path.join(root, 'stubs');
+function sandboxAt(root: string): Sandbox {
   const state = path.join(root, 'state');
-  const gitConfig = path.join(root, 'gitconfig');
-  fs.mkdirSync(state);
-  write(gitConfig, '[user]\n\tname = Test\n\temail = test@example.com\n[init]\n\tdefaultBranch = main\n[commit]\n\tgpgsign = false\n');
-  for (const [name, body] of Object.entries(STUBS)) write(path.join(stubs, name), body.replaceAll("__NODE_BIN__", NODE_BIN), 0o755);
   const env: NodeJS.ProcessEnv = {
-    PATH: `${stubs}:${process.env.PATH ?? ''}`,
+    PATH: `${path.join(root, 'stubs')}:${process.env.PATH ?? ''}`,
     HOME: root,
     STATE: state,
-    GIT_CONFIG_GLOBAL: gitConfig,
+    GIT_CONFIG_GLOBAL: path.join(root, 'gitconfig'),
     GIT_CONFIG_NOSYSTEM: '1',
     // Short, so a build that never comes up fails in a fraction of a second. deploy.sh's own
     // defaults (1s poll, 90s health, 30s stability) are pinned in deploy.health.test.ts.
@@ -257,7 +251,22 @@ export function createSandbox(): Sandbox {
     DEPLOY_STABILITY_SECONDS: '0',
     TZ: 'UTC',
   };
-  sandbox = { root, origin: path.join(root, 'origin.git'), work: path.join(root, 'work'), dev: path.join(root, 'dev'), state, backups: path.join(root, 'backups'), env };
+  return { root, origin: path.join(root, 'origin.git'), work: path.join(root, 'work'), dev: path.join(root, 'dev'), state, backups: path.join(root, 'backups'), env };
+}
+
+/**
+ * Builds a sandbox from scratch: origin with v1 deployed in `work` (its dist/ and node_modules/
+ * marked v1), and a `dev` clone to push later versions from. About ten git processes, so
+ * `createSandbox` does this once per file and copies the result.
+ * @returns The new sandbox, also stored in `sandbox`.
+ */
+function buildSandbox(): Sandbox {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bcuk-deploy-'));
+  sandbox = sandboxAt(root);
+  const { state } = sandbox;
+  fs.mkdirSync(state);
+  write(path.join(root, 'gitconfig'), '[user]\n\tname = Test\n\temail = test@example.com\n[init]\n\tdefaultBranch = main\n[commit]\n\tgpgsign = false\n');
+  for (const [name, body] of Object.entries(STUBS)) write(path.join(root, 'stubs', name), body.replaceAll("__NODE_BIN__", NODE_BIN), 0o755);
   run('git', ['init', '-q', '--bare', sandbox.origin], root);
   run('git', ['clone', '-q', sandbox.origin, sandbox.dev], root);
   for (const script of ['deploy.sh', 'scripts/backup-db.sh', 'scripts/restore-db.sh', 'scripts/lib/dotenv.sh']) copyScript(script);
@@ -277,6 +286,32 @@ export function createSandbox(): Sandbox {
   // The database already records the migration the checkout starts with, as a real one would.
   write(path.join(state, 'applied-migrations'), '0001_baseline\n');
   return sandbox;
+}
+
+/** The sandbox every test in this file starts from, built on first use. */
+let template: Sandbox | undefined;
+
+/**
+ * Copies the template into a fresh directory and points the paths baked into it (the git remotes
+ * and the .env's BACKUP_DIR are absolute) at the copy.
+ * @returns The new sandbox, also stored in `sandbox`.
+ */
+export function createSandbox(): Sandbox {
+  template ??= buildSandbox();
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bcuk-deploy-'));
+  fs.cpSync(template.root, root, { recursive: true, preserveTimestamps: true });
+  for (const file of ['dev/.git/config', 'work/.git/config', 'work/.env']) {
+    const target = path.join(root, file);
+    fs.writeFileSync(target, fs.readFileSync(target, 'utf8').replaceAll(template.root, root));
+  }
+  sandbox = sandboxAt(root);
+  return sandbox;
+}
+
+/** Deletes the template sandbox, if one was built. Call once the file's tests are done. */
+export function removeTemplate(): void {
+  if (template) fs.rmSync(template.root, { recursive: true, force: true });
+  template = undefined;
 }
 
 /**
@@ -325,8 +360,8 @@ export function pushV2({ migration = false } = {}): void {
 }
 
 /**
- * Registers a `beforeEach` that builds a fresh sandbox and an `afterEach` that removes it, for the
- * `describe` block this is called in.
+ * Registers a `beforeEach` that gives each test a fresh sandbox, an `afterEach` that removes it and
+ * an `afterAll` that removes the shared template, for the `describe` block this is called in.
  * @param setup - Optional extra setup to run after each sandbox is built.
  */
 export function useSandbox(setup?: () => void): void {
@@ -337,4 +372,5 @@ export function useSandbox(setup?: () => void): void {
   afterEach(() => {
     fs.rmSync(sandbox.root, { recursive: true, force: true });
   });
+  afterAll(removeTemplate);
 }
