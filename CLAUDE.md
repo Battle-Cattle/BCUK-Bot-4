@@ -19,11 +19,19 @@ Do this once per session before `npm install`/`npm ci`/`npm test`/etc. — don't
 
 ## ALWAYS: Before Committing
 
+Run the fast checks on what you changed. CI (`.github/workflows/ci.yml`) runs everything else on every push, so don't repeat its full run locally:
+
 ```bash
-npm run typecheck && npm test
+npm run typecheck
+npx vitest run --changed origin/main   # only the tests that import a changed file
+npx eslint $(git diff --name-only --diff-filter=d origin/main -- '*.ts' '*.js' '*.mjs' '*.mts')
 ```
 
-Not `npx tsc` — see "TypeScript 6 + 7" below for why the bare `tsc` command is ambiguous here.
+Not `npx tsc`. See "TypeScript 6 + 7" below for why the bare `tsc` command is ambiguous here.
+
+`--changed` follows imports from the changed files, so it misses tests that depend on something indirectly. **Run the full `npm test` instead** when the change touches shared infrastructure: `src/db.ts`, `migrations/` or `DATABASE-SCHEMA.md` (a test replays one against the other), `src/shared/`, `src/test-utils/`, `package.json`/`package-lock.json`, or a `tsconfig*`/`vitest*`/`eslint` config. Leave coverage, `build`, `check:circular`, `check:unused` and `test:toolchain` to CI unless you're changing what they check.
+
+**CI is the gate, not the local run.** A PR isn't done until CI is green. If it fails, reproduce the failing check locally, fix it, and show it passing before pushing again.
 
 ## TypeScript 6 + 7
 
@@ -146,7 +154,7 @@ Auth middleware (`src/web/middleware.ts`), applied in this order:
 - Every new function or behaviour change **must** include or update a Vitest test in the relevant `*.test.ts` file alongside the source file.
 - Tests live in `src/__tests__/` or co-located `*.test.ts` files — match the convention of the file being tested.
 - When modifying existing behaviour, update affected tests before committing — never leave a passing-but-wrong test.
-- Run `npm test` and confirm all tests pass before committing.
+- Run the tests for what you changed before committing (see "ALWAYS: Before Committing" for when that means the full suite), and make sure CI's full run passes.
 
 ---
 
@@ -189,7 +197,7 @@ The two can differ (e.g. a low-impact fix that's wanted soon, or a high-impact f
 
 ## Related repos
 
-`BCUK-Companion-Core`, `BCUK-Companion-ExpiredMinotaur` and `BCUK-StreamDeck-Plugin` follow the same code standards, adapted to their language: tests with every change, docstrings on every function, Qlty's complexity limits. The plugin's `eslint.config.js` is a port of this repo's; the .NET repos enforce docs with StyleCop's SA1600 rules. Their `CLAUDE.md` files carry the same "PR Reviews (Qlty)" and "PR Reviews (CodeRabbit)" sections, word for word. When you change a shared rule here, make the same change in those three files.
+`BCUK-Companion-Core`, `BCUK-Companion-ExpiredMinotaur` and `BCUK-StreamDeck-Plugin` follow the same code standards, adapted to their language: tests with every change, docstrings on every function, Qlty's complexity limits, and fast checks on what changed before committing, with CI's full run as the gate. The plugin's `eslint.config.js` is a port of this repo's; the .NET repos enforce docs with StyleCop's SA1600 rules. Their `CLAUDE.md` files carry the same "PR Reviews (Qlty)" and "PR Reviews (CodeRabbit)" sections, word for word. When you change a shared rule here, make the same change in those three files.
 
 ## PR Reviews (Qlty)
 
