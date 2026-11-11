@@ -461,6 +461,23 @@ Expected constraints and behavior:
 - `UNIQUE KEY uq_overlay_video_library_filename (filename)` and `UNIQUE KEY uq_overlay_video_library_source (source_video_id)`; the latter stops the same video being added twice while it exists.
 - Adding checks, in one transaction, that the streamer owns the source video. Removing is not streamer-scoped (the route is Admin only) and returns the row's `filename` for disk cleanup; copies streamers imported are kept.
 
+## `shared_overlay_video`
+
+Videos for the shared video overlay (#917): one list for every streamer who has added the shared overlay as a browser source. Managed by Manager+. Files live in `<OVERLAY_FOLDER>/shared/`.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | `INT` PK auto-increment | |
+| `name` | `VARCHAR(255)` | Display name |
+| `filename` | `VARCHAR(255)` | Stored file name, new for every upload and never reused, so a URL always means the same file |
+| `uploaded_by` | `BIGINT` nullable | FK to `user.discord_id` ON DELETE SET NULL; provenance only |
+| `enabled` | `BOOLEAN` | Defaults to true; only enabled videos are offered to overlays and the Stream Deck |
+| `created_at` | `TIMESTAMP` | Defaults to `CURRENT_TIMESTAMP` |
+
+Expected constraints:
+
+- `UNIQUE KEY uq_shared_overlay_video_filename (filename)`. Removing returns the row's `filename` for disk cleanup.
+
 ## `overlay_reward`
 
 A streamer's Twitch channel-point rewards that trigger overlay videos. Independent of `reward_pricing`.
