@@ -85,7 +85,7 @@ async function downloadSyncVideo(s, entry) {
   if (total === null) total = Infinity;
   while (count * s.chunkBytes < total) {
     await waitWhileSyncPaused(s);
-    if (!s.wanted.has(entry.url)) { await s.deps.storage.clearChunks(entry.url); return; }
+    if (!s.wanted.has(entry.url)) { await cleanUpRemovedDownload(s, entry); return; }
     total = await downloadSyncChunk(s, entry, count, generation);
     if (total === null) return restartSyncDownload(s, entry);
     count++;
@@ -108,14 +108,14 @@ async function restartSyncDownload(s, entry) {
 }
 
 /**
- * After a failed download: a video taken off the list meanwhile keeps no half-downloaded chunks,
- * and if it is put back on the list while they are being cleared (the list update skipped it, as
- * it was still the active download) it is queued again.
+ * After a download ended because its video left the list (it failed, or was abandoned): clears the
+ * half-downloaded chunks, and if the video is put back on the list while they are being cleared
+ * (the list update skipped it, as it was still the active download) queues it again.
  * @param {object} s - The syncer's state.
- * @param {{url: string}} entry - The video whose download failed.
+ * @param {{url: string}} entry - The video whose download ended.
  * @returns {Promise<void>} Resolves once any cleanup and re-queueing is done.
  */
-async function cleanUpFailedRemoval(s, entry) {
+async function cleanUpRemovedDownload(s, entry) {
   if (s.wanted.has(entry.url)) return;
   await s.deps.storage.clearChunks(entry.url).catch(function () {});
   if (s.wanted.has(entry.url) && !s.queue.some(function (q) { return q.url === entry.url; })) s.queue.push(entry);
@@ -137,7 +137,7 @@ async function drainSyncQueue(s) {
       forgetSyncRetry(s, entry.url);
     } catch (err) {
       handleSyncFailure(s, entry, err);
-      await cleanUpFailedRemoval(s, entry);
+      await cleanUpRemovedDownload(s, entry);
     }
     s.active = null;
   }
@@ -167,6 +167,10 @@ async function applyVideoList(s, list, seq) {
     await s.deps.storage.clearChunks(url);
     emitSyncEvent(s, { type: 'removed', url: url });
     forgetSyncRetry(s, url);
+  }
+  for (const url of plan.clear) {
+    // Leftover chunks of a stored video; the one being stored right now clears its own.
+    if (url !== s.active) await s.deps.storage.clearChunks(url);
   }
   // The video being downloaded is not stored yet, so it is in the plan; queueing it again would fetch it twice.
   s.queue = plan.download.filter(function (e) { return e.url !== s.active; });

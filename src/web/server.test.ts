@@ -298,6 +298,12 @@ describe('CSP header', () => {
     expect(csp).not.toMatch(/font-src[^;]*https:/);
   });
 
+  it('allows blob: media, which the shared overlay plays its stored videos from', async () => {
+    const res = await request(app).get('/__marker_dashboard');
+    const csp = res.headers['content-security-policy'];
+    expect(csp).toMatch(/media-src 'self' blob:(;|$)/);
+  });
+
   it('restricts style-src to self, without allowing unsafe-inline', async () => {
     const res = await request(app).get('/__marker_dashboard');
     const csp = res.headers['content-security-policy'];
