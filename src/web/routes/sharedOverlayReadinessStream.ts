@@ -36,9 +36,23 @@ function anotherPublishWanted(): boolean {
 }
 
 /**
- * Sends the current snapshot to every open admin stream. Calls that arrive while one is running
- * are folded into one more run afterwards, so a burst of reports costs few list lookups.
- * @returns Resolves once the snapshot has been sent; never rejects.
+ * Sends the current snapshot to every open admin stream.
+ * @returns Resolves once sent; never rejects (a failed lookup is logged).
+ */
+async function publishOnce(): Promise<void> {
+  try {
+    const snapshot = await currentSnapshot();
+    for (const key of [...readinessConnections.keys()]) broadcastToChannel(readinessConnections, key, snapshot);
+  } catch (err) {
+    log.error('Failed to publish shared overlay readiness:', err);
+  }
+}
+
+/**
+ * Publishes the current snapshot. Calls that arrive while a run is in progress are folded into one
+ * more run afterwards (even if the earlier lookup failed), so a burst of reports costs few list
+ * lookups and an accepted report is never left unpublished.
+ * @returns Resolves once the publishing has settled; never rejects.
  */
 async function publish(): Promise<void> {
   if (publishState.running) { publishState.again = true; return; }
@@ -47,11 +61,8 @@ async function publish(): Promise<void> {
     do {
       publishState.again = false;
       if (readinessConnections.size === 0) break;
-      const snapshot = await currentSnapshot();
-      for (const key of [...readinessConnections.keys()]) broadcastToChannel(readinessConnections, key, snapshot);
+      await publishOnce();
     } while (anotherPublishWanted());
-  } catch (err) {
-    log.error('Failed to publish shared overlay readiness:', err);
   } finally {
     publishState.running = false;
   }

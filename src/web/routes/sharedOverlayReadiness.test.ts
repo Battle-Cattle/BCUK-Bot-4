@@ -72,8 +72,8 @@ describe('getReadinessSnapshot', () => {
 
   it('reconnecting brings the overlay back online with its report', () => {
     recordReadinessReport('alice', { stored: [1], downloading: null });
-    expect(getReadinessSnapshot(videos, new Set()).overlays[0]!.online).toBe(false);
-    expect(getReadinessSnapshot(videos, new Set(['alice'])).overlays[0]!.online).toBe(true);
+    expect(getReadinessSnapshot(videos, new Set()).overlays[0]).toMatchObject({ online: false });
+    expect(getReadinessSnapshot(videos, new Set(['alice'])).overlays[0]).toMatchObject({ online: true });
   });
 
   it('per video: ready counts, who is missing it with download percentages, and the all-ready tick', () => {

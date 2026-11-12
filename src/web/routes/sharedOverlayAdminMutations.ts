@@ -15,6 +15,7 @@ import { storeSharedVideo, recordSharedVideo, removeSharedVideoFile } from './sh
 import { broadcastSharedVideoList } from './sharedOverlaySource';
 import { isWebmTranscodeQueueFull } from './overlayVideoTranscode';
 import { SHARED_SETTINGS_PATH } from './sharedOverlayAdminShared';
+import { notifyReadinessChange } from './sharedOverlayReadiness';
 
 // Rename, enable/disable, delete and import for shared overlay videos (#917). Mounted by
 // sharedOverlayAdmin.ts behind the Manager gate (requireAuth → requireGuildContext → requireManager).
@@ -33,6 +34,7 @@ async function broadcastListQuietly(): Promise<void> {
   } catch (err) {
     log.error('Failed to broadcast shared video list:', err);
   }
+  notifyReadinessChange(); // the admin pages' readiness view follows the list too
 }
 
 /**
