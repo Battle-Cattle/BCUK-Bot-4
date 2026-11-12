@@ -142,6 +142,21 @@ describe('broadcast', () => {
     expect(frames(a.res).at(-1)).toEqual({ type: 'videos', videos: [{ id: 2, name: 'Boo', url: '/overlay/shared/videos/b.webm' }] });
   });
 
+  it('sends no playback to an overlay until its init frame has been written', async () => {
+    let release!: (v: unknown) => void;
+    listEnabledSharedVideos.mockReturnValueOnce(new Promise((resolve) => { release = resolve; }));
+    const a = fake('alice');
+    const connecting = handler('/:login/events')(a.req, a.res, vi.fn());
+    await vi.waitFor(() => expect(sharedConnections.has('alice')).toBe(true));
+    pushSharedPlay('/overlay/shared/videos/x.webm', 123);
+    expect(frames(a.res)).toEqual([]);
+    release([]);
+    await connecting;
+    pushSharedPlay('/overlay/shared/videos/x.webm', 456);
+    expect(frames(a.res).map((f) => f.type)).toEqual(['init', 'play']);
+    expect(frames(a.res)[1].playAt).toBe(456);
+  });
+
   it('reaches nobody when none are connected', () => {
     expect(broadcastSharedEvent({ type: 'x' })).toBe(0);
   });

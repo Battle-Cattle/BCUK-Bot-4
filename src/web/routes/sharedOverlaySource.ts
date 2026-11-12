@@ -58,14 +58,20 @@ async function getSharedVideoEntries(): Promise<SharedOverlayVideoEntry[]> {
 }
 
 /**
- * Sends a payload to every connected shared overlay.
+ * Overlays whose `init` frame has been written. Until then an overlay doesn't know the server's
+ * clock offset or the late-start limit, so it must not be sent a playback time it would misjudge.
+ */
+const initialised = new WeakSet<Response>();
+
+/**
+ * Sends a payload to every connected shared overlay that has received its `init` frame.
  * @param payload - JSON-serialisable message for the overlays.
- * @returns How many overlays were still connected after the send.
+ * @returns How many overlays were still connected after the send (including any still waiting for `init`).
  */
 export function broadcastSharedEvent(payload: unknown): number {
   let reached = 0;
   for (const login of [...sharedConnections.keys()]) {
-    reached += broadcastToChannel(sharedConnections, login, payload) ?? 0;
+    reached += broadcastToChannel(sharedConnections, login, payload, (res) => initialised.has(res)) ?? 0;
   }
   return reached;
 }
@@ -109,7 +115,10 @@ async function sendInit(res: Response): Promise<void> {
   try {
     const videos = await getSharedVideoEntries();
     const init = { type: 'init', serverTime: Date.now(), maxLateMs: SHARED_OVERLAY_MAX_LATE_SECONDS * 1000, videos };
-    if (!res.writableEnded) res.write(`data: ${JSON.stringify(init)}\n\n`);
+    if (!res.writableEnded) {
+      res.write(`data: ${JSON.stringify(init)}\n\n`);
+      initialised.add(res);
+    }
   } catch (err) {
     log.error('Failed to send shared overlay init:', err);
     res.end();
