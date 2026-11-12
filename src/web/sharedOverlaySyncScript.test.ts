@@ -86,6 +86,15 @@ describe('createSharedSyncer', () => {
     storage, fetchRange, chunkBytes: 100, chunkPauseMs: 0, isPaused: () => false, sleep: async () => {}, ...extra,
   });
 
+  /** A fake clock whose `sleep` advances it, recording each sleep; for tests where a failed video waits to be retried. */
+  const fakeClock = () => {
+    const clock = { time: 0, sleeps: [] as number[] };
+    return {
+      clock,
+      timing: { now: () => clock.time, sleep: async (ms: number) => { clock.sleeps.push(ms); clock.time += ms; } },
+    };
+  };
+
   it('downloads in chunks, joins them in order, stores the video and clears the chunks', async () => {
     const storage = memoryStorage();
     const fetchRange = fakeFetch(250);
@@ -157,21 +166,22 @@ describe('createSharedSyncer', () => {
     expect(storage.chunks.has('/a')).toBe(false);
   });
 
-  it('logs a failed download, waits, and carries on with the next video', async () => {
+  it('logs a failed download and carries on with the next video straight away', async () => {
     const storage = memoryStorage();
     const log = vi.fn();
-    const sleeps: number[] = [];
+    const { clock, timing } = fakeClock();
+    let failures = 1;
     const fetchRange = vi.fn(async (url: string) => {
-      if (url === '/bad') throw new Error('offline');
+      if (url === '/bad' && failures-- > 0) throw new Error('offline');
       return { buffer: 'x', total: 50 };
     });
-    const syncer = createSharedSyncer(deps(storage, fetchRange, { log, sleep: async (ms: number) => { sleeps.push(ms); } }));
+    const syncer = createSharedSyncer(deps(storage, fetchRange, { log, ...timing }));
     await syncer.sync([v('/bad'), v('/good')]);
     await syncer.idle();
     expect(log).toHaveBeenCalledWith('Shared video download failed: /bad', expect.any(Error));
-    expect(sleeps).toContain(10000);
     expect(storage.videos.has('/good')).toBe(true);
-    expect(storage.videos.has('/bad')).toBe(false);
+    expect(storage.videos.has('/bad')).toBe(true); // retried after its wait
+    expect(clock.time).toBe(10000);
   });
 
   it('emits progress, stored, removed and idle events for the page to report', async () => {
@@ -249,6 +259,30 @@ describe('createSharedSyncer', () => {
       ]);
     });
 
+    it('tries a pushed video at once, even while its failed background download waits to be retried', async () => {
+      const storage = memoryStorage();
+      const { clock, timing } = fakeClock();
+      const holder: { syncer?: any; result?: string } = {};
+      let failures = 1;
+      let fetchedAt = -1;
+      const fetchRange = vi.fn(async (url: string, start: number) => {
+        if (failures-- > 0) throw new Error('offline');
+        fetchedAt = clock.time;
+        return { buffer: `${url}:${start}`, total: 50 };
+      });
+      let pushed = false;
+      const sleep = async (ms: number) => {
+        await timing.sleep(ms);
+        if (!pushed) { pushed = true; holder.result = await holder.syncer.fetchNow(v('/a')); }
+      };
+      holder.syncer = createSharedSyncer(deps(storage, fetchRange, { now: timing.now, sleep }));
+      await holder.syncer.sync([v('/a')]); // fails, and would wait 10 s before its next try
+      await holder.syncer.idle();
+      expect(holder.result).toBe('fetching');
+      expect(fetchedAt).toBe(1000); // right after the first short wait, not after the full 10 s
+      expect(storage.videos.has('/a')).toBe(true);
+    });
+
     it('resumes a half-stored video from its chunks', async () => {
       const storage = memoryStorage({ chunks: { '/a': ['/a:0'] } });
       const fetchRange = fakeFetch(200);
@@ -316,10 +350,11 @@ describe('createSharedSyncer', () => {
     const storage = memoryStorage({ videos: ['/b'] });
     let releaseRead!: (urls: string[]) => void;
     const slowRead = new Promise<string[]>((resolve) => { releaseRead = resolve; });
-    vi.spyOn(storage, 'listVideos').mockReturnValueOnce(slowRead);
+    const listVideos = vi.spyOn(storage, 'listVideos').mockReturnValueOnce(slowRead);
     const fetchRange = fakeFetch(50);
     const syncer = createSharedSyncer(deps(storage, fetchRange));
     const older = syncer.sync([v('/a')]); // would delete /b
+    await waitFor(() => expect(listVideos).toHaveBeenCalledTimes(1)); // the older list is mid-read
     const newer = syncer.sync([v('/b')]);
     releaseRead(['/b']);
     await Promise.all([older, newer]);
@@ -357,38 +392,55 @@ describe('createSharedSyncer', () => {
     expect(storage.videos.has('/a')).toBe(false);
   });
 
-  it('retries a failed video after a wait, without a new list, and keeps going with the others', async () => {
+  it('retries a failed video after its wait, without a new list', async () => {
     const storage = memoryStorage();
-    const sleeps: number[] = [];
+    const { clock, timing } = fakeClock();
     let failures = 1;
     const fetchRange = vi.fn(async (url: string, start: number) => {
+      if (failures-- > 0) throw new Error('offline');
+      return { buffer: `${url}:${start}`, total: 50 };
+    });
+    const syncer = createSharedSyncer(deps(storage, fetchRange, timing));
+    await syncer.sync([v('/a')]);
+    await syncer.idle();
+    expect(storage.videos.has('/a')).toBe(true);
+    expect(fetchRange).toHaveBeenCalledTimes(2);
+    expect(clock.time).toBe(10000);
+  });
+
+  it('does not hold up later videos while a failed one waits for its retry', async () => {
+    const storage = memoryStorage();
+    const { clock, timing } = fakeClock();
+    let failures = 1;
+    const order: Array<[string, number]> = [];
+    const fetchRange = vi.fn(async (url: string, start: number) => {
+      order.push([url, clock.time]);
       if (url === '/a' && failures-- > 0) throw new Error('offline');
       return { buffer: `${url}:${start}`, total: 50 };
     });
-    const syncer = createSharedSyncer(deps(storage, fetchRange, { sleep: async (ms: number) => { sleeps.push(ms); } }));
+    const syncer = createSharedSyncer(deps(storage, fetchRange, timing));
     await syncer.sync([v('/a'), v('/b')]);
     await syncer.idle();
-    expect(sleeps).toEqual([10000]);
+    // /b is fetched at once (time 0), right after /a failed; /a is retried when its wait is over.
+    expect(order).toEqual([['/a', 0], ['/b', 0], ['/a', 10000]]);
     expect([...storage.videos.keys()].sort()).toEqual(['/a', '/b']);
-    // The failed video went to the back of the queue, so /b was stored first.
-    expect(fetchRange.mock.calls.map((c) => c[0])).toEqual(['/a', '/b', '/a']);
   });
 
-  it('waits twice as long after each failure, up to a cap, and gives up after eight tries', async () => {
+  it('waits twice as long after each failure, up to a cap, and keeps retrying while the video is wanted', async () => {
     const storage = memoryStorage();
-    const sleeps: number[] = [];
-    const fetchRange = vi.fn(async () => { throw new Error('offline'); });
-    const syncer = createSharedSyncer(deps(storage, fetchRange, { sleep: async (ms: number) => { sleeps.push(ms); } }));
-    await syncer.sync([v('/bad')]);
+    const { clock, timing } = fakeClock();
+    let failures = 9;
+    const fetchRange = vi.fn(async (url: string, start: number) => {
+      if (failures-- > 0) throw new Error('offline');
+      return { buffer: `${url}:${start}`, total: 50 };
+    });
+    const syncer = createSharedSyncer(deps(storage, fetchRange, timing));
+    await syncer.sync([v('/a')]);
     await syncer.idle();
-    expect(sleeps).toEqual([10000, 20000, 40000, 80000, 160000, 300000, 300000, 300000]);
-    expect(fetchRange).toHaveBeenCalledTimes(8);
-    // A later list tries it afresh.
-    sleeps.length = 0;
-    await syncer.sync([v('/bad')]);
-    await syncer.idle();
-    expect(fetchRange).toHaveBeenCalledTimes(16);
-    expect(sleeps[0]).toBe(10000);
+    expect(fetchRange).toHaveBeenCalledTimes(10); // well past eight tries
+    expect(storage.videos.has('/a')).toBe(true);
+    // 10 s doubling up to the 5 min cap: 10, 20, 40, 80, 160, then 300 s for each later failure.
+    expect(clock.time).toBe(10000 + 20000 + 40000 + 80000 + 160000 + 4 * 300000);
   });
 
   it('does not retry a failed video that has left the list', async () => {
