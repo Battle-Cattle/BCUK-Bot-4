@@ -92,6 +92,8 @@ export const OVERLAY_LIBRARY_MAX_TOTAL_MB = parsePositiveIntEnv(process.env.OVER
 export const OVERLAY_TRANSCODE_TIMEOUT_MINUTES = parsePositiveIntEnv(process.env.OVERLAY_TRANSCODE_TIMEOUT_MINUTES, 30);
 export const COMPANION_MAX_SSE_PER_TOKEN = parsePositiveIntEnv(process.env.COMPANION_MAX_SSE_PER_TOKEN, 3);
 export const OVERLAY_MAX_SSE_PER_CHANNEL = parsePositiveIntEnv(process.env.OVERLAY_MAX_SSE_PER_CHANNEL, 10);
+/** Longest a shared overlay video may start late before it is skipped, in seconds (#917). */
+export const SHARED_OVERLAY_MAX_LATE_SECONDS = parsePositiveIntEnv(process.env.SHARED_OVERLAY_MAX_LATE_SECONDS, 3);
 export const ALERT_ASSETS_FOLDER = process.env.ALERT_ASSETS_FOLDER?.trim() || './alert-assets';
 export const ALERT_MAX_IMAGE_MB = parsePositiveIntEnv(process.env.ALERT_MAX_IMAGE_MB, 10);
 export const ALERT_MAX_SOUND_MB = parsePositiveIntEnv(process.env.ALERT_MAX_SOUND_MB, 5);

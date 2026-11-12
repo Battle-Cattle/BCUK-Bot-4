@@ -125,6 +125,11 @@ describe('GET /:login', () => {
     expect(res.status).toBe(404);
   });
 
+  it('falls through (404) for "shared", which belongs to the shared overlay router', async () => {
+    const res = await supertest(buildApp()).get('/shared');
+    expect(res.status).toBe(404);
+  });
+
   it('falls through (404) for a malformed login', async () => {
     const res = await supertest(buildApp()).get('/not-valid!');
     expect(res.status).toBe(404);

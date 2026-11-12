@@ -30,6 +30,7 @@ import companionCommandsRouter from './companionCommands';
 import companionKeysRouter from './companionKeys';
 import userSettingsRouter from './userSettings';
 import overlaySourceRouter from './overlaySource';
+import sharedOverlaySourceRouter from './sharedOverlaySource';
 import overlayAdminRouter from './overlayAdmin';
 import alertsOverlaySourceRouter from './alertsOverlaySource';
 import alertsAdminRouter from './alertsAdmin';
@@ -77,6 +78,7 @@ export function mountRoutes(app: Express, { streamdeckLimiter }: MountRoutesOpti
   app.use('/', sfxPublicRouter);
   app.use('/', privacyRouter);
   app.use('/', tosRouter);
+  app.use('/overlay/shared', sharedOverlaySourceRouter);
   app.use('/overlay', overlaySourceRouter);
   app.use('/alerts', alertsOverlaySourceRouter);
   // authLimiter is applied per-route inside companionAuthRouter, not here — this

@@ -12,7 +12,7 @@ const router = Router();
 const LOGIN_RE = /^[a-zA-Z0-9_]{1,25}$/;
 const FILENAME_RE = /^[\w-]+\.(webm|mp4)$/i;
 // Words reserved for admin routes — must not be treated as channel logins.
-const RESERVED_LOGINS = new Set(['settings', 'videos', 'controller']);
+const RESERVED_LOGINS = new Set(['settings', 'videos', 'controller', 'shared']);
 // Shared by the plain browser-source route below and the /events SSE route, so both apply the
 // identical login-validity rule from one place.
 const isValidLogin = createLoginValidator(LOGIN_RE, RESERVED_LOGINS);
@@ -49,7 +49,7 @@ router.get('/controller', (_req, res) => {
  * @param req - Express request; reads the `login` route param.
  * @param res - Express response; renders the `overlaySource` view, or calls
  *   `next()` to fall through to later routes if `login` is malformed or
- *   reserved (e.g. `settings`, `videos`, `controller`).
+ *   reserved (e.g. `settings`, `videos`, `controller`, `shared`).
  */
 router.get('/:login', (req, res, next) => {
   const login = isValidLogin(req.params.login);
