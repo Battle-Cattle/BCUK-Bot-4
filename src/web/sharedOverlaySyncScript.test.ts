@@ -8,8 +8,8 @@ const source = fs.readFileSync(path.join(__dirname, '../../public/shared-overlay
 // Top-level const/function declarations aren't properties of a vm context, so export them explicitly.
 const context: Record<string, any> = {};
 vm.createContext(context);
-vm.runInContext(`${source}\nthis.api = { planSharedSync, nextSharedChunkRange, createSharedSyncer, resolveSharedSource, buildReadinessReport };`, context);
-const { planSharedSync, nextSharedChunkRange, createSharedSyncer, resolveSharedSource, buildReadinessReport } = context.api;
+vm.runInContext(`${source}\nthis.api = { planSharedSync, nextSharedChunkRange, createSharedSyncer, resolveSharedSource, checkedRangeTotal, buildReadinessReport };`, context);
+const { planSharedSync, nextSharedChunkRange, createSharedSyncer, resolveSharedSource, checkedRangeTotal, buildReadinessReport } = context.api;
 
 const v = (url: string) => ({ url });
 
@@ -164,6 +164,24 @@ describe('createSharedSyncer', () => {
     expect(fetchRange).toHaveBeenCalledTimes(1);
     expect(storage.videos.has('/a')).toBe(false);
     expect(storage.chunks.has('/a')).toBe(false);
+  });
+
+  it('starts a video over when it is removed and added back while a chunk is in flight', async () => {
+    const storage = memoryStorage();
+    const holder: { syncer?: any } = {};
+    let first = true;
+    const fetchRange = vi.fn(async (url: string, start: number) => {
+      if (first && start === 100) {
+        first = false;
+        await holder.syncer.sync([]); // the removal's cleanup clears the stored chunks
+        await holder.syncer.sync([v('/a')]); // then it is back on the list before the chunk lands
+      }
+      return { buffer: `${url}:${start}`, total: 250 };
+    });
+    holder.syncer = createSharedSyncer(deps(storage, fetchRange));
+    await holder.syncer.sync([v('/a')]);
+    await holder.syncer.idle();
+    expect(storage.videos.get('/a')).toEqual(['/a:0', '/a:100', '/a:200']);
   });
 
   it('logs a failed download and carries on with the next video straight away', async () => {
@@ -403,6 +421,27 @@ describe('createSharedSyncer', () => {
     await syncer.sync([v('/a')]);
     await syncer.idle();
     expect(fetchRange).not.toHaveBeenCalled();
+  });
+});
+
+describe('checkedRangeTotal', () => {
+  it('returns the total for an answer that covers the requested bytes', () => {
+    expect(checkedRangeTotal('bytes 0-99/250', 100, 0, 99)).toBe(250);
+  });
+
+  it('accepts a shorter last chunk', () => {
+    expect(checkedRangeTotal('bytes 200-249/250', 50, 200, 299)).toBe(250);
+  });
+
+  it.each([
+    ['a missing header', null, 100],
+    ['an unknown total', 'bytes 0-99/*', 100],
+    ['a different start', 'bytes 100-199/250', 100],
+    ['an answer past the requested end', 'bytes 0-199/250', 200],
+    ['an end beyond the file', 'bytes 0-99/50', 100],
+    ['a body shorter than the range', 'bytes 0-99/250', 40],
+  ])('rejects %s', (_name, header, bytes) => {
+    expect(() => checkedRangeTotal(header, bytes as number, 0, 99)).toThrow();
   });
 });
 
