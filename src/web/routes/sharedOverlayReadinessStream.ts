@@ -87,25 +87,25 @@ onConnectionCountChange(sharedConnections, onChange);
 /** Most times the first snapshot is looked up again because something changed during the lookup. */
 const MAX_INITIAL_LOOKUPS = 3;
 
-/** The first snapshot for a new stream, and whether a change overlapped its last lookup. */
+/** The first snapshot for a new stream, and the change count its last lookup started at. */
 interface InitialSnapshot {
   snapshot: ReadinessSnapshot;
-  /** True when something changed during the last lookup, so the snapshot may already be out of date. */
-  stale: boolean;
+  /** The change count when the last lookup began; any later change may not be in the snapshot. */
+  seen: number;
 }
 
 /**
  * Builds the first snapshot for a new stream. A change that arrives during the lookup would not be
  * published to this stream (it is not registered yet), so the lookup is repeated if one did, a few
- * times at most; the caller publishes again after attaching if the last lookup still overlapped one.
- * @returns The snapshot and whether it may be stale.
+ * times at most. The caller compares `seen` with the change count again once the stream is attached,
+ * which also covers a change after the last lookup but before the attach.
+ * @returns The snapshot and the change count its last lookup started at.
  */
 async function initialSnapshot(): Promise<InitialSnapshot> {
   for (let tries = 1; ; tries++) {
     const seen = changeCount;
     const snapshot = await currentSnapshot();
-    const stale = changeCount !== seen;
-    if (!stale || tries >= MAX_INITIAL_LOOKUPS) return { snapshot, stale };
+    if (changeCount === seen || tries >= MAX_INITIAL_LOOKUPS) return { snapshot, seen };
   }
 }
 
@@ -132,5 +132,5 @@ router.get('/readiness/events', async (req, res) => {
   });
   if (!attached) return;
   res.write(`data: ${JSON.stringify(first.snapshot)}\n\n`);
-  if (first.stale) void publish(); // the stream is registered now, so it gets the fresh state
+  if (changeCount !== first.seen) void publish(); // changed since the lookup began; the stream is registered now, so it gets the fresh state
 });
