@@ -114,7 +114,8 @@ async function sendInit(res: Response): Promise<void> {
  * @param res - Express response; sends the file, or 400 for a malformed name / 404 if missing.
  */
 router.get('/videos/:filename', async (req, res) => {
-  const folder = path.resolve(OVERLAY_FOLDER, SHARED_FOLDER);
+  // POSIX join, like safeResolve (which the file helpers use on it) and the bot's Linux target.
+  const folder = path.posix.join(OVERLAY_FOLDER, SHARED_FOLDER);
   const file = await resolveSharedFile(res, folder, req.params.filename, FILENAME_RE);
   if (file) sendStreamerFile(res, file.realPath);
 });
