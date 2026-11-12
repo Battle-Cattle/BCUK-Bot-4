@@ -146,6 +146,20 @@ async function restartSyncDownload(s, entry) {
 }
 
 /**
+ * After a failed download: a video taken off the list meanwhile keeps no half-downloaded chunks,
+ * and if it is put back on the list while they are being cleared (the list update skipped it, as
+ * it was still the active download) it is queued again.
+ * @param {object} s - The syncer's state.
+ * @param {{url: string}} entry - The video whose download failed.
+ * @returns {Promise<void>} Resolves once any cleanup and re-queueing is done.
+ */
+async function cleanUpFailedRemoval(s, entry) {
+  if (s.wanted.has(entry.url)) return;
+  await s.deps.storage.clearChunks(entry.url).catch(function () {});
+  if (s.wanted.has(entry.url) && !s.queue.some(function (q) { return q.url === entry.url; })) s.queue.push(entry);
+}
+
+/**
  * Drains the queue one video at a time. A failed video waits for its retry time at the back of
  * the queue while the others carry on; when only waiting videos remain, it sleeps until one is due.
  * @param {object} s - The syncer's state.
@@ -161,8 +175,7 @@ async function drainSyncQueue(s) {
       forgetSyncRetry(s, entry.url);
     } catch (err) {
       handleSyncFailure(s, entry, err);
-      // A video taken off the list while it failed keeps no half-downloaded chunks.
-      if (!s.wanted.has(entry.url)) await s.deps.storage.clearChunks(entry.url).catch(function () {});
+      await cleanUpFailedRemoval(s, entry);
     }
     s.active = null;
   }
