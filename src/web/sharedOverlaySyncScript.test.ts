@@ -458,6 +458,53 @@ describe('createSharedSyncer', () => {
       expect(storage.videos.has('/a')).toBe(true);
     });
 
+    it('does not bring back a video that left the list while the push was reading the storage', async () => {
+      const storage = memoryStorage();
+      const realList = storage.listVideos;
+      let hold: Promise<void> | null = null;
+      storage.listVideos = async () => { const h = hold; hold = null; if (h) await h; return realList(); };
+      let releaseB!: () => void;
+      const bBlocked = new Promise<void>((resolve) => { releaseB = resolve; });
+      const fetched: string[] = [];
+      const fetchRange = vi.fn(async (url: string, start: number) => {
+        fetched.push(url);
+        if (url === '/b') await bBlocked;
+        return { buffer: `${url}:${start}`, total: 50 };
+      });
+      const syncer = createSharedSyncer(deps(storage, fetchRange));
+      await syncer.sync([v('/b'), v('/a')]); // /b downloads (blocked); /a waits behind it
+      let releasePush!: () => void;
+      hold = new Promise<void>((resolve) => { releasePush = resolve; });
+      const push = syncer.fetchNow(v('/a')); // waits in the storage read
+      await syncer.sync([v('/b')]); // /a leaves the list
+      releasePush();
+      expect(await push).toBe('ignored');
+      releaseB();
+      await syncer.idle();
+      expect(fetched).toEqual(['/b']);
+      expect(storage.videos.has('/a')).toBe(false);
+    });
+
+    it('keeps a pushed video ahead of the background ones when a new list arrives', async () => {
+      const storage = memoryStorage();
+      let releaseA!: () => void;
+      const aBlocked = new Promise<void>((resolve) => { releaseA = resolve; });
+      const order: string[] = [];
+      const fetchRange = vi.fn(async (url: string, start: number) => {
+        order.push(`${url}:${start}`);
+        if (url === '/a' && start === 0) await aBlocked;
+        return { buffer: `${url}:${start}`, total: 200 };
+      });
+      const syncer = createSharedSyncer(deps(storage, fetchRange));
+      await syncer.sync([v('/a'), v('/b'), v('/c')]); // /a downloads (blocked on its first chunk)
+      expect(await syncer.fetchNow(v('/c'))).toBe('fetching'); // /c goes to the front of the queue
+      await syncer.sync([v('/a'), v('/b'), v('/c'), v('/d')]); // a new list rebuilds the queue
+      releaseA();
+      await syncer.idle();
+      // /a yields to the pushed /c at its next chunk boundary, then resumes; /b and the new /d follow.
+      expect(order).toEqual(['/a:0', '/c:0', '/c:100', '/a:100', '/b:0', '/b:100', '/d:0', '/d:100']);
+    });
+
     it('resumes a half-stored video from its chunks', async () => {
       const storage = memoryStorage({ chunks: { '/a': ['/a:0'] } });
       const fetchRange = fakeFetch(200);

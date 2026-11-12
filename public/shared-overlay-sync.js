@@ -153,6 +153,24 @@ async function drainSyncQueue(s) {
 }
 
 /**
+ * Rebuilds the download queue from a plan. Videos already waiting keep their places (so a pushed
+ * video stays ahead of the background ones); newly planned ones follow in list order. The video
+ * being downloaded is left out: it is not stored yet, so it is in the plan, and queueing it again
+ * would fetch it twice.
+ * @param {object} s - The syncer's state.
+ * @param {Array<{url: string}>} planned - The videos the plan says to download, in list order.
+ * @returns {Array<{url: string}>} The new queue.
+ */
+function rebuildSyncQueue(s, planned) {
+  const byUrl = new Map(planned.map(function (e) { return [e.url, e]; }));
+  const kept = s.queue
+    .filter(function (e) { return byUrl.has(e.url) && e.url !== s.current; })
+    .map(function (e) { return byUrl.get(e.url); });
+  const keptUrls = new Set(kept.map(function (e) { return e.url; }));
+  return kept.concat(planned.filter(function (e) { return e.url !== s.current && !keptUrls.has(e.url); }));
+}
+
+/**
  * Applies one video list: deletes stored and half-stored videos that left it and queues the missing
  * ones. Does nothing when a newer list has arrived (before or during the storage reads), as that
  * list's own plan is the one to apply and this one is stale.
@@ -179,8 +197,7 @@ async function applyVideoList(s, list, seq) {
     // Leftover chunks of a stored video; the one being stored right now clears its own.
     if (url !== s.active) await s.deps.storage.clearChunks(url);
   }
-  // The video being downloaded is not stored yet, so it is in the plan; queueing it again would fetch it twice.
-  s.queue = plan.download.filter(function (e) { return e.url !== s.current; });
+  s.queue = rebuildSyncQueue(s, plan.download);
   if (!s.running && s.queue.length > 0) s.running = drainSyncQueue(s);
 }
 
