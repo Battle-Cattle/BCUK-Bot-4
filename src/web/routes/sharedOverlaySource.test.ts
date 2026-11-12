@@ -27,6 +27,7 @@ vi.mock('../../shared/pathUtils', async (importOriginal) => {
   };
 });
 
+import { waitFor } from '../../test-utils/waitFor';
 import express from 'express';
 import supertest from 'supertest';
 import router, {
@@ -140,6 +141,37 @@ describe('broadcast', () => {
     listEnabledSharedVideos.mockResolvedValue([{ id: 2, name: 'Boo', filename: 'b.webm' }]);
     await expect(broadcastSharedVideoList()).resolves.toBe(1);
     expect(frames(a.res).at(-1)).toEqual({ type: 'videos', videos: [{ id: 2, name: 'Boo', url: '/overlay/shared/videos/b.webm' }] });
+  });
+
+  it('sends overlapping list changes in order, so a slow earlier read cannot overwrite a newer list', async () => {
+    const a = fake('alice');
+    await handler('/:login/events')(a.req, a.res, vi.fn());
+    let releaseFirst!: (v: unknown) => void;
+    listEnabledSharedVideos
+      .mockReturnValueOnce(new Promise((resolve) => { releaseFirst = resolve; }))
+      .mockResolvedValueOnce([{ id: 2, name: 'Newer', filename: 'n.webm' }]);
+    const readsBefore = listEnabledSharedVideos.mock.calls.length;
+    const first = broadcastSharedVideoList();
+    const second = broadcastSharedVideoList();
+    await waitFor(() => expect(listEnabledSharedVideos).toHaveBeenCalledTimes(readsBefore + 1));
+    // The second change has not read the list yet: it waits for the first send to finish.
+    expect(listEnabledSharedVideos).toHaveBeenCalledTimes(readsBefore + 1);
+    releaseFirst([{ id: 1, name: 'Older', filename: 'o.webm' }]);
+    await Promise.all([first, second]);
+    expect(frames(a.res).slice(-2).map((f: any) => f.videos[0].name)).toEqual(['Older', 'Newer']);
+  });
+
+  it('still sends the next list change after an earlier one failed', async () => {
+    const a = fake('alice');
+    await handler('/:login/events')(a.req, a.res, vi.fn());
+    listEnabledSharedVideos
+      .mockRejectedValueOnce(new Error('db down'))
+      .mockResolvedValueOnce([{ id: 3, name: 'Next', filename: 'x.webm' }]);
+    const failed = broadcastSharedVideoList();
+    const next = broadcastSharedVideoList();
+    await expect(failed).rejects.toThrow('db down');
+    await expect(next).resolves.toBe(1);
+    expect((frames(a.res).at(-1) as any).videos[0].name).toBe('Next');
   });
 
   it('sends no playback to an overlay until its init frame has been written', async () => {
