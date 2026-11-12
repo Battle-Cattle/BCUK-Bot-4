@@ -1,4 +1,4 @@
-/* global handleSyncFailure, forgetSyncRetry, takeReadyEntry, msUntilNextRetry */
+/* global planSharedSync, nextSharedChunkRange, checkedRangeTotal, handleSyncFailure, forgetSyncRetry, takeReadyEntry, msUntilNextRetry */
 /**
  * Background sync of shared overlay videos into the overlay's own storage (#917). The queue, diff
  * and resume decisions live here as plain functions over injected storage and fetch layers, so they
@@ -13,90 +13,12 @@ const SHARED_SYNC_CHUNK_PAUSE_MS = 1000;
 const SHARED_SYNC_PAUSE_POLL_MS = 500;
 
 /**
- * Works out what a new video list needs: the videos to download (in the list's order, which is
- * newest first, as those are the most likely to be triggered soon) and the stored or half-stored
- * videos that are no longer on the list.
- * @param {Array<{url: string}>} list - The current enabled video list.
- * @param {string[]} storedUrls - URLs of the videos already stored in full.
- * @param {string[]} partialUrls - URLs that have downloaded chunks but are not complete.
- * @returns {{download: Array<{url: string}>, remove: string[]}} Videos to fetch, and URLs to delete.
- */
-function planSharedSync(list, storedUrls, partialUrls) {
-  const wanted = new Set(list.map(function (v) { return v.url; }));
-  const stored = new Set(storedUrls);
-  const remove = storedUrls.concat(partialUrls).filter(function (url, i, all) {
-    return !wanted.has(url) && all.indexOf(url) === i;
-  });
-  return { download: list.filter(function (v) { return !stored.has(v.url); }), remove: remove };
-}
-
-/**
- * Byte range of the chunk to request next, resuming after the chunks already stored.
- * @param {number} chunkCount - Number of consecutive chunks (from 0) already stored.
- * @param {number} chunkBytes - Size of each chunk in bytes.
- * @returns {{start: number, end: number}} Inclusive byte range of the next chunk.
- */
-function nextSharedChunkRange(chunkCount, chunkBytes) {
-  return { start: chunkCount * chunkBytes, end: (chunkCount + 1) * chunkBytes - 1 };
-}
-
-/**
- * Builds the readiness report sent to the server: the ids of the listed videos stored in full, and
- * the id and percentage of the video being downloaded, if any.
- * @param {Array<{id: number, url: string}>} list - The current enabled video list.
- * @param {string[]} storedUrls - URLs of the videos stored in full.
- * @param {{url: string, percent: number}|null} downloading - The current download, or null.
- * @returns {{stored: number[], downloading: ({id: number, percent: number}|null)}} The report body.
- */
-function buildReadinessReport(list, storedUrls, downloading) {
-  const stored = new Set(storedUrls);
-  const current = downloading ? list.find(function (v) { return v.url === downloading.url; }) : undefined;
-  return {
-    stored: list.filter(function (v) { return stored.has(v.url); }).map(function (v) { return v.id; }),
-    downloading: current ? { id: current.id, percent: downloading.percent } : null,
-  };
-}
-
-/**
- * Passes an event to the page, if it listens.
- * @param {object} s - The syncer's state.
- * @param {{type: string, url?: string, percent?: number}} event - The event.
- * @returns {void}
- */
-function emitSyncEvent(s, event) {
-  if (s.deps.onEvent) s.deps.onEvent(event);
-}
-
-/**
  * Waits while a shared video is triggered or playing, polling.
  * @param {object} s - The syncer's state (see {@link createSharedSyncer}).
  * @returns {Promise<void>} Resolves once no longer paused.
  */
 async function waitWhileSyncPaused(s) {
   while (s.deps.isPaused()) await s.deps.sleep(SHARED_SYNC_PAUSE_POLL_MS);
-}
-
-/**
- * Checks a 206 answer covers the bytes asked for and returns the file's total size. A proxy or
- * server that answered a different range, or cut the body short, must not have its bytes stored
- * as if they were the requested chunk.
- * @param {string|null} contentRange - The response's Content-Range header.
- * @param {number} bodyBytes - Length of the response body.
- * @param {number} start - First byte asked for.
- * @param {number} end - Last byte asked for (inclusive; the answer ends at the file's last byte if that comes first).
- * @returns {number} The file's total size in bytes.
- */
-function checkedRangeTotal(contentRange, bodyBytes, start, end) {
-  const match = /^bytes (\d+)-(\d+)\/(\d+)$/.exec(contentRange || '');
-  if (!match) throw new Error('No usable Content-Range: ' + contentRange);
-  const first = Number(match[1]);
-  const last = Number(match[2]);
-  const total = Number(match[3]);
-  if (first !== start || last !== Math.min(end, total - 1)) {
-    throw new Error('Range answered ' + contentRange + ' for bytes ' + start + '-' + end);
-  }
-  if (bodyBytes !== last - first + 1) throw new Error('Range body was ' + bodyBytes + ' bytes, expected ' + (last - first + 1));
-  return total;
 }
 
 /**
