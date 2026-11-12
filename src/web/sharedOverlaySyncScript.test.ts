@@ -361,6 +361,32 @@ describe('createSharedSyncer', () => {
     expect(clock.time).toBe(10000 + 20000 + 40000 + 80000 + 160000 + 4 * 300000);
   });
 
+  it('starts a video afresh when it is added back after being removed during its retry wait', async () => {
+    const storage = memoryStorage();
+    const { clock, timing } = fakeClock();
+    const holder: { syncer?: any } = {};
+    let failures = 1;
+    let fetchedAt = -1;
+    const fetchRange = vi.fn(async (url: string, start: number) => {
+      if (failures-- > 0) throw new Error('offline');
+      fetchedAt = clock.time;
+      return { buffer: `${url}:${start}`, total: 50 };
+    });
+    let relisted = false;
+    const sleep = async (ms: number) => {
+      await timing.sleep(ms);
+      if (relisted) return;
+      relisted = true;
+      await holder.syncer.sync([]); // removed while waiting to retry
+      await holder.syncer.sync([v('/a')]); // and added straight back, well before the 10 s wait is over
+    };
+    holder.syncer = createSharedSyncer(deps(storage, fetchRange, { now: timing.now, sleep }));
+    await holder.syncer.sync([v('/a')]);
+    await holder.syncer.idle();
+    expect(fetchedAt).toBe(1000); // not held back by the earlier failure's wait
+    expect(storage.videos.has('/a')).toBe(true);
+  });
+
   it('does not retry a failed video that has left the list', async () => {
     const storage = memoryStorage();
     const holder: { syncer?: any } = {};
