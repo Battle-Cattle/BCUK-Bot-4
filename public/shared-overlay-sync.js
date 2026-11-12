@@ -211,7 +211,8 @@ async function applyVideoList(s, list, seq) {
 
 /**
  * Takes a new video list. The wanted set switches at once (so a download in flight for a removed
- * video stops), while applying the lists is serialised, so two lists can't act on each other's
+ * video stops, and a removed video's retry wait is forgotten, so adding it back later starts
+ * fresh), while applying the lists is serialised, so two lists can't act on each other's
  * half-read storage state.
  * @param {object} s - The syncer's state.
  * @param {Array<{url: string}>} list - The current enabled video list.
@@ -220,6 +221,7 @@ async function applyVideoList(s, list, seq) {
 function syncVideoList(s, list) {
   const seq = ++s.syncSeq;
   s.wanted = new Set(list.map(function (v) { return v.url; }));
+  Array.from(s.failures.keys()).forEach(function (url) { if (!s.wanted.has(url)) forgetSyncRetry(s, url); });
   const applied = s.syncChain.then(function () { return applyVideoList(s, list, seq); });
   s.syncChain = applied.catch(function () {});
   return applied;
