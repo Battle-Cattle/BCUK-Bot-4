@@ -87,12 +87,15 @@ async function storeCompletedVideo(s, url) {
 
 /**
  * Downloads one video chunk by chunk, resuming after stored chunks, then joins and stores it.
- * Stops early (clearing its chunks) if the video leaves the list meanwhile.
+ * Stops early (clearing its chunks) if the video leaves the list meanwhile, and does nothing if
+ * it is already stored: a plan made from an older storage read can queue a video that has
+ * finished since.
  * @param {object} s - The syncer's state.
  * @param {{url: string}} entry - The video to store.
- * @returns {Promise<void>} Resolves once stored or abandoned.
+ * @returns {Promise<void>} Resolves once stored, abandoned or found already stored.
  */
 async function downloadSyncVideo(s, entry) {
+  if ((await s.deps.storage.listVideos()).indexOf(entry.url) !== -1) return;
   let count = await s.deps.storage.countChunks(entry.url);
   // The total size is stored with the chunks, so chunks that already cover the file (the page was
   // closed before the video was joined) are finished without another request past the end.
