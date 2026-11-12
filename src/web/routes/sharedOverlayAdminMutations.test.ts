@@ -18,6 +18,8 @@ const files = vi.hoisted(() => ({
   storeSharedVideo: vi.fn(), recordSharedVideo: vi.fn(), removeSharedVideoFile: vi.fn(),
 }));
 vi.mock('./sharedOverlayVideoStorage', () => files);
+const transcode = vi.hoisted(() => ({ isWebmTranscodeQueueFull: vi.fn(() => false) }));
+vi.mock('./overlayVideoTranscode', () => transcode);
 const broadcast = vi.fn();
 vi.mock('./sharedOverlaySource', () => ({ broadcastSharedVideoList: (...a: unknown[]) => broadcast(...a) }));
 
@@ -27,6 +29,7 @@ import {
   removeSharedVideo, renameSharedVideo, setSharedVideoEnabled, getStreamerByDiscordId, getVideosForStreamer,
 } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
+import { waitFor } from '../../test-utils/waitFor';
 
 const app = () => buildTestApp({ router, bodyParser: 'urlencoded' });
 const post = (url: string, body: object = {}) => supertest(app()).post(url).type('form').send(body);
@@ -35,6 +38,7 @@ const loc = (res: { headers: Record<string, string> }) => res.headers.location;
 beforeEach(() => {
   vi.clearAllMocks();
   broadcast.mockResolvedValue(2);
+  transcode.isWebmTranscodeQueueFull.mockReturnValue(false);
 });
 
 describe('rename', () => {
@@ -137,6 +141,33 @@ describe('import own video', () => {
     expect(loc(await post('/import/x'))).toBe('/overlay/shared/settings?error=invalid_id');
     expect(loc(await post('/import/10'))).toBe('/overlay/shared/settings?error=not_found');
     expect(files.recordSharedVideo).not.toHaveBeenCalled();
+  });
+
+  it('turns an import away with transcode_busy before copying anything when the conversion queue is full', async () => {
+    transcode.isWebmTranscodeQueueFull.mockReturnValue(true);
+    expect(loc(await post('/import/9'))).toBe('/overlay/shared/settings?error=transcode_busy');
+    expect(files.storeSharedVideo).not.toHaveBeenCalled();
+    expect(files.recordSharedVideo).not.toHaveBeenCalled();
+  });
+
+  it('turns a fourth concurrent import away with upload_busy and frees the slots afterwards', async () => {
+    const release: Array<() => void> = [];
+    files.storeSharedVideo.mockImplementation(() => new Promise<string>((resolve) => { release.push(() => resolve('new.webm')); }));
+    const running = [1, 2, 3].map(() => post('/import/9').then((r) => loc(r)));
+    await waitFor(() => expect(files.storeSharedVideo).toHaveBeenCalledTimes(3));
+    expect(loc(await post('/import/9'))).toBe('/overlay/shared/settings?error=upload_busy');
+    expect(files.storeSharedVideo).toHaveBeenCalledTimes(3);
+    release.forEach((r) => r());
+    expect(await Promise.all(running)).toEqual(Array(3).fill('/overlay/shared/settings?success=video_added'));
+    files.storeSharedVideo.mockResolvedValue('after.webm');
+    expect(loc(await post('/import/9'))).toBe('/overlay/shared/settings?success=video_added');
+  });
+
+  it('frees the import slot when the conversion fails', async () => {
+    files.storeSharedVideo.mockRejectedValue(Object.assign(new Error('x'), { code: 'transcode_failed' }));
+    for (let i = 0; i < 4; i++) {
+      expect(loc(await post('/import/9'))).toBe('/overlay/shared/settings?error=transcode_failed');
+    }
   });
 
   it('reports a failed conversion and records nothing', async () => {
