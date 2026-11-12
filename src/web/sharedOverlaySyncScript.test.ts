@@ -548,6 +548,7 @@ describe('checkedRangeTotal', () => {
     ['a missing header', null, 100],
     ['an unknown total', 'bytes 0-99/*', 100],
     ['a different start', 'bytes 100-199/250', 100],
+    ['an answer that stops short before the end of the file', 'bytes 0-49/250', 50],
     ['an answer past the requested end', 'bytes 0-199/250', 200],
     ['an end beyond the file', 'bytes 0-99/50', 100],
     ['a body shorter than the range', 'bytes 0-99/250', 40],
