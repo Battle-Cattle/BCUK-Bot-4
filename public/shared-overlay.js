@@ -1,4 +1,4 @@
-/* global connectSse, planSharedPlayback, buildReadinessReport, createSharedSyncer, resolveSharedSource, createSharedStorage, sharedStorageAvailable */
+/* global connectSse, planSharedPlayback, buildReadinessReport, createSharedSyncer, resolveSharedSource, checkedRangeTotal, createSharedStorage, sharedStorageAvailable */
 (function () {
   const script = document.currentScript;
   const login = script ? script.dataset.login : '';
@@ -43,9 +43,8 @@
   async function fetchRange(url, start, end, fullSpeed) {
     const res = await fetch(fullSpeed ? url : url + '?preload=1', { headers: { Range: 'bytes=' + start + '-' + end } });
     if (res.status !== 206) throw new Error('Range request answered ' + res.status);
-    const match = /\/(\d+)$/.exec(res.headers.get('Content-Range') || '');
-    if (!match) throw new Error('No total size in Content-Range');
-    return { buffer: await res.arrayBuffer(), total: Number(match[1]) };
+    const buffer = await res.arrayBuffer();
+    return { buffer: buffer, total: checkedRangeTotal(res.headers.get('Content-Range'), buffer.byteLength, start, end) };
   }
 
   /**
