@@ -64,7 +64,12 @@ async function storeCompletedVideo(s, url) {
  * @returns {Promise<void>} Resolves once stored, abandoned or found already stored.
  */
 async function downloadSyncVideo(s, entry) {
-  if ((await s.deps.storage.listVideos()).indexOf(entry.url) !== -1) return;
+  if ((await s.deps.storage.listVideos()).indexOf(entry.url) !== -1) {
+    // Stored already; chunks left over from a cleanup that failed after the store (or a page that
+    // closed before it) go now, and a failure here is retried like any other.
+    await s.deps.storage.clearChunks(entry.url);
+    return;
+  }
   const generation = s.removals.get(entry.url) || 0;
   let count = await s.deps.storage.countChunks(entry.url);
   // The total size is stored with the chunks, so chunks that already cover the file (the page was
