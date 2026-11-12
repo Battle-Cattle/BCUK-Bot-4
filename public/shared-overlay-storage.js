@@ -98,10 +98,12 @@ function createSharedStorage() {
       return Array.from(new Set(keys.map(function (k) { return k[0]; })));
     },
     countChunks: async function (url) {
-      // Only an unbroken run from 0 counts, so a gap left by a crash is refetched.
-      const records = await chunkRecords(url);
+      // Only an unbroken run from 0 counts, so a gap left by a crash is refetched. Keys are read,
+      // not records, so resuming a big download doesn't load its stored bytes.
+      const keys = await chunkRequest('readonly', function (s) { return s.index('url').getAllKeys(url); });
+      const indexes = keys.map(function (k) { return k[1]; }).sort(function (a, b) { return a - b; });
       let n = 0;
-      while (n < records.length && records[n].index === n) n++;
+      while (n < indexes.length && indexes[n] === n) n++;
       return n;
     },
     chunkTotal: async function (url) {
