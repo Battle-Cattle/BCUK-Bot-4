@@ -12,6 +12,11 @@ const SHARED_SYNC_CHUNK_PAUSE_MS = 1000;
 /** How long to wait before trying again after a failed download, and how often to re-check a pause. */
 const SHARED_SYNC_RETRY_MS = 10000;
 const SHARED_SYNC_PAUSE_POLL_MS = 500;
+/** A failed download is retried with a doubling wait, capped here, and given up on after this many tries. */
+const SHARED_SYNC_MAX_RETRY_MS = 300000;
+const SHARED_SYNC_MAX_ATTEMPTS = 8;
+/** Longest to wait for the stored copy of a video before streaming it instead. */
+const SHARED_SOURCE_LOOKUP_MS = 1500;
 
 /**
  * Works out what a new video list needs: the videos to download (in the list's order, which is
@@ -87,8 +92,25 @@ async function waitWhileSyncPaused(s) {
 async function downloadSyncChunk(s, entry, count) {
   const range = nextSharedChunkRange(count, s.chunkBytes);
   const part = await s.deps.fetchRange(entry.url, range.start, range.end);
-  await s.deps.storage.putChunk(entry.url, count, part.buffer);
+  await s.deps.storage.putChunk(entry.url, count, part.buffer, part.total);
   return part.total;
+}
+
+/**
+ * Joins a video's finished chunks into the stored copy and clears them. Removal is checked again
+ * after the store, because a video taken off the list while its last chunk or the store was in
+ * flight must not stay stored.
+ * @param {object} s - The syncer's state.
+ * @param {string} url - The video's URL path.
+ * @returns {Promise<boolean>} True when the video was stored and is still wanted; false when it was removed meanwhile.
+ */
+async function storeCompletedVideo(s, url) {
+  const storage = s.deps.storage;
+  if (s.wanted.has(url)) await storage.putVideo(url, await storage.getChunks(url));
+  const kept = s.wanted.has(url);
+  if (!kept) await storage.deleteVideo(url);
+  await storage.clearChunks(url);
+  return kept;
 }
 
 /**
@@ -100,7 +122,10 @@ async function downloadSyncChunk(s, entry, count) {
  */
 async function downloadSyncVideo(s, entry) {
   let count = await s.deps.storage.countChunks(entry.url);
-  let total = Infinity;
+  // The total size is stored with the chunks, so chunks that already cover the file (the page was
+  // closed before the video was joined) are finished without another request past the end.
+  let total = count > 0 ? await s.deps.storage.chunkTotal(entry.url) : null;
+  if (total === null) total = Infinity;
   while (count * s.chunkBytes < total) {
     await waitWhileSyncPaused(s);
     if (!s.wanted.has(entry.url)) { await s.deps.storage.clearChunks(entry.url); return; }
@@ -109,53 +134,122 @@ async function downloadSyncVideo(s, entry) {
     emitSyncEvent(s, { type: 'progress', url: entry.url, percent: Math.min(100, Math.round((count * s.chunkBytes / total) * 100)) });
     if (count * s.chunkBytes < total) await s.deps.sleep(s.chunkPauseMs);
   }
-  await s.deps.storage.putVideo(entry.url, await s.deps.storage.getChunks(entry.url));
-  await s.deps.storage.clearChunks(entry.url);
-  emitSyncEvent(s, { type: 'stored', url: entry.url });
+  if (await storeCompletedVideo(s, entry.url)) emitSyncEvent(s, { type: 'stored', url: entry.url });
 }
 
 /**
- * Drains the queue one video at a time; a failed video waits a while and is retried by the next list.
+ * Handles a failed download: logs it, waits (doubling each time, up to a cap) and puts the video
+ * at the back of the queue so later videos are not held up, unless it left the list or has failed
+ * too often (the next list message then tries it again).
+ * @param {object} s - The syncer's state.
+ * @param {{url: string}} entry - The video that failed.
+ * @param {*} err - What went wrong.
+ * @returns {Promise<void>} Resolves once the wait is over and the video is requeued or given up on.
+ */
+async function handleSyncFailure(s, entry, err) {
+  const attempts = (s.failures.get(entry.url) || 0) + 1;
+  s.failures.set(entry.url, attempts);
+  if (s.deps.log) s.deps.log('Shared video download failed: ' + entry.url, err);
+  await s.deps.sleep(Math.min(SHARED_SYNC_RETRY_MS * Math.pow(2, attempts - 1), SHARED_SYNC_MAX_RETRY_MS));
+  const queued = s.queue.some(function (q) { return q.url === entry.url; });
+  if (attempts < SHARED_SYNC_MAX_ATTEMPTS && s.wanted.has(entry.url) && !queued) {
+    s.queue.push(entry);
+  } else {
+    s.failures.delete(entry.url);
+  }
+}
+
+/**
+ * Drains the queue one video at a time; a failed video waits and is retried after the others.
  * @param {object} s - The syncer's state.
  * @returns {Promise<void>} Resolves once the queue is empty.
  */
 async function drainSyncQueue(s) {
   while (s.queue.length > 0) {
     const entry = s.queue.shift();
+    s.active = entry.url;
     try {
       await downloadSyncVideo(s, entry);
+      s.failures.delete(entry.url);
     } catch (err) {
-      if (s.deps.log) s.deps.log('Shared video download failed: ' + entry.url, err);
-      await s.deps.sleep(SHARED_SYNC_RETRY_MS);
+      await handleSyncFailure(s, entry, err);
     }
+    s.active = null;
   }
   s.running = null;
   emitSyncEvent(s, { type: 'idle' });
 }
 
 /**
- * Takes a new video list: deletes stored and half-stored videos that left it and queues the missing ones.
+ * Applies one video list: deletes stored and half-stored videos that left it and queues the missing
+ * ones. Does nothing when a newer list has arrived (before or during the storage reads), as that
+ * list's own plan is the one to apply and this one is stale.
  * @param {object} s - The syncer's state.
- * @param {Array<{url: string}>} list - The current enabled video list.
+ * @param {Array<{url: string}>} list - The video list to apply.
+ * @param {number} seq - This list's sequence number.
  * @returns {Promise<void>} Resolves once the queue is updated and draining.
  */
-async function syncVideoList(s, list) {
-  s.wanted = new Set(list.map(function (v) { return v.url; }));
+async function applyVideoList(s, list, seq) {
+  if (seq !== s.syncSeq) return;
   const plan = planSharedSync(list, await s.deps.storage.listVideos(), await s.deps.storage.listPartial());
+  if (seq !== s.syncSeq) return;
   for (const url of plan.remove) {
+    if (s.wanted.has(url)) continue;
     await s.deps.storage.deleteVideo(url);
     await s.deps.storage.clearChunks(url);
     emitSyncEvent(s, { type: 'removed', url: url });
   }
-  s.queue = plan.download;
+  // The video being downloaded is not stored yet, so it is in the plan; queueing it again would fetch it twice.
+  s.queue = plan.download.filter(function (e) { return e.url !== s.active; });
   if (!s.running && s.queue.length > 0) s.running = drainSyncQueue(s);
+}
+
+/**
+ * Takes a new video list. The wanted set switches at once (so a download in flight for a removed
+ * video stops), while applying the lists is serialised, so two lists can't act on each other's
+ * half-read storage state.
+ * @param {object} s - The syncer's state.
+ * @param {Array<{url: string}>} list - The current enabled video list.
+ * @returns {Promise<void>} Resolves once this list has been applied or superseded.
+ */
+function syncVideoList(s, list) {
+  const seq = ++s.syncSeq;
+  s.wanted = new Set(list.map(function (v) { return v.url; }));
+  const applied = s.syncChain.then(function () { return applyVideoList(s, list, seq); });
+  s.syncChain = applied.catch(function () {});
+  return applied;
+}
+
+/**
+ * Picks what to play a video from: its stored copy as an object URL, or the normal route when
+ * there is none or the lookup doesn't answer in time (a stalled storage read must not delay
+ * playback past its window).
+ * @param {string} url - The video's URL path.
+ * @param {object} deps - Injected layers.
+ * @param {{getVideoBlob: function(string): Promise<Blob|null>}|null} deps.storage - The storage layer, or null when unavailable.
+ * @param {function(Blob): string} deps.createObjectUrl - Makes an object URL for a blob.
+ * @param {function(string): void} deps.revokeObjectUrl - Frees an object URL.
+ * @param {function(number): Promise<void>} deps.sleep - Resolves after the given milliseconds.
+ * @param {number} [deps.lookupMs] - How long to wait for the stored copy (defaults to the constant above).
+ * @returns {Promise<{src: string, release: function(): void}>} The source and a function freeing it.
+ */
+async function resolveSharedSource(url, deps) {
+  const route = { src: url, release: function () {} };
+  if (!deps.storage) return route;
+  const lookup = deps.storage.getVideoBlob(url).catch(function () { return null; });
+  const timeout = deps.sleep(deps.lookupMs === undefined ? SHARED_SOURCE_LOOKUP_MS : deps.lookupMs).then(function () { return null; });
+  const blob = await Promise.race([lookup, timeout]);
+  if (!blob) return route;
+  const objectUrl = deps.createObjectUrl(blob);
+  return { src: objectUrl, release: function () { deps.revokeObjectUrl(objectUrl); } };
 }
 
 /**
  * Creates the background syncer.
  * @param {object} deps - Injected layers.
- * @param {object} deps.storage - `listVideos()`, `listPartial()`, `countChunks(url)`, `getChunks(url)`,
- *   `putChunk(url, index, buffer)`, `putVideo(url, chunks)`, `deleteVideo(url)`, `clearChunks(url)`.
+ * @param {object} deps.storage - `listVideos()`, `listPartial()`, `countChunks(url)`, `chunkTotal(url)`
+ *   (the file size stored with the chunks, or null), `getChunks(url)`,
+ *   `putChunk(url, index, buffer, total)`, `putVideo(url, chunks)`, `deleteVideo(url)`, `clearChunks(url)`.
  * @param {function(string, number, number): Promise<{buffer: ArrayBuffer, total: number}>} deps.fetchRange -
  *   Fetches an inclusive byte range, reporting the file's total size.
  * @param {function(): boolean} deps.isPaused - True while a shared video is triggered or playing.
@@ -178,6 +272,10 @@ function createSharedSyncer(deps) {
     wanted: new Set(),
     queue: [],
     running: null,
+    active: null, // URL of the video being downloaded
+    failures: new Map(), // URL -> failed attempts so far
+    syncSeq: 0,
+    syncChain: Promise.resolve(),
   };
   return {
     sync: function (list) { return syncVideoList(s, list); },
