@@ -84,15 +84,42 @@ async function waitWhileSyncPaused(s) {
 }
 
 /**
+ * Checks a 206 answer covers the bytes asked for and returns the file's total size. A proxy or
+ * server that answered a different range, or cut the body short, must not have its bytes stored
+ * as if they were the requested chunk.
+ * @param {string|null} contentRange - The response's Content-Range header.
+ * @param {number} bodyBytes - Length of the response body.
+ * @param {number} start - First byte asked for.
+ * @param {number} end - Last byte asked for (inclusive; the server may answer less at the file's end).
+ * @returns {number} The file's total size in bytes.
+ */
+function checkedRangeTotal(contentRange, bodyBytes, start, end) {
+  const match = /^bytes (\d+)-(\d+)\/(\d+)$/.exec(contentRange || '');
+  if (!match) throw new Error('No usable Content-Range: ' + contentRange);
+  const first = Number(match[1]);
+  const last = Number(match[2]);
+  const total = Number(match[3]);
+  if (first !== start || last < first || last > end || last >= total) {
+    throw new Error('Range answered ' + contentRange + ' for bytes ' + start + '-' + end);
+  }
+  if (bodyBytes !== last - first + 1) throw new Error('Range body was ' + bodyBytes + ' bytes, expected ' + (last - first + 1));
+  return total;
+}
+
+/**
  * Downloads the next chunk of a video and stores it.
  * @param {object} s - The syncer's state.
  * @param {{url: string}} entry - The video being stored.
  * @param {number} count - Number of chunks stored so far.
- * @returns {Promise<number>} The video's total size in bytes, as the server reports it.
+ * @param {number} generation - The video's removal count when this download started.
+ * @returns {Promise<number|null>} The video's total size in bytes, as the server reports it, or
+ *   null when the video was taken off the list (and maybe put back) while the chunk was in flight,
+ *   so the chunk was dropped rather than stored beside chunks of a different download.
  */
-async function downloadSyncChunk(s, entry, count) {
+async function downloadSyncChunk(s, entry, count, generation) {
   const range = nextSharedChunkRange(count, s.chunkBytes);
   const part = await s.deps.fetchRange(entry.url, range.start, range.end);
+  if ((s.removals.get(entry.url) || 0) !== generation) return null;
   await s.deps.storage.putChunk(entry.url, count, part.buffer, part.total);
   return part.total;
 }
@@ -138,6 +165,7 @@ async function storeCompletedVideo(s, url) {
  */
 async function downloadSyncVideo(s, entry) {
   if ((await s.deps.storage.listVideos()).indexOf(entry.url) !== -1) return;
+  const generation = s.removals.get(entry.url) || 0;
   let count = await s.deps.storage.countChunks(entry.url);
   // The total size is stored with the chunks, so chunks that already cover the file (the page was
   // closed before the video was joined) are finished without another request past the end.
@@ -146,13 +174,26 @@ async function downloadSyncVideo(s, entry) {
   while (count * s.chunkBytes < total) {
     await waitWhileSyncPaused(s);
     if (!s.wanted.has(entry.url)) { await s.deps.storage.clearChunks(entry.url); return; }
-    total = await downloadSyncChunk(s, entry, count);
+    total = await downloadSyncChunk(s, entry, count, generation);
+    if (total === null) return restartSyncDownload(s, entry);
     count++;
     emitSyncEvent(s, { type: 'progress', url: entry.url, percent: Math.min(100, Math.round((count * s.chunkBytes / total) * 100)) });
     if (count * s.chunkBytes < total && syncYieldsToPush(s, entry)) return;
     if (count * s.chunkBytes < total && !s.fast.has(entry.url)) await s.deps.sleep(s.chunkPauseMs);
   }
   if (await storeCompletedVideo(s, entry.url)) emitSyncEvent(s, { type: 'stored', url: entry.url });
+}
+
+/**
+ * Drops the chunks of a download that was invalidated (its video left the list while a chunk was
+ * in flight) and, if the video is back on the list, starts it again from the beginning.
+ * @param {object} s - The syncer's state.
+ * @param {{url: string}} entry - The video whose download was invalidated.
+ * @returns {Promise<void>} Resolves once the chunks are cleared and any fresh download is done.
+ */
+async function restartSyncDownload(s, entry) {
+  await s.deps.storage.clearChunks(entry.url);
+  if (s.wanted.has(entry.url)) await downloadSyncVideo(s, entry);
 }
 
 /**
@@ -287,7 +328,10 @@ async function fetchSyncNow(s, entry) {
  */
 function syncVideoList(s, list) {
   const seq = ++s.syncSeq;
-  s.wanted = new Set(list.map(function (v) { return v.url; }));
+  const next = new Set(list.map(function (v) { return v.url; }));
+  // A video that leaves the list ends the download in flight for it, even if it comes back.
+  s.wanted.forEach(function (url) { if (!next.has(url)) s.removals.set(url, (s.removals.get(url) || 0) + 1); });
+  s.wanted = next;
   Array.from(s.failures.keys()).forEach(function (url) { if (!s.wanted.has(url)) forgetSyncRetry(s, url); });
   const applied = s.syncChain.then(function () { return applyVideoList(s, list, seq); });
   s.syncChain = applied.catch(function () {});
@@ -345,6 +389,7 @@ function createSharedSyncer(deps) {
     chunkBytes: deps.chunkBytes || SHARED_SYNC_CHUNK_BYTES,
     chunkPauseMs: deps.chunkPauseMs === undefined ? SHARED_SYNC_CHUNK_PAUSE_MS : deps.chunkPauseMs,
     wanted: new Set(),
+    removals: new Map(), // URL -> times it left the list, so a download can tell it was invalidated
     queue: [],
     running: null,
     current: null, // url being downloaded now
