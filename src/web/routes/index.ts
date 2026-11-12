@@ -32,6 +32,7 @@ import userSettingsRouter from './userSettings';
 import overlaySourceRouter from './overlaySource';
 import sharedOverlaySourceRouter from './sharedOverlaySource';
 import sharedOverlayAdminRouter from './sharedOverlayAdmin';
+import './sharedOverlayLivePush'; // registers the live-state push for the shared overlays
 import overlayAdminRouter from './overlayAdmin';
 import alertsOverlaySourceRouter from './alertsOverlaySource';
 import alertsAdminRouter from './alertsAdmin';

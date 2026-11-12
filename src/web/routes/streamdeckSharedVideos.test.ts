@@ -13,7 +13,9 @@ vi.mock('../../shared/config', () => ({
   SHARED_OVERLAY_LEAD_MS: 4000,
   SHARED_OVERLAY_TRIGGER_COOLDOWN_MS: 3000,
 }));
+const conns = vi.hoisted(() => ({ sharedConnections: new Map<string, Set<unknown>>() }));
 vi.mock('./sharedOverlaySource', () => ({
+  sharedConnections: conns.sharedConnections,
   pushSharedPlay: vi.fn(),
   sharedVideoUrl: (f: string) => `/overlay/shared/videos/${f}`,
 }));
@@ -22,6 +24,7 @@ import supertest from 'supertest';
 import router, { resetSharedVideoCooldown } from './streamdeckSharedVideos';
 import { getSharedVideo, listEnabledSharedVideos } from '../../db';
 import { pushSharedPlay } from './sharedOverlaySource';
+import { recordReadinessReport, resetReadiness } from './sharedOverlayReadiness';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
 const app = () => buildTestApp({ router, bodyParser: 'json' });
@@ -33,6 +36,8 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(100_000);
   resetSharedVideoCooldown();
+  conns.sharedConnections.clear();
+  resetReadiness();
   vi.mocked(getSharedVideo).mockResolvedValue(video as any);
   vi.mocked(pushSharedPlay).mockReturnValue(3);
 });
@@ -47,10 +52,23 @@ describe('auth', () => {
 });
 
 describe('GET /shared-videos', () => {
-  it('lists only id and name of the enabled videos', async () => {
+  it('lists the enabled videos with their id and name, and zero readiness with nobody connected', async () => {
     vi.mocked(listEnabledSharedVideos).mockResolvedValue([video as any]);
     const res = await supertest(app()).get('/shared-videos').set(auth).expect(200);
-    expect(res.body).toEqual({ ok: true, videos: [{ id: 2, name: 'Clap' }] });
+    expect(res.body).toEqual({ ok: true, videos: [{ id: 2, name: 'Clap', ready: 0, connected: 0 }] });
+  });
+
+  it('adds how many connected overlays have each video, matching the admin aggregation', async () => {
+    vi.mocked(listEnabledSharedVideos).mockResolvedValue([video as any, { id: 3, name: 'Boo', filename: 'b.webm', enabled: true } as any]);
+    ['alice', 'bob', 'carol'].forEach((l) => conns.sharedConnections.set(l, new Set()));
+    recordReadinessReport('alice', { stored: [2, 3], downloading: null });
+    recordReadinessReport('bob', { stored: [2], downloading: { id: 3, percent: 10 } });
+    recordReadinessReport('dave', { stored: [2, 3], downloading: null }); // offline: not counted
+    const res = await supertest(app()).get('/shared-videos').set(auth).expect(200);
+    expect(res.body.videos).toEqual([
+      { id: 2, name: 'Clap', ready: 2, connected: 3 },
+      { id: 3, name: 'Boo', ready: 1, connected: 3 },
+    ]);
   });
 
   it('answers 500 on a DB error', async () => {

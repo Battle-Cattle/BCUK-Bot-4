@@ -13,7 +13,7 @@ const listEnabledSharedVideos = vi.fn();
 vi.mock('../../db', () => ({
   listEnabledSharedVideos: (...a: unknown[]) => listEnabledSharedVideos(...a),
   getStreamerByDiscordId: vi.fn(),
-  getAllStreamersWithGroups: vi.fn(async () => ['alice', 'bob'].map((twitch_name) => ({ twitch_name }))),
+  getAllStreamersWithGroups: vi.fn(async () => ['alice', 'bob', 'livechannel'].map((twitch_name) => ({ twitch_name }))),
   createManagedLookupCache: (opts: { loadCache: () => Promise<unknown> }) => ({ getCache: () => opts.loadCache(), invalidate: () => {} }),
   DEFAULT_REFRESH_FAILURE_BACKOFF_MS: 5000,
   DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS: 60000,
@@ -36,6 +36,7 @@ vi.mock('../../shared/pathUtils', async (importOriginal) => {
 import express from 'express';
 import supertest from 'supertest';
 import { getReadinessSnapshot, resetReadiness } from './sharedOverlayReadiness';
+import { setTwitchChannel, setTwitchChannelLive } from '../../shared/statusStore';
 import router, {
   sharedConnections, broadcastSharedEvent, pushSharedPlay, getSharedOverlayConnectionCount,
 } from './sharedOverlaySource';
@@ -104,6 +105,17 @@ describe('events', () => {
     });
     expect(typeof init.serverTime).toBe('number');
     expect(getSharedOverlayConnectionCount()).toBe(1);
+  });
+
+  it('tells the overlay whether its streamer is live on connect', async () => {
+    const offline = fake('alice');
+    await handler('/:login/events')(offline.req, offline.res, vi.fn());
+    expect(frames(offline.res)[0].live).toBe(false);
+    setTwitchChannel('livechannel', true); // Twitch logins are at least 4 characters
+    setTwitchChannelLive('livechannel', true);
+    const live = fake('livechannel');
+    await handler('/:login/events')(live.req, live.res, vi.fn());
+    expect(frames(live.res)[0].live).toBe(true);
   });
 
   it('closes the connection when the list lookup fails', async () => {

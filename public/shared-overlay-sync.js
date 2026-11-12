@@ -9,9 +9,20 @@
 const SHARED_SYNC_CHUNK_BYTES = 2 * 1024 * 1024;
 /** Pause between chunks, spreading the load (the server-side speed limit is the hard cap). */
 const SHARED_SYNC_CHUNK_PAUSE_MS = 1000;
+/** Pause between chunks while the streamer is offline: faster, the server budget still caps the total. */
+const SHARED_SYNC_CHUNK_PAUSE_OFFLINE_MS = 250;
 /** How long to wait before trying again after a failed download, and how often to re-check a pause. */
 const SHARED_SYNC_RETRY_MS = 10000;
 const SHARED_SYNC_PAUSE_POLL_MS = 500;
+
+/**
+ * Pause between chunks for the streamer's live state: slow while they stream, faster while offline.
+ * @param {boolean} live - Whether the streamer is live (treat as live until told otherwise).
+ * @returns {number} Milliseconds to wait between chunks.
+ */
+function chunkPauseFor(live) {
+  return live ? SHARED_SYNC_CHUNK_PAUSE_MS : SHARED_SYNC_CHUNK_PAUSE_OFFLINE_MS;
+}
 
 /**
  * Works out what a new video list needs: the videos to download (in the list's order, which is
@@ -73,7 +84,8 @@ function buildReadinessReport(list, storedUrls, downloading) {
  *   chunk arrives (`progress`, with the percentage), a video is stored (`stored`) or deleted
  *   (`removed`), and when the queue drains (`idle`), so the page can report readiness.
  * @param {number} [deps.chunkBytes] - Bytes per chunk (defaults to the constant above).
- * @param {number} [deps.chunkPauseMs] - Pause between chunks (defaults to the constant above).
+ * @param {number|function(): number} [deps.chunkPauseMs] - Pause between chunks, or a function giving
+ *   it each time (defaults to the live-streamer constant above).
  * @returns {{sync: function(Array<{url: string}>): Promise<void>, fetchNow: function({url: string}): Promise<string>, idle: function(): Promise<void>}}
  *   `sync` takes a new list (queueing downloads and deleting removed videos); `fetchNow` handles a
  *   Manager push; `idle` resolves once the queue has drained.
@@ -81,6 +93,14 @@ function buildReadinessReport(list, storedUrls, downloading) {
 function createSharedSyncer(deps) {
   const chunkBytes = deps.chunkBytes || SHARED_SYNC_CHUNK_BYTES;
   const chunkPauseMs = deps.chunkPauseMs === undefined ? SHARED_SYNC_CHUNK_PAUSE_MS : deps.chunkPauseMs;
+
+  /**
+   * The pause to take after a chunk right now.
+   * @returns {number} Milliseconds.
+   */
+  function pauseMs() {
+    return typeof chunkPauseMs === 'function' ? chunkPauseMs() : chunkPauseMs;
+  }
   let wanted = new Set();
   let queue = [];
   let running = null;
@@ -135,7 +155,7 @@ function createSharedSyncer(deps) {
       count++;
       emit({ type: 'progress', url: entry.url, percent: Math.min(100, Math.round((count * chunkBytes / total) * 100)) });
       if (count * chunkBytes < total && yieldsToPush(entry)) return;
-      if (count * chunkBytes < total && !fast.has(entry.url)) await deps.sleep(chunkPauseMs);
+      if (count * chunkBytes < total && !fast.has(entry.url)) await deps.sleep(pauseMs());
     }
     await deps.storage.putVideo(entry.url, await deps.storage.getChunks(entry.url));
     await deps.storage.clearChunks(entry.url);

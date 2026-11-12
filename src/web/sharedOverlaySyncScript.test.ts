@@ -7,8 +7,8 @@ const source = fs.readFileSync(path.join(__dirname, '../../public/shared-overlay
 // Top-level const/function declarations aren't properties of a vm context, so export them explicitly.
 const context: Record<string, any> = {};
 vm.createContext(context);
-vm.runInContext(`${source}\nthis.api = { planSharedSync, nextSharedChunkRange, createSharedSyncer, buildReadinessReport };`, context);
-const { planSharedSync, nextSharedChunkRange, createSharedSyncer, buildReadinessReport } = context.api;
+vm.runInContext(`${source}\nthis.api = { planSharedSync, nextSharedChunkRange, createSharedSyncer, buildReadinessReport, chunkPauseFor };`, context);
+const { planSharedSync, nextSharedChunkRange, createSharedSyncer, buildReadinessReport, chunkPauseFor } = context.api;
 
 const v = (url: string) => ({ url });
 
@@ -58,6 +58,14 @@ function memoryStorage(initial: { videos?: string[]; chunks?: Record<string, str
 function fakeFetch(size: number) {
   return vi.fn(async (url: string, start: number, _end: number) => ({ buffer: `${url}:${start}`, total: size }));
 }
+
+describe('chunkPauseFor', () => {
+  it('preloads faster while the streamer is offline than while they are live', () => {
+    expect(chunkPauseFor(true)).toBe(1000);
+    expect(chunkPauseFor(false)).toBe(250);
+    expect(chunkPauseFor(false)).toBeLessThan(chunkPauseFor(true));
+  });
+});
 
 describe('buildReadinessReport', () => {
   const list = [{ id: 1, url: '/a' }, { id: 2, url: '/b' }];
@@ -147,6 +155,18 @@ describe('createSharedSyncer', () => {
     expect(fetchRange).toHaveBeenCalledTimes(1);
     expect(storage.videos.has('/a')).toBe(false);
     expect(storage.chunks.has('/a')).toBe(false);
+  });
+
+  it('takes the pause between chunks from a function, so a live-state change applies mid-download', async () => {
+    const sleeps: number[] = [];
+    let pause = 900;
+    const fetchRange = vi.fn(async (url: string) => { pause = 120; return { buffer: url, total: 300 }; });
+    const syncer = createSharedSyncer(deps(memoryStorage(), fetchRange, {
+      chunkPauseMs: () => pause, sleep: async (ms: number) => { sleeps.push(ms); },
+    }));
+    await syncer.sync([v('/a')]);
+    await syncer.idle();
+    expect(sleeps).toEqual([120, 120]);
   });
 
   it('logs a failed download, waits, and carries on with the next video', async () => {

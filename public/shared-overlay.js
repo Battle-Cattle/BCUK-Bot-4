@@ -1,4 +1,4 @@
-/* global connectSse, planSharedPlayback, buildReadinessReport, createSharedSyncer, createSharedStorage, sharedStorageAvailable */
+/* global connectSse, planSharedPlayback, buildReadinessReport, chunkPauseFor, createSharedSyncer, createSharedStorage, sharedStorageAvailable */
 (function () {
   const script = document.currentScript;
   const login = script ? script.dataset.login : '';
@@ -14,6 +14,7 @@
   let syncer = null;
   let storage = null;
   let firstSyncDone = false;
+  let streamerLive = true; // slow until the server says the streamer is offline
   let currentList = [];
   let downloading = null; // { url, percent } while a background download runs
   let lastProgressReportAt = 0;
@@ -97,6 +98,7 @@
       storage: storage,
       fetchRange: fetchRange,
       isPaused: function () { return playing; },
+      chunkPauseMs: function () { return chunkPauseFor(streamerLive); },
       sleep: function (ms) { return new Promise(function (resolve) { setTimeout(resolve, ms); }); },
       log: function (message, err) { console.warn(message, err); },
       onEvent: handleSyncEvent,
@@ -184,7 +186,10 @@
     if (data.type === 'init') {
       clockOffsetMs = data.serverTime - Date.now();
       if (typeof data.maxLateMs === 'number') maxLateMs = data.maxLateMs;
+      if (typeof data.live === 'boolean') streamerLive = data.live;
       syncList(data.videos);
+    } else if (data.type === 'live') {
+      streamerLive = data.live === true;
     } else if (data.type === 'videos') {
       syncList(data.videos);
     } else if (data.type === 'fetchNow' && data.url) {
