@@ -63,6 +63,17 @@ describe('rename', () => {
   });
 });
 
+describe('database errors', () => {
+  it('redirect rename, enable and import failures with save_failed', async () => {
+    vi.mocked(renameSharedVideo).mockRejectedValue(new Error('db'));
+    expect(loc(await post('/3/rename', { name: 'a' }))).toBe('/overlay/shared/settings?error=save_failed');
+    vi.mocked(setSharedVideoEnabled).mockRejectedValue(new Error('db'));
+    expect(loc(await post('/3/enabled', { enabled: '1' }))).toBe('/overlay/shared/settings?error=save_failed');
+    vi.mocked(getStreamerByDiscordId).mockRejectedValue(new Error('db'));
+    expect(loc(await post('/import/9'))).toBe('/overlay/shared/settings?error=save_failed');
+  });
+});
+
 describe('enabled', () => {
   it('enables and disables, each broadcasting the list', async () => {
     vi.mocked(setSharedVideoEnabled).mockResolvedValue(true);

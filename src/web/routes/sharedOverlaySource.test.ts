@@ -38,7 +38,7 @@ import supertest from 'supertest';
 import { getReadinessSnapshot, resetReadiness } from './sharedOverlayReadiness';
 import { setTwitchChannel, setTwitchChannelLive } from '../../shared/statusStore';
 import router, {
-  sharedConnections, broadcastSharedEvent, pushSharedPlay, getSharedOverlayConnectionCount,
+  sharedConnections, broadcastSharedEvent, broadcastSharedVideoList, pushSharedPlay, getSharedOverlayConnectionCount,
 } from './sharedOverlaySource';
 
 /** Finds a route handler on the router's stack. */
@@ -153,6 +153,14 @@ describe('broadcast', () => {
       expect(frames(r).at(-1)).toEqual({ type: 'play', video: '/overlay/shared/videos/x.webm', playAt: 123 });
     }
     expect(broadcastSharedEvent({ type: 'x' })).toBe(2);
+  });
+
+  it('sends the current enabled list to every overlay when a Manager changes it', async () => {
+    const a = fake('alice');
+    await handler('/:login/events')(a.req, a.res, vi.fn());
+    listEnabledSharedVideos.mockResolvedValue([{ id: 2, name: 'Boo', filename: 'b.webm' }]);
+    await expect(broadcastSharedVideoList()).resolves.toBe(1);
+    expect(frames(a.res).at(-1)).toEqual({ type: 'videos', videos: [{ id: 2, name: 'Boo', url: '/overlay/shared/videos/b.webm' }] });
   });
 
   it('reaches nobody when none are connected', () => {

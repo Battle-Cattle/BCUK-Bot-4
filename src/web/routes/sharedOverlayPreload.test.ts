@@ -91,6 +91,12 @@ describe('servePreloadVideo', () => {
     expect(res.headers['content-length']).toBe('0');
   });
 
+  it('answers 404 when the file vanishes between the checks and reading its size', async () => {
+    const stat = vi.spyOn(fs.promises, 'stat').mockRejectedValueOnce(Object.assign(new Error('gone'), { code: 'ENOENT' }));
+    expect((await get('small.webm')).status).toBe(404);
+    stat.mockRestore();
+  });
+
   it('refuses unsafe or unsupported names and 404s a missing file', async () => {
     expect((await get('..%2Fsmall.webm')).status).toBe(400);
     expect((await get('small.mp4')).status).toBe(400);
