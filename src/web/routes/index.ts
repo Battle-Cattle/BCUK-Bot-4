@@ -31,6 +31,7 @@ import companionKeysRouter from './companionKeys';
 import userSettingsRouter from './userSettings';
 import overlaySourceRouter from './overlaySource';
 import sharedOverlaySourceRouter from './sharedOverlaySource';
+import sharedOverlayAdminRouter from './sharedOverlayAdmin';
 import overlayAdminRouter from './overlayAdmin';
 import alertsOverlaySourceRouter from './alertsOverlaySource';
 import alertsAdminRouter from './alertsAdmin';
@@ -142,6 +143,7 @@ export function mountRoutes(app: Express, { streamdeckLimiter }: MountRoutesOpti
   app.use('/admin', adminGuildRouter);
 
   app.use('/user/settings', requireAuth, userSettingsRouter);
+  app.use('/overlay/shared/settings', sharedOverlayAdminRouter);
   app.use('/overlay', requireAuth, overlayAdminRouter);
   app.use('/alerts', requireAuth, alertsAdminRouter);
   app.use('/channel-points', requireAuth, channelPointsAdminRouter);

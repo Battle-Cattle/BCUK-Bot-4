@@ -71,6 +71,15 @@ export function broadcastSharedEvent(payload: unknown): number {
 }
 
 /**
+ * Sends the current enabled video list to every connected shared overlay, so they catch up after a
+ * Manager adds, removes, enables or disables a video without a restart.
+ * @returns How many overlays were still connected after the send.
+ */
+export async function broadcastSharedVideoList(): Promise<number> {
+  return broadcastSharedEvent({ type: 'videos', videos: await getSharedVideoEntries() });
+}
+
+/**
  * Tells every connected shared overlay to play a video at a server time.
  * @param url - URL path of the video.
  * @param playAt - Server epoch milliseconds to start playing at.
