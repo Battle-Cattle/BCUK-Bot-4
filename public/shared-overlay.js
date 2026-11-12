@@ -11,6 +11,7 @@
   let clockOffsetMs = 0; // server time minus local time
   let maxLateMs = 3000;
   let playing = false;
+  let current = null; // handle of the video being loaded or played
   let syncer = null;
   let storage = null;
   let firstSyncDone = false;
@@ -84,27 +85,45 @@
   }
 
   /**
-   * Starts a loaded video at its planned moment, or drops it if it is too late.
-   * @param {HTMLVideoElement} v - The loaded, hidden video element.
-   * @param {number} playAt - Server time the video should have started at.
-   * @param {function(): void} finish - Removes the video and allows the next one.
+   * Removes a video and allows the next one to play. Only the video currently active may release
+   * the gate, so a late cleanup for an earlier video can't free it while a newer one is playing.
+   * @param {{v: HTMLVideoElement, source: {release: function(): void}, startTimer: number|null, deadline: number|null}} handle - The video's handle.
    * @returns {void}
    */
-  function start(v, playAt, finish) {
+  function finish(handle) {
+    clearTimeout(handle.startTimer);
+    clearTimeout(handle.deadline);
+    handle.v.remove();
+    handle.source.release();
+    if (current !== handle) return;
+    current = null;
+    playing = false;
+  }
+
+  /**
+   * Starts a loaded video at its planned moment, or drops it if it is too late.
+   * @param {{v: HTMLVideoElement, source: {release: function(): void}, startTimer: number|null, deadline: number|null}} handle - The video's handle.
+   * @param {number} playAt - Server time the video should have started at.
+   * @returns {void}
+   */
+  function start(handle, playAt) {
     const plan = planSharedPlayback(serverNow(), playAt, maxLateMs);
-    if (plan.action === 'skip') { finish(); return; }
-    setTimeout(function () {
+    if (plan.action === 'skip') { finish(handle); return; }
+    handle.startTimer = setTimeout(function () {
       const late = planSharedPlayback(serverNow(), playAt, maxLateMs);
-      if (late.action === 'skip') { finish(); return; }
-      if (late.seekSeconds > 0) v.currentTime = late.seekSeconds;
-      v.style.visibility = 'visible';
-      v.play().catch(finish);
+      if (late.action === 'skip') { finish(handle); return; }
+      clearTimeout(handle.deadline); // it is starting; the late limit no longer applies
+      if (late.seekSeconds > 0) handle.v.currentTime = late.seekSeconds;
+      handle.v.style.visibility = 'visible';
+      handle.v.play().catch(function () { finish(handle); });
     }, plan.delayMs);
   }
 
   /**
    * Loads a video hidden (from storage when stored), then starts it at `playAt`. Ignored while
-   * another is playing. Background downloads pause for as long as `playing` is set.
+   * another is playing; background downloads pause for as long as `playing` is set. A video that
+   * has not become ready by `playAt` plus the late limit (a stalled load fires no event) is
+   * dropped, so it can't hold the gate for ever.
    * @param {string} url - URL path of the video.
    * @param {number} playAt - Server time to start at.
    * @returns {Promise<void>} Resolves once the video element is set up.
@@ -114,18 +133,16 @@
     playing = true;
     const source = await resolveSource(url);
     const v = document.createElement('video');
-    const finish = function () {
-      v.remove();
-      source.release();
-      playing = false;
-    };
+    const handle = { v: v, source: source, startTimer: null, deadline: null };
+    current = handle;
     v.src = source.src;
     v.preload = 'auto';
     v.playsInline = true;
     v.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;visibility:hidden;';
-    v.addEventListener('ended', finish);
-    v.addEventListener('error', finish);
-    v.addEventListener('canplay', function () { start(v, playAt, finish); }, { once: true });
+    v.addEventListener('ended', function () { finish(handle); });
+    v.addEventListener('error', function () { finish(handle); });
+    v.addEventListener('canplay', function () { start(handle, playAt); }, { once: true });
+    handle.deadline = setTimeout(function () { finish(handle); }, Math.max(0, playAt + maxLateMs - serverNow()));
     document.body.appendChild(v);
   }
 
