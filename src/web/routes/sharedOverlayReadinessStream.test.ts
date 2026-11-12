@@ -8,6 +8,19 @@ const entries = vi.fn();
 const conns = vi.hoisted(() => ({ sharedConnections: new Map<string, Set<unknown>>() }));
 vi.mock('./sharedOverlaySource', () => ({ getSharedVideoEntries: () => entries(), sharedConnections: conns.sharedConnections }));
 
+const attachHook = vi.hoisted(() => ({ beforeAttach: null as null | (() => void) }));
+vi.mock('./sseChannel', async (importOriginal) => {
+  const original = await importOriginal<typeof import('./sseChannel')>();
+  return {
+    ...original,
+    // Lets a test make a change land right before the stream is registered.
+    attachSseConnection: (...args: Parameters<typeof original.attachSseConnection>) => {
+      attachHook.beforeAttach?.();
+      return original.attachSseConnection(...args);
+    },
+  };
+});
+
 import { router, readinessConnections } from './sharedOverlayReadinessStream';
 import { recordReadinessReport, resetReadiness, notifyReadinessChange } from './sharedOverlayReadiness';
 
@@ -32,6 +45,7 @@ beforeEach(() => {
   conns.sharedConnections.clear();
   resetReadiness();
   entries.mockClear();
+  attachHook.beforeAttach = null;
   entries.mockResolvedValue([{ id: 1, name: 'Clap' }]);
 });
 
@@ -97,6 +111,20 @@ describe('GET /readiness/events', () => {
     await connecting;
     expect(snapshots(res)).toHaveLength(1);
     expect(snapshots(res)[0].videos.map((v: { id: number }) => v.id)).toEqual([1, 2]);
+  });
+
+  it('refreshes a new stream when a change lands after the last lookup but before it is attached', async () => {
+    entries.mockResolvedValueOnce([{ id: 1, name: 'Clap' }]);
+    attachHook.beforeAttach = () => {
+      attachHook.beforeAttach = null;
+      entries.mockResolvedValue([{ id: 1, name: 'Clap' }, { id: 2, name: 'Boo' }]);
+      notifyReadinessChange(); // publish() skips it: no stream is registered yet
+    };
+    const { req, res } = fake('m1');
+    await handler(req, res);
+    expect(snapshots(res)[0].videos).toHaveLength(1);
+    await vi.waitFor(() => expect(snapshots(res)).toHaveLength(2));
+    expect(snapshots(res)[1].videos.map((v: { id: number }) => v.id)).toEqual([1, 2]);
   });
 
   it('stops repeating the first lookup after a few changes, then publishes the fresh state to the new stream', async () => {
