@@ -1,12 +1,19 @@
-/* global connectSse, planSharedPlayback */
+/* global connectSse, planSharedPlayback, createSharedSyncer, createSharedStorage, sharedStorageAvailable */
 (function () {
   const script = document.currentScript;
   const login = script ? script.dataset.login : '';
   if (!login) return;
 
+  /** Random delay range before the first background sync, so overlays opened together don't all start at once. */
+  const FIRST_SYNC_MIN_MS = 2000;
+  const FIRST_SYNC_SPREAD_MS = 6000;
+
   let clockOffsetMs = 0; // server time minus local time
   let maxLateMs = 3000;
   let playing = false;
+  let syncer = null;
+  let storage = null;
+  let firstSyncDone = false;
 
   /**
    * Current time on the server's clock.
@@ -17,60 +24,123 @@
   }
 
   /**
+   * Fetches one inclusive byte range of a video from the normal route.
+   * @param {string} url - The video's URL path.
+   * @param {number} start - First byte, inclusive.
+   * @param {number} end - Last byte, inclusive.
+   * @returns {Promise<{buffer: ArrayBuffer, total: number}>} The bytes and the file's total size.
+   */
+  async function fetchRange(url, start, end) {
+    const res = await fetch(url, { headers: { Range: 'bytes=' + start + '-' + end } });
+    if (res.status !== 206) throw new Error('Range request answered ' + res.status);
+    const match = /\/(\d+)$/.exec(res.headers.get('Content-Range') || '');
+    if (!match) throw new Error('No total size in Content-Range');
+    return { buffer: await res.arrayBuffer(), total: Number(match[1]) };
+  }
+
+  /**
+   * Sets up the background syncer, or leaves it off (videos then stream at trigger time) when the
+   * page can't store files — Cache Storage needs an HTTPS or localhost overlay URL.
+   * @returns {void}
+   */
+  function setUpSync() {
+    if (!sharedStorageAvailable()) {
+      console.warn('Shared overlay: Cache Storage is unavailable (use an https:// browser source URL); videos will stream when triggered.');
+      return;
+    }
+    storage = createSharedStorage();
+    syncer = createSharedSyncer({
+      storage: storage,
+      fetchRange: fetchRange,
+      isPaused: function () { return playing; },
+      sleep: function (ms) { return new Promise(function (resolve) { setTimeout(resolve, ms); }); },
+      log: function (message, err) { console.warn(message, err); },
+    });
+  }
+
+  /**
+   * Hands a video list to the syncer: the first one after a random delay, later ones at once.
+   * @param {Array<{url: string}>} videos - The enabled video list from the server.
+   * @returns {void}
+   */
+  function syncList(videos) {
+    if (!syncer || !Array.isArray(videos)) return;
+    const run = function () { syncer.sync(videos).catch(function (err) { console.warn('Shared video sync failed', err); }); };
+    if (firstSyncDone) { run(); return; }
+    firstSyncDone = true;
+    setTimeout(run, FIRST_SYNC_MIN_MS + Math.random() * FIRST_SYNC_SPREAD_MS);
+  }
+
+  /**
+   * Picks what to play from: the stored copy as an object URL when there is one, else the route.
+   * @param {string} url - The video's URL path.
+   * @returns {Promise<{src: string, release: function(): void}>} The source and a function freeing it.
+   */
+  async function resolveSource(url) {
+    const blob = storage ? await storage.getVideoBlob(url).catch(function () { return null; }) : null;
+    if (!blob) return { src: url, release: function () {} };
+    const objectUrl = URL.createObjectURL(blob);
+    return { src: objectUrl, release: function () { URL.revokeObjectURL(objectUrl); } };
+  }
+
+  /**
    * Starts a loaded video at its planned moment, or drops it if it is too late.
    * @param {HTMLVideoElement} v - The loaded, hidden video element.
    * @param {number} playAt - Server time the video should have started at.
+   * @param {function(): void} finish - Removes the video and allows the next one.
    * @returns {void}
    */
-  function start(v, playAt) {
+  function start(v, playAt, finish) {
     const plan = planSharedPlayback(serverNow(), playAt, maxLateMs);
-    if (plan.action === 'skip') { finish(v); return; }
+    if (plan.action === 'skip') { finish(); return; }
     setTimeout(function () {
       const late = planSharedPlayback(serverNow(), playAt, maxLateMs);
-      if (late.action === 'skip') { finish(v); return; }
+      if (late.action === 'skip') { finish(); return; }
       if (late.seekSeconds > 0) v.currentTime = late.seekSeconds;
       v.style.visibility = 'visible';
-      v.play().catch(function () { finish(v); });
+      v.play().catch(finish);
     }, plan.delayMs);
   }
 
   /**
-   * Removes a video and allows the next one to play.
-   * @param {HTMLVideoElement} v - The video element to remove.
-   * @returns {void}
-   */
-  function finish(v) {
-    v.remove();
-    playing = false;
-  }
-
-  /**
-   * Loads a video hidden, then starts it at `playAt`. Ignored while another is playing.
+   * Loads a video hidden (from storage when stored), then starts it at `playAt`. Ignored while
+   * another is playing. Background downloads pause for as long as `playing` is set.
    * @param {string} url - URL path of the video.
    * @param {number} playAt - Server time to start at.
-   * @returns {void}
+   * @returns {Promise<void>} Resolves once the video element is set up.
    */
-  function play(url, playAt) {
+  async function play(url, playAt) {
     if (playing) return;
     playing = true;
+    const source = await resolveSource(url);
     const v = document.createElement('video');
-    v.src = url;
+    const finish = function () {
+      v.remove();
+      source.release();
+      playing = false;
+    };
+    v.src = source.src;
     v.preload = 'auto';
     v.playsInline = true;
     v.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;visibility:hidden;';
-    v.addEventListener('ended', function () { finish(v); });
-    v.addEventListener('error', function () { finish(v); });
-    v.addEventListener('canplay', function () { start(v, playAt); }, { once: true });
+    v.addEventListener('ended', finish);
+    v.addEventListener('error', finish);
+    v.addEventListener('canplay', function () { start(v, playAt, finish); }, { once: true });
     document.body.appendChild(v);
   }
+
+  setUpSync();
 
   connectSse('/overlay/shared/' + login + '/events', function (data) {
     if (!data) return;
     if (data.type === 'init') {
       clockOffsetMs = data.serverTime - Date.now();
       if (typeof data.maxLateMs === 'number') maxLateMs = data.maxLateMs;
+      syncList(data.videos);
+    } else if (data.type === 'videos') {
+      syncList(data.videos);
     } else if (data.type === 'play' && data.video) {
-      play(data.video, data.playAt);
+      void play(data.video, data.playAt);
     }
   });
 })();
