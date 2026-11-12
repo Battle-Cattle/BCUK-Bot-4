@@ -4,8 +4,8 @@ import path from 'path';
 import vm from 'vm';
 import { waitFor } from '../test-utils/waitFor';
 
-// The syncer's script is split over four files that share one global scope on the page.
-const source = ['shared-overlay-plan.js', 'shared-overlay-retry.js', 'shared-overlay-source.js', 'shared-overlay-sync.js']
+// The syncer's script is split over five files that share one global scope on the page.
+const source = ['shared-overlay-plan.js', 'shared-overlay-retry.js', 'shared-overlay-source.js', 'shared-overlay-pacing.js', 'shared-overlay-sync.js']
   .map((name) => fs.readFileSync(path.join(__dirname, '../../public', name), 'utf8'))
   .join('\n');
 // Top-level const/function declarations aren't properties of a vm context, so export them explicitly.
@@ -716,7 +716,7 @@ describe('resolveSharedSource', () => {
 describe('shared overlay page', () => {
   it('loads the helper scripts before the page script that uses them', () => {
     const view = fs.readFileSync(path.join(__dirname, '../../views/sharedOverlaySource.ejs'), 'utf8');
-    const order = ['sseClient', 'shared-overlay-timing', 'shared-overlay-plan', 'shared-overlay-retry', 'shared-overlay-source', 'shared-overlay-sync', 'shared-overlay-storage', 'shared-overlay.js']
+    const order = ['sseClient', 'shared-overlay-timing', 'shared-overlay-plan', 'shared-overlay-retry', 'shared-overlay-source', 'shared-overlay-pacing', 'shared-overlay-sync', 'shared-overlay-storage', 'shared-overlay.js']
       .map((name) => view.indexOf(`/${name}`));
     expect(order.every((i) => i >= 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
