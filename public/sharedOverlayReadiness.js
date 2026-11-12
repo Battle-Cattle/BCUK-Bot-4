@@ -75,15 +75,29 @@ function fillList(list, lines, emptyText, extras) {
 }
 
 /**
- * Renders a readiness snapshot into the page's two lists.
+ * Shows or clears the "connection lost" state: the lists keep the last snapshot, but the page says
+ * it may be out of date until the next snapshot arrives.
+ * @param {boolean} stale - True when the stream has dropped.
+ * @returns {void}
+ */
+function setReadinessStale(stale) {
+  document.getElementById('readiness-status').hidden = !stale;
+  for (const id of ['readiness-overlays', 'readiness-videos']) {
+    document.getElementById(id).classList.toggle('stale', stale);
+  }
+}
+
+/**
+ * Renders a readiness snapshot into the page's two lists (and clears any stale marking).
  * @param {{overlays: Array<object>, videos: Array<object>}} snapshot - The snapshot from the stream.
  * @returns {void}
  */
 function renderReadiness(snapshot) {
+  setReadinessStale(false);
   fillList(document.getElementById('readiness-overlays'), snapshot.overlays.map(describeOverlay), 'No shared overlays have connected yet.');
   fillList(document.getElementById('readiness-videos'), snapshot.videos.map(describeVideo), 'No enabled shared videos.', snapshot.videos.map(buildPushForm));
 }
 
 if (document.getElementById('readiness-overlays')) {
-  connectSse('/overlay/shared/settings/readiness/events', renderReadiness);
+  connectSse('/overlay/shared/settings/readiness/events', renderReadiness, { onError: function () { setReadinessStale(true); } });
 }

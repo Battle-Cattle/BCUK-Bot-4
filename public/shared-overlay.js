@@ -25,6 +25,8 @@
 
   /** Least time between readiness reports (all triggers share it; the server allows 30 a minute). */
   const REPORT_GAP_MS = 3000;
+  /** How often a page that doesn't own the sync re-reports, so it picks up videos the owner stored. */
+  const NON_OWNER_REFRESH_MS = 30000;
   /** How long to wait before retrying a report the server rate-limited. */
   const REPORT_RETRY_MS = 15000;
   let listReceived = false; // whether the server has sent a list yet (an empty one counts)
@@ -112,7 +114,11 @@
       storage = null;
       return;
     }
-    // Only one page of this browser syncs at a time; the others still play from the stored videos.
+    // Only one page of this browser syncs at a time; the others still play from the stored videos,
+    // and re-report now and then (the owner's stored-video events only reach the owner's page).
+    setInterval(function () {
+      if (!syncer && listReceived) sendReadiness();
+    }, NON_OWNER_REFRESH_MS);
     holdSyncOwnership(navigator.locks, SYNC_LOCK_NAME, function () {
       syncer = createSharedSyncer({
         storage: storage,

@@ -11,13 +11,16 @@ function fakeElement() {
     children: [] as any[], textContent: '',
     appendChild(child: unknown) { el.children.push(child); },
     replaceChildren() { el.children = []; },
+    hidden: true,
+    classes: new Set<string>(),
+    classList: { toggle(name: string, on: boolean) { if (on) el.classes.add(name); else el.classes.delete(name); } },
   };
   return el;
 }
 
 /** Runs the script with fake lists and returns its functions and the lists. */
 function load() {
-  const lists: Record<string, any> = { 'readiness-overlays': fakeElement(), 'readiness-videos': fakeElement() };
+  const lists: Record<string, any> = { 'readiness-overlays': fakeElement(), 'readiness-videos': fakeElement(), 'readiness-status': fakeElement() };
   const connectSse = vi.fn();
   const context: Record<string, unknown> = {
     document: {
@@ -27,7 +30,7 @@ function load() {
     connectSse,
   };
   vm.createContext(context);
-  vm.runInContext(`${source}\nthis.api = { describeOverlay, describeVideo, renderReadiness, buildPushForm };`, context);
+  vm.runInContext(`${source}\nthis.api = { describeOverlay, describeVideo, renderReadiness, setReadinessStale, buildPushForm };`, context);
   return { api: (context as any).api, lists, connectSse };
 }
 
@@ -81,6 +84,19 @@ describe('readiness page script', () => {
     expect(texts(lists['readiness-videos'])).toEqual(['No enabled shared videos.']);
     api.renderReadiness({ overlays: [{ login: 'a', online: true, stored: 0, total: 1, downloading: null, reportedAt: 1 }], videos: [] });
     expect(texts(lists['readiness-overlays'])).toEqual(['a — online — 0/1 stored']);
-    expect(connectSse).toHaveBeenCalledWith('/overlay/shared/settings/readiness/events', expect.any(Function));
+    expect(connectSse).toHaveBeenCalledWith('/overlay/shared/settings/readiness/events', expect.any(Function), { onError: expect.any(Function) });
+  });
+
+  it('marks the lists stale when the stream errors and clears it on the next snapshot', () => {
+    const { api, lists, connectSse } = load();
+    const options = connectSse.mock.lastCall?.[2];
+    expect(options).toBeDefined();
+    options.onError();
+    expect(lists['readiness-status'].hidden).toBe(false);
+    expect(lists['readiness-overlays'].classes.has('stale')).toBe(true);
+    expect(lists['readiness-videos'].classes.has('stale')).toBe(true);
+    api.renderReadiness({ overlays: [], videos: [] });
+    expect(lists['readiness-status'].hidden).toBe(true);
+    expect(lists['readiness-overlays'].classes.has('stale')).toBe(false);
   });
 });
