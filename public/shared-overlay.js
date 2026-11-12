@@ -1,4 +1,4 @@
-/* global connectSse, planSharedPlayback, buildReadinessReport, createSharedSyncer, resolveSharedSource, fetchSharedRange, holdSyncOwnership, fallBackToRoute, playSource, createSharedStorage, sharedStorageAvailable */
+/* global connectSse, createReadinessReporter, nextDownloadState, planSharedPlayback, buildReadinessReport, createSharedSyncer, resolveSharedSource, fetchSharedRange, holdSyncOwnership, fallBackToRoute, playSource, createSharedStorage, sharedStorageAvailable */
 (function () {
   const script = document.currentScript;
   const login = script ? script.dataset.login : '';
@@ -22,10 +22,11 @@
   let firstSyncTimer = null;
   let currentList = []; // newest list: the readiness report's basis, and what the delayed first sync uses
   let downloading = null; // { url, percent } while a background download runs
-  let lastProgressReportAt = 0;
 
-  /** Most often a progress report is sent while a download runs. */
-  const PROGRESS_REPORT_MS = 3000;
+  /** Least time between readiness reports (all triggers share it; the server allows 30 a minute). */
+  const REPORT_GAP_MS = 3000;
+  /** How long to wait before retrying a report the server rate-limited. */
+  const REPORT_RETRY_MS = 15000;
   let listReceived = false; // whether the server has sent a list yet (an empty one counts)
 
   /**
@@ -48,39 +49,49 @@
   }
 
   /**
-   * Tells the server which videos are stored and how the current download is going, for the admin
-   * page's readiness stats. Failures are ignored: the stats are best effort.
-   * @returns {Promise<void>} Resolves once the report was sent (or failed).
+   * Posts which videos are stored and how the current download is going, for the admin page's
+   * readiness stats. Failures are ignored: the stats are best effort.
+   * @returns {Promise<number|undefined>} The HTTP status, or undefined if the request failed.
    */
-  async function sendReadiness() {
+  async function postReadiness() {
     try {
       const storedUrls = storage ? await storage.listVideos() : [];
       const body = buildReadinessReport(currentList, storedUrls, downloading);
-      await fetch('/overlay/shared/' + login + '/report', {
+      const res = await fetch('/overlay/shared/' + login + '/report', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
+      return res.status;
     } catch (_) {
-      // Best effort.
+      return undefined; // best effort
     }
   }
 
+  const reporter = createReadinessReporter({
+    send: postReadiness,
+    gapMs: REPORT_GAP_MS,
+    retryMs: REPORT_RETRY_MS,
+    now: function () { return Date.now(); },
+    setTimer: function (fn, ms) { return setTimeout(fn, ms); },
+  });
+
   /**
-   * Reacts to a syncer event: reports when a video is stored or removed or the queue drains, and
-   * at most every few seconds while a download progresses.
+   * Asks for a readiness report of the current state (throttled and coalesced by the reporter).
+   * @returns {void}
+   */
+  function sendReadiness() {
+    reporter.request();
+  }
+
+  /**
+   * Reacts to a syncer event by reporting the new state.
    * @param {{type: string, url?: string, percent?: number}} event - The syncer event.
    * @returns {void}
    */
   function handleSyncEvent(event) {
-    if (event.type === 'progress') {
-      downloading = { url: event.url, percent: event.percent };
-      if (Date.now() - lastProgressReportAt < PROGRESS_REPORT_MS) return;
-      lastProgressReportAt = Date.now();
-    } else {
-      downloading = null;
-    }
-    void sendReadiness();
+    downloading = nextDownloadState(downloading, event);
+    sendReadiness();
   }
 
   /**
@@ -138,7 +149,7 @@
     if (!Array.isArray(videos)) return;
     currentList = videos;
     listReceived = true;
-    void sendReadiness(); // on connect and on every list change
+    sendReadiness(); // on connect and on every list change
     if (!syncer) return; // storage unavailable, or another page owns the sync for now
     if (firstSyncDone) { runSync(videos); return; }
     if (firstSyncTimer !== null) return;
