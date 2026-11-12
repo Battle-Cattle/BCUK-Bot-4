@@ -76,6 +76,23 @@ export function broadcastSharedEvent(payload: unknown): number {
   return reached;
 }
 
+/** Tail of the list-broadcast chain, so each broadcast starts only after the previous one has finished. */
+let listBroadcastQueue: Promise<unknown> = Promise.resolve();
+
+/**
+ * Sends the current enabled video list to every connected shared overlay, so they catch up after a
+ * Manager adds, removes, enables or disables a video without a restart. Broadcasts run one at a
+ * time, each reading the list only once the previous send is done, so two overlapping changes
+ * cannot leave overlays holding a stale list because an earlier read finished last.
+ * @returns How many overlays were still connected after the send; rejects if this broadcast's
+ *   list lookup fails (the next broadcast still runs).
+ */
+export function broadcastSharedVideoList(): Promise<number> {
+  const sent = listBroadcastQueue.then(async () => broadcastSharedEvent({ type: 'videos', videos: await getSharedVideoEntries() }));
+  listBroadcastQueue = sent.catch(() => undefined);
+  return sent;
+}
+
 /**
  * Tells every connected shared overlay to play a video at a server time.
  * @param url - URL path of the video.

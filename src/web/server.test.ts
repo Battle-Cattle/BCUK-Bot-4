@@ -146,6 +146,7 @@ vi.mock('./routes/streamdeckKeys', () => ({ default: emptyRouter() }));
 vi.mock('./routes/userSettings', () => ({ default: emptyRouter() }));
 vi.mock('./routes/overlaySource', () => ({ default: emptyRouter() }));
 vi.mock('./routes/sharedOverlaySource', () => ({ default: emptyRouter() }));
+vi.mock('./routes/sharedOverlayAdmin', () => ({ default: emptyRouter() }));
 vi.mock('./routes/overlayAdmin', () => ({ default: emptyRouter() }));
 vi.mock('./routes/alertsOverlaySource', () => ({ default: emptyRouter() }));
 vi.mock('./routes/alertsAdmin', () => ({ default: emptyRouter() }));

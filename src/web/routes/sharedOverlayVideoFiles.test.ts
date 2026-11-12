@@ -2,7 +2,6 @@ import path from 'path';
 import { describe, it, expect, vi } from 'vitest';
 
 vi.mock('../../shared/config', () => ({ OVERLAY_FOLDER: '/data/overlay' }));
-
 import { resolveSharedVideoPath, SHARED_FOLDER } from './sharedOverlayVideoFiles';
 
 describe('resolveSharedVideoPath', () => {
