@@ -129,7 +129,8 @@ async function sendInit(res: Response): Promise<void> {
  */
 router.get('/videos/:filename', async (req, res) => {
   if (req.query.preload === '1') { await servePreloadVideo(req, res); return; }
-  const folder = path.resolve(OVERLAY_FOLDER, SHARED_FOLDER);
+  // POSIX join, like safeResolve (which the file helpers use on it) and the bot's Linux target.
+  const folder = path.posix.join(OVERLAY_FOLDER, SHARED_FOLDER);
   const file = await resolveSharedFile(res, folder, req.params.filename, FILENAME_RE);
   if (file) sendStreamerFile(res, file.realPath);
 });

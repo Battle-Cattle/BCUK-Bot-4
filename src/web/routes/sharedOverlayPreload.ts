@@ -49,7 +49,8 @@ export function parseByteRange(header: string | undefined, size: number): { star
  * @returns Resolves once the response has been started (or refused).
  */
 export async function servePreloadVideo(req: Request, res: Response): Promise<void> {
-  const folder = path.resolve(OVERLAY_FOLDER, SHARED_FOLDER);
+  // POSIX join, like safeResolve (which resolveSharedFile uses on it) and the bot's Linux target.
+  const folder = path.posix.join(OVERLAY_FOLDER, SHARED_FOLDER);
   const file = await resolveSharedFile(res, folder, String(req.params.filename), /^[\w-]+\.(webm)$/i);
   if (!file) return;
   let size: number;

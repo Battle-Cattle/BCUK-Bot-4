@@ -59,6 +59,135 @@ function buildReadinessReport(list, storedUrls, downloading) {
 }
 
 /**
+ * Passes an event to the page, if it listens.
+ * @param {object} s - The syncer's state.
+ * @param {{type: string, url?: string, percent?: number}} event - The event.
+ * @returns {void}
+ */
+function emitSyncEvent(s, event) {
+  if (s.deps.onEvent) s.deps.onEvent(event);
+}
+
+/**
+ * Waits while a shared video is triggered or playing, polling.
+ * @param {object} s - The syncer's state (see {@link createSharedSyncer}).
+ * @returns {Promise<void>} Resolves once no longer paused.
+ */
+async function waitWhileSyncPaused(s) {
+  while (s.deps.isPaused()) await s.deps.sleep(SHARED_SYNC_PAUSE_POLL_MS);
+}
+
+/**
+ * Downloads the next chunk of a video and stores it.
+ * @param {object} s - The syncer's state.
+ * @param {{url: string}} entry - The video being stored.
+ * @param {number} count - Number of chunks stored so far.
+ * @returns {Promise<number>} The video's total size in bytes, as the server reports it.
+ */
+async function downloadSyncChunk(s, entry, count) {
+  const range = nextSharedChunkRange(count, s.chunkBytes);
+  const part = await s.deps.fetchRange(entry.url, range.start, range.end, s.fast.has(entry.url));
+  await s.deps.storage.putChunk(entry.url, count, part.buffer);
+  return part.total;
+}
+
+/**
+ * A pushed video waiting at the front of the queue takes over from a background download: the
+ * background one goes back in the queue (its chunks are kept) and resumes afterwards.
+ * @param {object} s - The syncer's state.
+ * @param {{url: string}} entry - The video being downloaded.
+ * @returns {boolean} True if `entry` was put back and its download should stop for now.
+ */
+function syncYieldsToPush(s, entry) {
+  if (s.fast.has(entry.url) || s.queue.length === 0 || !s.fast.has(s.queue[0].url)) return false;
+  s.queue.splice(1, 0, entry);
+  return true;
+}
+
+/**
+ * Downloads one video chunk by chunk, resuming after stored chunks, then joins and stores it.
+ * Stops early (clearing its chunks) if the video leaves the list meanwhile.
+ * @param {object} s - The syncer's state.
+ * @param {{url: string}} entry - The video to store.
+ * @returns {Promise<void>} Resolves once stored or abandoned.
+ */
+async function downloadSyncVideo(s, entry) {
+  let count = await s.deps.storage.countChunks(entry.url);
+  let total = Infinity;
+  while (count * s.chunkBytes < total) {
+    await waitWhileSyncPaused(s);
+    if (!s.wanted.has(entry.url)) { await s.deps.storage.clearChunks(entry.url); return; }
+    total = await downloadSyncChunk(s, entry, count);
+    count++;
+    emitSyncEvent(s, { type: 'progress', url: entry.url, percent: Math.min(100, Math.round((count * s.chunkBytes / total) * 100)) });
+    if (count * s.chunkBytes < total && syncYieldsToPush(s, entry)) return;
+    if (count * s.chunkBytes < total && !s.fast.has(entry.url)) await s.deps.sleep(s.chunkPauseMs);
+  }
+  await s.deps.storage.putVideo(entry.url, await s.deps.storage.getChunks(entry.url));
+  await s.deps.storage.clearChunks(entry.url);
+  emitSyncEvent(s, { type: 'stored', url: entry.url });
+}
+
+/**
+ * Drains the queue one video at a time; a failed video waits a while and is retried by the next list.
+ * @param {object} s - The syncer's state.
+ * @returns {Promise<void>} Resolves once the queue is empty.
+ */
+async function drainSyncQueue(s) {
+  while (s.queue.length > 0) {
+    const entry = s.queue.shift();
+    s.current = entry.url;
+    try {
+      await downloadSyncVideo(s, entry);
+    } catch (err) {
+      if (s.deps.log) s.deps.log('Shared video download failed: ' + entry.url, err);
+      await s.deps.sleep(SHARED_SYNC_RETRY_MS);
+    }
+    s.fast.delete(entry.url);
+    s.current = null;
+  }
+  s.running = null;
+  emitSyncEvent(s, { type: 'idle' });
+}
+
+/**
+ * Takes a new video list: deletes stored and half-stored videos that left it and queues the missing ones.
+ * @param {object} s - The syncer's state.
+ * @param {Array<{url: string}>} list - The current enabled video list.
+ * @returns {Promise<void>} Resolves once the queue is updated and draining.
+ */
+async function syncVideoList(s, list) {
+  s.wanted = new Set(list.map(function (v) { return v.url; }));
+  const plan = planSharedSync(list, await s.deps.storage.listVideos(), await s.deps.storage.listPartial());
+  for (const url of plan.remove) {
+    await s.deps.storage.deleteVideo(url);
+    await s.deps.storage.clearChunks(url);
+    emitSyncEvent(s, { type: 'removed', url: url });
+  }
+  s.queue = plan.download;
+  if (!s.running && s.queue.length > 0) s.running = drainSyncQueue(s);
+}
+
+/**
+ * Handles a Manager push: makes sure a video is stored, at full speed, without playing it.
+ * @param {object} s - The syncer's state.
+ * @param {{url: string}} entry - The pushed video.
+ * @returns {Promise<string>} `ignored` if already stored, `finishing` if its background download
+ *   is under way (now sped up, keeping its chunks), or `fetching` if it was missing (the
+ *   background queue pauses behind it and resumes afterwards).
+ */
+async function fetchSyncNow(s, entry) {
+  if ((await s.deps.storage.listVideos()).indexOf(entry.url) !== -1) return 'ignored';
+  s.wanted.add(entry.url);
+  s.fast.add(entry.url);
+  if (s.current === entry.url) return 'finishing';
+  s.queue = s.queue.filter(function (e) { return e.url !== entry.url; });
+  s.queue.unshift(entry);
+  if (!s.running) s.running = drainSyncQueue(s);
+  return 'fetching';
+}
+
+/**
  * Creates the background syncer.
  * @param {object} deps - Injected layers.
  * @param {object} deps.storage - `listVideos()`, `listPartial()`, `countChunks(url)`, `getChunks(url)`,
@@ -79,119 +208,19 @@ function buildReadinessReport(list, storedUrls, downloading) {
  *   Manager push; `idle` resolves once the queue has drained.
  */
 function createSharedSyncer(deps) {
-  const chunkBytes = deps.chunkBytes || SHARED_SYNC_CHUNK_BYTES;
-  const chunkPauseMs = deps.chunkPauseMs === undefined ? SHARED_SYNC_CHUNK_PAUSE_MS : deps.chunkPauseMs;
-  let wanted = new Set();
-  let queue = [];
-  let running = null;
-  let current = null; // url being downloaded now
-  const fast = new Set(); // urls to download at full speed (Manager push)
-
-  /**
-   * Passes an event to the page, if it listens.
-   * @param {object} event - The event.
-   * @returns {void}
-   */
-  function emit(event) {
-    if (deps.onEvent) deps.onEvent(event);
-  }
-
-  /**
-   * Waits while paused, polling.
-   * @returns {Promise<void>} Resolves once no longer paused.
-   */
-  async function waitWhilePaused() {
-    while (deps.isPaused()) await deps.sleep(SHARED_SYNC_PAUSE_POLL_MS);
-  }
-
-  /**
-   * A pushed video waiting at the front of the queue takes over from a background download: the
-   * background one goes back in the queue (its chunks are kept) and resumes afterwards.
-   * @param {{url: string}} entry - The video being downloaded.
-   * @returns {boolean} True if `entry` was put back and its download should stop for now.
-   */
-  function yieldsToPush(entry) {
-    if (fast.has(entry.url) || queue.length === 0 || !fast.has(queue[0].url)) return false;
-    queue.splice(1, 0, entry);
-    return true;
-  }
-
-  /**
-   * Downloads one video chunk by chunk, resuming after stored chunks, then joins and stores it.
-   * Stops early (clearing its chunks) if the video leaves the list meanwhile.
-   * @param {{url: string}} entry - The video to store.
-   * @returns {Promise<void>} Resolves once stored or abandoned.
-   */
-  async function downloadOne(entry) {
-    let count = await deps.storage.countChunks(entry.url);
-    let total = Infinity;
-    while (count * chunkBytes < total) {
-      await waitWhilePaused();
-      if (!wanted.has(entry.url)) { await deps.storage.clearChunks(entry.url); return; }
-      const range = nextSharedChunkRange(count, chunkBytes);
-      const part = await deps.fetchRange(entry.url, range.start, range.end, fast.has(entry.url));
-      total = part.total;
-      await deps.storage.putChunk(entry.url, count, part.buffer);
-      count++;
-      emit({ type: 'progress', url: entry.url, percent: Math.min(100, Math.round((count * chunkBytes / total) * 100)) });
-      if (count * chunkBytes < total && yieldsToPush(entry)) return;
-      if (count * chunkBytes < total && !fast.has(entry.url)) await deps.sleep(chunkPauseMs);
-    }
-    await deps.storage.putVideo(entry.url, await deps.storage.getChunks(entry.url));
-    await deps.storage.clearChunks(entry.url);
-    emit({ type: 'stored', url: entry.url });
-  }
-
-  /**
-   * Drains the queue one video at a time; a failed video waits a while and is retried by the next list.
-   * @returns {Promise<void>} Resolves once the queue is empty.
-   */
-  async function drain() {
-    while (queue.length > 0) {
-      const entry = queue.shift();
-      current = entry.url;
-      try {
-        await downloadOne(entry);
-      } catch (err) {
-        if (deps.log) deps.log('Shared video download failed: ' + entry.url, err);
-        await deps.sleep(SHARED_SYNC_RETRY_MS);
-      }
-      fast.delete(entry.url);
-      current = null;
-    }
-    running = null;
-    emit({ type: 'idle' });
-  }
-
+  const s = {
+    deps: deps,
+    chunkBytes: deps.chunkBytes || SHARED_SYNC_CHUNK_BYTES,
+    chunkPauseMs: deps.chunkPauseMs === undefined ? SHARED_SYNC_CHUNK_PAUSE_MS : deps.chunkPauseMs,
+    wanted: new Set(),
+    queue: [],
+    running: null,
+    current: null, // url being downloaded now
+    fast: new Set(), // urls to download at full speed (Manager push)
+  };
   return {
-    sync: async function (list) {
-      wanted = new Set(list.map(function (v) { return v.url; }));
-      const plan = planSharedSync(list, await deps.storage.listVideos(), await deps.storage.listPartial());
-      for (const url of plan.remove) {
-        await deps.storage.deleteVideo(url);
-        await deps.storage.clearChunks(url);
-        emit({ type: 'removed', url: url });
-      }
-      queue = plan.download;
-      if (!running && queue.length > 0) running = drain();
-    },
-    /**
-     * Handles a Manager push: makes sure a video is stored, at full speed, without playing it.
-     * @param {{url: string}} entry - The pushed video.
-     * @returns {Promise<string>} `ignored` if already stored, `finishing` if its background download
-     *   is under way (now sped up, keeping its chunks), or `fetching` if it was missing (the
-     *   background queue pauses behind it and resumes afterwards).
-     */
-    fetchNow: async function (entry) {
-      if ((await deps.storage.listVideos()).indexOf(entry.url) !== -1) return 'ignored';
-      wanted.add(entry.url);
-      fast.add(entry.url);
-      if (current === entry.url) return 'finishing';
-      queue = queue.filter(function (e) { return e.url !== entry.url; });
-      queue.unshift(entry);
-      if (!running) running = drain();
-      return 'fetching';
-    },
-    idle: function () { return running || Promise.resolve(); },
+    sync: function (list) { return syncVideoList(s, list); },
+    fetchNow: function (entry) { return fetchSyncNow(s, entry); },
+    idle: function () { return s.running || Promise.resolve(); },
   };
 }
