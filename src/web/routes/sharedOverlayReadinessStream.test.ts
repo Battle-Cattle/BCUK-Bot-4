@@ -86,6 +86,27 @@ describe('GET /readiness/events', () => {
     await vi.waitFor(() => expect(snapshots(res)).toHaveLength(2));
   });
 
+  it('looks the first snapshot up again when the list changed during the lookup', async () => {
+    let finishFirst: (rows: Array<{ id: number; name: string }>) => void = () => {};
+    entries.mockImplementationOnce(() => new Promise((resolve) => { finishFirst = resolve; }));
+    const { req, res } = fake('m1');
+    const connecting = handler(req, res);
+    notifyReadinessChange(); // the list changes while the first lookup is pending: no stream registered yet
+    entries.mockResolvedValueOnce([{ id: 1, name: 'Clap' }, { id: 2, name: 'Boo' }]);
+    finishFirst([{ id: 1, name: 'Clap' }]); // the stale list
+    await connecting;
+    expect(snapshots(res)).toHaveLength(1);
+    expect(snapshots(res)[0].videos.map((v: { id: number }) => v.id)).toEqual([1, 2]);
+  });
+
+  it('stops repeating the first lookup after a few changes', async () => {
+    entries.mockImplementation(async () => { notifyReadinessChange(); return [{ id: 1, name: 'Clap' }]; });
+    const { req, res } = fake('m1');
+    await handler(req, res);
+    expect(entries).toHaveBeenCalledTimes(3);
+    expect(snapshots(res)).toHaveLength(1);
+  });
+
   it('does not look anything up when no admin stream is open', async () => {
     conns.sharedConnections.set('alice', new Set());
     recordReadinessReport('alice', { stored: [], downloading: null });

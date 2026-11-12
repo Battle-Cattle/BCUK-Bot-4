@@ -68,9 +68,37 @@ async function publish(): Promise<void> {
   }
 }
 
-// Reports, and overlays connecting or disconnecting, change what the page shows.
-onReadinessChange(() => { void publish(); });
-onConnectionCountChange(sharedConnections, () => { void publish(); });
+/** Counts change notifications, so a lookup can tell whether anything changed while it ran. */
+let changeCount = 0;
+
+/**
+ * Records a change and publishes.
+ * @returns Nothing; the publish runs in the background.
+ */
+function onChange(): void {
+  changeCount++;
+  void publish();
+}
+
+// Reports, list changes, and overlays connecting or disconnecting change what the page shows.
+onReadinessChange(onChange);
+onConnectionCountChange(sharedConnections, onChange);
+
+/** Most times the first snapshot is looked up again because something changed during the lookup. */
+const MAX_INITIAL_LOOKUPS = 3;
+
+/**
+ * Builds the first snapshot for a new stream. A change that arrives during the lookup would not be
+ * published to this stream (it is not registered yet), so the lookup is repeated if one did.
+ * @returns The snapshot, fresh as of the last lookup.
+ */
+async function initialSnapshot(): Promise<ReadinessSnapshot> {
+  for (let tries = 1; ; tries++) {
+    const seen = changeCount;
+    const snapshot = await currentSnapshot();
+    if (changeCount === seen || tries >= MAX_INITIAL_LOOKUPS) return snapshot;
+  }
+}
 
 /**
  * GET /overlay/shared/settings/readiness/events — SSE stream of readiness snapshots for the
@@ -84,7 +112,7 @@ router.get('/readiness/events', async (req, res) => {
   const key = getSessionUser(req).discordId;
   let snapshot: ReadinessSnapshot;
   try {
-    snapshot = await currentSnapshot();
+    snapshot = await initialSnapshot();
   } catch (err) {
     log.error('Failed to build shared overlay readiness:', err);
     res.status(500).end();

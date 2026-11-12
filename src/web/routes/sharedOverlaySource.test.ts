@@ -262,7 +262,7 @@ describe('POST /:login/report', () => {
     await connect();
     expect((await post('alice', { stored: [99] })).status).toBe(400);
     expect((await post('alice', { stored: 'x' })).status).toBe(400);
-    expect(getReadinessSnapshot([{ id: 1, name: 'Clap' }], new Set(['alice'])).overlays[0]!.reportedAt).toBeNull();
+    expect(getReadinessSnapshot([{ id: 1, name: 'Clap' }], new Set(['alice'])).overlays[0]).toMatchObject({ reportedAt: null });
   });
 
   it('answers 500 when the list cannot be read', async () => {
