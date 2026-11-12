@@ -42,6 +42,26 @@ describe('views/overlayAdmin.ejs', () => {
   });
 });
 
+describe('views/overlayAdmin.ejs browser sources', () => {
+  it('gives the streamer both their video overlay link and their shared overlay link', async () => {
+    const html = await render();
+    expect(html).toContain('https://bot.example/overlay/streamer</code>');
+    expect(html).toContain('https://bot.example/overlay/shared/streamer</code>');
+    expect(html).toContain('Shared Video Overlay — OBS Browser Source');
+  });
+
+  it('keeps the connection status for the video overlay only', async () => {
+    const html = await render();
+    expect(html).toContain('data-events-url="/overlay/settings/events"');
+    expect(html.match(/id="overlay-status-dot"/g)).toHaveLength(1);
+  });
+
+  it('shows neither link, and no browser sources, to a user who is not a streamer', async () => {
+    const html = await render({ streamer: null });
+    expect(html).not.toContain('/overlay/shared/');
+  });
+});
+
 describe('views/overlayAdmin.ejs upload progress', () => {
   it('gives the upload form a hidden progress display and the conversion progress endpoint', async () => {
     const html = await render();
