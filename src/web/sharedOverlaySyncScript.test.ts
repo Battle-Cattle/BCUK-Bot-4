@@ -323,6 +323,24 @@ describe('createSharedSyncer', () => {
     expect(fetchRange).not.toHaveBeenCalled();
   });
 
+  it('clears the chunks of a stored video on a retry when their first cleanup failed, with no new list', async () => {
+    const storage = memoryStorage();
+    const { timing } = fakeClock();
+    const baseClear = storage.clearChunks;
+    let failOnce = true;
+    storage.clearChunks = async (u: string) => {
+      if (failOnce) { failOnce = false; throw new Error('quota'); }
+      await baseClear(u);
+    };
+    const fetchRange = fakeFetch(250);
+    const syncer = createSharedSyncer(deps(storage, fetchRange, { ...timing, log: () => {} }));
+    await syncer.sync([v('/a')]);
+    await syncer.idle();
+    expect(storage.videos.get('/a')).toEqual(['/a:0', '/a:100', '/a:200']);
+    expect(storage.chunks.has('/a')).toBe(false);
+    expect(fetchRange).toHaveBeenCalledTimes(3); // the retry only cleaned up; it did not download again
+  });
+
   it('logs a failed download and carries on with the next video straight away', async () => {
     const storage = memoryStorage();
     const log = vi.fn();
@@ -736,10 +754,12 @@ describe('fetchSharedRange', () => {
 });
 
 describe('holdSyncOwnership', () => {
-  it('starts at once without the Web Locks API', () => {
+  it('does not start, and says so, without the Web Locks API', () => {
     const start = vi.fn();
-    holdSyncOwnership(undefined, 'sync', start);
-    expect(start).toHaveBeenCalledTimes(1);
+    const onUnavailable = vi.fn();
+    holdSyncOwnership(undefined, 'sync', start, onUnavailable);
+    expect(start).not.toHaveBeenCalled();
+    expect(onUnavailable).toHaveBeenCalledTimes(1);
   });
 
   it('starts only once the page holds the lock, and holds it for good', async () => {
@@ -751,7 +771,7 @@ describe('holdSyncOwnership', () => {
         grant = async () => { held = callback(); };
       })),
     };
-    holdSyncOwnership(locks, 'sync', start);
+    holdSyncOwnership(locks, 'sync', start, vi.fn());
     expect(locks.request).toHaveBeenCalledWith('sync', expect.any(Function));
     expect(start).not.toHaveBeenCalled(); // another page holds it
     await grant();
@@ -762,11 +782,31 @@ describe('holdSyncOwnership', () => {
     expect(settled).not.toHaveBeenCalled(); // the callback never settles, so the lock stays held
   });
 
-  it('starts anyway if the lock request itself fails, and only once', async () => {
+  it('does not start if the lock request itself fails, and reports the error', async () => {
     const start = vi.fn();
-    holdSyncOwnership({ request: async () => { throw new Error('denied'); } }, 'sync', start);
+    const onUnavailable = vi.fn();
+    holdSyncOwnership({ request: async () => { throw new Error('denied'); } }, 'sync', start, onUnavailable);
     await new Promise((resolve) => setTimeout(resolve, 5));
-    expect(start).toHaveBeenCalledTimes(1);
+    expect(start).not.toHaveBeenCalled();
+    expect(onUnavailable).toHaveBeenCalledTimes(1);
+    expect(onUnavailable.mock.calls[0]![0].message).toBe('denied');
+  });
+
+  it('keeps two pages from syncing at once: only the one holding the lock starts', async () => {
+    const queue: Array<() => Promise<void>> = [];
+    let held = false;
+    const locks = {
+      request: (_name: string, callback: () => Promise<void>) => new Promise<void>(() => {
+        const run = () => { held = true; void callback(); };
+        if (held) queue.push(async () => run()); else run();
+      }),
+    };
+    const startA = vi.fn();
+    const startB = vi.fn();
+    holdSyncOwnership(locks, 'sync', startA, vi.fn());
+    holdSyncOwnership(locks, 'sync', startB, vi.fn());
+    expect(startA).toHaveBeenCalledTimes(1);
+    expect(startB).not.toHaveBeenCalled();
   });
 });
 
