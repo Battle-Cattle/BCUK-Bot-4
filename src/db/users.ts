@@ -236,6 +236,7 @@ export const USER_REFERENCING_COLUMNS: ReadonlyArray<readonly [table: string, co
   ['streamdeck_key_guild_status', 'approved_by'],
   ['webauthn_credentials', 'discord_id'],
   ['passkey_enrollment_codes', 'discord_id'],
+  ['shared_overlay_video', 'uploaded_by'],
 ];
 
 const NOT_REFERENCED_CLAUSES = USER_REFERENCING_COLUMNS
