@@ -11,8 +11,8 @@ const source = ['shared-overlay-plan.js', 'shared-overlay-retry.js', 'shared-ove
 // Top-level const/function declarations aren't properties of a vm context, so export them explicitly.
 const context: Record<string, any> = { setTimeout, clearTimeout, AbortController };
 vm.createContext(context);
-vm.runInContext(`${source}\nthis.api = { planSharedSync, nextSharedChunkRange, createSharedSyncer, resolveSharedSource, checkedRangeTotal, fetchSharedRange, holdSyncOwnership, fallBackToRoute, buildReadinessReport, chunkPauseFor };`, context);
-const { planSharedSync, nextSharedChunkRange, createSharedSyncer, resolveSharedSource, checkedRangeTotal, fetchSharedRange, holdSyncOwnership, fallBackToRoute, buildReadinessReport, chunkPauseFor } = context.api;
+vm.runInContext(`${source}\nthis.api = { planSharedSync, nextSharedChunkRange, createSharedSyncer, resolveSharedSource, checkedRangeTotal, fetchSharedRange, holdSyncOwnership, fallBackToRoute, playSource, buildReadinessReport, chunkPauseFor };`, context);
+const { planSharedSync, nextSharedChunkRange, createSharedSyncer, resolveSharedSource, checkedRangeTotal, fetchSharedRange, holdSyncOwnership, fallBackToRoute, playSource, buildReadinessReport, chunkPauseFor } = context.api;
 
 const v = (url: string) => ({ url });
 
@@ -855,6 +855,47 @@ describe('fallBackToRoute', () => {
     expect(fallBackToRoute(handle, '/a.webm', setSrc)).toBe(true);
     expect(fallBackToRoute(handle, '/a.webm', setSrc)).toBe(false);
     expect(setSrc).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('playSource', () => {
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  it('reports a failed play() of the current source', async () => {
+    const handle = { v: { play: () => Promise.reject(new Error('NotAllowedError')) }, source: { src: '/a.webm', release: vi.fn() } };
+    const onFailure = vi.fn();
+    playSource(handle, onFailure);
+    await flush();
+    expect(onFailure).toHaveBeenCalledTimes(1);
+  });
+
+  it('does nothing when play() succeeds', async () => {
+    const handle = { v: { play: () => Promise.resolve() }, source: { src: '/a.webm', release: vi.fn() } };
+    const onFailure = vi.fn();
+    playSource(handle, onFailure);
+    await flush();
+    expect(onFailure).not.toHaveBeenCalled();
+  });
+
+  it('ignores the abort of a pending play() when the stored copy was replaced by the route', async () => {
+    let rejectPlay: (err: Error) => void = () => {};
+    const pending = new Promise<void>((_resolve, reject) => { rejectPlay = reject; });
+    const handle = { v: { play: () => pending }, source: { src: 'blob:stored', release: vi.fn() } };
+    const onFailure = vi.fn();
+    playSource(handle, onFailure);
+    fallBackToRoute(handle, '/a.webm', vi.fn()); // the element error switches to the route...
+    rejectPlay(new Error('AbortError')); // ...which aborts the pending play()
+    await flush();
+    expect(onFailure).not.toHaveBeenCalled();
+  });
+
+  it('still reports a failure of the route after the fallback', async () => {
+    const handle = { v: { play: () => Promise.reject(new Error('NotSupportedError')) }, source: { src: 'blob:stored', release: vi.fn() } };
+    fallBackToRoute(handle, '/a.webm', vi.fn());
+    const onFailure = vi.fn();
+    playSource(handle, onFailure);
+    await flush();
+    expect(onFailure).toHaveBeenCalledTimes(1);
   });
 });
 

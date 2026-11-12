@@ -1,4 +1,4 @@
-/* global connectSse, planSharedPlayback, buildReadinessReport, chunkPauseFor, createSharedSyncer, resolveSharedSource, fetchSharedRange, holdSyncOwnership, fallBackToRoute, createSharedStorage, sharedStorageAvailable */
+/* global connectSse, planSharedPlayback, buildReadinessReport, chunkPauseFor, createSharedSyncer, resolveSharedSource, fetchSharedRange, holdSyncOwnership, fallBackToRoute, playSource, createSharedStorage, sharedStorageAvailable */
 (function () {
   const script = document.currentScript;
   const login = script ? script.dataset.login : '';
@@ -198,7 +198,7 @@
       if (late.action === 'skip') { finish(handle); return; }
       if (late.seekSeconds > 0) handle.v.currentTime = late.seekSeconds;
       handle.v.style.visibility = 'visible';
-      handle.v.play().catch(function () { finish(handle); });
+      playSource(handle, function () { finish(handle); });
     }, plan.delayMs);
   }
 
