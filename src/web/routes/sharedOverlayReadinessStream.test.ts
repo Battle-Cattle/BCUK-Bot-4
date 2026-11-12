@@ -99,12 +99,19 @@ describe('GET /readiness/events', () => {
     expect(snapshots(res)[0].videos.map((v: { id: number }) => v.id)).toEqual([1, 2]);
   });
 
-  it('stops repeating the first lookup after a few changes', async () => {
-    entries.mockImplementation(async () => { notifyReadinessChange(); return [{ id: 1, name: 'Clap' }]; });
+  it('stops repeating the first lookup after a few changes, then publishes the fresh state to the new stream', async () => {
+    let lookups = 0;
+    entries.mockImplementation(async () => {
+      lookups++;
+      if (lookups <= 3) notifyReadinessChange(); // every one of the first three lookups overlaps a change
+      return lookups <= 3 ? [{ id: 1, name: 'Clap' }] : [{ id: 1, name: 'Clap' }, { id: 2, name: 'Boo' }];
+    });
     const { req, res } = fake('m1');
     await handler(req, res);
-    expect(entries).toHaveBeenCalledTimes(3);
-    expect(snapshots(res)).toHaveLength(1);
+    expect(snapshots(res)[0].videos).toHaveLength(1); // the possibly stale first snapshot
+    await vi.waitFor(() => expect(snapshots(res)).toHaveLength(2));
+    expect(lookups).toBe(4); // three for the first snapshot (the cap), one refresh after attaching
+    expect(snapshots(res)[1].videos.map((v: { id: number }) => v.id)).toEqual([1, 2]);
   });
 
   it('does not look anything up when no admin stream is open', async () => {

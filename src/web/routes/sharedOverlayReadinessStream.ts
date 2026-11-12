@@ -87,16 +87,25 @@ onConnectionCountChange(sharedConnections, onChange);
 /** Most times the first snapshot is looked up again because something changed during the lookup. */
 const MAX_INITIAL_LOOKUPS = 3;
 
+/** The first snapshot for a new stream, and whether a change overlapped its last lookup. */
+interface InitialSnapshot {
+  snapshot: ReadinessSnapshot;
+  /** True when something changed during the last lookup, so the snapshot may already be out of date. */
+  stale: boolean;
+}
+
 /**
  * Builds the first snapshot for a new stream. A change that arrives during the lookup would not be
- * published to this stream (it is not registered yet), so the lookup is repeated if one did.
- * @returns The snapshot, fresh as of the last lookup.
+ * published to this stream (it is not registered yet), so the lookup is repeated if one did, a few
+ * times at most; the caller publishes again after attaching if the last lookup still overlapped one.
+ * @returns The snapshot and whether it may be stale.
  */
-async function initialSnapshot(): Promise<ReadinessSnapshot> {
+async function initialSnapshot(): Promise<InitialSnapshot> {
   for (let tries = 1; ; tries++) {
     const seen = changeCount;
     const snapshot = await currentSnapshot();
-    if (changeCount === seen || tries >= MAX_INITIAL_LOOKUPS) return snapshot;
+    const stale = changeCount !== seen;
+    if (!stale || tries >= MAX_INITIAL_LOOKUPS) return { snapshot, stale };
   }
 }
 
@@ -110,9 +119,9 @@ async function initialSnapshot(): Promise<ReadinessSnapshot> {
  */
 router.get('/readiness/events', async (req, res) => {
   const key = getSessionUser(req).discordId;
-  let snapshot: ReadinessSnapshot;
+  let first: InitialSnapshot;
   try {
-    snapshot = await initialSnapshot();
+    first = await initialSnapshot();
   } catch (err) {
     log.error('Failed to build shared overlay readiness:', err);
     res.status(500).end();
@@ -121,5 +130,7 @@ router.get('/readiness/events', async (req, res) => {
   const attached = attachSseConnection(req, res, {
     connections: readinessConnections, key, maxPerChannel: OVERLAY_STATUS_MAX_SSE_PER_STREAMER,
   });
-  if (attached) res.write(`data: ${JSON.stringify(snapshot)}\n\n`);
+  if (!attached) return;
+  res.write(`data: ${JSON.stringify(first.snapshot)}\n\n`);
+  if (first.stale) void publish(); // the stream is registered now, so it gets the fresh state
 });
