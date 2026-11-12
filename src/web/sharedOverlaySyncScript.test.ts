@@ -9,10 +9,10 @@ const source = ['shared-overlay-plan.js', 'shared-overlay-retry.js', 'shared-ove
   .map((name) => fs.readFileSync(path.join(__dirname, '../../public', name), 'utf8'))
   .join('\n');
 // Top-level const/function declarations aren't properties of a vm context, so export them explicitly.
-const context: Record<string, any> = {};
+const context: Record<string, any> = { setTimeout, clearTimeout, AbortController };
 vm.createContext(context);
-vm.runInContext(`${source}\nthis.api = { planSharedSync, nextSharedChunkRange, createSharedSyncer, resolveSharedSource, checkedRangeTotal, buildReadinessReport };`, context);
-const { planSharedSync, nextSharedChunkRange, createSharedSyncer, resolveSharedSource, checkedRangeTotal, buildReadinessReport } = context.api;
+vm.runInContext(`${source}\nthis.api = { planSharedSync, nextSharedChunkRange, createSharedSyncer, resolveSharedSource, checkedRangeTotal, fetchSharedRange, holdSyncOwnership, buildReadinessReport };`, context);
+const { planSharedSync, nextSharedChunkRange, createSharedSyncer, resolveSharedSource, checkedRangeTotal, fetchSharedRange, holdSyncOwnership, buildReadinessReport } = context.api;
 
 const v = (url: string) => ({ url });
 
@@ -31,6 +31,17 @@ describe('planSharedSync', () => {
 
   it('still downloads a partial video that is on the list', () => {
     expect(planSharedSync([v('/a')], [], ['/a']).download).toHaveLength(1);
+  });
+
+  it('clears the leftover chunks of a wanted video that is already stored, and keeps the video', () => {
+    const plan = planSharedSync([v('/a'), v('/b')], ['/a', '/b'], ['/a']);
+    expect(plan.clear).toEqual(['/a']);
+    expect(plan.remove).toEqual([]);
+    expect(plan.download).toEqual([]);
+  });
+
+  it('leaves the chunks of a video that is not stored yet alone', () => {
+    expect(planSharedSync([v('/a')], [], ['/a']).clear).toEqual([]);
   });
 });
 
@@ -197,17 +208,18 @@ describe('createSharedSyncer', () => {
     storage.deleteVideo = async (u: string) => { deleting(); await gate; await baseDelete(u); };
     const holder: { syncer?: any } = {};
     let secondChunkCalls = 0;
+    let removal: Promise<void> = Promise.resolve();
     const fetchRange = vi.fn(async (url: string, start: number) => {
       if (start === 100) {
         secondChunkCalls++;
         if (secondChunkCalls === 1) {
-          void holder.syncer.sync([]); // removal cleanup starts, then stalls in deleteVideo
+          removal = holder.syncer.sync([]); // removal cleanup starts, then stalls in deleteVideo
           await deleteStarted;
           void holder.syncer.sync([v('/a')]); // back on the list while the cleanup is stalled
         } else if (secondChunkCalls === 2) {
           // The restarted download has stored its first chunk; only now does the cleanup go on.
           release();
-          await new Promise((resolve) => setTimeout(resolve, 5));
+          await removal; // the cleanup has finished before this chunk is returned
         }
       }
       return { buffer: `${url}:${start}`, total: 250 };
@@ -264,6 +276,51 @@ describe('createSharedSyncer', () => {
     release();
     await holder.syncer.idle();
     expect(storage.videos.get('/a')).toEqual(['/a:0', '/a:100', '/a:200']);
+  });
+
+  it('queues a video again when it is put back while the cleanup after abandoning its download runs', async () => {
+    const storage = memoryStorage();
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let clearing: () => void = () => {};
+    const clearStarted = new Promise<void>((resolve) => { clearing = resolve; });
+    const baseClear = storage.clearChunks;
+    let stall = true;
+    storage.clearChunks = async (u: string) => {
+      if (stall) { stall = false; clearing(); await gate; }
+      await baseClear(u);
+    };
+    const holder: { syncer?: any } = {};
+    let paused = false;
+    let polls = 0;
+    const isPaused = () => {
+      if (paused && ++polls === 1) void holder.syncer.sync([]); // removed while the download waits to resume
+      return paused && polls < 2;
+    };
+    const fetchRange = vi.fn(async (url: string, start: number) => {
+      if (start === 100) paused = true; // the next chunk waits behind a playing video
+      return { buffer: `${url}:${start}`, total: 250 };
+    });
+    holder.syncer = createSharedSyncer(deps(storage, fetchRange, { isPaused }));
+    await holder.syncer.sync([v('/a')]);
+    await clearStarted;
+    await holder.syncer.sync([v('/a')]); // back on the list while the cleanup is stalled
+    release();
+    await holder.syncer.idle();
+    expect(storage.videos.get('/a')).toEqual(['/a:0', '/a:100', '/a:200']);
+  });
+
+  it('clears the leftover chunks of a video that is already stored', async () => {
+    const storage = memoryStorage();
+    storage.videos.set('/a', ['/a:0', '/a:100', '/a:200']);
+    storage.chunks.set('/a', ['/a:0', '/a:100', '/a:200']);
+    const fetchRange = fakeFetch(250);
+    const syncer = createSharedSyncer(deps(storage, fetchRange));
+    await syncer.sync([v('/a')]);
+    await syncer.idle();
+    expect(storage.chunks.has('/a')).toBe(false);
+    expect(storage.videos.get('/a')).toEqual(['/a:0', '/a:100', '/a:200']);
+    expect(fetchRange).not.toHaveBeenCalled();
   });
 
   it('logs a failed download and carries on with the next video straight away', async () => {
@@ -633,6 +690,83 @@ describe('checkedRangeTotal', () => {
     ['a body shorter than the range', 'bytes 0-99/250', 40],
   ])('rejects %s', (_name, header, bytes) => {
     expect(() => checkedRangeTotal(header, bytes as number, 0, 99)).toThrow();
+  });
+});
+
+describe('fetchSharedRange', () => {
+  const answer = (status: number, range: string | null, body: number) => ({
+    status,
+    headers: { get: () => range },
+    arrayBuffer: async () => ({ byteLength: body }),
+  });
+
+  it('requests the range and returns the validated bytes and total', async () => {
+    const fetchFn = vi.fn(async () => answer(206, 'bytes 0-99/250', 100));
+    const part = await fetchSharedRange(fetchFn, '/a', 0, 99, 1000);
+    expect(part.total).toBe(250);
+    expect(part.buffer.byteLength).toBe(100);
+    expect(fetchFn).toHaveBeenCalledWith('/a', expect.objectContaining({ headers: { Range: 'bytes=0-99' } }));
+  });
+
+  it('rejects an answer that is not 206', async () => {
+    await expect(fetchSharedRange(async () => answer(200, null, 250), '/a', 0, 99, 1000)).rejects.toThrow('answered 200');
+  });
+
+  it('rejects a body that is shorter than its range', async () => {
+    await expect(fetchSharedRange(async () => answer(206, 'bytes 0-99/250', 40), '/a', 0, 99, 1000)).rejects.toThrow();
+  });
+
+  it('gives up when the headers never arrive within the deadline', async () => {
+    const stalled = (_url: string, options: any) => new Promise((_resolve, reject) => {
+      options.signal.addEventListener('abort', () => reject(new Error('aborted')));
+    });
+    await expect(fetchSharedRange(stalled, '/a', 0, 99, 20)).rejects.toThrow('aborted');
+  });
+
+  it('gives up when the body stalls after the headers', async () => {
+    const stalledBody = (_url: string, options: any) => Promise.resolve({
+      status: 206,
+      headers: { get: () => 'bytes 0-99/250' },
+      arrayBuffer: () => new Promise((_resolve, reject) => {
+        options.signal.addEventListener('abort', () => reject(new Error('body aborted')));
+      }),
+    });
+    await expect(fetchSharedRange(stalledBody, '/a', 0, 99, 20)).rejects.toThrow('body aborted');
+  });
+});
+
+describe('holdSyncOwnership', () => {
+  it('starts at once without the Web Locks API', () => {
+    const start = vi.fn();
+    holdSyncOwnership(undefined, 'sync', start);
+    expect(start).toHaveBeenCalledTimes(1);
+  });
+
+  it('starts only once the page holds the lock, and holds it for good', async () => {
+    const start = vi.fn();
+    let grant: () => Promise<void> = async () => {};
+    let held: Promise<void> | undefined;
+    const locks = {
+      request: vi.fn((_name: string, callback: () => Promise<void>) => new Promise<void>(() => {
+        grant = async () => { held = callback(); };
+      })),
+    };
+    holdSyncOwnership(locks, 'sync', start);
+    expect(locks.request).toHaveBeenCalledWith('sync', expect.any(Function));
+    expect(start).not.toHaveBeenCalled(); // another page holds it
+    await grant();
+    expect(start).toHaveBeenCalledTimes(1);
+    const settled = vi.fn();
+    void held!.then(settled);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(settled).not.toHaveBeenCalled(); // the callback never settles, so the lock stays held
+  });
+
+  it('starts anyway if the lock request itself fails, and only once', async () => {
+    const start = vi.fn();
+    holdSyncOwnership({ request: async () => { throw new Error('denied'); } }, 'sync', start);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(start).toHaveBeenCalledTimes(1);
   });
 });
 
