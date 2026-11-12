@@ -29,6 +29,10 @@ function parseVideoId(req: Request): number | null {
 /**
  * GET /api/streamdeck/shared-videos — lists the enabled shared videos for the plugin's dropdown, with
  * how many connected overlays have each stored.
+ * The Stream Deck plugin's Play Shared Video action (BCUK-StreamDeck-Plugin 2.1.0+) reads `id`, `name`
+ * and the `ready` / `connected` pair from this response: both must stay non-negative integers (it
+ * drops the pair otherwise), and `connected: 0` means "no overlay online". Changing them needs a
+ * plugin update; adding other fields is safe.
  * @param _req - Express request; authenticated by `requireApiKey`.
  * @param res - `{ ok, videos: [{ id, name, ready, connected }] }` (`ready` of `connected` overlays
  *   have the video stored), or 500 on a DB error.
