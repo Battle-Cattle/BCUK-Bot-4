@@ -11,8 +11,8 @@ const source = ['shared-overlay-plan.js', 'shared-overlay-retry.js', 'shared-ove
 // Top-level const/function declarations aren't properties of a vm context, so export them explicitly.
 const context: Record<string, any> = { setTimeout, clearTimeout, AbortController };
 vm.createContext(context);
-vm.runInContext(`${source}\nthis.api = { planSharedSync, nextSharedChunkRange, createSharedSyncer, resolveSharedSource, checkedRangeTotal, fetchSharedRange, holdSyncOwnership, buildReadinessReport };`, context);
-const { planSharedSync, nextSharedChunkRange, createSharedSyncer, resolveSharedSource, checkedRangeTotal, fetchSharedRange, holdSyncOwnership, buildReadinessReport } = context.api;
+vm.runInContext(`${source}\nthis.api = { planSharedSync, nextSharedChunkRange, createSharedSyncer, resolveSharedSource, checkedRangeTotal, fetchSharedRange, holdSyncOwnership, fallBackToRoute, buildReadinessReport };`, context);
+const { planSharedSync, nextSharedChunkRange, createSharedSyncer, resolveSharedSource, checkedRangeTotal, fetchSharedRange, holdSyncOwnership, fallBackToRoute, buildReadinessReport } = context.api;
 
 const v = (url: string) => ({ url });
 
@@ -807,6 +807,34 @@ describe('holdSyncOwnership', () => {
     holdSyncOwnership(locks, 'sync', startB, vi.fn());
     expect(startA).toHaveBeenCalledTimes(1);
     expect(startB).not.toHaveBeenCalled();
+  });
+});
+
+describe('fallBackToRoute', () => {
+  it('frees the stored copy and points the video at the route', () => {
+    const release = vi.fn();
+    const handle = { source: { src: 'blob:stored', release } };
+    const setSrc = vi.fn();
+    expect(fallBackToRoute(handle, '/overlay/shared/videos/a.webm', setSrc)).toBe(true);
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(setSrc).toHaveBeenCalledWith('/overlay/shared/videos/a.webm');
+    expect(handle.source.src).toBe('/overlay/shared/videos/a.webm');
+  });
+
+  it('gives up when the video is already on the route, so a second failure ends it', () => {
+    const handle = { source: { src: '/overlay/shared/videos/a.webm', release: vi.fn() } };
+    const setSrc = vi.fn();
+    expect(fallBackToRoute(handle, '/overlay/shared/videos/a.webm', setSrc)).toBe(false);
+    expect(setSrc).not.toHaveBeenCalled();
+    expect(fallBackToRoute(handle, '/overlay/shared/videos/a.webm', setSrc)).toBe(false);
+  });
+
+  it('only falls back once for a stored copy', () => {
+    const handle = { source: { src: 'blob:stored', release: vi.fn() } };
+    const setSrc = vi.fn();
+    expect(fallBackToRoute(handle, '/a.webm', setSrc)).toBe(true);
+    expect(fallBackToRoute(handle, '/a.webm', setSrc)).toBe(false);
+    expect(setSrc).toHaveBeenCalledTimes(1);
   });
 });
 
