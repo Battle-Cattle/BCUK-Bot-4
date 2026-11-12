@@ -346,6 +346,32 @@ describe('createSharedSyncer', () => {
     expect(storage.videos.get('/a')).toEqual(['/a:0', '/a:100', '/a:200']);
   });
 
+  it('does not download a video again when a stale plan queues it after it has finished', async () => {
+    const storage = memoryStorage();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let releasePartial!: () => void;
+    const slowPartial = new Promise<string[]>((resolve) => { releasePartial = () => resolve([]); });
+    const fetchRange = vi.fn(async (url: string, start: number) => {
+      if (start === 100) await gate;
+      return { buffer: `${url}:${start}`, total: 250 };
+    });
+    const syncer = createSharedSyncer(deps(storage, fetchRange));
+    await syncer.sync([v('/a')]);
+    await waitFor(() => expect(fetchRange).toHaveBeenCalledTimes(2)); // chunk 1 is in flight
+    const listPartial = vi.spyOn(storage, 'listPartial').mockReturnValueOnce(slowPartial);
+    // This refresh has read the stored list (without /a) but its partial list is still pending.
+    const refresh = syncer.sync([v('/a')]);
+    await waitFor(() => expect(listPartial).toHaveBeenCalledTimes(1));
+    release(); // /a finishes and is stored, so nothing is downloading any more
+    await waitFor(() => expect(storage.videos.has('/a')).toBe(true));
+    releasePartial(); // the stale plan now queues /a again
+    await refresh;
+    await syncer.idle();
+    expect(fetchRange).toHaveBeenCalledTimes(3); // not downloaded a second time
+    expect(storage.videos.get('/a')).toEqual(['/a:0', '/a:100', '/a:200']);
+  });
+
   it('ignores an older list that a newer one overtook while storage was being read', async () => {
     const storage = memoryStorage({ videos: ['/b'] });
     let releaseRead!: (urls: string[]) => void;
