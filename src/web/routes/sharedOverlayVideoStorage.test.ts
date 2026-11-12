@@ -1,3 +1,4 @@
+import path from 'path';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockLogger } from '../../test-utils/loggerMock';
 
@@ -12,6 +13,10 @@ vi.mock('../../db', () => ({ addSharedVideo: addVideo }));
 
 import { storeSharedVideo, removeSharedVideoFile, recordSharedVideo } from './sharedOverlayVideoStorage';
 
+// path.resolve gives the platform's separators (and a drive letter on Windows).
+const sharedDir = path.resolve('/data/overlay', 'shared');
+const sharedFile = path.resolve('/data/overlay', 'shared', 'a.webm');
+
 beforeEach(() => { vi.clearAllMocks(); });
 
 describe('shared video storage', () => {
@@ -20,12 +25,12 @@ describe('shared video storage', () => {
     mkdir.mockImplementation(async () => { order.push('mkdir'); });
     storeMov.mockImplementation(async (dir: string) => { order.push(`store:${dir}`); return 'x.webm'; });
     await expect(storeSharedVideo(async () => {})).resolves.toBe('x.webm');
-    expect(order).toEqual(['mkdir', 'store:/data/overlay/shared']);
+    expect(order).toEqual(['mkdir', `store:${sharedDir}`]);
   });
 
   it('removes a file quietly, ignoring unsafe names', async () => {
     await removeSharedVideoFile('a.webm');
-    expect(rm).toHaveBeenCalledWith('/data/overlay/shared/a.webm', { force: true });
+    expect(rm).toHaveBeenCalledWith(sharedFile, { force: true });
     rm.mockClear();
     await removeSharedVideoFile('../a.webm');
     expect(rm).not.toHaveBeenCalled();
@@ -42,6 +47,6 @@ describe('shared video storage', () => {
   it('removes the file when the insert fails', async () => {
     addVideo.mockRejectedValue(new Error('db'));
     await expect(recordSharedVideo('Clap', 'a.webm', 'u1')).rejects.toThrow('db');
-    expect(rm).toHaveBeenCalledWith('/data/overlay/shared/a.webm', { force: true });
+    expect(rm).toHaveBeenCalledWith(sharedFile, { force: true });
   });
 });
