@@ -20,11 +20,14 @@ function load() {
   const lists: Record<string, any> = { 'readiness-overlays': fakeElement(), 'readiness-videos': fakeElement() };
   const connectSse = vi.fn();
   const context: Record<string, unknown> = {
-    document: { getElementById: (id: string) => lists[id] ?? null, createElement: () => fakeElement() },
+    document: {
+      getElementById: (id: string) => lists[id] ?? null, createElement: () => fakeElement(),
+      body: { dataset: { csrfToken: 'tok' } },
+    },
     connectSse,
   };
   vm.createContext(context);
-  vm.runInContext(`${source}\nthis.api = { describeOverlay, describeVideo, renderReadiness };`, context);
+  vm.runInContext(`${source}\nthis.api = { describeOverlay, describeVideo, renderReadiness, buildPushForm };`, context);
   return { api: (context as any).api, lists, connectSse };
 }
 
@@ -51,6 +54,24 @@ describe('readiness page script', () => {
       .toBe('✅ Clap — ready on 5/5 connected overlays');
     expect(api.describeVideo({ name: 'Boo', ready: 3, online: 5, allReady: false, missing: [{ login: 'a', percent: 40 }, { login: 'b', percent: null }] }))
       .toBe('Boo — ready on 3/5 connected overlays; missing on a (40%), b');
+  });
+
+  it('builds a push form that posts with the CSRF token, greyed out when every connected overlay has the video', () => {
+    const { api } = load();
+    const form = api.buildPushForm({ id: 7, allReady: false, online: 3 });
+    expect(form).toMatchObject({ method: 'POST', action: '/overlay/shared/settings/videos/7/push' });
+    expect(form.children[0]).toMatchObject({ type: 'hidden', name: '_csrf', value: 'tok' });
+    expect(form.children[1]).toMatchObject({ textContent: 'Push to overlays', disabled: false });
+    expect(api.buildPushForm({ id: 7, allReady: true, online: 3 }).children[1].disabled).toBe(true);
+    expect(api.buildPushForm({ id: 7, allReady: false, online: 0 }).children[1].disabled).toBe(true);
+  });
+
+  it('puts a push form on each video row but not on the placeholder', () => {
+    const { api, lists } = load();
+    api.renderReadiness({ overlays: [], videos: [{ id: 1, name: 'Clap', ready: 0, online: 1, missing: [], allReady: false }] });
+    expect(lists['readiness-videos'].children[0].children).toHaveLength(1);
+    api.renderReadiness({ overlays: [], videos: [] });
+    expect(lists['readiness-videos'].children[0].children).toHaveLength(0);
   });
 
   it('renders both lists, with placeholders when empty, and opens the stream', () => {

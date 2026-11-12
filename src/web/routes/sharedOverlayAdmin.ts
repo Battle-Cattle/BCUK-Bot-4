@@ -13,6 +13,7 @@ import { getSharedOverlayConnectionCount } from './sharedOverlaySource';
 import { SHARED_PROGRESS_KEY } from './sharedOverlayAdminShared';
 import { router as mutationsRouter } from './sharedOverlayAdminMutations';
 import { router as uploadRouter } from './sharedOverlayAdminUpload';
+import { router as pushRouter } from './sharedOverlayAdminPush';
 import { router as readinessRouter } from './sharedOverlayReadinessStream';
 
 // The Manager+ settings page of the shared video overlay (#917), mounted at /overlay/shared/settings.
@@ -23,16 +24,25 @@ const router = Router();
 
 const KNOWN_ERRORS = new Set([
   'invalid_id', 'invalid_name', 'not_found', 'not_a_streamer', 'invalid_file', 'upload_failed',
-  'delete_failed', 'save_failed', 'transcode_failed', 'transcode_busy',
+  'delete_failed', 'save_failed', 'transcode_failed', 'transcode_busy', 'video_disabled', 'push_cooldown',
   ...CHUNKED_UPLOAD_ERROR_CODES,
 ]);
 const KNOWN_SUCCESSES = new Set([
-  'video_uploaded', 'video_renamed', 'video_enabled', 'video_disabled', 'video_deleted', 'video_added',
+  'video_uploaded', 'video_renamed', 'video_enabled', 'video_disabled', 'video_deleted', 'video_added', 'video_pushed',
 ]);
 
 // requireGuildContext re-derives the access level for the current guild; it must run before
 // requireManager, which reads that level.
 router.use(requireAuth, requireGuildContext, requireManager);
+
+/**
+ * Reads the `pushed` count the push redirect carries.
+ * @param raw - The untrusted query value.
+ * @returns A whole number from 0 to 9999 (plenty for a handful of overlays), or 0 if it is not one.
+ */
+function parsePushedCount(raw: unknown): number {
+  return typeof raw === 'string' && /^\d{1,4}$/.test(raw) ? Number(raw) : 0;
+}
 
 /**
  * GET /overlay/shared/settings — renders the shared videos page: the list with its controls, the
@@ -54,6 +64,7 @@ router.get('/', csrfProtection, async (req, res) => {
       videos,
       ownVideos,
       connectedCount: getSharedOverlayConnectionCount(),
+      pushedCount: parsePushedCount(req.query.pushed),
       baseUrl: PUBLIC_URL,
       streamer: streamer ?? null,
       maxFileMb: OVERLAY_MAX_FILE_MB,
@@ -79,6 +90,7 @@ router.get('/progress/:uploadId', (req, res) => {
 });
 
 router.use(readinessRouter);
+router.use(pushRouter);
 router.use(uploadRouter);
 router.use(mutationsRouter);
 

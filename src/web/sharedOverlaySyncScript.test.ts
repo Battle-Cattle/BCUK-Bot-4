@@ -181,6 +181,74 @@ describe('createSharedSyncer', () => {
     ]);
   });
 
+  describe('fetchNow (Manager push)', () => {
+    it('ignores a video that is already stored', async () => {
+      const fetchRange = fakeFetch(50);
+      const syncer = createSharedSyncer(deps(memoryStorage({ videos: ['/a'] }), fetchRange));
+      expect(await syncer.fetchNow(v('/a'))).toBe('ignored');
+      expect(fetchRange).not.toHaveBeenCalled();
+    });
+
+    it('fetches a missing video, pausing the background queue behind it and resuming afterwards', async () => {
+      const storage = memoryStorage();
+      const order: string[] = [];
+      const holder: { syncer?: any; result?: string } = {};
+      const fetchRange = vi.fn(async (url: string, start: number) => {
+        order.push(`${url}:${start}`);
+        if (url === '/a' && start === 0) holder.result = await holder.syncer.fetchNow(v('/c'));
+        return { buffer: `${url}:${start}`, total: 150 };
+      });
+      holder.syncer = createSharedSyncer(deps(storage, fetchRange));
+      await holder.syncer.sync([v('/a'), v('/b')]);
+      await holder.syncer.idle();
+      expect(holder.result).toBe('fetching');
+      // /c jumps in after /a's first chunk, keeps going to the end, then /a resumes (its chunk is kept), then /b.
+      expect(order).toEqual(['/a:0', '/c:0', '/c:100', '/a:100', '/b:0', '/b:100']);
+      expect([...storage.videos.keys()].sort()).toEqual(['/a', '/b', '/c']);
+      expect(storage.videos.get('/a')).toEqual(['/a:0', '/a:100']);
+    });
+
+    it('finishes a video already downloading in the background at full speed, keeping its chunks', async () => {
+      const storage = memoryStorage();
+      const sleeps: number[] = [];
+      const holder: { syncer?: any; result?: string } = {};
+      const fetchRange = vi.fn(async (url: string, start: number) => {
+        if (start === 0) holder.result = await holder.syncer.fetchNow(v(url));
+        return { buffer: `${url}:${start}`, total: 300 };
+      });
+      holder.syncer = createSharedSyncer(deps(storage, fetchRange, { chunkPauseMs: 7, sleep: async (ms: number) => { sleeps.push(ms); } }));
+      await holder.syncer.sync([v('/a')]);
+      await holder.syncer.idle();
+      expect(holder.result).toBe('finishing');
+      expect(fetchRange).toHaveBeenCalledTimes(3);
+      expect(sleeps).not.toContain(7);
+      expect(storage.videos.get('/a')).toEqual(['/a:0', '/a:100', '/a:200']);
+    });
+
+    it('resumes a half-stored video from its chunks', async () => {
+      const storage = memoryStorage({ chunks: { '/a': ['/a:0'] } });
+      const fetchRange = fakeFetch(200);
+      const syncer = createSharedSyncer(deps(storage, fetchRange));
+      expect(await syncer.fetchNow(v('/a'))).toBe('fetching');
+      await syncer.idle();
+      expect(fetchRange.mock.calls.map((c) => c[1])).toEqual([100]);
+    });
+
+    it('still waits while a shared video plays', async () => {
+      let paused = true;
+      let polls = 0;
+      const fetchRange = fakeFetch(50);
+      const syncer = createSharedSyncer(deps(memoryStorage(), fetchRange, {
+        isPaused: () => paused, sleep: async () => { if (++polls === 2) paused = false; },
+      }));
+      await syncer.fetchNow(v('/a'));
+      await Promise.resolve();
+      expect(fetchRange).not.toHaveBeenCalled();
+      await syncer.idle();
+      expect(fetchRange).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it('does nothing when everything is already stored', async () => {
     const fetchRange = fakeFetch(50);
     const syncer = createSharedSyncer(deps(memoryStorage({ videos: ['/a'] }), fetchRange));

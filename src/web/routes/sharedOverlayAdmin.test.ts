@@ -29,6 +29,7 @@ vi.mock('./sharedOverlayReadinessStream', async () => {
   r.get('/readiness/events', (_req, res) => { res.end('stream'); });
   return { router: r };
 });
+vi.mock('./sharedOverlayAdminPush', async () => ({ router: (await import('express')).Router() }));
 vi.mock('./sharedOverlayAdminUpload', async () => ({ router: (await import('express')).Router() }));
 vi.mock('./overlayConversionProgress', () => ({
   parseUploadId: (v: string) => (v === 'a'.repeat(32) ? v : null),
@@ -63,6 +64,12 @@ describe('GET /', () => {
       view: 'sharedOverlayAdmin', connectedCount: 4, success: 'video_deleted', error: null,
       videos: [{ id: 1 }], ownVideos: [{ id: 9 }],
     });
+  });
+
+  it('passes the pushed count from the query, ignoring anything that is not a small number', async () => {
+    expect((await supertest(app()).get('/?success=video_pushed&pushed=3')).body.pushedCount).toBe(3);
+    expect((await supertest(app()).get('/?pushed=abc')).body.pushedCount).toBe(0);
+    expect((await supertest(app()).get('/?pushed=99999')).body.pushedCount).toBe(0);
   });
 
   it('shows no own videos for a Manager who is not a streamer', async () => {

@@ -73,9 +73,9 @@ function buildReadinessReport(list, storedUrls, downloading) {
  *   (`removed`), and when the queue drains (`idle`), so the page can report readiness.
  * @param {number} [deps.chunkBytes] - Bytes per chunk (defaults to the constant above).
  * @param {number} [deps.chunkPauseMs] - Pause between chunks (defaults to the constant above).
- * @returns {{sync: function(Array<{url: string}>): Promise<void>, idle: function(): Promise<void>}}
- *   `sync` takes a new list (queueing downloads and deleting removed videos); `idle` resolves once
- *   the queue has drained.
+ * @returns {{sync: function(Array<{url: string}>): Promise<void>, fetchNow: function({url: string}): Promise<string>, idle: function(): Promise<void>}}
+ *   `sync` takes a new list (queueing downloads and deleting removed videos); `fetchNow` handles a
+ *   Manager push; `idle` resolves once the queue has drained.
  */
 function createSharedSyncer(deps) {
   const chunkBytes = deps.chunkBytes || SHARED_SYNC_CHUNK_BYTES;
@@ -83,6 +83,8 @@ function createSharedSyncer(deps) {
   let wanted = new Set();
   let queue = [];
   let running = null;
+  let current = null; // url being downloaded now
+  const fast = new Set(); // urls to download at full speed (Manager push)
 
   /**
    * Passes an event to the page, if it listens.
@@ -99,6 +101,18 @@ function createSharedSyncer(deps) {
    */
   async function waitWhilePaused() {
     while (deps.isPaused()) await deps.sleep(SHARED_SYNC_PAUSE_POLL_MS);
+  }
+
+  /**
+   * A pushed video waiting at the front of the queue takes over from a background download: the
+   * background one goes back in the queue (its chunks are kept) and resumes afterwards.
+   * @param {{url: string}} entry - The video being downloaded.
+   * @returns {boolean} True if `entry` was put back and its download should stop for now.
+   */
+  function yieldsToPush(entry) {
+    if (fast.has(entry.url) || queue.length === 0 || !fast.has(queue[0].url)) return false;
+    queue.splice(1, 0, entry);
+    return true;
   }
 
   /**
@@ -119,7 +133,8 @@ function createSharedSyncer(deps) {
       await deps.storage.putChunk(entry.url, count, part.buffer);
       count++;
       emit({ type: 'progress', url: entry.url, percent: Math.min(100, Math.round((count * chunkBytes / total) * 100)) });
-      if (count * chunkBytes < total) await deps.sleep(chunkPauseMs);
+      if (count * chunkBytes < total && yieldsToPush(entry)) return;
+      if (count * chunkBytes < total && !fast.has(entry.url)) await deps.sleep(chunkPauseMs);
     }
     await deps.storage.putVideo(entry.url, await deps.storage.getChunks(entry.url));
     await deps.storage.clearChunks(entry.url);
@@ -133,12 +148,15 @@ function createSharedSyncer(deps) {
   async function drain() {
     while (queue.length > 0) {
       const entry = queue.shift();
+      current = entry.url;
       try {
         await downloadOne(entry);
       } catch (err) {
         if (deps.log) deps.log('Shared video download failed: ' + entry.url, err);
         await deps.sleep(SHARED_SYNC_RETRY_MS);
       }
+      fast.delete(entry.url);
+      current = null;
     }
     running = null;
     emit({ type: 'idle' });
@@ -155,6 +173,23 @@ function createSharedSyncer(deps) {
       }
       queue = plan.download;
       if (!running && queue.length > 0) running = drain();
+    },
+    /**
+     * Handles a Manager push: makes sure a video is stored, at full speed, without playing it.
+     * @param {{url: string}} entry - The pushed video.
+     * @returns {Promise<string>} `ignored` if already stored, `finishing` if its background download
+     *   is under way (now sped up, keeping its chunks), or `fetching` if it was missing (the
+     *   background queue pauses behind it and resumes afterwards).
+     */
+    fetchNow: async function (entry) {
+      if ((await deps.storage.listVideos()).indexOf(entry.url) !== -1) return 'ignored';
+      wanted.add(entry.url);
+      fast.add(entry.url);
+      if (current === entry.url) return 'finishing';
+      queue = queue.filter(function (e) { return e.url !== entry.url; });
+      queue.unshift(entry);
+      if (!running) running = drain();
+      return 'fetching';
     },
     idle: function () { return running || Promise.resolve(); },
   };
