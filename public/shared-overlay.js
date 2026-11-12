@@ -1,4 +1,4 @@
-/* global connectSse, planSharedPlayback, buildReadinessReport, chunkPauseFor, createSharedSyncer, resolveSharedSource, checkedRangeTotal, createSharedStorage, sharedStorageAvailable */
+/* global connectSse, planSharedPlayback, buildReadinessReport, chunkPauseFor, createSharedSyncer, resolveSharedSource, fetchSharedRange, holdSyncOwnership, createSharedStorage, sharedStorageAvailable */
 (function () {
   const script = document.currentScript;
   const login = script ? script.dataset.login : '';
@@ -7,6 +7,10 @@
   /** Random delay range before the first background sync, so overlays opened together don't all start at once. */
   const FIRST_SYNC_MIN_MS = 2000;
   const FIRST_SYNC_SPREAD_MS = 6000;
+  /** Longest one range request (headers and body) may take before it counts as failed and is retried. */
+  const RANGE_DEADLINE_MS = 120000;
+  /** Name of the lock that lets only one overlay page of this browser run the background sync. */
+  const SYNC_LOCK_NAME = 'bcuk-shared-overlay-sync';
 
   let clockOffsetMs = 0; // server time minus local time
   let maxLateMs = 3000;
@@ -23,6 +27,7 @@
 
   /** Most often a progress report is sent while a download runs. */
   const PROGRESS_REPORT_MS = 3000;
+  let listReceived = false; // whether the server has sent a list yet (an empty one counts)
 
   /**
    * Current time on the server's clock.
@@ -41,11 +46,9 @@
    * @param {boolean} fullSpeed - True for a pushed video.
    * @returns {Promise<{buffer: ArrayBuffer, total: number}>} The bytes and the file's total size.
    */
-  async function fetchRange(url, start, end, fullSpeed) {
-    const res = await fetch(fullSpeed ? url : url + '?preload=1', { headers: { Range: 'bytes=' + start + '-' + end } });
-    if (res.status !== 206) throw new Error('Range request answered ' + res.status);
-    const buffer = await res.arrayBuffer();
-    return { buffer: buffer, total: checkedRangeTotal(res.headers.get('Content-Range'), buffer.byteLength, start, end) };
+  function fetchRange(url, start, end, fullSpeed) {
+    const route = fullSpeed ? url : url + '?preload=1';
+    return fetchSharedRange(function (u, options) { return fetch(u, options); }, route, start, end, RANGE_DEADLINE_MS);
   }
 
   /**
@@ -102,14 +105,18 @@
       storage = null;
       return;
     }
-    syncer = createSharedSyncer({
-      storage: storage,
-      fetchRange: fetchRange,
-      isPaused: function () { return playing; },
-      chunkPauseMs: function () { return chunkPauseFor(streamerLive); },
-      sleep: function (ms) { return new Promise(function (resolve) { setTimeout(resolve, ms); }); },
-      log: function (message, err) { console.warn(message, err); },
-      onEvent: handleSyncEvent,
+    // Only one page of this browser syncs at a time; the others still play from the stored videos.
+    holdSyncOwnership(navigator.locks, SYNC_LOCK_NAME, function () {
+      syncer = createSharedSyncer({
+        storage: storage,
+        fetchRange: fetchRange,
+        isPaused: function () { return playing; },
+        chunkPauseMs: function () { return chunkPauseFor(streamerLive); },
+        sleep: function (ms) { return new Promise(function (resolve) { setTimeout(resolve, ms); }); },
+        log: function (message, err) { console.warn(message, err); },
+        onEvent: handleSyncEvent,
+      });
+      if (listReceived) syncList(currentList); // a list that arrived while another page held the lock
     });
   }
 
@@ -132,8 +139,9 @@
   function syncList(videos) {
     if (!Array.isArray(videos)) return;
     currentList = videos;
+    listReceived = true;
     void sendReadiness(); // on connect and on every list change
-    if (!syncer) return;
+    if (!syncer) return; // storage unavailable, or another page owns the sync for now
     if (firstSyncDone) { runSync(videos); return; }
     if (firstSyncTimer !== null) return;
     firstSyncTimer = setTimeout(function () {

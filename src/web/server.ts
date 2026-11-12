@@ -47,7 +47,8 @@ app.use(
         imgSrc: ["'self'", 'data:', 'https://cdn.discordapp.com', 'https://static-cdn.jtvnw.net'],
         fontSrc: ["'self'"],
         connectSrc: ["'self'"],
-        mediaSrc: ["'self'"],
+        // blob: is for the shared overlay playing a video it stored in the browser (an object URL).
+        mediaSrc: ["'self'", 'blob:'],
         objectSrc: ["'none'"],
         baseUri: ["'self'"],
         frameAncestors: ["'none'"],
