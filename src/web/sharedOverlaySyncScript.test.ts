@@ -235,6 +235,37 @@ describe('createSharedSyncer', () => {
     expect(storage.videos.has('/a')).toBe(false);
   });
 
+  it('downloads a video again when it is put back while the cleanup after its failed download runs', async () => {
+    const storage = memoryStorage();
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let clearing: () => void = () => {};
+    const clearStarted = new Promise<void>((resolve) => { clearing = resolve; });
+    const baseClear = storage.clearChunks;
+    let stall = true;
+    storage.clearChunks = async (u: string) => {
+      if (stall) { stall = false; clearing(); await gate; }
+      await baseClear(u);
+    };
+    const holder: { syncer?: any } = {};
+    let failed = false;
+    const fetchRange = vi.fn(async (url: string, start: number) => {
+      if (start === 100 && !failed) {
+        failed = true;
+        void holder.syncer.sync([]); // removed, then the fetch fails
+        throw new Error('network down');
+      }
+      return { buffer: `${url}:${start}`, total: 250 };
+    });
+    holder.syncer = createSharedSyncer(deps(storage, fetchRange, { log: () => {} }));
+    await holder.syncer.sync([v('/a')]);
+    await clearStarted;
+    await holder.syncer.sync([v('/a')]); // back on the list while the cleanup is stalled
+    release();
+    await holder.syncer.idle();
+    expect(storage.videos.get('/a')).toEqual(['/a:0', '/a:100', '/a:200']);
+  });
+
   it('logs a failed download and carries on with the next video straight away', async () => {
     const storage = memoryStorage();
     const log = vi.fn();
