@@ -1,4 +1,4 @@
-/* global connectSse, planSharedPlayback, createSharedSyncer, resolveSharedSource, checkedRangeTotal, createSharedStorage, sharedStorageAvailable */
+/* global connectSse, planSharedPlayback, createSharedSyncer, resolveSharedSource, fetchSharedRange, holdSyncOwnership, createSharedStorage, sharedStorageAvailable */
 (function () {
   const script = document.currentScript;
   const login = script ? script.dataset.login : '';
@@ -7,6 +7,10 @@
   /** Random delay range before the first background sync, so overlays opened together don't all start at once. */
   const FIRST_SYNC_MIN_MS = 2000;
   const FIRST_SYNC_SPREAD_MS = 6000;
+  /** Longest one range request (headers and body) may take before it counts as failed and is retried. */
+  const RANGE_DEADLINE_MS = 120000;
+  /** Name of the lock that lets only one overlay page of this browser run the background sync. */
+  const SYNC_LOCK_NAME = 'bcuk-shared-overlay-sync';
 
   let clockOffsetMs = 0; // server time minus local time
   let maxLateMs = 3000;
@@ -16,7 +20,7 @@
   let storage = null;
   let firstSyncDone = false;
   let firstSyncTimer = null;
-  let latestVideos = []; // newest list, which the delayed first sync uses
+  let latestVideos = null; // newest list, which the delayed first sync uses (null until one arrives)
 
   /**
    * Current time on the server's clock.
@@ -33,11 +37,8 @@
    * @param {number} end - Last byte, inclusive.
    * @returns {Promise<{buffer: ArrayBuffer, total: number}>} The bytes and the file's total size.
    */
-  async function fetchRange(url, start, end) {
-    const res = await fetch(url, { headers: { Range: 'bytes=' + start + '-' + end } });
-    if (res.status !== 206) throw new Error('Range request answered ' + res.status);
-    const buffer = await res.arrayBuffer();
-    return { buffer: buffer, total: checkedRangeTotal(res.headers.get('Content-Range'), buffer.byteLength, start, end) };
+  function fetchRange(url, start, end) {
+    return fetchSharedRange(function (u, options) { return fetch(u, options); }, url, start, end, RANGE_DEADLINE_MS);
   }
 
   /**
@@ -58,12 +59,16 @@
       storage = null;
       return;
     }
-    syncer = createSharedSyncer({
-      storage: storage,
-      fetchRange: fetchRange,
-      isPaused: function () { return playing; },
-      sleep: function (ms) { return new Promise(function (resolve) { setTimeout(resolve, ms); }); },
-      log: function (message, err) { console.warn(message, err); },
+    // Only one page of this browser syncs at a time; the others still play from the stored videos.
+    holdSyncOwnership(navigator.locks, SYNC_LOCK_NAME, function () {
+      syncer = createSharedSyncer({
+        storage: storage,
+        fetchRange: fetchRange,
+        isPaused: function () { return playing; },
+        sleep: function (ms) { return new Promise(function (resolve) { setTimeout(resolve, ms); }); },
+        log: function (message, err) { console.warn(message, err); },
+      });
+      if (latestVideos) syncList(latestVideos); // a list that arrived while another page held the lock
     });
   }
 
@@ -84,8 +89,9 @@
    * @returns {void}
    */
   function syncList(videos) {
-    if (!syncer || !Array.isArray(videos)) return;
+    if (!Array.isArray(videos)) return;
     latestVideos = videos;
+    if (!syncer) return; // storage unavailable, or another page owns the sync for now
     if (firstSyncDone) { runSync(videos); return; }
     if (firstSyncTimer !== null) return;
     firstSyncTimer = setTimeout(function () {
