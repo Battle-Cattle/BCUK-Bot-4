@@ -241,6 +241,8 @@ async function drainSyncQueue(s) {
       forgetSyncRetry(s, entry.url);
     } catch (err) {
       handleSyncFailure(s, entry, err);
+      // A video taken off the list while it failed keeps no half-downloaded chunks.
+      if (!s.wanted.has(entry.url)) await s.deps.storage.clearChunks(entry.url).catch(function () {});
     }
     s.fast.delete(entry.url);
     s.current = null;
@@ -265,6 +267,9 @@ async function applyVideoList(s, list, seq) {
   for (const url of plan.remove) {
     if (s.wanted.has(url)) continue;
     await s.deps.storage.deleteVideo(url);
+    // Put back on the list during the delete: a download of it may have started over by now, and
+    // clearing would wipe the chunks it has written since.
+    if (s.wanted.has(url)) continue;
     await s.deps.storage.clearChunks(url);
     emitSyncEvent(s, { type: 'removed', url: url });
     forgetSyncRetry(s, url);
