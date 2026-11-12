@@ -9,7 +9,7 @@ const conns = vi.hoisted(() => ({ sharedConnections: new Map<string, Set<unknown
 vi.mock('./sharedOverlaySource', () => ({ getSharedVideoEntries: () => entries(), sharedConnections: conns.sharedConnections }));
 
 import { router, readinessConnections } from './sharedOverlayReadinessStream';
-import { recordReadinessReport, resetReadiness } from './sharedOverlayReadiness';
+import { recordReadinessReport, resetReadiness, notifyReadinessChange } from './sharedOverlayReadiness';
 
 /** The stream route's handler. */
 const handler = (router as any).stack.find((l: any) => l.route?.path === '/readiness/events').route.stack[0].handle;
@@ -31,6 +31,7 @@ beforeEach(() => {
   readinessConnections.clear();
   conns.sharedConnections.clear();
   resetReadiness();
+  entries.mockClear();
   entries.mockResolvedValue([{ id: 1, name: 'Clap' }]);
 });
 
@@ -62,6 +63,26 @@ describe('GET /readiness/events', () => {
     recordReadinessReport('alice', { stored: [], downloading: null });
     await vi.waitFor(() => expect(logMock.error).toHaveBeenCalledWith('Failed to publish shared overlay readiness:', expect.any(Error)));
     recordReadinessReport('alice', { stored: [1], downloading: null });
+    await vi.waitFor(() => expect(snapshots(res)).toHaveLength(2));
+  });
+
+  it('still publishes a report that arrived while a failing lookup was pending', async () => {
+    conns.sharedConnections.set('alice', new Set());
+    const { req, res } = fake('m1');
+    await handler(req, res);
+    let failLookup: (err: Error) => void = () => {};
+    entries.mockImplementationOnce(() => new Promise((_resolve, reject) => { failLookup = reject; }));
+    recordReadinessReport('alice', { stored: [], downloading: null }); // starts the lookup that will fail
+    recordReadinessReport('alice', { stored: [1], downloading: null }); // arrives while it is pending
+    failLookup(new Error('db'));
+    await vi.waitFor(() => expect(snapshots(res)).toHaveLength(2));
+    expect(snapshots(res)[1].overlays[0]).toMatchObject({ stored: 1 });
+  });
+
+  it('publishes when the enabled list changes, even with no report', async () => {
+    const { req, res } = fake('m1');
+    await handler(req, res);
+    notifyReadinessChange();
     await vi.waitFor(() => expect(snapshots(res)).toHaveLength(2));
   });
 

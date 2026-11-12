@@ -938,7 +938,7 @@ describe('resolveSharedSource', () => {
 describe('shared overlay page', () => {
   it('loads the helper scripts before the page script that uses them', () => {
     const view = fs.readFileSync(path.join(__dirname, '../../views/sharedOverlaySource.ejs'), 'utf8');
-    const order = ['sseClient', 'shared-overlay-timing', 'shared-overlay-plan', 'shared-overlay-retry', 'shared-overlay-source', 'shared-overlay-push', 'shared-overlay-sync', 'shared-overlay-storage', 'shared-overlay.js']
+    const order = ['sseClient', 'shared-overlay-timing', 'shared-overlay-plan', 'shared-overlay-retry', 'shared-overlay-source', 'shared-overlay-push', 'shared-overlay-sync', 'shared-overlay-storage', 'shared-overlay-report', 'shared-overlay.js']
       .map((name) => view.indexOf(`/${name}`));
     expect(order.every((i) => i >= 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
