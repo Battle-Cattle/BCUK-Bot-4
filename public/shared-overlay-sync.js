@@ -90,7 +90,7 @@ async function waitWhileSyncPaused(s) {
  * @param {string|null} contentRange - The response's Content-Range header.
  * @param {number} bodyBytes - Length of the response body.
  * @param {number} start - First byte asked for.
- * @param {number} end - Last byte asked for (inclusive; the server may answer less at the file's end).
+ * @param {number} end - Last byte asked for (inclusive; the answer ends at the file's last byte if that comes first).
  * @returns {number} The file's total size in bytes.
  */
 function checkedRangeTotal(contentRange, bodyBytes, start, end) {
@@ -99,7 +99,7 @@ function checkedRangeTotal(contentRange, bodyBytes, start, end) {
   const first = Number(match[1]);
   const last = Number(match[2]);
   const total = Number(match[3]);
-  if (first !== start || last < first || last > end || last >= total) {
+  if (first !== start || last !== Math.min(end, total - 1)) {
     throw new Error('Range answered ' + contentRange + ' for bytes ' + start + '-' + end);
   }
   if (bodyBytes !== last - first + 1) throw new Error('Range body was ' + bodyBytes + ' bytes, expected ' + (last - first + 1));
