@@ -266,3 +266,21 @@ export const libraryImportLimiter = rateLimit({
   message: 'Too many requests to add library videos to your videos. Please try again in an hour.',
   handler: limitReachedHandler('library-import'),
 });
+
+/** Most readiness reports one shared overlay may send per minute (it reports every few seconds while downloading). */
+export const SHARED_OVERLAY_REPORT_LIMIT = 30;
+
+/**
+ * Per-overlay cap on shared overlay readiness reports (#917), applied to the unauthenticated
+ * `POST /overlay/shared/:login/report`. Keyed by client IP and login, so one overlay can't flood
+ * the endpoint and several streamers sharing an IP don't share a bucket.
+ */
+export const sharedOverlayReportLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: SHARED_OVERLAY_REPORT_LIMIT,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  keyGenerator: (req) => `${ipKeyGenerator(req.ip ?? '')}:${String(req.params.login ?? '').toLowerCase()}`,
+  message: 'Too many readiness reports.',
+  handler: limitReachedHandler('shared-overlay-report'),
+});

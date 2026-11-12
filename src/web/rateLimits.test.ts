@@ -23,6 +23,8 @@ import {
   sessionLimiterSkip,
   streamdeckLimiterKey,
   streamdeckAuthFailureLimiter,
+  sharedOverlayReportLimiter,
+  SHARED_OVERLAY_REPORT_LIMIT,
   streamdeckAuthFailureWasSuccessful,
 } from './rateLimits';
 
@@ -341,5 +343,17 @@ describe('limitReachedHandler', () => {
     await agent.get('/thing').set('x-key', 'one');
 
     expect((await agent.get('/thing').set('x-key', 'one')).text).toBe('Too fast on /thing');
+  });
+});
+
+describe('sharedOverlayReportLimiter', () => {
+  it('allows a burst up to the limit per overlay, then answers 429, without touching other overlays', async () => {
+    const app = express();
+    app.post('/:login/report', sharedOverlayReportLimiter, (_req, res) => { res.status(204).end(); });
+    const send = (login: string) => supertest(app).post(`/${login}/report`);
+    for (let i = 0; i < SHARED_OVERLAY_REPORT_LIMIT; i++) expect((await send('alice')).status).toBe(204);
+    expect((await send('alice')).status).toBe(429);
+    expect((await send('ALICE')).status).toBe(429);
+    expect((await send('bob')).status).toBe(204);
   });
 });

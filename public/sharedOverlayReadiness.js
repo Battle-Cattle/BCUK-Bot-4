@@ -1,0 +1,62 @@
+/* global connectSse */
+/**
+ * Formats when an overlay last reported.
+ * @param {number|null} reportedAt - Epoch ms of the last report, or null.
+ * @returns {string} A short description such as "last report 12:30:01", or "no report yet".
+ */
+function formatReportTime(reportedAt) {
+  return reportedAt ? 'last report ' + new Date(reportedAt).toLocaleTimeString() : 'no report yet';
+}
+
+/**
+ * Describes one overlay for the per-overlay list.
+ * @param {{login: string, online: boolean, stored: number, total: number, downloading: ({name: string, percent: number}|null), reportedAt: (number|null)}} o - The overlay's row.
+ * @returns {string} For example "bob — online — 10/12 stored, downloading Clap 40%".
+ */
+function describeOverlay(o) {
+  const parts = [o.login, o.online ? 'online' : 'offline (' + formatReportTime(o.reportedAt) + ')', o.stored + '/' + o.total + ' stored'];
+  if (o.downloading) parts.push('downloading ' + o.downloading.name + ' ' + o.downloading.percent + '%');
+  return parts.join(' — ');
+}
+
+/**
+ * Describes one video for the per-video list.
+ * @param {{name: string, ready: number, online: number, missing: Array<{login: string, percent: (number|null)}>, allReady: boolean}} v - The video's row.
+ * @returns {string} For example "✅ Clap — ready on 5/5 connected overlays", or which overlays miss it.
+ */
+function describeVideo(v) {
+  const head = (v.allReady ? '✅ ' : '') + v.name + ' — ready on ' + v.ready + '/' + v.online + ' connected overlays';
+  if (v.missing.length === 0) return head;
+  const missing = v.missing.map(function (m) { return m.login + (m.percent === null ? '' : ' (' + m.percent + '%)'); });
+  return head + '; missing on ' + missing.join(', ');
+}
+
+/**
+ * Replaces a list's items with one line per entry.
+ * @param {HTMLElement} list - The `ul` to fill.
+ * @param {string[]} lines - The text of each item.
+ * @param {string} emptyText - Shown when there are no lines.
+ * @returns {void}
+ */
+function fillList(list, lines, emptyText) {
+  list.replaceChildren();
+  for (const text of lines.length > 0 ? lines : [emptyText]) {
+    const item = document.createElement('li');
+    item.textContent = text;
+    list.appendChild(item);
+  }
+}
+
+/**
+ * Renders a readiness snapshot into the page's two lists.
+ * @param {{overlays: Array<object>, videos: Array<object>}} snapshot - The snapshot from the stream.
+ * @returns {void}
+ */
+function renderReadiness(snapshot) {
+  fillList(document.getElementById('readiness-overlays'), snapshot.overlays.map(describeOverlay), 'No shared overlays have connected yet.');
+  fillList(document.getElementById('readiness-videos'), snapshot.videos.map(describeVideo), 'No enabled shared videos.');
+}
+
+if (document.getElementById('readiness-overlays')) {
+  connectSse('/overlay/shared/settings/readiness/events', renderReadiness);
+}

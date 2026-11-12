@@ -19,6 +19,10 @@ vi.mock('../../db', () => ({
   DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS: 60000,
 }));
 vi.mock('fs', () => ({ default: { readdirSync: () => ['sharedOverlaySource.ejs'] } }));
+vi.mock('../rateLimits', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../rateLimits')>()),
+  sharedOverlayReportLimiter: (_q: any, _s: any, next: any) => next(),
+}));
 vi.mock('../../shared/pathUtils', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../shared/pathUtils')>();
   return {
@@ -29,6 +33,7 @@ vi.mock('../../shared/pathUtils', async (importOriginal) => {
 
 import express from 'express';
 import supertest from 'supertest';
+import { getReadinessSnapshot, resetReadiness } from './sharedOverlayReadiness';
 import router, {
   sharedConnections, broadcastSharedEvent, pushSharedPlay, getSharedOverlayConnectionCount,
 } from './sharedOverlaySource';
@@ -58,6 +63,7 @@ function frames(res: any): any[] {
 
 function app() {
   const a = express();
+  a.use(express.json());
   a.use((req, res, next) => {
     (res as any).render = (view: string, locals?: object) => res.json({ view, ...(locals ?? {}) });
     (res as any).sendFile = (p: string) => res.json({ sentFile: p });
@@ -69,6 +75,7 @@ function app() {
 
 beforeEach(() => {
   sharedConnections.clear();
+  resetReadiness();
   vi.clearAllMocks();
   listEnabledSharedVideos.mockResolvedValue([{ id: 1, name: 'Clap', filename: 'a b.webm' }]);
 });
@@ -149,5 +156,41 @@ describe('GET /videos/:filename', () => {
     const res = await supertest(app()).get(`/videos/${name}`);
     expect([400, 404]).toContain(res.status);
     expect(res.body.sentFile).toBeUndefined();
+  });
+});
+
+describe('POST /:login/report', () => {
+  const connect = async (login = 'alice') => handler('/:login/events')(fake(login).req, fake(login).res, vi.fn());
+  const post = (login: string, body: unknown) => supertest(app()).post(`/${login}/report`).send(body as object);
+
+  it('records a report from a connected overlay', async () => {
+    await connect();
+    const res = await post('alice', { stored: [1], downloading: null });
+    expect(res.status).toBe(204);
+    expect(getReadinessSnapshot([{ id: 1, name: 'Clap' }], new Set(['alice'])).overlays[0]).toMatchObject({ stored: 1 });
+  });
+
+  it('is case-insensitive about the login', async () => {
+    await connect();
+    expect((await post('ALICE', { stored: [], downloading: null })).status).toBe(204);
+  });
+
+  it('refuses a login with no connected overlay, and malformed or reserved logins', async () => {
+    expect((await post('alice', { stored: [] })).status).toBe(404);
+    expect((await post('settings', { stored: [] })).status).toBe(404);
+    expect((await post('not-valid!', { stored: [] })).status).toBe(404);
+  });
+
+  it('refuses ids that are not on the current list and malformed bodies', async () => {
+    await connect();
+    expect((await post('alice', { stored: [99] })).status).toBe(400);
+    expect((await post('alice', { stored: 'x' })).status).toBe(400);
+    expect(getReadinessSnapshot([{ id: 1, name: 'Clap' }], new Set(['alice'])).overlays[0]!.reportedAt).toBeNull();
+  });
+
+  it('answers 500 when the list cannot be read', async () => {
+    await connect();
+    listEnabledSharedVideos.mockRejectedValueOnce(new Error('db'));
+    expect((await post('alice', { stored: [] })).status).toBe(500);
   });
 });

@@ -1,4 +1,4 @@
-/* global connectSse, planSharedPlayback, createSharedSyncer, createSharedStorage, sharedStorageAvailable */
+/* global connectSse, planSharedPlayback, buildReadinessReport, createSharedSyncer, createSharedStorage, sharedStorageAvailable */
 (function () {
   const script = document.currentScript;
   const login = script ? script.dataset.login : '';
@@ -14,6 +14,12 @@
   let syncer = null;
   let storage = null;
   let firstSyncDone = false;
+  let currentList = [];
+  let downloading = null; // { url, percent } while a background download runs
+  let lastProgressReportAt = 0;
+
+  /** Most often a progress report is sent while a download runs. */
+  const PROGRESS_REPORT_MS = 3000;
 
   /**
    * Current time on the server's clock.
@@ -39,6 +45,42 @@
   }
 
   /**
+   * Tells the server which videos are stored and how the current download is going, for the admin
+   * page's readiness stats. Failures are ignored: the stats are best effort.
+   * @returns {Promise<void>} Resolves once the report was sent (or failed).
+   */
+  async function sendReadiness() {
+    try {
+      const storedUrls = storage ? await storage.listVideos() : [];
+      const body = buildReadinessReport(currentList, storedUrls, downloading);
+      await fetch('/overlay/shared/' + login + '/report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    } catch (_) {
+      // Best effort.
+    }
+  }
+
+  /**
+   * Reacts to a syncer event: reports when a video is stored or removed or the queue drains, and
+   * at most every few seconds while a download progresses.
+   * @param {{type: string, url?: string, percent?: number}} event - The syncer event.
+   * @returns {void}
+   */
+  function handleSyncEvent(event) {
+    if (event.type === 'progress') {
+      downloading = { url: event.url, percent: event.percent };
+      if (Date.now() - lastProgressReportAt < PROGRESS_REPORT_MS) return;
+      lastProgressReportAt = Date.now();
+    } else {
+      downloading = null;
+    }
+    void sendReadiness();
+  }
+
+  /**
    * Sets up the background syncer, or leaves it off (videos then stream at trigger time) when the
    * page can't store files — Cache Storage needs an HTTPS or localhost overlay URL.
    * @returns {void}
@@ -55,6 +97,7 @@
       isPaused: function () { return playing; },
       sleep: function (ms) { return new Promise(function (resolve) { setTimeout(resolve, ms); }); },
       log: function (message, err) { console.warn(message, err); },
+      onEvent: handleSyncEvent,
     });
   }
 
@@ -64,7 +107,10 @@
    * @returns {void}
    */
   function syncList(videos) {
-    if (!syncer || !Array.isArray(videos)) return;
+    if (!Array.isArray(videos)) return;
+    currentList = videos;
+    void sendReadiness(); // on connect and on every list change
+    if (!syncer) return;
     const run = function () { syncer.sync(videos).catch(function (err) { console.warn('Shared video sync failed', err); }); };
     if (firstSyncDone) { run(); return; }
     firstSyncDone = true;

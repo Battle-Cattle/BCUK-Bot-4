@@ -1,0 +1,86 @@
+import type { Response } from 'express';
+import { Router } from 'express';
+import { createLogger } from '../../shared/logger';
+import { OVERLAY_STATUS_MAX_SSE_PER_STREAMER } from '../../shared/config';
+import { getSessionUser } from '../session';
+import { attachSseConnection, broadcastToChannel, onConnectionCountChange } from './sseChannel';
+import { getReadinessSnapshot, onReadinessChange, type ReadinessSnapshot } from './sharedOverlayReadiness';
+import { getSharedVideoEntries, sharedConnections } from './sharedOverlaySource';
+
+// Live readiness stream for the shared videos admin page (#917). Mounted by sharedOverlayAdmin.ts
+// behind the Manager gate, so only Managers can open it.
+
+const log = createLogger('SharedOverlayReadinessStream');
+export const router = Router();
+
+/** Open admin streams, keyed by the viewing Manager's Discord id. */
+export const readinessConnections = new Map<string, Set<Response>>();
+
+/**
+ * Builds the current snapshot from the enabled list and the connected overlays.
+ * @returns The snapshot the admin page renders.
+ */
+async function currentSnapshot(): Promise<ReadinessSnapshot> {
+  return getReadinessSnapshot(await getSharedVideoEntries(), new Set(sharedConnections.keys()));
+}
+
+/** Publish state: whether a run is in progress and whether another call arrived during it. */
+const publishState = { running: false, again: false };
+
+/**
+ * Whether a publish was requested while one was running.
+ * @returns True if another run is wanted.
+ */
+function anotherPublishWanted(): boolean {
+  return publishState.again;
+}
+
+/**
+ * Sends the current snapshot to every open admin stream. Calls that arrive while one is running
+ * are folded into one more run afterwards, so a burst of reports costs few list lookups.
+ * @returns Resolves once the snapshot has been sent; never rejects.
+ */
+async function publish(): Promise<void> {
+  if (publishState.running) { publishState.again = true; return; }
+  publishState.running = true;
+  try {
+    do {
+      publishState.again = false;
+      if (readinessConnections.size === 0) break;
+      const snapshot = await currentSnapshot();
+      for (const key of [...readinessConnections.keys()]) broadcastToChannel(readinessConnections, key, snapshot);
+    } while (anotherPublishWanted());
+  } catch (err) {
+    log.error('Failed to publish shared overlay readiness:', err);
+  } finally {
+    publishState.running = false;
+  }
+}
+
+// Reports, and overlays connecting or disconnecting, change what the page shows.
+onReadinessChange(() => { void publish(); });
+onConnectionCountChange(sharedConnections, () => { void publish(); });
+
+/**
+ * GET /overlay/shared/settings/readiness/events — SSE stream of readiness snapshots for the
+ * admin page: one on connect, then one whenever a report arrives or an overlay connects or
+ * disconnects. Limited per Manager like the other status streams.
+ * @param req - Express request; reads the session user.
+ * @param res - Express response; upgrades to `text/event-stream`, or replies 429 over the limit
+ *   or 500 if the first snapshot cannot be built.
+ */
+router.get('/readiness/events', async (req, res) => {
+  const key = getSessionUser(req).discordId;
+  let snapshot: ReadinessSnapshot;
+  try {
+    snapshot = await currentSnapshot();
+  } catch (err) {
+    log.error('Failed to build shared overlay readiness:', err);
+    res.status(500).end();
+    return;
+  }
+  const attached = attachSseConnection(req, res, {
+    connections: readinessConnections, key, maxPerChannel: OVERLAY_STATUS_MAX_SSE_PER_STREAMER,
+  });
+  if (attached) res.write(`data: ${JSON.stringify(snapshot)}\n\n`);
+});

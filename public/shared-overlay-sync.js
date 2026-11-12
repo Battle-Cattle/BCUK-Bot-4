@@ -42,6 +42,23 @@ function nextSharedChunkRange(chunkCount, chunkBytes) {
 }
 
 /**
+ * Builds the readiness report sent to the server: the ids of the listed videos stored in full, and
+ * the id and percentage of the video being downloaded, if any.
+ * @param {Array<{id: number, url: string}>} list - The current enabled video list.
+ * @param {string[]} storedUrls - URLs of the videos stored in full.
+ * @param {{url: string, percent: number}|null} downloading - The current download, or null.
+ * @returns {{stored: number[], downloading: ({id: number, percent: number}|null)}} The report body.
+ */
+function buildReadinessReport(list, storedUrls, downloading) {
+  const stored = new Set(storedUrls);
+  const current = downloading ? list.find(function (v) { return v.url === downloading.url; }) : undefined;
+  return {
+    stored: list.filter(function (v) { return stored.has(v.url); }).map(function (v) { return v.id; }),
+    downloading: current ? { id: current.id, percent: downloading.percent } : null,
+  };
+}
+
+/**
  * Creates the background syncer.
  * @param {object} deps - Injected layers.
  * @param {object} deps.storage - `listVideos()`, `listPartial()`, `countChunks(url)`, `getChunks(url)`,
@@ -51,6 +68,9 @@ function nextSharedChunkRange(chunkCount, chunkBytes) {
  * @param {function(): boolean} deps.isPaused - True while a shared video is triggered or playing.
  * @param {function(number): Promise<void>} deps.sleep - Resolves after the given milliseconds.
  * @param {function(string, *): void} [deps.log] - Reports a failed download.
+ * @param {function({type: string, url?: string, percent?: number}): void} [deps.onEvent] - Told when a
+ *   chunk arrives (`progress`, with the percentage), a video is stored (`stored`) or deleted
+ *   (`removed`), and when the queue drains (`idle`), so the page can report readiness.
  * @param {number} [deps.chunkBytes] - Bytes per chunk (defaults to the constant above).
  * @param {number} [deps.chunkPauseMs] - Pause between chunks (defaults to the constant above).
  * @returns {{sync: function(Array<{url: string}>): Promise<void>, idle: function(): Promise<void>}}
@@ -63,6 +83,15 @@ function createSharedSyncer(deps) {
   let wanted = new Set();
   let queue = [];
   let running = null;
+
+  /**
+   * Passes an event to the page, if it listens.
+   * @param {object} event - The event.
+   * @returns {void}
+   */
+  function emit(event) {
+    if (deps.onEvent) deps.onEvent(event);
+  }
 
   /**
    * Waits while paused, polling.
@@ -89,10 +118,12 @@ function createSharedSyncer(deps) {
       total = part.total;
       await deps.storage.putChunk(entry.url, count, part.buffer);
       count++;
+      emit({ type: 'progress', url: entry.url, percent: Math.min(100, Math.round((count * chunkBytes / total) * 100)) });
       if (count * chunkBytes < total) await deps.sleep(chunkPauseMs);
     }
     await deps.storage.putVideo(entry.url, await deps.storage.getChunks(entry.url));
     await deps.storage.clearChunks(entry.url);
+    emit({ type: 'stored', url: entry.url });
   }
 
   /**
@@ -110,6 +141,7 @@ function createSharedSyncer(deps) {
       }
     }
     running = null;
+    emit({ type: 'idle' });
   }
 
   return {
@@ -119,6 +151,7 @@ function createSharedSyncer(deps) {
       for (const url of plan.remove) {
         await deps.storage.deleteVideo(url);
         await deps.storage.clearChunks(url);
+        emit({ type: 'removed', url: url });
       }
       queue = plan.download;
       if (!running && queue.length > 0) running = drain();

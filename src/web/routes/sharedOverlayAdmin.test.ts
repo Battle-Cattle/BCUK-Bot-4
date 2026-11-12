@@ -24,6 +24,11 @@ vi.mock('../../db', () => ({
 }));
 vi.mock('./sharedOverlaySource', () => ({ getSharedOverlayConnectionCount: () => 4, broadcastSharedVideoList: vi.fn() }));
 vi.mock('./sharedOverlayAdminMutations', async () => ({ router: (await import('express')).Router() }));
+vi.mock('./sharedOverlayReadinessStream', async () => {
+  const r = (await import('express')).Router();
+  r.get('/readiness/events', (_req, res) => { res.end('stream'); });
+  return { router: r };
+});
 vi.mock('./sharedOverlayAdminUpload', async () => ({ router: (await import('express')).Router() }));
 vi.mock('./overlayConversionProgress', () => ({
   parseUploadId: (v: string) => (v === 'a'.repeat(32) ? v : null),
@@ -83,5 +88,17 @@ describe('GET /progress/:uploadId', () => {
   it('reports none for an unknown or malformed id', async () => {
     const res = await supertest(app()).get('/progress/zzz');
     expect(res.body).toEqual({ stage: 'none', percent: null });
+  });
+});
+
+describe('GET /readiness/events', () => {
+  it('is Manager only, behind the guild context', async () => {
+    const res = await supertest(app()).get('/readiness/events').set('x-level', 'mod');
+    expect(res.status).toBe(403);
+    expect(calls).toEqual(['auth', 'guild', 'manager']);
+  });
+
+  it('is served to a Manager', async () => {
+    expect((await supertest(app()).get('/readiness/events')).text).toBe('stream');
   });
 });
