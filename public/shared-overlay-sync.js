@@ -13,6 +13,16 @@ const SHARED_SYNC_CHUNK_PAUSE_MS = 1000;
 const SHARED_SYNC_PAUSE_POLL_MS = 500;
 
 /**
+ * Passes an event to the page, if it listens.
+ * @param {object} s - The syncer's state.
+ * @param {{type: string, url?: string, percent?: number}} event - The event.
+ * @returns {void}
+ */
+function emitSyncEvent(s, event) {
+  if (s.deps.onEvent) s.deps.onEvent(event);
+}
+
+/**
  * Waits while a shared video is triggered or playing, polling.
  * @param {object} s - The syncer's state (see {@link createSharedSyncer}).
  * @returns {Promise<void>} Resolves once no longer paused.
@@ -45,13 +55,15 @@ async function downloadSyncChunk(s, entry, count, generation) {
  * flight must not stay stored.
  * @param {object} s - The syncer's state.
  * @param {string} url - The video's URL path.
- * @returns {Promise<void>} Resolves once stored, or once the removed video's data is gone.
+ * @returns {Promise<boolean>} True when the video was stored and is still wanted; false when it was removed meanwhile.
  */
 async function storeCompletedVideo(s, url) {
   const storage = s.deps.storage;
   if (s.wanted.has(url)) await storage.putVideo(url, await storage.getChunks(url));
-  if (!s.wanted.has(url)) await storage.deleteVideo(url);
+  const kept = s.wanted.has(url);
+  if (!kept) await storage.deleteVideo(url);
   await storage.clearChunks(url);
+  return kept;
 }
 
 /**
@@ -82,9 +94,10 @@ async function downloadSyncVideo(s, entry) {
     total = await downloadSyncChunk(s, entry, count, generation);
     if (total === null) return restartSyncDownload(s, entry);
     count++;
+    emitSyncEvent(s, { type: 'progress', url: entry.url, percent: Math.min(100, Math.round((count * s.chunkBytes / total) * 100)) });
     if (count * s.chunkBytes < total) await s.deps.sleep(s.chunkPauseMs);
   }
-  await storeCompletedVideo(s, entry.url);
+  if (await storeCompletedVideo(s, entry.url)) emitSyncEvent(s, { type: 'stored', url: entry.url });
 }
 
 /**
@@ -134,6 +147,7 @@ async function drainSyncQueue(s) {
     s.active = null;
   }
   s.running = null;
+  emitSyncEvent(s, { type: 'idle' });
 }
 
 /**
@@ -156,6 +170,7 @@ async function applyVideoList(s, list, seq) {
     // clearing would wipe the chunks it has written since.
     if (s.wanted.has(url)) continue;
     await s.deps.storage.clearChunks(url);
+    emitSyncEvent(s, { type: 'removed', url: url });
     forgetSyncRetry(s, url);
   }
   for (const url of plan.clear) {
@@ -199,6 +214,9 @@ function syncVideoList(s, list) {
  * @param {function(): boolean} deps.isPaused - True while a shared video is triggered or playing.
  * @param {function(number): Promise<void>} deps.sleep - Resolves after the given milliseconds.
  * @param {function(string, *): void} [deps.log] - Reports a failed download.
+ * @param {function({type: string, url?: string, percent?: number}): void} [deps.onEvent] - Told when a
+ *   chunk arrives (`progress`, with the percentage), a video is stored (`stored`) or deleted
+ *   (`removed`), and when the queue drains (`idle`), so the page can report readiness.
  * @param {function(): number} [deps.now] - Current time in milliseconds (defaults to `Date.now`); schedules retries.
  * @param {number} [deps.chunkBytes] - Bytes per chunk (defaults to the constant above).
  * @param {number} [deps.chunkPauseMs] - Pause between chunks (defaults to the constant above).

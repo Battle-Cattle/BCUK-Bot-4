@@ -59,6 +59,23 @@ function checkedRangeTotal(contentRange, bodyBytes, start, end) {
 }
 
 /**
+ * Builds the readiness report sent to the server: the ids of the listed videos stored in full, and
+ * the id and percentage of the video being downloaded, if any.
+ * @param {Array<{id: number, url: string}>} list - The current enabled video list.
+ * @param {string[]} storedUrls - URLs of the videos stored in full.
+ * @param {{url: string, percent: number}|null} downloading - The current download, or null.
+ * @returns {{stored: number[], downloading: ({id: number, percent: number}|null)}} The report body.
+ */
+function buildReadinessReport(list, storedUrls, downloading) {
+  const stored = new Set(storedUrls);
+  const current = downloading ? list.find(function (v) { return v.url === downloading.url; }) : undefined;
+  return {
+    stored: list.filter(function (v) { return stored.has(v.url); }).map(function (v) { return v.id; }),
+    downloading: current ? { id: current.id, percent: downloading.percent } : null,
+  };
+}
+
+/**
  * Fetches one inclusive byte range of a video, giving up if the headers and body together take
  * longer than a deadline (a stalled body would otherwise hold the single download worker for good),
  * and checks the answer covers the bytes asked for.

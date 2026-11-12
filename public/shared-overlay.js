@@ -1,4 +1,4 @@
-/* global connectSse, planSharedPlayback, createSharedSyncer, resolveSharedSource, fetchSharedRange, holdSyncOwnership, fallBackToRoute, playSource, createSharedStorage, sharedStorageAvailable */
+/* global connectSse, createReadinessReporter, nextDownloadState, planSharedPlayback, buildReadinessReport, createSharedSyncer, resolveSharedSource, fetchSharedRange, holdSyncOwnership, fallBackToRoute, playSource, createSharedStorage, sharedStorageAvailable */
 (function () {
   const script = document.currentScript;
   const login = script ? script.dataset.login : '';
@@ -20,7 +20,16 @@
   let storage = null;
   let firstSyncDone = false;
   let firstSyncTimer = null;
-  let latestVideos = null; // newest list, which the delayed first sync uses (null until one arrives)
+  let currentList = []; // newest list: the readiness report's basis, and what the delayed first sync uses
+  let downloading = null; // { url, percent } while a background download runs
+
+  /** Least time between readiness reports (all triggers share it; the server allows 30 a minute). */
+  const REPORT_GAP_MS = 3000;
+  /** How often a page that doesn't own the sync re-reports, so it picks up videos the owner stored. */
+  const NON_OWNER_REFRESH_MS = 30000;
+  /** How long to wait before retrying a report the server rate-limited. */
+  const REPORT_RETRY_MS = 15000;
+  let listReceived = false; // whether the server has sent a list yet (an empty one counts)
 
   /**
    * Current time on the server's clock.
@@ -42,6 +51,52 @@
   }
 
   /**
+   * Posts which videos are stored and how the current download is going, for the admin page's
+   * readiness stats. Failures are ignored: the stats are best effort.
+   * @returns {Promise<number|undefined>} The HTTP status, or undefined if the request failed.
+   */
+  async function postReadiness() {
+    try {
+      const storedUrls = storage ? await storage.listVideos() : [];
+      const body = buildReadinessReport(currentList, storedUrls, downloading);
+      const res = await fetch('/overlay/shared/' + login + '/report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      return res.status;
+    } catch (_) {
+      return undefined; // best effort
+    }
+  }
+
+  const reporter = createReadinessReporter({
+    send: postReadiness,
+    gapMs: REPORT_GAP_MS,
+    retryMs: REPORT_RETRY_MS,
+    now: function () { return Date.now(); },
+    setTimer: function (fn, ms) { return setTimeout(fn, ms); },
+  });
+
+  /**
+   * Asks for a readiness report of the current state (throttled and coalesced by the reporter).
+   * @returns {void}
+   */
+  function sendReadiness() {
+    reporter.request();
+  }
+
+  /**
+   * Reacts to a syncer event by reporting the new state.
+   * @param {{type: string, url?: string, percent?: number}} event - The syncer event.
+   * @returns {void}
+   */
+  function handleSyncEvent(event) {
+    downloading = nextDownloadState(downloading, event);
+    sendReadiness();
+  }
+
+  /**
    * Sets up the background syncer, or leaves it off (videos then stream at trigger time) when the
    * page can't store files — Cache Storage needs an HTTPS or localhost overlay URL.
    * @returns {void}
@@ -59,7 +114,11 @@
       storage = null;
       return;
     }
-    // Only one page of this browser syncs at a time; the others still play from the stored videos.
+    // Only one page of this browser syncs at a time; the others still play from the stored videos,
+    // and re-report now and then (the owner's stored-video events only reach the owner's page).
+    setInterval(function () {
+      if (!syncer && listReceived) sendReadiness();
+    }, NON_OWNER_REFRESH_MS);
     holdSyncOwnership(navigator.locks, SYNC_LOCK_NAME, function () {
       syncer = createSharedSyncer({
         storage: storage,
@@ -67,8 +126,9 @@
         isPaused: function () { return playing; },
         sleep: function (ms) { return new Promise(function (resolve) { setTimeout(resolve, ms); }); },
         log: function (message, err) { console.warn(message, err); },
+        onEvent: handleSyncEvent,
       });
-      if (latestVideos) syncList(latestVideos); // a list that arrived while another page held the lock
+      if (listReceived) syncList(currentList); // a list that arrived while another page held the lock
     }, function (err) {
       // Without a cross-page lock, two pages could clobber each other's stored data: no syncing.
       console.warn('Shared overlay: background sync is off (the Web Locks API is unavailable); videos will stream when triggered.', err);
@@ -93,13 +153,15 @@
    */
   function syncList(videos) {
     if (!Array.isArray(videos)) return;
-    latestVideos = videos;
+    currentList = videos;
+    listReceived = true;
+    sendReadiness(); // on connect and on every list change
     if (!syncer) return; // storage unavailable, or another page owns the sync for now
     if (firstSyncDone) { runSync(videos); return; }
     if (firstSyncTimer !== null) return;
     firstSyncTimer = setTimeout(function () {
       firstSyncDone = true;
-      runSync(latestVideos);
+      runSync(currentList);
     }, FIRST_SYNC_MIN_MS + Math.random() * FIRST_SYNC_SPREAD_MS);
   }
 

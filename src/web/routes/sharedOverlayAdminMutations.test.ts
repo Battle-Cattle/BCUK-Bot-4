@@ -20,6 +20,8 @@ const files = vi.hoisted(() => ({
 vi.mock('./sharedOverlayVideoStorage', () => files);
 const transcode = vi.hoisted(() => ({ isWebmTranscodeQueueFull: vi.fn(() => false) }));
 vi.mock('./overlayVideoTranscode', () => transcode);
+const readiness = vi.hoisted(() => ({ notifyReadinessChange: vi.fn() }));
+vi.mock('./sharedOverlayReadiness', () => readiness);
 const broadcast = vi.fn();
 vi.mock('./sharedOverlaySource', () => ({ broadcastSharedVideoList: (...a: unknown[]) => broadcast(...a) }));
 
@@ -90,6 +92,17 @@ describe('enabled', () => {
   it('reports a missing video', async () => {
     vi.mocked(setSharedVideoEnabled).mockResolvedValue(false);
     expect(loc(await post('/3/enabled', { enabled: '1' }))).toBe('/overlay/shared/settings?error=not_found');
+  });
+});
+
+describe('readiness view', () => {
+  it('is told about a list change, even when the overlay broadcast fails', async () => {
+    vi.mocked(setSharedVideoEnabled).mockResolvedValue(true);
+    await post('/3/enabled', { enabled: '1' });
+    expect(readiness.notifyReadinessChange).toHaveBeenCalledTimes(1);
+    broadcast.mockRejectedValue(new Error('x'));
+    await post('/3/enabled', { enabled: '0' });
+    expect(readiness.notifyReadinessChange).toHaveBeenCalledTimes(2);
   });
 });
 

@@ -7,6 +7,8 @@ import {
 } from '../../shared/config';
 import { listEnabledSharedVideos } from '../../db';
 import { renderView } from './viewHelpers';
+import { sharedOverlayReportLimiter } from '../rateLimits';
+import { parseReadinessReport, recordReadinessReport } from './sharedOverlayReadiness';
 import { resolveSharedFile, sendStreamerFile } from './streamerFileServing';
 import { broadcastToChannel } from './sseChannel';
 import { createSseEventsHandler, createLoginValidator } from './sseEventsHandlers';
@@ -52,7 +54,7 @@ export function sharedVideoUrl(filename: string): string {
  * Lists the enabled shared videos in the shape sent to overlays.
  * @returns Enabled videos, newest first.
  */
-async function getSharedVideoEntries(): Promise<SharedOverlayVideoEntry[]> {
+export async function getSharedVideoEntries(): Promise<SharedOverlayVideoEntry[]> {
   const videos = await listEnabledSharedVideos();
   return videos.map((v) => ({ id: v.id, name: v.name, url: sharedVideoUrl(v.filename) }));
 }
@@ -156,6 +158,31 @@ router.get('/:login', (req, res, next) => {
   const login = isValidLogin(req.params.login);
   if (login === null) { next(); return; }
   renderView(res, 'sharedOverlaySource', { login });
+});
+
+/**
+ * POST /overlay/shared/:login/report — an overlay reports which shared videos it has stored and its
+ * current download, for the admin page's readiness stats. No login (OBS can't log in), so it is
+ * rate-limited per overlay, accepts only ids on the current list, and only for a login that has a
+ * shared overlay connected right now. The stats are self-reported and only drive what the admin
+ * page shows, never what plays.
+ * @param req - Express request; JSON body `{ stored: number[], downloading: {id, percent} | null }`.
+ * @param res - 204 when recorded; 404 for a malformed login or one with no connected overlay; 400
+ *   for a malformed report or an id not on the list; 500 if the list can't be read.
+ */
+router.post('/:login/report', sharedOverlayReportLimiter, async (req, res) => {
+  const login = isValidLogin(String(req.params.login));
+  if (login === null || !sharedConnections.get(login)?.size) { res.status(404).end(); return; }
+  try {
+    const validIds = new Set((await getSharedVideoEntries()).map((v) => v.id));
+    const report = parseReadinessReport(req.body, validIds);
+    if (!report) { res.status(400).end(); return; }
+    recordReadinessReport(login, report);
+    res.status(204).end();
+  } catch (err) {
+    log.error('Failed to record shared overlay report:', err);
+    res.status(500).end();
+  }
 });
 
 /**

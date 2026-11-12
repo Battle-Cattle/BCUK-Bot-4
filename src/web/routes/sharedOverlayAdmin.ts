@@ -13,6 +13,7 @@ import { getSharedOverlayConnectionCount } from './sharedOverlaySource';
 import { SHARED_PROGRESS_KEY } from './sharedOverlayAdminShared';
 import { router as mutationsRouter } from './sharedOverlayAdminMutations';
 import { router as uploadRouter } from './sharedOverlayAdminUpload';
+import { router as readinessRouter } from './sharedOverlayReadinessStream';
 
 // The Manager+ settings page of the shared video overlay (#917), mounted at /overlay/shared/settings.
 // `settings` is a reserved login, so this path can't collide with a streamer's shared overlay.
@@ -77,6 +78,7 @@ router.get('/progress/:uploadId', (req, res) => {
   res.json((uploadId && getConversionProgress(SHARED_PROGRESS_KEY, uploadId)) ?? { stage: 'none', percent: null });
 });
 
+router.use(readinessRouter);
 router.use(uploadRouter);
 router.use(mutationsRouter);
 

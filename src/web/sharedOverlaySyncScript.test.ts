@@ -11,8 +11,8 @@ const source = ['shared-overlay-plan.js', 'shared-overlay-retry.js', 'shared-ove
 // Top-level const/function declarations aren't properties of a vm context, so export them explicitly.
 const context: Record<string, any> = { setTimeout, clearTimeout, AbortController };
 vm.createContext(context);
-vm.runInContext(`${source}\nthis.api = { planSharedSync, nextSharedChunkRange, createSharedSyncer, resolveSharedSource, checkedRangeTotal, fetchSharedRange, holdSyncOwnership, fallBackToRoute, playSource };`, context);
-const { planSharedSync, nextSharedChunkRange, createSharedSyncer, resolveSharedSource, checkedRangeTotal, fetchSharedRange, holdSyncOwnership, fallBackToRoute, playSource } = context.api;
+vm.runInContext(`${source}\nthis.api = { planSharedSync, nextSharedChunkRange, createSharedSyncer, resolveSharedSource, checkedRangeTotal, fetchSharedRange, holdSyncOwnership, fallBackToRoute, playSource, buildReadinessReport };`, context);
+const { planSharedSync, nextSharedChunkRange, createSharedSyncer, resolveSharedSource, checkedRangeTotal, fetchSharedRange, holdSyncOwnership, fallBackToRoute, playSource, buildReadinessReport } = context.api;
 
 const v = (url: string) => ({ url });
 
@@ -80,6 +80,20 @@ function memoryStorage(initial: { videos?: string[]; chunks?: Record<string, str
 function fakeFetch(size: number) {
   return vi.fn(async (url: string, start: number, _end: number) => ({ buffer: `${url}:${start}`, total: size }));
 }
+
+describe('buildReadinessReport', () => {
+  const list = [{ id: 1, url: '/a' }, { id: 2, url: '/b' }];
+
+  it('reports the ids of listed, stored videos and the current download by id', () => {
+    expect(buildReadinessReport(list, ['/a', '/gone'], { url: '/b', percent: 30 }))
+      .toEqual({ stored: [1], downloading: { id: 2, percent: 30 } });
+  });
+
+  it('reports no download when none runs or it is no longer listed', () => {
+    expect(buildReadinessReport(list, [], null).downloading).toBeNull();
+    expect(buildReadinessReport(list, [], { url: '/gone', percent: 5 }).downloading).toBeNull();
+  });
+});
 
 describe('createSharedSyncer', () => {
   const deps = (storage: any, fetchRange: any, extra: object = {}) => ({
@@ -343,6 +357,21 @@ describe('createSharedSyncer', () => {
     expect(storage.videos.has('/good')).toBe(true);
     expect(storage.videos.has('/bad')).toBe(true); // retried after its wait
     expect(clock.time).toBe(10000);
+  });
+
+  it('emits progress, stored, removed and idle events for the page to report', async () => {
+    const storage = memoryStorage({ videos: ['/gone'] });
+    const events: any[] = [];
+    const syncer = createSharedSyncer(deps(storage, fakeFetch(150), { onEvent: (e: any) => events.push(e) }));
+    await syncer.sync([v('/a')]);
+    await syncer.idle();
+    expect(events).toEqual([
+      { type: 'removed', url: '/gone' },
+      { type: 'progress', url: '/a', percent: 67 },
+      { type: 'progress', url: '/a', percent: 100 },
+      { type: 'stored', url: '/a' },
+      { type: 'idle' },
+    ]);
   });
 
   it('finishes chunks that already cover the file without asking for a range past its end', async () => {
@@ -801,7 +830,7 @@ describe('resolveSharedSource', () => {
 describe('shared overlay page', () => {
   it('loads the helper scripts before the page script that uses them', () => {
     const view = fs.readFileSync(path.join(__dirname, '../../views/sharedOverlaySource.ejs'), 'utf8');
-    const order = ['sseClient', 'shared-overlay-timing', 'shared-overlay-plan', 'shared-overlay-retry', 'shared-overlay-source', 'shared-overlay-sync', 'shared-overlay-storage', 'shared-overlay.js']
+    const order = ['sseClient', 'shared-overlay-timing', 'shared-overlay-plan', 'shared-overlay-retry', 'shared-overlay-source', 'shared-overlay-sync', 'shared-overlay-storage', 'shared-overlay-report', 'shared-overlay.js']
       .map((name) => view.indexOf(`/${name}`));
     expect(order.every((i) => i >= 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
