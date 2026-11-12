@@ -59,6 +59,14 @@ export function parseReadinessReport(body: unknown, validIds: ReadonlySet<number
  */
 export function recordReadinessReport(login: string, report: ReadinessReport, now: number = Date.now()): void {
   reports.set(login, { ...report, reportedAt: now });
+  notifyReadinessChange();
+}
+
+/**
+ * Tells the readiness subscribers to publish a fresh snapshot, e.g. after the enabled video list
+ * changed (which changes what the snapshot holds without any overlay reporting).
+ */
+export function notifyReadinessChange(): void {
   for (const listener of listeners) listener();
 }
 
