@@ -12,9 +12,10 @@ const SHARED_SYNC_CHUNK_PAUSE_MS = 1000;
 /** How long to wait before trying again after a failed download, and how often to re-check a pause. */
 const SHARED_SYNC_RETRY_MS = 10000;
 const SHARED_SYNC_PAUSE_POLL_MS = 500;
-/** A failed download is retried with a doubling wait, capped here, and given up on after this many tries. */
+/** A failed download is retried with a doubling wait, capped here, for as long as the video stays on the list. */
 const SHARED_SYNC_MAX_RETRY_MS = 300000;
-const SHARED_SYNC_MAX_ATTEMPTS = 8;
+/** While every queued video is waiting to be retried, the drain sleeps at most this long at a time, so a new list or push is noticed. */
+const SHARED_SYNC_WAIT_POLL_MS = 1000;
 /** Longest to wait for the stored copy of a video before streaming it instead. */
 const SHARED_SOURCE_LOOKUP_MS = 1500;
 
@@ -138,41 +139,73 @@ async function downloadSyncVideo(s, entry) {
 }
 
 /**
- * Handles a failed download: logs it, waits (doubling each time, up to a cap) and puts the video
- * at the back of the queue so later videos are not held up, unless it left the list or has failed
- * too often (the next list message then tries it again).
+ * Handles a failed download: logs it and schedules a retry after a wait that doubles with each
+ * failure up to a cap. The video goes to the back of the queue, so later videos carry on at once
+ * rather than waiting out the delay; it is retried for as long as it stays on the list.
  * @param {object} s - The syncer's state.
  * @param {{url: string}} entry - The video that failed.
  * @param {*} err - What went wrong.
- * @returns {Promise<void>} Resolves once the wait is over and the video is requeued or given up on.
+ * @returns {void}
  */
-async function handleSyncFailure(s, entry, err) {
+function handleSyncFailure(s, entry, err) {
+  if (s.deps.log) s.deps.log('Shared video download failed: ' + entry.url, err);
+  if (!s.wanted.has(entry.url)) { forgetSyncRetry(s, entry.url); return; }
   const attempts = (s.failures.get(entry.url) || 0) + 1;
   s.failures.set(entry.url, attempts);
-  if (s.deps.log) s.deps.log('Shared video download failed: ' + entry.url, err);
-  await s.deps.sleep(Math.min(SHARED_SYNC_RETRY_MS * Math.pow(2, attempts - 1), SHARED_SYNC_MAX_RETRY_MS));
-  const queued = s.queue.some(function (q) { return q.url === entry.url; });
-  if (attempts < SHARED_SYNC_MAX_ATTEMPTS && s.wanted.has(entry.url) && !queued) {
-    s.queue.push(entry);
-  } else {
-    s.failures.delete(entry.url);
-  }
+  s.retryAt.set(entry.url, s.now() + Math.min(SHARED_SYNC_RETRY_MS * Math.pow(2, attempts - 1), SHARED_SYNC_MAX_RETRY_MS));
+  if (!s.queue.some(function (q) { return q.url === entry.url; })) s.queue.push(entry);
 }
 
 /**
- * Drains the queue one video at a time; a failed video waits and is retried after the others.
+ * Clears a video's retry state (its failure count and retry time).
+ * @param {object} s - The syncer's state.
+ * @param {string} url - The video's URL path.
+ * @returns {void}
+ */
+function forgetSyncRetry(s, url) {
+  s.failures.delete(url);
+  s.retryAt.delete(url);
+}
+
+/**
+ * Takes the first queued video that is not waiting to be retried.
+ * @param {object} s - The syncer's state.
+ * @returns {{url: string}|null} The video, removed from the queue, or null when all are waiting.
+ */
+function takeReadyEntry(s) {
+  const now = s.now();
+  const i = s.queue.findIndex(function (e) { return (s.retryAt.get(e.url) || 0) <= now; });
+  return i === -1 ? null : s.queue.splice(i, 1)[0];
+}
+
+/**
+ * How long to sleep while every queued video is waiting to be retried: until the soonest one is
+ * due, but never longer than the poll interval, so a new list or push is noticed promptly.
+ * @param {object} s - The syncer's state.
+ * @returns {number} Milliseconds to sleep (at least 1).
+ */
+function msUntilNextRetry(s) {
+  const now = s.now();
+  const waits = s.queue.map(function (e) { return (s.retryAt.get(e.url) || 0) - now; });
+  return Math.min(SHARED_SYNC_WAIT_POLL_MS, Math.max(1, Math.min.apply(null, waits)));
+}
+
+/**
+ * Drains the queue one video at a time. A failed video waits for its retry time at the back of
+ * the queue while the others carry on; when only waiting videos remain, it sleeps until one is due.
  * @param {object} s - The syncer's state.
  * @returns {Promise<void>} Resolves once the queue is empty.
  */
 async function drainSyncQueue(s) {
   while (s.queue.length > 0) {
-    const entry = s.queue.shift();
+    const entry = takeReadyEntry(s);
+    if (!entry) { await s.deps.sleep(msUntilNextRetry(s)); continue; }
     s.active = entry.url;
     try {
       await downloadSyncVideo(s, entry);
-      s.failures.delete(entry.url);
+      forgetSyncRetry(s, entry.url);
     } catch (err) {
-      await handleSyncFailure(s, entry, err);
+      handleSyncFailure(s, entry, err);
     }
     s.active = null;
   }
@@ -198,6 +231,7 @@ async function applyVideoList(s, list, seq) {
     await s.deps.storage.deleteVideo(url);
     await s.deps.storage.clearChunks(url);
     emitSyncEvent(s, { type: 'removed', url: url });
+    forgetSyncRetry(s, url);
   }
   // The video being downloaded is not stored yet, so it is in the plan; queueing it again would fetch it twice.
   s.queue = plan.download.filter(function (e) { return e.url !== s.active; });
@@ -258,6 +292,7 @@ async function resolveSharedSource(url, deps) {
  * @param {function({type: string, url?: string, percent?: number}): void} [deps.onEvent] - Told when a
  *   chunk arrives (`progress`, with the percentage), a video is stored (`stored`) or deleted
  *   (`removed`), and when the queue drains (`idle`), so the page can report readiness.
+ * @param {function(): number} [deps.now] - Current time in milliseconds (defaults to `Date.now`); schedules retries.
  * @param {number} [deps.chunkBytes] - Bytes per chunk (defaults to the constant above).
  * @param {number} [deps.chunkPauseMs] - Pause between chunks (defaults to the constant above).
  * @returns {{sync: function(Array<{url: string}>): Promise<void>, idle: function(): Promise<void>}}
@@ -274,6 +309,8 @@ function createSharedSyncer(deps) {
     running: null,
     active: null, // URL of the video being downloaded
     failures: new Map(), // URL -> failed attempts so far
+    retryAt: new Map(), // URL -> time a failed video may be tried again
+    now: deps.now || function () { return Date.now(); },
     syncSeq: 0,
     syncChain: Promise.resolve(),
   };
