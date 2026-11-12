@@ -29,3 +29,20 @@ async function resolveSharedSource(url, deps) {
   const objectUrl = deps.createObjectUrl(blob);
   return { src: objectUrl, release: function () { deps.revokeObjectUrl(objectUrl); } };
 }
+
+/**
+ * Switches a video that failed to play from its stored copy to the normal route, once: a stored
+ * copy that is truncated or can't be decoded would otherwise fail every trigger, as the sync never
+ * replaces a copy it already holds.
+ * @param {{source: {src: string, release: function(): void}}} handle - The video's handle; its source is replaced.
+ * @param {string} url - The video's URL path (the route).
+ * @param {function(string): void} setSrc - Points the video element at a new source.
+ * @returns {boolean} True if it switched to the route; false if it was on the route already, so the caller gives up.
+ */
+function fallBackToRoute(handle, url, setSrc) {
+  if (handle.source.src === url) return false;
+  handle.source.release();
+  handle.source = { src: url, release: function () {} };
+  setSrc(url);
+  return true;
+}
