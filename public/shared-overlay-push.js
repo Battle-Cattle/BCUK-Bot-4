@@ -7,14 +7,19 @@
 
 /**
  * A pushed video waiting at the front of the queue takes over from a background download: the
- * background one goes back in the queue (its chunks are kept) and resumes afterwards.
+ * background one goes back in the queue behind all the pushed ones (its chunks are kept) and
+ * resumes afterwards.
  * @param {object} s - The syncer's state.
  * @param {{url: string}} entry - The video being downloaded.
  * @returns {boolean} True if `entry` was put back and its download should stop for now.
  */
 function syncYieldsToPush(s, entry) {
   if (s.fast.has(entry.url) || s.queue.length === 0 || !s.fast.has(s.queue[0].url)) return false;
-  s.queue.splice(1, 0, entry);
+  // After every pushed video waiting (not just the first), so none of them waits for another
+  // chunk of the background download.
+  let at = 0;
+  while (at < s.queue.length && s.fast.has(s.queue[at].url)) at++;
+  s.queue.splice(at, 0, entry);
   return true;
 }
 
