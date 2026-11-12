@@ -112,7 +112,6 @@
     handle.startTimer = setTimeout(function () {
       const late = planSharedPlayback(serverNow(), playAt, maxLateMs);
       if (late.action === 'skip') { finish(handle); return; }
-      clearTimeout(handle.deadline); // it is starting; the late limit no longer applies
       if (late.seekSeconds > 0) handle.v.currentTime = late.seekSeconds;
       handle.v.style.visibility = 'visible';
       handle.v.play().catch(function () { finish(handle); });
@@ -142,6 +141,9 @@
     v.addEventListener('ended', function () { finish(handle); });
     v.addEventListener('error', function () { finish(handle); });
     v.addEventListener('canplay', function () { start(handle, playAt); }, { once: true });
+    // Only once it is really playing does the late limit stop applying: a stalled seek or a pending
+    // play() must not hold the gate, or start the video after its window.
+    v.addEventListener('playing', function () { clearTimeout(handle.deadline); }, { once: true });
     handle.deadline = setTimeout(function () { finish(handle); }, Math.max(0, playAt + maxLateMs - serverNow()));
     document.body.appendChild(v);
   }
