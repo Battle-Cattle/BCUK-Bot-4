@@ -22,7 +22,7 @@ vi.mock('./sharedOverlaySource', () => ({ broadcastSharedVideoList: (...a: unkno
 const transcode = vi.hoisted(() => ({ isWebmTranscodeQueueFull: vi.fn(() => false) }));
 vi.mock('./overlayVideoTranscode', () => transcode);
 const progress = vi.hoisted(() => ({
-  parseUploadId: vi.fn((v: unknown) => (typeof v === 'string' ? v : null)),
+  parseUploadId: vi.fn((v: unknown) => (v === 'a'.repeat(32) ? v : null)),
   claimConversionProgress: vi.fn(() => Symbol('o')),
   setConversionProgress: vi.fn(), releaseConversionProgress: vi.fn(),
 }));
@@ -74,7 +74,7 @@ describe('chunked upload mounting', () => {
 describe('completing an upload', () => {
   it.each(['mp4', 'webm', 'mov'])('converts a %s to WebM, records it and broadcasts', async (type) => {
     storage.detectUploadedVideoType.mockResolvedValue(type);
-    const { res } = await complete({ file, body: { name: ' Clap ' }, uploadId: 'abc' });
+    const { res } = await complete({ file, body: { name: ' Clap ' }, uploadId: 'a'.repeat(32) });
     expect(storage.placeUpload).toHaveBeenCalledWith(file, '/o/shared/x.mov.upload');
     expect(files.recordSharedVideo).toHaveBeenCalledWith('Clap', 'x.webm', 'u1');
     expect(progress.setConversionProgress).toHaveBeenCalled();
@@ -99,7 +99,7 @@ describe('completing an upload', () => {
 
   it('reports a failed conversion and records nothing', async () => {
     files.storeSharedVideo.mockRejectedValue(Object.assign(new Error('x'), { code: 'transcode_failed' }));
-    const { res } = await complete({ file, body: {}, uploadId: 'abc' });
+    const { res } = await complete({ file, body: {}, uploadId: 'a'.repeat(32) });
     expect(res.redirect).toHaveBeenCalledWith('/overlay/shared/settings?error=transcode_failed');
     expect(files.recordSharedVideo).not.toHaveBeenCalled();
     expect(progress.releaseConversionProgress).toHaveBeenCalled();

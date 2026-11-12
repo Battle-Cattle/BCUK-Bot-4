@@ -13,6 +13,7 @@ import { parsePositiveIntId } from './validation';
 import { logAndRedirectError } from './errorHandling';
 import { storeSharedVideo, recordSharedVideo, removeSharedVideoFile } from './sharedOverlayVideoStorage';
 import { broadcastSharedVideoList } from './sharedOverlaySource';
+import { isWebmTranscodeQueueFull } from './overlayVideoTranscode';
 import { SHARED_SETTINGS_PATH } from './sharedOverlayAdminShared';
 
 // Rename, enable/disable, delete and import for shared overlay videos (#917). Mounted by
@@ -94,13 +95,34 @@ router.post('/:id/delete', csrfProtection, async (req, res) => {
   }
 });
 
+/** Most imports converted at once, the same cap as shared uploads. */
+const MAX_CONCURRENT_IMPORTS = 3;
+
+/** Imports whose copy and conversion are running right now. */
+let activeImports = 0;
+
+/**
+ * Reserves an import slot unless too many imports are running or the conversion queue is full.
+ * The check and the reservation happen in one synchronous step, so concurrent requests cannot all
+ * pass the check before any of them counts; the caller must decrement `activeImports` when the
+ * slot was reserved. Called before the source file is copied, so a refused import costs no I/O.
+ * @returns `upload_busy`, `transcode_busy`, or null when a slot was reserved.
+ */
+function reserveImportSlot(): 'upload_busy' | 'transcode_busy' | null {
+  if (activeImports >= MAX_CONCURRENT_IMPORTS) return 'upload_busy';
+  if (isWebmTranscodeQueueFull()) return 'transcode_busy';
+  activeImports++;
+  return null;
+}
+
 /**
  * Converts the Manager's own overlay video into a new shared video, copying its file as the
  * conversion source so the original is untouched.
  * @param streamerId - DB row ID of the Manager's streamer record.
  * @param videoId - Primary key of their `overlay_video` row.
  * @param discordId - Discord snowflake of the Manager, recorded as the uploader.
- * @returns The redirect URL for the outcome.
+ * @returns The redirect URL for the outcome (`upload_busy` or `transcode_busy` when too many imports
+ *   or conversions are already running, before anything is copied).
  */
 async function importOwnVideo(streamerId: number, videoId: number, discordId: string): Promise<string> {
   const video = (await getVideosForStreamer(streamerId)).find((v) => v.id === videoId);
@@ -108,7 +130,14 @@ async function importOwnVideo(streamerId: number, videoId: number, discordId: st
   const lexical = safeResolve(OVERLAY_FOLDER, String(streamerId), video.filename);
   const real = lexical ? await realPathWithin(OVERLAY_FOLDER, lexical) : null;
   if (!real) return `${SHARED_SETTINGS_PATH}?error=not_found`;
-  const filename = await storeSharedVideo((dest) => fs.promises.copyFile(real, dest, fs.constants.COPYFILE_EXCL));
+  const busy = reserveImportSlot();
+  if (busy) return `${SHARED_SETTINGS_PATH}?error=${busy}`;
+  let filename: string;
+  try {
+    filename = await storeSharedVideo((dest) => fs.promises.copyFile(real, dest, fs.constants.COPYFILE_EXCL));
+  } finally {
+    activeImports--;
+  }
   await recordSharedVideo(video.name, filename, discordId);
   await broadcastListQuietly();
   log.info(`Manager ${discordId} added overlay video ${videoId} to the shared list as ${filename}`);
@@ -122,7 +151,7 @@ async function importOwnVideo(streamerId: number, videoId: number, discordId: st
  * to WebM (even if it already is one) so there is a single code path.
  * @param req - Express request; reads the `videoId` route param and the session user.
  * @param res - Redirects with `?success=video_added`, or `?error=` `invalid_id`, `not_a_streamer`,
- *   `not_found`, `transcode_busy`, `transcode_failed` or `save_failed`.
+ *   `not_found`, `upload_busy`, `transcode_busy`, `transcode_failed` or `save_failed`.
  */
 router.post('/import/:videoId', csrfProtection, async (req, res) => {
   try {
