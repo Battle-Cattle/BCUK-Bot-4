@@ -1,13 +1,26 @@
-/* global connectSse, planSharedPlayback */
+/* global connectSse, planSharedPlayback, createSharedSyncer, resolveSharedSource, fetchSharedRange, holdSyncOwnership, fallBackToRoute, playSource, createSharedStorage, sharedStorageAvailable */
 (function () {
   const script = document.currentScript;
   const login = script ? script.dataset.login : '';
   if (!login) return;
 
+  /** Random delay range before the first background sync, so overlays opened together don't all start at once. */
+  const FIRST_SYNC_MIN_MS = 2000;
+  const FIRST_SYNC_SPREAD_MS = 6000;
+  /** Longest one range request (headers and body) may take before it counts as failed and is retried. */
+  const RANGE_DEADLINE_MS = 120000;
+  /** Name of the lock that lets only one overlay page of this browser run the background sync. */
+  const SYNC_LOCK_NAME = 'bcuk-shared-overlay-sync';
+
   let clockOffsetMs = 0; // server time minus local time
   let maxLateMs = 3000;
   let playing = false;
   let current = null; // handle of the video being loaded or played
+  let syncer = null;
+  let storage = null;
+  let firstSyncDone = false;
+  let firstSyncTimer = null;
+  let latestVideos = null; // newest list, which the delayed first sync uses (null until one arrives)
 
   /**
    * Current time on the server's clock.
@@ -18,15 +31,104 @@
   }
 
   /**
+   * Fetches one inclusive byte range of a video from the normal route.
+   * @param {string} url - The video's URL path.
+   * @param {number} start - First byte, inclusive.
+   * @param {number} end - Last byte, inclusive.
+   * @returns {Promise<{buffer: ArrayBuffer, total: number}>} The bytes and the file's total size.
+   */
+  function fetchRange(url, start, end) {
+    return fetchSharedRange(function (u, options) { return fetch(u, options); }, url, start, end, RANGE_DEADLINE_MS);
+  }
+
+  /**
+   * Sets up the background syncer, or leaves it off (videos then stream at trigger time) when the
+   * page can't store files — Cache Storage needs an HTTPS or localhost overlay URL.
+   * @returns {void}
+   */
+  function setUpSync() {
+    if (!sharedStorageAvailable()) {
+      console.warn('Shared overlay: Cache Storage is unavailable (use an https:// browser source URL); videos will stream when triggered.');
+      return;
+    }
+    try {
+      storage = createSharedStorage();
+    } catch (err) {
+      // IndexedDB can refuse to open at once (e.g. a SecurityError); videos then stream when triggered.
+      console.warn('Shared overlay: storage could not be opened; videos will stream when triggered.', err);
+      storage = null;
+      return;
+    }
+    // Only one page of this browser syncs at a time; the others still play from the stored videos.
+    holdSyncOwnership(navigator.locks, SYNC_LOCK_NAME, function () {
+      syncer = createSharedSyncer({
+        storage: storage,
+        fetchRange: fetchRange,
+        isPaused: function () { return playing; },
+        sleep: function (ms) { return new Promise(function (resolve) { setTimeout(resolve, ms); }); },
+        log: function (message, err) { console.warn(message, err); },
+      });
+      if (latestVideos) syncList(latestVideos); // a list that arrived while another page held the lock
+    }, function (err) {
+      // Without a cross-page lock, two pages could clobber each other's stored data: no syncing.
+      console.warn('Shared overlay: background sync is off (the Web Locks API is unavailable); videos will stream when triggered.', err);
+    });
+  }
+
+  /**
+   * Gives the syncer a video list.
+   * @param {Array<{url: string}>} videos - The enabled video list.
+   * @returns {void}
+   */
+  function runSync(videos) {
+    syncer.sync(videos).catch(function (err) { console.warn('Shared video sync failed', err); });
+  }
+
+  /**
+   * Hands a video list to the syncer: the first one after a random delay, later ones at once. A list
+   * that arrives during the delay replaces the waiting one, so the delayed sync never works from a
+   * list that has since changed.
+   * @param {Array<{url: string}>} videos - The enabled video list from the server.
+   * @returns {void}
+   */
+  function syncList(videos) {
+    if (!Array.isArray(videos)) return;
+    latestVideos = videos;
+    if (!syncer) return; // storage unavailable, or another page owns the sync for now
+    if (firstSyncDone) { runSync(videos); return; }
+    if (firstSyncTimer !== null) return;
+    firstSyncTimer = setTimeout(function () {
+      firstSyncDone = true;
+      runSync(latestVideos);
+    }, FIRST_SYNC_MIN_MS + Math.random() * FIRST_SYNC_SPREAD_MS);
+  }
+
+  /**
+   * Picks what to play from: the stored copy as an object URL when there is one (and found in
+   * time), else the route.
+   * @param {string} url - The video's URL path.
+   * @returns {Promise<{src: string, release: function(): void}>} The source and a function freeing it.
+   */
+  function resolveSource(url) {
+    return resolveSharedSource(url, {
+      storage: storage,
+      createObjectUrl: function (blob) { return URL.createObjectURL(blob); },
+      revokeObjectUrl: function (objectUrl) { URL.revokeObjectURL(objectUrl); },
+      sleep: function (ms) { return new Promise(function (resolve) { setTimeout(resolve, ms); }); },
+    });
+  }
+
+  /**
    * Removes a video and allows the next one to play. Only the video currently active may release
    * the gate, so a late cleanup for an earlier video can't free it while a newer one is playing.
-   * @param {{v: HTMLVideoElement, startTimer: number|null, deadline: number|null}} handle - The video's handle.
+   * @param {{v: HTMLVideoElement, source: {release: function(): void}, startTimer: number|null, deadline: number|null}} handle - The video's handle.
    * @returns {void}
    */
   function finish(handle) {
     clearTimeout(handle.startTimer);
     clearTimeout(handle.deadline);
     handle.v.remove();
+    handle.source.release();
     if (current !== handle) return;
     current = null;
     playing = false;
@@ -34,7 +136,7 @@
 
   /**
    * Starts a loaded video at its planned moment, or drops it if it is too late.
-   * @param {{v: HTMLVideoElement, startTimer: number|null, deadline: number|null}} handle - The video's handle.
+   * @param {{v: HTMLVideoElement, source: {release: function(): void}, startTimer: number|null, deadline: number|null}} handle - The video's handle.
    * @param {number} playAt - Server time the video should have started at.
    * @returns {void}
    */
@@ -46,49 +148,70 @@
       if (late.action === 'skip') { finish(handle); return; }
       if (late.seekSeconds > 0) handle.v.currentTime = late.seekSeconds;
       handle.v.style.visibility = 'visible';
-      handle.v.play().catch(function () { finish(handle); });
+      playSource(handle, function () { finish(handle); });
     }, plan.delayMs);
   }
 
   /**
-   * Loads a video hidden, then starts it at `playAt`. Ignored while another is playing. A video
-   * that has not become ready by `playAt` plus the late limit (a stalled load fires no event) is
+   * Loads a video hidden (from storage when stored), then starts it at `playAt`. Ignored while
+   * another is playing; background downloads pause for as long as `playing` is set. A video that
+   * has not become ready by `playAt` plus the late limit (a stalled load fires no event) is
    * dropped, so it can't hold the gate for ever.
    * @param {string} url - URL path of the video.
    * @param {number} playAt - Server time to start at.
-   * @returns {void}
+   * @returns {Promise<void>} Resolves once the video element is set up.
    */
-  function play(url, playAt) {
+  async function play(url, playAt) {
     if (playing) return;
     playing = true;
     const v = document.createElement('video');
-    const handle = { v: v, startTimer: null, deadline: null };
+    const handle = { v: v, source: { src: url, release: function () {} }, startTimer: null, deadline: null };
     current = handle;
-    v.src = url;
+    // The deadline runs from the start, so a stalled stored-copy lookup can't hold the gate either.
+    handle.deadline = setTimeout(function () { finish(handle); }, Math.max(0, playAt + maxLateMs - serverNow()));
+    const source = await resolveSource(url);
+    if (current !== handle) { source.release(); return; } // dropped by the deadline while looking
+    handle.source = source;
+    v.src = source.src;
     v.preload = 'auto';
     v.playsInline = true;
     v.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;visibility:hidden;';
     v.addEventListener('ended', function () { finish(handle); });
-    v.addEventListener('error', function () { finish(handle); });
-    v.addEventListener('canplay', function () { start(handle, playAt); }, { once: true });
+    const onCanPlay = function () { start(handle, playAt); };
+    v.addEventListener('error', function () {
+      // A stored copy that can't be played falls back to the route once, before the video has started.
+      if (current === handle && !handle.started && fallBackToRoute(handle, url, function (src) { v.src = src; })) {
+        clearTimeout(handle.startTimer);
+        v.removeEventListener('canplay', onCanPlay);
+        v.addEventListener('canplay', onCanPlay, { once: true });
+        return;
+      }
+      finish(handle);
+    });
+    v.addEventListener('canplay', onCanPlay, { once: true });
     // Only once it is really playing does the late limit stop applying: a stalled seek or a pending
     // play() must not hold the gate, or start the video after its window.
     // A delayed deadline timer must not let a late start through, so check the time here too.
     v.addEventListener('playing', function () {
+      handle.started = true;
       if (serverNow() > playAt + maxLateMs) finish(handle);
       else clearTimeout(handle.deadline);
     }, { once: true });
-    handle.deadline = setTimeout(function () { finish(handle); }, Math.max(0, playAt + maxLateMs - serverNow()));
     document.body.appendChild(v);
   }
+
+  setUpSync();
 
   connectSse('/overlay/shared/' + login + '/events', function (data) {
     if (!data) return;
     if (data.type === 'init') {
       clockOffsetMs = data.serverTime - Date.now();
       if (typeof data.maxLateMs === 'number') maxLateMs = data.maxLateMs;
+      syncList(data.videos);
+    } else if (data.type === 'videos') {
+      syncList(data.videos);
     } else if (data.type === 'play' && data.video) {
-      play(data.video, data.playAt);
+      void play(data.video, data.playAt);
     }
   });
 })();
