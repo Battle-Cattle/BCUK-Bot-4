@@ -1,4 +1,4 @@
-/* global connectSse, planSharedPlayback, buildReadinessReport, createSharedSyncer, createSharedStorage, sharedStorageAvailable */
+/* global connectSse, planSharedPlayback, buildReadinessReport, createSharedSyncer, resolveSharedSource, createSharedStorage, sharedStorageAvailable */
 (function () {
   const script = document.currentScript;
   const login = script ? script.dataset.login : '';
@@ -15,7 +15,8 @@
   let syncer = null;
   let storage = null;
   let firstSyncDone = false;
-  let currentList = [];
+  let firstSyncTimer = null;
+  let currentList = []; // newest list: the readiness report's basis, and what the delayed first sync uses
   let downloading = null; // { url, percent } while a background download runs
   let lastProgressReportAt = 0;
 
@@ -93,7 +94,14 @@
       console.warn('Shared overlay: Cache Storage is unavailable (use an https:// browser source URL); videos will stream when triggered.');
       return;
     }
-    storage = createSharedStorage();
+    try {
+      storage = createSharedStorage();
+    } catch (err) {
+      // IndexedDB can refuse to open at once (e.g. a SecurityError); videos then stream when triggered.
+      console.warn('Shared overlay: storage could not be opened; videos will stream when triggered.', err);
+      storage = null;
+      return;
+    }
     syncer = createSharedSyncer({
       storage: storage,
       fetchRange: fetchRange,
@@ -105,7 +113,18 @@
   }
 
   /**
-   * Hands a video list to the syncer: the first one after a random delay, later ones at once.
+   * Gives the syncer a video list.
+   * @param {Array<{url: string}>} videos - The enabled video list.
+   * @returns {void}
+   */
+  function runSync(videos) {
+    syncer.sync(videos).catch(function (err) { console.warn('Shared video sync failed', err); });
+  }
+
+  /**
+   * Hands a video list to the syncer: the first one after a random delay, later ones at once. A list
+   * that arrives during the delay replaces the waiting one, so the delayed sync never works from a
+   * list that has since changed.
    * @param {Array<{url: string}>} videos - The enabled video list from the server.
    * @returns {void}
    */
@@ -114,22 +133,27 @@
     currentList = videos;
     void sendReadiness(); // on connect and on every list change
     if (!syncer) return;
-    const run = function () { syncer.sync(videos).catch(function (err) { console.warn('Shared video sync failed', err); }); };
-    if (firstSyncDone) { run(); return; }
-    firstSyncDone = true;
-    setTimeout(run, FIRST_SYNC_MIN_MS + Math.random() * FIRST_SYNC_SPREAD_MS);
+    if (firstSyncDone) { runSync(videos); return; }
+    if (firstSyncTimer !== null) return;
+    firstSyncTimer = setTimeout(function () {
+      firstSyncDone = true;
+      runSync(currentList);
+    }, FIRST_SYNC_MIN_MS + Math.random() * FIRST_SYNC_SPREAD_MS);
   }
 
   /**
-   * Picks what to play from: the stored copy as an object URL when there is one, else the route.
+   * Picks what to play from: the stored copy as an object URL when there is one (and found in
+   * time), else the route.
    * @param {string} url - The video's URL path.
    * @returns {Promise<{src: string, release: function(): void}>} The source and a function freeing it.
    */
-  async function resolveSource(url) {
-    const blob = storage ? await storage.getVideoBlob(url).catch(function () { return null; }) : null;
-    if (!blob) return { src: url, release: function () {} };
-    const objectUrl = URL.createObjectURL(blob);
-    return { src: objectUrl, release: function () { URL.revokeObjectURL(objectUrl); } };
+  function resolveSource(url) {
+    return resolveSharedSource(url, {
+      storage: storage,
+      createObjectUrl: function (blob) { return URL.createObjectURL(blob); },
+      revokeObjectUrl: function (objectUrl) { URL.revokeObjectURL(objectUrl); },
+      sleep: function (ms) { return new Promise(function (resolve) { setTimeout(resolve, ms); }); },
+    });
   }
 
   /**
@@ -178,10 +202,14 @@
   async function play(url, playAt) {
     if (playing) return;
     playing = true;
-    const source = await resolveSource(url);
     const v = document.createElement('video');
-    const handle = { v: v, source: source, startTimer: null, deadline: null };
+    const handle = { v: v, source: { src: url, release: function () {} }, startTimer: null, deadline: null };
     current = handle;
+    // The deadline runs from the start, so a stalled stored-copy lookup can't hold the gate either.
+    handle.deadline = setTimeout(function () { finish(handle); }, Math.max(0, playAt + maxLateMs - serverNow()));
+    const source = await resolveSource(url);
+    if (current !== handle) { source.release(); return; } // dropped by the deadline while looking
+    handle.source = source;
     v.src = source.src;
     v.preload = 'auto';
     v.playsInline = true;
@@ -196,7 +224,6 @@
       if (serverNow() > playAt + maxLateMs) finish(handle);
       else clearTimeout(handle.deadline);
     }, { once: true });
-    handle.deadline = setTimeout(function () { finish(handle); }, Math.max(0, playAt + maxLateMs - serverNow()));
     document.body.appendChild(v);
   }
 

@@ -29,6 +29,20 @@ function idbResult(request) {
 }
 
 /**
+ * Waits for an IndexedDB transaction to commit. A request succeeding only means the write was
+ * queued: the transaction can still abort while committing, so writes must wait for this.
+ * @param {IDBTransaction} tx - The transaction to wait for.
+ * @returns {Promise<void>} Resolves when the transaction commits; rejects if it errors or aborts.
+ */
+function idbTransactionDone(tx) {
+  return new Promise(function (resolve, reject) {
+    tx.oncomplete = function () { resolve(); };
+    tx.onerror = function () { reject(tx.error); };
+    tx.onabort = function () { reject(tx.error || new Error('IndexedDB transaction aborted')); };
+  });
+}
+
+/**
  * Opens the chunk database, creating its store on first use.
  * @returns {Promise<IDBDatabase>} The open database.
  */
@@ -43,11 +57,14 @@ function openChunkDb() {
 
 /**
  * Creates the storage layer the syncer uses.
- * @returns {object} `listVideos`, `listPartial`, `countChunks`, `getChunks`, `putChunk`, `putVideo`,
- *   `deleteVideo`, `clearChunks` and `getVideoBlob`, all promise-returning.
+ * @returns {object} `listVideos`, `listPartial`, `countChunks`, `chunkTotal`, `getChunks`, `putChunk`,
+ *   `putVideo`, `deleteVideo`, `clearChunks` and `getVideoBlob`, all promise-returning.
+ * @throws {Error} When IndexedDB can't be opened (it can throw at once, e.g. a SecurityError).
  */
 function createSharedStorage() {
   const dbPromise = openChunkDb();
+  // Failures surface through the operations that await it; this stops an unhandled-rejection warning.
+  dbPromise.catch(function () {});
 
   /**
    * Runs one request against the chunk store.
@@ -87,11 +104,19 @@ function createSharedStorage() {
       while (n < records.length && records[n].index === n) n++;
       return n;
     },
+    chunkTotal: async function (url) {
+      // Every chunk records the file's total size; chunk 0 is read alone as the chunks are big.
+      const record = await chunkRequest('readonly', function (s) { return s.get([url, 0]); });
+      return record && typeof record.total === 'number' ? record.total : null;
+    },
     getChunks: async function (url) {
       return (await chunkRecords(url)).map(function (r) { return r.buffer; });
     },
-    putChunk: function (url, index, buffer) {
-      return chunkRequest('readwrite', function (s) { return s.put({ url: url, index: index, buffer: buffer }); });
+    putChunk: async function (url, index, buffer, total) {
+      const db = await dbPromise;
+      const tx = db.transaction(SHARED_CHUNK_STORE, 'readwrite');
+      tx.objectStore(SHARED_CHUNK_STORE).put({ url: url, index: index, buffer: buffer, total: total });
+      await idbTransactionDone(tx);
     },
     putVideo: async function (url, chunks) {
       const cache = await caches.open(SHARED_CACHE_NAME);
@@ -105,8 +130,10 @@ function createSharedStorage() {
       // getAllKeys on an index returns the records' primary keys ([url, index]), which delete() takes.
       const keys = await chunkRequest('readonly', function (s) { return s.index('url').getAllKeys(IDBKeyRange.only(url)); });
       const db = await dbPromise;
-      const store = db.transaction(SHARED_CHUNK_STORE, 'readwrite').objectStore(SHARED_CHUNK_STORE);
-      await Promise.all(keys.map(function (k) { return idbResult(store.delete(k)); }));
+      const tx = db.transaction(SHARED_CHUNK_STORE, 'readwrite');
+      const store = tx.objectStore(SHARED_CHUNK_STORE);
+      keys.forEach(function (k) { store.delete(k); });
+      await idbTransactionDone(tx);
     },
     getVideoBlob: async function (url) {
       const cache = await caches.open(SHARED_CACHE_NAME);
