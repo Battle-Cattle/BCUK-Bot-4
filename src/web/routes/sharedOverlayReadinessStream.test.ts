@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { mockLogger } from '../../test-utils/loggerMock';
 
-vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
+const logMock = vi.hoisted(() => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }));
+vi.mock('../../shared/logger', () => ({ createLogger: () => logMock }));
 vi.mock('../../shared/config', () => ({ OVERLAY_STATUS_MAX_SSE_PER_STREAMER: 2, SSE_MAX_TOTAL_CONNECTIONS: 1000 }));
 vi.mock('../session', () => ({ getSessionUser: (req: any) => ({ discordId: req.discordId }) }));
 const entries = vi.fn();
@@ -52,6 +52,24 @@ describe('GET /readiness/events', () => {
     await vi.waitFor(() => expect(snapshots(a.res)).toHaveLength(2));
     expect(snapshots(b.res)).toHaveLength(2);
     expect(snapshots(a.res)[1].videos[0]).toMatchObject({ ready: 1, allReady: true });
+  });
+
+  it('logs, and keeps working, when a later snapshot cannot be built', async () => {
+    conns.sharedConnections.set('alice', new Set());
+    const { req, res } = fake('m1');
+    await handler(req, res);
+    entries.mockRejectedValueOnce(new Error('db'));
+    recordReadinessReport('alice', { stored: [], downloading: null });
+    await vi.waitFor(() => expect(logMock.error).toHaveBeenCalledWith('Failed to publish shared overlay readiness:', expect.any(Error)));
+    recordReadinessReport('alice', { stored: [1], downloading: null });
+    await vi.waitFor(() => expect(snapshots(res)).toHaveLength(2));
+  });
+
+  it('does not look anything up when no admin stream is open', async () => {
+    conns.sharedConnections.set('alice', new Set());
+    recordReadinessReport('alice', { stored: [], downloading: null });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(entries).not.toHaveBeenCalled();
   });
 
   it('limits streams per Manager', async () => {
