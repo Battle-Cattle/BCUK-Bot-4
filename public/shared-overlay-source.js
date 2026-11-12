@@ -46,3 +46,18 @@ function fallBackToRoute(handle, url, setSrc) {
   setSrc(url);
   return true;
 }
+
+/**
+ * Starts playing a video and reports a failure of that attempt. A rejection is ignored when the
+ * video's source has been replaced since (a fallback to the route reloads the element, which
+ * aborts the pending play() with an AbortError: that is not a failure of the new source).
+ * @param {{v: {play: function(): Promise<void>}, source: object}} handle - The video's handle.
+ * @param {function(): void} onFailure - Called when playing the current source fails.
+ * @returns {void}
+ */
+function playSource(handle, onFailure) {
+  const attempt = handle.source;
+  handle.v.play().catch(function () {
+    if (handle.source === attempt) onFailure();
+  });
+}
