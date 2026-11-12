@@ -13,6 +13,16 @@ const SHARED_SYNC_CHUNK_PAUSE_MS = 1000;
 const SHARED_SYNC_PAUSE_POLL_MS = 500;
 
 /**
+ * Passes an event to the page, if it listens.
+ * @param {object} s - The syncer's state.
+ * @param {{type: string, url?: string, percent?: number}} event - The event.
+ * @returns {void}
+ */
+function emitSyncEvent(s, event) {
+  if (s.deps.onEvent) s.deps.onEvent(event);
+}
+
+/**
  * Waits while a shared video is triggered or playing, polling.
  * @param {object} s - The syncer's state (see {@link createSharedSyncer}).
  * @returns {Promise<void>} Resolves once no longer paused.
