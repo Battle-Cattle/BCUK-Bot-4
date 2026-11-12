@@ -505,6 +505,26 @@ describe('createSharedSyncer', () => {
       expect(order).toEqual(['/a:0', '/c:0', '/c:100', '/a:100', '/b:0', '/b:100', '/d:0', '/d:100']);
     });
 
+    it('puts the background download behind every pending push, not just the first', async () => {
+      const storage = memoryStorage();
+      let releaseA!: () => void;
+      const aBlocked = new Promise<void>((resolve) => { releaseA = resolve; });
+      const order: string[] = [];
+      const fetchRange = vi.fn(async (url: string, start: number) => {
+        order.push(`${url}:${start}`);
+        if (url === '/a' && start === 0) await aBlocked;
+        return { buffer: `${url}:${start}`, total: 200 };
+      });
+      const syncer = createSharedSyncer(deps(storage, fetchRange));
+      await syncer.sync([v('/a')]); // /a downloads (blocked on its first chunk)
+      await syncer.fetchNow(v('/c'));
+      await syncer.fetchNow(v('/d')); // the waiting pushes are now /d then /c
+      releaseA();
+      await syncer.idle();
+      // /a yields at its chunk boundary and resumes only after both pushed videos are done.
+      expect(order).toEqual(['/a:0', '/d:0', '/d:100', '/c:0', '/c:100', '/a:100']);
+    });
+
     it('resumes a half-stored video from its chunks', async () => {
       const storage = memoryStorage({ chunks: { '/a': ['/a:0'] } });
       const fetchRange = fakeFetch(200);
