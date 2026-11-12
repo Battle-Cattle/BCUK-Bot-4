@@ -225,6 +225,22 @@ describe('createSharedSyncer', () => {
       expect(storage.videos.get('/a')).toEqual(['/a:0', '/a:100', '/a:200']);
     });
 
+    it('asks for the preload route for background downloads and full speed only for a pushed video', async () => {
+      const fullSpeedFlags: Array<[string, boolean]> = [];
+      const holder: { syncer?: any } = {};
+      const fetchRange = vi.fn(async (url: string, start: number, _end: number, fullSpeed: boolean) => {
+        fullSpeedFlags.push([`${url}:${start}`, fullSpeed]);
+        if (url === '/a' && start === 0) await holder.syncer.fetchNow(v('/c'));
+        return { buffer: 'x', total: 150 };
+      });
+      holder.syncer = createSharedSyncer(deps(memoryStorage(), fetchRange));
+      await holder.syncer.sync([v('/a')]);
+      await holder.syncer.idle();
+      expect(fullSpeedFlags).toEqual([
+        ['/a:0', false], ['/c:0', true], ['/c:100', true], ['/a:100', false],
+      ]);
+    });
+
     it('resumes a half-stored video from its chunks', async () => {
       const storage = memoryStorage({ chunks: { '/a': ['/a:0'] } });
       const fetchRange = fakeFetch(200);

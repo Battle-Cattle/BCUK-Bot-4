@@ -30,14 +30,16 @@
   }
 
   /**
-   * Fetches one inclusive byte range of a video from the normal route.
+   * Fetches one inclusive byte range of a video. Background downloads use the speed-limited
+   * `?preload=1` route; a Manager push uses the normal route at full speed.
    * @param {string} url - The video's URL path.
    * @param {number} start - First byte, inclusive.
    * @param {number} end - Last byte, inclusive.
+   * @param {boolean} fullSpeed - True for a pushed video.
    * @returns {Promise<{buffer: ArrayBuffer, total: number}>} The bytes and the file's total size.
    */
-  async function fetchRange(url, start, end) {
-    const res = await fetch(url, { headers: { Range: 'bytes=' + start + '-' + end } });
+  async function fetchRange(url, start, end, fullSpeed) {
+    const res = await fetch(fullSpeed ? url : url + '?preload=1', { headers: { Range: 'bytes=' + start + '-' + end } });
     if (res.status !== 206) throw new Error('Range request answered ' + res.status);
     const match = /\/(\d+)$/.exec(res.headers.get('Content-Range') || '');
     if (!match) throw new Error('No total size in Content-Range');

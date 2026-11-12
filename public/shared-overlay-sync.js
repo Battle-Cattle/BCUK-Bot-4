@@ -63,8 +63,9 @@ function buildReadinessReport(list, storedUrls, downloading) {
  * @param {object} deps - Injected layers.
  * @param {object} deps.storage - `listVideos()`, `listPartial()`, `countChunks(url)`, `getChunks(url)`,
  *   `putChunk(url, index, buffer)`, `putVideo(url, chunks)`, `deleteVideo(url)`, `clearChunks(url)`.
- * @param {function(string, number, number): Promise<{buffer: ArrayBuffer, total: number}>} deps.fetchRange -
- *   Fetches an inclusive byte range, reporting the file's total size.
+ * @param {function(string, number, number, boolean): Promise<{buffer: ArrayBuffer, total: number}>} deps.fetchRange -
+ *   Fetches an inclusive byte range, reporting the file's total size. The last argument is true for
+ *   a Manager-pushed video, which downloads at full speed instead of through the preload limit.
  * @param {function(): boolean} deps.isPaused - True while a shared video is triggered or playing.
  * @param {function(number): Promise<void>} deps.sleep - Resolves after the given milliseconds.
  * @param {function(string, *): void} [deps.log] - Reports a failed download.
@@ -128,7 +129,7 @@ function createSharedSyncer(deps) {
       await waitWhilePaused();
       if (!wanted.has(entry.url)) { await deps.storage.clearChunks(entry.url); return; }
       const range = nextSharedChunkRange(count, chunkBytes);
-      const part = await deps.fetchRange(entry.url, range.start, range.end);
+      const part = await deps.fetchRange(entry.url, range.start, range.end, fast.has(entry.url));
       total = part.total;
       await deps.storage.putChunk(entry.url, count, part.buffer);
       count++;

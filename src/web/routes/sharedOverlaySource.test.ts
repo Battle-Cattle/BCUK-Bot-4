@@ -19,6 +19,8 @@ vi.mock('../../db', () => ({
   DEFAULT_REFRESH_FAILURE_MAX_BACKOFF_MS: 60000,
 }));
 vi.mock('fs', () => ({ default: { readdirSync: () => ['sharedOverlaySource.ejs'] } }));
+const servePreload = vi.hoisted(() => vi.fn());
+vi.mock('./sharedOverlayPreload', () => ({ servePreloadVideo: servePreload }));
 vi.mock('../rateLimits', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../rateLimits')>()),
   sharedOverlayReportLimiter: (_q: any, _s: any, next: any) => next(),
@@ -150,6 +152,14 @@ describe('GET /videos/:filename', () => {
   it('serves a file from the shared folder', async () => {
     const res = await supertest(app()).get('/videos/a.webm');
     expect(res.body.sentFile).toBe('/app/overlay-videos/shared/a.webm');
+  });
+
+  it('serves ?preload=1 through the speed-limited handler, and the plain route at full speed', async () => {
+    servePreload.mockImplementation(async (_req: any, res: any) => { res.json({ throttled: true }); });
+    expect((await supertest(app()).get('/videos/a.webm?preload=1')).body).toEqual({ throttled: true });
+    expect(servePreload).toHaveBeenCalledTimes(1);
+    expect((await supertest(app()).get('/videos/a.webm')).body.sentFile).toBe('/app/overlay-videos/shared/a.webm');
+    expect(servePreload).toHaveBeenCalledTimes(1);
   });
 
   it.each(['a.mp4', 'a.txt', '..%2Fx.webm'])('refuses %s', async (name) => {
