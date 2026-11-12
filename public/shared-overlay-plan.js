@@ -103,17 +103,18 @@ async function fetchSharedRange(fetchFn, url, start, end, deadlineMs) {
  * Lets only one overlay page at a time run the background sync. Pages of the same browser share
  * one set of stored videos and chunks, so two syncing at once could clear each other's chunks or
  * store an incomplete video over a finished one. The page holding the lock syncs; the others wait
- * and take over if it closes. Without the Web Locks API the page just starts.
+ * and take over if it closes. Without the Web Locks API, or if the lock can't be requested, the
+ * page does not sync at all (videos then stream when triggered) rather than risk two pages
+ * clobbering each other's stored data.
  * @param {{request: function(string, function(): Promise<void>): Promise<*>}|undefined} locks - `navigator.locks`, if any.
  * @param {string} name - The lock's name.
  * @param {function(): void} start - Starts this page's syncing; called once it owns the lock.
+ * @param {function(*): void} onUnavailable - Called, with the error if there is one, when the lock can't be had.
  * @returns {void}
  */
-function holdSyncOwnership(locks, name, start) {
-  if (!locks || typeof locks.request !== 'function') { start(); return; }
-  let started = false;
-  const begin = function () { if (!started) { started = true; start(); } };
+function holdSyncOwnership(locks, name, start, onUnavailable) {
+  if (!locks || typeof locks.request !== 'function') { onUnavailable(undefined); return; }
   // The returned promise never settles, so the lock is held until the page goes away.
-  Promise.resolve(locks.request(name, function () { begin(); return new Promise(function () {}); }))
-    .catch(begin);
+  Promise.resolve(locks.request(name, function () { start(); return new Promise(function () {}); }))
+    .catch(onUnavailable);
 }

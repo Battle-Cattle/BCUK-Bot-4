@@ -112,6 +112,9 @@
         onEvent: handleSyncEvent,
       });
       if (listReceived) syncList(currentList); // a list that arrived while another page held the lock
+    }, function (err) {
+      // Without a cross-page lock, two pages could clobber each other's stored data: no syncing.
+      console.warn('Shared overlay: background sync is off (the Web Locks API is unavailable); videos will stream when triggered.', err);
     });
   }
 
