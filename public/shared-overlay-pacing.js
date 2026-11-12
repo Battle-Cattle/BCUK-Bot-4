@@ -1,4 +1,4 @@
-/* global SHARED_SYNC_CHUNK_PAUSE_MS */
+/* global SHARED_SYNC_CHUNK_PAUSE_MS, syncYieldsToPush */
 /**
  * Pacing of a shared video download (#917): how long it waits between chunks, and when it gives
  * way to a Manager-pushed video. Plain functions over the syncer's state (see createSharedSyncer
@@ -24,19 +24,6 @@ function chunkPauseFor(live) {
  */
 function syncChunkPauseMs(s) {
   return typeof s.chunkPauseMs === 'function' ? s.chunkPauseMs() : s.chunkPauseMs;
-}
-
-/**
- * A pushed video waiting at the front of the queue takes over from a background download: the
- * background one goes back in the queue (its chunks are kept) and resumes afterwards.
- * @param {object} s - The syncer's state.
- * @param {{url: string}} entry - The video being downloaded.
- * @returns {boolean} True if `entry` was put back and its download should stop for now.
- */
-function syncYieldsToPush(s, entry) {
-  if (s.fast.has(entry.url) || s.queue.length === 0 || !s.fast.has(s.queue[0].url)) return false;
-  s.queue.splice(1, 0, entry);
-  return true;
 }
 
 /**

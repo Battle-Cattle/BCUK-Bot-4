@@ -1,4 +1,4 @@
-/* global pauseAfterSyncChunk, planSharedSync, nextSharedChunkRange, checkedRangeTotal, handleSyncFailure, forgetSyncRetry, takeReadyEntry, msUntilNextRetry */
+/* global pauseAfterSyncChunk, fetchSyncNow, planSharedSync, nextSharedChunkRange, checkedRangeTotal, handleSyncFailure, forgetSyncRetry, takeReadyEntry, msUntilNextRetry */
 /**
  * Background sync of shared overlay videos into the overlay's own storage (#917). The queue, diff
  * and resume decisions live here as plain functions over injected storage and fetch layers, so they
@@ -178,26 +178,6 @@ async function applyVideoList(s, list, seq) {
   // The video being downloaded is not stored yet, so it is in the plan; queueing it again would fetch it twice.
   s.queue = plan.download.filter(function (e) { return e.url !== s.current; });
   if (!s.running && s.queue.length > 0) s.running = drainSyncQueue(s);
-}
-
-/**
- * Handles a Manager push: makes sure a video is stored, at full speed, without playing it.
- * @param {object} s - The syncer's state.
- * @param {{url: string}} entry - The pushed video.
- * @returns {Promise<string>} `ignored` if already stored, `finishing` if its background download
- *   is under way (now sped up, keeping its chunks), or `fetching` if it was missing (the
- *   background queue pauses behind it and resumes afterwards).
- */
-async function fetchSyncNow(s, entry) {
-  if ((await s.deps.storage.listVideos()).indexOf(entry.url) !== -1) return 'ignored';
-  s.wanted.add(entry.url);
-  s.fast.add(entry.url);
-  forgetSyncRetry(s, entry.url); // a push is tried at once, whatever wait a failed background download was under
-  if (s.current === entry.url) return 'finishing';
-  s.queue = s.queue.filter(function (e) { return e.url !== entry.url; });
-  s.queue.unshift(entry);
-  if (!s.running) s.running = drainSyncQueue(s);
-  return 'fetching';
 }
 
 /**
