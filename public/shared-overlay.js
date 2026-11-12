@@ -1,4 +1,4 @@
-/* global connectSse, planSharedPlayback, buildReadinessReport, chunkPauseFor, createSharedSyncer, resolveSharedSource, fetchSharedRange, holdSyncOwnership, createSharedStorage, sharedStorageAvailable */
+/* global connectSse, planSharedPlayback, buildReadinessReport, chunkPauseFor, createSharedSyncer, resolveSharedSource, fetchSharedRange, holdSyncOwnership, fallBackToRoute, createSharedStorage, sharedStorageAvailable */
 (function () {
   const script = document.currentScript;
   const login = script ? script.dataset.login : '';
@@ -227,12 +227,23 @@
     v.playsInline = true;
     v.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;visibility:hidden;';
     v.addEventListener('ended', function () { finish(handle); });
-    v.addEventListener('error', function () { finish(handle); });
-    v.addEventListener('canplay', function () { start(handle, playAt); }, { once: true });
+    const onCanPlay = function () { start(handle, playAt); };
+    v.addEventListener('error', function () {
+      // A stored copy that can't be played falls back to the route once, before the video has started.
+      if (current === handle && !handle.started && fallBackToRoute(handle, url, function (src) { v.src = src; })) {
+        clearTimeout(handle.startTimer);
+        v.removeEventListener('canplay', onCanPlay);
+        v.addEventListener('canplay', onCanPlay, { once: true });
+        return;
+      }
+      finish(handle);
+    });
+    v.addEventListener('canplay', onCanPlay, { once: true });
     // Only once it is really playing does the late limit stop applying: a stalled seek or a pending
     // play() must not hold the gate, or start the video after its window.
     // A delayed deadline timer must not let a late start through, so check the time here too.
     v.addEventListener('playing', function () {
+      handle.started = true;
       if (serverNow() > playAt + maxLateMs) finish(handle);
       else clearTimeout(handle.deadline);
     }, { once: true });
