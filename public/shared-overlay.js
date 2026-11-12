@@ -193,7 +193,11 @@
     v.addEventListener('canplay', function () { start(handle, playAt); }, { once: true });
     // Only once it is really playing does the late limit stop applying: a stalled seek or a pending
     // play() must not hold the gate, or start the video after its window.
-    v.addEventListener('playing', function () { clearTimeout(handle.deadline); }, { once: true });
+    // A delayed deadline timer must not let a late start through, so check the time here too.
+    v.addEventListener('playing', function () {
+      if (serverNow() > playAt + maxLateMs) finish(handle);
+      else clearTimeout(handle.deadline);
+    }, { once: true });
     handle.deadline = setTimeout(function () { finish(handle); }, Math.max(0, playAt + maxLateMs - serverNow()));
     document.body.appendChild(v);
   }
