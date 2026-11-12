@@ -1,3 +1,4 @@
+/* global handleSyncFailure, forgetSyncRetry, takeReadyEntry, msUntilNextRetry */
 /**
  * Background sync of shared overlay videos into the overlay's own storage (#917). The queue, diff
  * and resume decisions live here as plain functions over injected storage and fetch layers, so they
@@ -9,15 +10,7 @@
 const SHARED_SYNC_CHUNK_BYTES = 2 * 1024 * 1024;
 /** Pause between chunks, spreading the load (the server-side speed limit is the hard cap). */
 const SHARED_SYNC_CHUNK_PAUSE_MS = 1000;
-/** How long to wait before trying again after a failed download, and how often to re-check a pause. */
-const SHARED_SYNC_RETRY_MS = 10000;
 const SHARED_SYNC_PAUSE_POLL_MS = 500;
-/** A failed download is retried with a doubling wait, capped here, for as long as the video stays on the list. */
-const SHARED_SYNC_MAX_RETRY_MS = 300000;
-/** While every queued video is waiting to be retried, the drain sleeps at most this long at a time, so a new list or push is noticed. */
-const SHARED_SYNC_WAIT_POLL_MS = 1000;
-/** Longest to wait for the stored copy of a video before streaming it instead. */
-const SHARED_SOURCE_LOOKUP_MS = 1500;
 
 /**
  * Works out what a new video list needs: the videos to download (in the list's order, which is
@@ -183,58 +176,6 @@ async function restartSyncDownload(s, entry) {
 }
 
 /**
- * Handles a failed download: logs it and schedules a retry after a wait that doubles with each
- * failure up to a cap. The video goes to the back of the queue, so later videos carry on at once
- * rather than waiting out the delay; it is retried for as long as it stays on the list.
- * @param {object} s - The syncer's state.
- * @param {{url: string}} entry - The video that failed.
- * @param {*} err - What went wrong.
- * @returns {void}
- */
-function handleSyncFailure(s, entry, err) {
-  if (s.deps.log) s.deps.log('Shared video download failed: ' + entry.url, err);
-  if (!s.wanted.has(entry.url)) { forgetSyncRetry(s, entry.url); return; }
-  const attempts = (s.failures.get(entry.url) || 0) + 1;
-  s.failures.set(entry.url, attempts);
-  s.retryAt.set(entry.url, s.now() + Math.min(SHARED_SYNC_RETRY_MS * Math.pow(2, attempts - 1), SHARED_SYNC_MAX_RETRY_MS));
-  if (!s.queue.some(function (q) { return q.url === entry.url; })) s.queue.push(entry);
-}
-
-/**
- * Clears a video's retry state (its failure count and retry time).
- * @param {object} s - The syncer's state.
- * @param {string} url - The video's URL path.
- * @returns {void}
- */
-function forgetSyncRetry(s, url) {
-  s.failures.delete(url);
-  s.retryAt.delete(url);
-}
-
-/**
- * Takes the first queued video that is not waiting to be retried.
- * @param {object} s - The syncer's state.
- * @returns {{url: string}|null} The video, removed from the queue, or null when all are waiting.
- */
-function takeReadyEntry(s) {
-  const now = s.now();
-  const i = s.queue.findIndex(function (e) { return (s.retryAt.get(e.url) || 0) <= now; });
-  return i === -1 ? null : s.queue.splice(i, 1)[0];
-}
-
-/**
- * How long to sleep while every queued video is waiting to be retried: until the soonest one is
- * due, but never longer than the poll interval, so a new list or push is noticed promptly.
- * @param {object} s - The syncer's state.
- * @returns {number} Milliseconds to sleep (at least 1).
- */
-function msUntilNextRetry(s) {
-  const now = s.now();
-  const waits = s.queue.map(function (e) { return (s.retryAt.get(e.url) || 0) - now; });
-  return Math.min(SHARED_SYNC_WAIT_POLL_MS, Math.max(1, Math.min.apply(null, waits)));
-}
-
-/**
  * Drains the queue one video at a time. A failed video waits for its retry time at the back of
  * the queue while the others carry on; when only waiting videos remain, it sleeps until one is due.
  * @param {object} s - The syncer's state.
@@ -306,30 +247,6 @@ function syncVideoList(s, list) {
   const applied = s.syncChain.then(function () { return applyVideoList(s, list, seq); });
   s.syncChain = applied.catch(function () {});
   return applied;
-}
-
-/**
- * Picks what to play a video from: its stored copy as an object URL, or the normal route when
- * there is none or the lookup doesn't answer in time (a stalled storage read must not delay
- * playback past its window).
- * @param {string} url - The video's URL path.
- * @param {object} deps - Injected layers.
- * @param {{getVideoBlob: function(string): Promise<Blob|null>}|null} deps.storage - The storage layer, or null when unavailable.
- * @param {function(Blob): string} deps.createObjectUrl - Makes an object URL for a blob.
- * @param {function(string): void} deps.revokeObjectUrl - Frees an object URL.
- * @param {function(number): Promise<void>} deps.sleep - Resolves after the given milliseconds.
- * @param {number} [deps.lookupMs] - How long to wait for the stored copy (defaults to the constant above).
- * @returns {Promise<{src: string, release: function(): void}>} The source and a function freeing it.
- */
-async function resolveSharedSource(url, deps) {
-  const route = { src: url, release: function () {} };
-  if (!deps.storage) return route;
-  const lookup = deps.storage.getVideoBlob(url).catch(function () { return null; });
-  const timeout = deps.sleep(deps.lookupMs === undefined ? SHARED_SOURCE_LOOKUP_MS : deps.lookupMs).then(function () { return null; });
-  const blob = await Promise.race([lookup, timeout]);
-  if (!blob) return route;
-  const objectUrl = deps.createObjectUrl(blob);
-  return { src: objectUrl, release: function () { deps.revokeObjectUrl(objectUrl); } };
 }
 
 /**
