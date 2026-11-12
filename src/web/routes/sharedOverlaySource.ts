@@ -40,12 +40,21 @@ interface SharedOverlayVideoEntry {
 }
 
 /**
+ * URL path a shared video is served from.
+ * @param filename - Stored filename of the video.
+ * @returns The URL path overlays load the video from.
+ */
+export function sharedVideoUrl(filename: string): string {
+  return VIDEO_URL_PREFIX + encodeURIComponent(filename);
+}
+
+/**
  * Lists the enabled shared videos in the shape sent to overlays.
  * @returns Enabled videos, newest first.
  */
 async function getSharedVideoEntries(): Promise<SharedOverlayVideoEntry[]> {
   const videos = await listEnabledSharedVideos();
-  return videos.map((v) => ({ id: v.id, name: v.name, url: VIDEO_URL_PREFIX + encodeURIComponent(v.filename) }));
+  return videos.map((v) => ({ id: v.id, name: v.name, url: sharedVideoUrl(v.filename) }));
 }
 
 /**
