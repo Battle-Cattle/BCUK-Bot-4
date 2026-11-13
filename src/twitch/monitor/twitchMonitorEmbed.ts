@@ -3,7 +3,7 @@ import { TwitchStream } from '../twitchApi';
 import { LiveState } from './twitchMonitorTypes';
 import type { MessageMentionOptions } from 'discord.js';
 import { fillTemplate } from '../../shared/textTemplate';
-import { mentionsWrittenIn, neutralizeMentions, truncateMessageContent } from '../../discord/discordUtils';
+import { fillTemplateWithoutPlaceholderMentions, mentionsWrittenIn, truncateMessageContent } from '../../discord/discordUtils';
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
@@ -123,18 +123,18 @@ export interface AnnouncementContent {
 /**
  * Fills a live/new-game announcement template for sending to Discord. Only mentions written in
  * the template can ping. Placeholder values (a stream title or game the streamer sets freely) are
- * neutralised first ({@link neutralizeMentions}), so `@everyone`, `@here`, a role or a user put into
- * one shows as text, even when the template allows the same mention type. `allowedMentions` then
- * limits pings to the template's own mentions as a second guard. The content is cut to Discord's
- * limit so a long title can't make every send fail.
+ * filled in by `fillTemplateWithoutPlaceholderMentions`, so `@everyone`, `@here`, a role or a user
+ * put into one, or pieced together with the template text around it (`@{title}` with title
+ * `everyone`), shows as text, even when the template allows the same mention type.
+ * `allowedMentions` then limits pings to the template's own mentions as a second guard. The
+ * content is cut to Discord's limit so a long title can't make every send fail.
  * @param template - The group's `live_message` or `new_game_message`.
  * @param vars - The placeholder values from {@link templateVars}.
  * @returns Content and `allowedMentions` to spread into a send or edit payload.
  */
 export function renderAnnouncementContent(template: string, vars: Record<string, string>): AnnouncementContent {
-  const safeVars = Object.fromEntries(Object.entries(vars).map(([key, value]) => [key, neutralizeMentions(value)]));
   return {
-    content: truncateMessageContent(fillTemplate(template, safeVars, 'keep')),
+    content: truncateMessageContent(fillTemplateWithoutPlaceholderMentions(template, vars)),
     allowedMentions: mentionsWrittenIn(template),
   };
 }

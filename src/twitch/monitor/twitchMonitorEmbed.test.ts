@@ -239,6 +239,25 @@ describe('renderAnnouncementContent (#1010)', () => {
     expect(everyoneTemplate.content).not.toMatch(/@here/);
   });
 
+  it('does not let a mention form across the edge of a placeholder (#1010 review)', () => {
+    const title = (t: string) => templateVars('streamer1', makeStream({ title: t }));
+    // Template '@' + title 'everyone'.
+    expect(renderAnnouncementContent('@here @{title}', title('everyone')).content).toBe('@here @\u200beveryone');
+    // Title ending in '@' + template 'here'.
+    expect(renderAnnouncementContent('{title}here', title('hi @')).content).toBe('hi @\u200bhere');
+    // Template '<@&' + title of digits, and '<@' + title of digits.
+    expect(renderAnnouncementContent('<@&{title}>', title('123456789012345678')).content).toBe('<@&\u200b123456789012345678>');
+    expect(renderAnnouncementContent('<@{title}>', title('123456789012345678')).content).toBe('<@\u200b123456789012345678>');
+    // Title ending in '<' + template '@&id>'.
+    expect(renderAnnouncementContent('{title}@&123456789012345678>', title('x <')).content).toBe('x <\u200b@&123456789012345678>');
+  });
+
+  it('leaves the stream URL and ordinary text untouched', () => {
+    const vars = templateVars('streamer1', makeStream({ title: 'Speedrun any%' }));
+    expect(renderAnnouncementContent('{streamer} is live: {title} {url}', vars).content)
+      .toBe('streamer1 is live: Speedrun any% https://www.twitch.tv/streamer1');
+  });
+
   it('neutralises a role that the template also names when it arrives through the title', () => {
     const role = '<@&123456789012345678>';
     const result = renderAnnouncementContent(`${role} {title}`, templateVars('streamer1', makeStream({ title: role })));

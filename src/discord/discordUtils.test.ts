@@ -43,6 +43,7 @@ import {
   trySendDiscordReply,
   mentionsWrittenIn,
   neutralizeMentions,
+  fillTemplateWithoutPlaceholderMentions,
   truncateMessageContent,
   DISCORD_MESSAGE_CONTENT_LIMIT,
 } from './discordUtils';
@@ -426,6 +427,27 @@ describe('neutralizeMentions', () => {
 
   it('leaves text without mentions, and plain @names, unchanged', () => {
     expect(neutralizeMentions('Elden Ring w/ @someone #1 <3')).toBe('Elden Ring w/ @someone #1 <3');
+  });
+});
+
+describe('fillTemplateWithoutPlaceholderMentions', () => {
+  it('fills placeholders, keeps an unknown one as written, and keeps the template\'s own mentions', () => {
+    expect(fillTemplateWithoutPlaceholderMentions('@everyone {a} {missing} <@&123456789012345678>', { a: 'x' }))
+      .toBe('@everyone x {missing} <@&123456789012345678>');
+  });
+
+  it('neutralises mentions inside a value, and at either edge of it', () => {
+    expect(fillTemplateWithoutPlaceholderMentions('{a}', { a: '@here' })).toBe('@\u200bhere');
+    expect(fillTemplateWithoutPlaceholderMentions('@{a}', { a: 'everyone' })).toBe('@\u200beveryone');
+    expect(fillTemplateWithoutPlaceholderMentions('<@!{a}>', { a: '123456789012345678' })).toBe('<@!\u200b123456789012345678>');
+    expect(fillTemplateWithoutPlaceholderMentions('<@&1234{a}>', { a: '56789012345678' })).toBe('<@&1234\u200b56789012345678>');
+    expect(fillTemplateWithoutPlaceholderMentions('{a}everyone', { a: '@' })).toBe('@\u200beveryone');
+    expect(fillTemplateWithoutPlaceholderMentions('{a}{b}', { a: 'x @', b: 'here' })).toBe('x @\u200bhere');
+  });
+
+  it('adds nothing for an empty value or one that can\'t form a mention', () => {
+    expect(fillTemplateWithoutPlaceholderMentions('@{a}', { a: '' })).toBe('@');
+    expect(fillTemplateWithoutPlaceholderMentions('Watch {a}!', { a: 'https://twitch.tv/x' })).toBe('Watch https://twitch.tv/x!');
   });
 });
 

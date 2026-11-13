@@ -64,6 +64,36 @@ export function neutralizeMentions(text: string): string {
     .replace(/<@/g, `<@${ZERO_WIDTH_SPACE}`);
 }
 
+/** Template text that a value placed right after it could turn into a mention: `@`, `<@`, `<@&`, `<@!`, or one of those followed by digits. */
+const ENDS_IN_MENTION_START = /(?:<@[&!]?\d*|@)$/;
+
+/** A value ending in one of these could become a mention with the template text placed after it: `@`, `<`, `<@`, `<@&`, `<@!` (and digits). */
+const VALUE_ENDS_IN_MENTION_START = /(?:<(?:@[&!]?\d*)?|@)$/;
+
+/**
+ * Fills `{name}` placeholders (as `fillTemplate` with its `'keep'` fallback does) so that nothing
+ * a placeholder value contributes can mention anyone. Each value goes through
+ * {@link neutralizeMentions}, and a zero-width space is put at a value's edge wherever it meets
+ * template text that could complete a mention with it: after a template `@`/`<@&` (so
+ * `@{title}` with title `everyone` doesn't become `@everyone`), and after a value ending in `@` or
+ * `<` (so title `@` before template `here` doesn't become `@here`). Mentions written entirely in
+ * the template are left as they are.
+ * @param template - Message template written by a panel user, with `{name}` placeholders.
+ * @param vars - Untrusted placeholder values; a placeholder with no value is left as written.
+ * @returns The filled content.
+ */
+export function fillTemplateWithoutPlaceholderMentions(template: string, vars: Record<string, string>): string {
+  return template.replace(/\{(\w+)\}/g, (match, key: string, offset: number) => {
+    const raw = Object.hasOwn(vars, key) ? vars[key] : undefined;
+    if (raw === undefined) return match;
+    let value = neutralizeMentions(raw);
+    if (value === '') return value;
+    if (ENDS_IN_MENTION_START.test(template.slice(0, offset))) value = `${ZERO_WIDTH_SPACE}${value}`;
+    if (VALUE_ENDS_IN_MENTION_START.test(value)) value = `${value}${ZERO_WIDTH_SPACE}`;
+    return value;
+  });
+}
+
 /** Discord's limit on a message's `content`. */
 export const DISCORD_MESSAGE_CONTENT_LIMIT = 2000;
 
