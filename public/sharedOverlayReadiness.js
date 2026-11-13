@@ -32,19 +32,46 @@ function describeVideo(v) {
 }
 
 /**
+ * Builds the "Push to overlays" form for one video: it POSTs with the page's CSRF token, and its
+ * button is greyed out when every connected overlay already has the video (or none is connected).
+ * @param {{id: number, allReady: boolean, online: number}} v - The video's row.
+ * @returns {HTMLFormElement} The form.
+ */
+function buildPushForm(v) {
+  const form = document.createElement('form');
+  form.method = 'POST';
+  form.action = '/overlay/shared/settings/videos/' + v.id + '/push';
+  const token = document.createElement('input');
+  token.type = 'hidden';
+  token.name = '_csrf';
+  token.value = document.body.dataset.csrfToken;
+  const button = document.createElement('button');
+  button.type = 'submit';
+  button.className = 'btn btn-ghost btn-sm';
+  button.textContent = 'Push to overlays';
+  button.disabled = v.allReady || v.online === 0;
+  form.appendChild(token);
+  form.appendChild(button);
+  return form;
+}
+
+/**
  * Replaces a list's items with one line per entry.
  * @param {HTMLElement} list - The `ul` to fill.
  * @param {string[]} lines - The text of each item.
  * @param {string} emptyText - Shown when there are no lines.
+ * @param {HTMLElement[]} [extras] - An element appended to each item, in order (optional).
  * @returns {void}
  */
-function fillList(list, lines, emptyText) {
+function fillList(list, lines, emptyText, extras) {
   list.replaceChildren();
-  for (const text of lines.length > 0 ? lines : [emptyText]) {
+  const texts = lines.length > 0 ? lines : [emptyText];
+  texts.forEach(function (text, i) {
     const item = document.createElement('li');
     item.textContent = text;
+    if (extras && lines.length > 0) item.appendChild(extras[i]);
     list.appendChild(item);
-  }
+  });
 }
 
 /**
@@ -68,7 +95,7 @@ function setReadinessStale(stale) {
 function renderReadiness(snapshot) {
   setReadinessStale(false);
   fillList(document.getElementById('readiness-overlays'), snapshot.overlays.map(describeOverlay), 'No shared overlays have connected yet.');
-  fillList(document.getElementById('readiness-videos'), snapshot.videos.map(describeVideo), 'No enabled shared videos.');
+  fillList(document.getElementById('readiness-videos'), snapshot.videos.map(describeVideo), 'No enabled shared videos.', snapshot.videos.map(buildPushForm));
 }
 
 if (document.getElementById('readiness-overlays')) {

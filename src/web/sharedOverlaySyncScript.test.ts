@@ -4,8 +4,8 @@ import path from 'path';
 import vm from 'vm';
 import { waitFor } from '../test-utils/waitFor';
 
-// The syncer's script is split over four files that share one global scope on the page.
-const source = ['shared-overlay-plan.js', 'shared-overlay-retry.js', 'shared-overlay-source.js', 'shared-overlay-sync.js']
+// The syncer's script is split over five files that share one global scope on the page.
+const source = ['shared-overlay-plan.js', 'shared-overlay-retry.js', 'shared-overlay-source.js', 'shared-overlay-push.js', 'shared-overlay-sync.js']
   .map((name) => fs.readFileSync(path.join(__dirname, '../../public', name), 'utf8'))
   .join('\n');
 // Top-level const/function declarations aren't properties of a vm context, so export them explicitly.
@@ -372,6 +372,165 @@ describe('createSharedSyncer', () => {
       { type: 'stored', url: '/a' },
       { type: 'idle' },
     ]);
+  });
+
+  describe('fetchNow (Manager push)', () => {
+    it('ignores a video that is already stored', async () => {
+      const fetchRange = fakeFetch(50);
+      const syncer = createSharedSyncer(deps(memoryStorage({ videos: ['/a'] }), fetchRange));
+      expect(await syncer.fetchNow(v('/a'))).toBe('ignored');
+      expect(fetchRange).not.toHaveBeenCalled();
+    });
+
+    it('fetches a missing video, pausing the background queue behind it and resuming afterwards', async () => {
+      const storage = memoryStorage();
+      const order: string[] = [];
+      const holder: { syncer?: any; result?: string } = {};
+      const fetchRange = vi.fn(async (url: string, start: number) => {
+        order.push(`${url}:${start}`);
+        if (url === '/a' && start === 0) holder.result = await holder.syncer.fetchNow(v('/c'));
+        return { buffer: `${url}:${start}`, total: 150 };
+      });
+      holder.syncer = createSharedSyncer(deps(storage, fetchRange));
+      await holder.syncer.sync([v('/a'), v('/b')]);
+      await holder.syncer.idle();
+      expect(holder.result).toBe('fetching');
+      // /c jumps in after /a's first chunk, keeps going to the end, then /a resumes (its chunk is kept), then /b.
+      expect(order).toEqual(['/a:0', '/c:0', '/c:100', '/a:100', '/b:0', '/b:100']);
+      expect([...storage.videos.keys()].sort()).toEqual(['/a', '/b', '/c']);
+      expect(storage.videos.get('/a')).toEqual(['/a:0', '/a:100']);
+    });
+
+    it('finishes a video already downloading in the background at full speed, keeping its chunks', async () => {
+      const storage = memoryStorage();
+      const sleeps: number[] = [];
+      const holder: { syncer?: any; result?: string } = {};
+      const fetchRange = vi.fn(async (url: string, start: number) => {
+        if (start === 0) holder.result = await holder.syncer.fetchNow(v(url));
+        return { buffer: `${url}:${start}`, total: 300 };
+      });
+      holder.syncer = createSharedSyncer(deps(storage, fetchRange, { chunkPauseMs: 7, sleep: async (ms: number) => { sleeps.push(ms); } }));
+      await holder.syncer.sync([v('/a')]);
+      await holder.syncer.idle();
+      expect(holder.result).toBe('finishing');
+      expect(fetchRange).toHaveBeenCalledTimes(3);
+      expect(sleeps).not.toContain(7);
+      expect(storage.videos.get('/a')).toEqual(['/a:0', '/a:100', '/a:200']);
+    });
+
+    it('tries a pushed video at once, even while its failed background download waits to be retried', async () => {
+      const storage = memoryStorage();
+      const { clock, timing } = fakeClock();
+      const holder: { syncer?: any; result?: string } = {};
+      let failures = 1;
+      let fetchedAt = -1;
+      const fetchRange = vi.fn(async (url: string, start: number) => {
+        if (failures-- > 0) throw new Error('offline');
+        fetchedAt = clock.time;
+        return { buffer: `${url}:${start}`, total: 50 };
+      });
+      let pushed = false;
+      const sleep = async (ms: number) => {
+        await timing.sleep(ms);
+        if (!pushed) { pushed = true; holder.result = await holder.syncer.fetchNow(v('/a')); }
+      };
+      holder.syncer = createSharedSyncer(deps(storage, fetchRange, { now: timing.now, sleep }));
+      await holder.syncer.sync([v('/a')]); // fails, and would wait 10 s before its next try
+      await holder.syncer.idle();
+      expect(holder.result).toBe('fetching');
+      expect(fetchedAt).toBe(1000); // right after the first short wait, not after the full 10 s
+      expect(storage.videos.has('/a')).toBe(true);
+    });
+
+    it('does not bring back a video that left the list while the push was reading the storage', async () => {
+      const storage = memoryStorage();
+      const realList = storage.listVideos;
+      let hold: Promise<void> | null = null;
+      storage.listVideos = async () => { const h = hold; hold = null; if (h) await h; return realList(); };
+      let releaseB!: () => void;
+      const bBlocked = new Promise<void>((resolve) => { releaseB = resolve; });
+      const fetched: string[] = [];
+      const fetchRange = vi.fn(async (url: string, start: number) => {
+        fetched.push(url);
+        if (url === '/b') await bBlocked;
+        return { buffer: `${url}:${start}`, total: 50 };
+      });
+      const syncer = createSharedSyncer(deps(storage, fetchRange));
+      await syncer.sync([v('/b'), v('/a')]); // /b downloads (blocked); /a waits behind it
+      let releasePush!: () => void;
+      hold = new Promise<void>((resolve) => { releasePush = resolve; });
+      const push = syncer.fetchNow(v('/a')); // waits in the storage read
+      await syncer.sync([v('/b')]); // /a leaves the list
+      releasePush();
+      expect(await push).toBe('ignored');
+      releaseB();
+      await syncer.idle();
+      expect(fetched).toEqual(['/b']);
+      expect(storage.videos.has('/a')).toBe(false);
+    });
+
+    it('keeps a pushed video ahead of the background ones when a new list arrives', async () => {
+      const storage = memoryStorage();
+      let releaseA!: () => void;
+      const aBlocked = new Promise<void>((resolve) => { releaseA = resolve; });
+      const order: string[] = [];
+      const fetchRange = vi.fn(async (url: string, start: number) => {
+        order.push(`${url}:${start}`);
+        if (url === '/a' && start === 0) await aBlocked;
+        return { buffer: `${url}:${start}`, total: 200 };
+      });
+      const syncer = createSharedSyncer(deps(storage, fetchRange));
+      await syncer.sync([v('/a'), v('/b'), v('/c')]); // /a downloads (blocked on its first chunk)
+      expect(await syncer.fetchNow(v('/c'))).toBe('fetching'); // /c goes to the front of the queue
+      await syncer.sync([v('/a'), v('/b'), v('/c'), v('/d')]); // a new list rebuilds the queue
+      releaseA();
+      await syncer.idle();
+      // /a yields to the pushed /c at its next chunk boundary, then resumes; /b and the new /d follow.
+      expect(order).toEqual(['/a:0', '/c:0', '/c:100', '/a:100', '/b:0', '/b:100', '/d:0', '/d:100']);
+    });
+
+    it('puts the background download behind every pending push, not just the first', async () => {
+      const storage = memoryStorage();
+      let releaseA!: () => void;
+      const aBlocked = new Promise<void>((resolve) => { releaseA = resolve; });
+      const order: string[] = [];
+      const fetchRange = vi.fn(async (url: string, start: number) => {
+        order.push(`${url}:${start}`);
+        if (url === '/a' && start === 0) await aBlocked;
+        return { buffer: `${url}:${start}`, total: 200 };
+      });
+      const syncer = createSharedSyncer(deps(storage, fetchRange));
+      await syncer.sync([v('/a')]); // /a downloads (blocked on its first chunk)
+      await syncer.fetchNow(v('/c'));
+      await syncer.fetchNow(v('/d')); // the waiting pushes are now /d then /c
+      releaseA();
+      await syncer.idle();
+      // /a yields at its chunk boundary and resumes only after both pushed videos are done.
+      expect(order).toEqual(['/a:0', '/d:0', '/d:100', '/c:0', '/c:100', '/a:100']);
+    });
+
+    it('resumes a half-stored video from its chunks', async () => {
+      const storage = memoryStorage({ chunks: { '/a': ['/a:0'] } });
+      const fetchRange = fakeFetch(200);
+      const syncer = createSharedSyncer(deps(storage, fetchRange));
+      expect(await syncer.fetchNow(v('/a'))).toBe('fetching');
+      await syncer.idle();
+      expect(fetchRange.mock.calls.map((c) => c[1])).toEqual([100]);
+    });
+
+    it('still waits while a shared video plays', async () => {
+      let paused = true;
+      let polls = 0;
+      const fetchRange = fakeFetch(50);
+      const syncer = createSharedSyncer(deps(memoryStorage(), fetchRange, {
+        isPaused: () => paused, sleep: async () => { if (++polls === 2) paused = false; },
+      }));
+      await syncer.fetchNow(v('/a'));
+      await Promise.resolve();
+      expect(fetchRange).not.toHaveBeenCalled();
+      await syncer.idle();
+      expect(fetchRange).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('finishes chunks that already cover the file without asking for a range past its end', async () => {
@@ -830,7 +989,7 @@ describe('resolveSharedSource', () => {
 describe('shared overlay page', () => {
   it('loads the helper scripts before the page script that uses them', () => {
     const view = fs.readFileSync(path.join(__dirname, '../../views/sharedOverlaySource.ejs'), 'utf8');
-    const order = ['sseClient', 'shared-overlay-timing', 'shared-overlay-plan', 'shared-overlay-retry', 'shared-overlay-source', 'shared-overlay-sync', 'shared-overlay-storage', 'shared-overlay-report', 'shared-overlay.js']
+    const order = ['sseClient', 'shared-overlay-timing', 'shared-overlay-plan', 'shared-overlay-retry', 'shared-overlay-source', 'shared-overlay-push', 'shared-overlay-sync', 'shared-overlay-storage', 'shared-overlay-report', 'shared-overlay.js']
       .map((name) => view.indexOf(`/${name}`));
     expect(order.every((i) => i >= 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);

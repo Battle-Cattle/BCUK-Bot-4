@@ -272,6 +272,9 @@
       syncList(data.videos);
     } else if (data.type === 'videos') {
       syncList(data.videos);
+    } else if (data.type === 'fetchNow' && data.url) {
+      // Manager push: store it now, never play it. Without storage there is nothing to do.
+      if (syncer) syncer.fetchNow({ url: data.url }).catch(function (err) { console.warn('Shared video push failed', err); });
     } else if (data.type === 'play' && data.video) {
       void play(data.video, data.playAt);
     }

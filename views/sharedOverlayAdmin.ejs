@@ -21,6 +21,8 @@
         invalid_upload:   'No valid file was chosen.',
         upload_failed:    'Upload failed — please try again.',
         delete_failed:    'Delete failed — please try again.',
+        video_disabled:   'That video is disabled. Enable it before pushing it to the overlays.',
+        push_cooldown:    'That video was pushed a moment ago. Give the overlays a minute to download it.',
         save_failed:      'Saving failed — please try again.'
       }; %>
       <p><%= errorMessages[error] || 'Something went wrong.' %></p>
@@ -35,7 +37,8 @@
         video_enabled:  'Video enabled.',
         video_disabled: 'Video disabled.',
         video_deleted:  'Video deleted.',
-        video_added:    'Video added to the shared list.'
+        video_added:    'Video added to the shared list.',
+        video_pushed:   'Pushed to ' + pushedCount + ' connected overlay' + (pushedCount === 1 ? '' : 's') + '. Those missing it are downloading it now.'
       }; %>
       <p><%= successMessages[success] || 'Done.' %></p>
     </div>

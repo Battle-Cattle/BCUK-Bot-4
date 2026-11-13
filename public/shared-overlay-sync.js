@@ -1,4 +1,4 @@
-/* global planSharedSync, nextSharedChunkRange, checkedRangeTotal, handleSyncFailure, forgetSyncRetry, takeReadyEntry, msUntilNextRetry */
+/* global syncYieldsToPush, fetchSyncNow, planSharedSync, nextSharedChunkRange, checkedRangeTotal, handleSyncFailure, forgetSyncRetry, takeReadyEntry, msUntilNextRetry */
 /**
  * Background sync of shared overlay videos into the overlay's own storage (#917). The queue, diff
  * and resume decisions live here as plain functions over injected storage and fetch layers, so they
@@ -95,7 +95,8 @@ async function downloadSyncVideo(s, entry) {
     if (total === null) return restartSyncDownload(s, entry);
     count++;
     emitSyncEvent(s, { type: 'progress', url: entry.url, percent: Math.min(100, Math.round((count * s.chunkBytes / total) * 100)) });
-    if (count * s.chunkBytes < total) await s.deps.sleep(s.chunkPauseMs);
+    if (count * s.chunkBytes < total && syncYieldsToPush(s, entry)) return;
+    if (count * s.chunkBytes < total && !s.fast.has(entry.url)) await s.deps.sleep(s.chunkPauseMs);
   }
   if (await storeCompletedVideo(s, entry.url)) emitSyncEvent(s, { type: 'stored', url: entry.url });
 }
@@ -136,7 +137,7 @@ async function drainSyncQueue(s) {
   while (s.queue.length > 0) {
     const entry = takeReadyEntry(s);
     if (!entry) { await s.deps.sleep(msUntilNextRetry(s)); continue; }
-    s.active = entry.url;
+    s.current = entry.url;
     try {
       await downloadSyncVideo(s, entry);
       forgetSyncRetry(s, entry.url);
@@ -144,10 +145,29 @@ async function drainSyncQueue(s) {
       handleSyncFailure(s, entry, err);
       await cleanUpRemovedDownload(s, entry);
     }
-    s.active = null;
+    s.fast.delete(entry.url);
+    s.current = null;
   }
   s.running = null;
   emitSyncEvent(s, { type: 'idle' });
+}
+
+/**
+ * Rebuilds the download queue from a plan. Videos already waiting keep their places (so a pushed
+ * video stays ahead of the background ones); newly planned ones follow in list order. The video
+ * being downloaded is left out: it is not stored yet, so it is in the plan, and queueing it again
+ * would fetch it twice.
+ * @param {object} s - The syncer's state.
+ * @param {Array<{url: string}>} planned - The videos the plan says to download, in list order.
+ * @returns {Array<{url: string}>} The new queue.
+ */
+function rebuildSyncQueue(s, planned) {
+  const byUrl = new Map(planned.map(function (e) { return [e.url, e]; }));
+  const kept = s.queue
+    .filter(function (e) { return byUrl.has(e.url) && e.url !== s.current; })
+    .map(function (e) { return byUrl.get(e.url); });
+  const keptUrls = new Set(kept.map(function (e) { return e.url; }));
+  return kept.concat(planned.filter(function (e) { return e.url !== s.current && !keptUrls.has(e.url); }));
 }
 
 /**
@@ -177,8 +197,7 @@ async function applyVideoList(s, list, seq) {
     // Leftover chunks of a stored video; the one being stored right now clears its own.
     if (url !== s.active) await s.deps.storage.clearChunks(url);
   }
-  // The video being downloaded is not stored yet, so it is in the plan; queueing it again would fetch it twice.
-  s.queue = plan.download.filter(function (e) { return e.url !== s.active; });
+  s.queue = rebuildSyncQueue(s, plan.download);
   if (!s.running && s.queue.length > 0) s.running = drainSyncQueue(s);
 }
 
@@ -220,9 +239,9 @@ function syncVideoList(s, list) {
  * @param {function(): number} [deps.now] - Current time in milliseconds (defaults to `Date.now`); schedules retries.
  * @param {number} [deps.chunkBytes] - Bytes per chunk (defaults to the constant above).
  * @param {number} [deps.chunkPauseMs] - Pause between chunks (defaults to the constant above).
- * @returns {{sync: function(Array<{url: string}>): Promise<void>, idle: function(): Promise<void>}}
- *   `sync` takes a new list (queueing downloads and deleting removed videos); `idle` resolves once
- *   the queue has drained.
+ * @returns {{sync: function(Array<{url: string}>): Promise<void>, fetchNow: function({url: string}): Promise<string>, idle: function(): Promise<void>}}
+ *   `sync` takes a new list (queueing downloads and deleting removed videos); `fetchNow` handles a
+ *   Manager push; `idle` resolves once the queue has drained.
  */
 function createSharedSyncer(deps) {
   const s = {
@@ -233,7 +252,8 @@ function createSharedSyncer(deps) {
     removals: new Map(), // URL -> times it left the list, so a download can tell it was invalidated
     queue: [],
     running: null,
-    active: null, // URL of the video being downloaded
+    current: null, // url being downloaded now
+    fast: new Set(), // urls to download at full speed (Manager push)
     failures: new Map(), // URL -> failed attempts so far
     retryAt: new Map(), // URL -> time a failed video may be tried again
     now: deps.now || function () { return Date.now(); },
@@ -242,6 +262,7 @@ function createSharedSyncer(deps) {
   };
   return {
     sync: function (list) { return syncVideoList(s, list); },
+    fetchNow: function (entry) { return fetchSyncNow(s, entry); },
     idle: function () { return s.running || Promise.resolve(); },
   };
 }

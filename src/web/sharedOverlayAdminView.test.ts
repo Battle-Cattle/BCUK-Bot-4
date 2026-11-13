@@ -15,6 +15,7 @@ function render(locals: Record<string, unknown> = {}): Promise<string> {
     ],
     ownVideos: [{ id: 9, name: 'Mine' }],
     connectedCount: 1,
+    pushedCount: 0,
     baseUrl: 'https://bot.example',
     streamer: { id: 5 },
     maxFileMb: 100,
@@ -41,8 +42,15 @@ describe('sharedOverlayAdmin view', () => {
     expect(html).not.toContain('Add one of your overlay videos');
   });
 
+  it('says how many overlays a push reached, singular and plural', async () => {
+    expect(await render({ success: 'video_pushed', pushedCount: 1 })).toContain('Pushed to 1 connected overlay.');
+    expect(await render({ success: 'video_pushed', pushedCount: 4 })).toContain('Pushed to 4 connected overlays.');
+  });
+
   it('shows error and success messages', async () => {
     expect(await render({ error: 'transcode_failed' })).toContain('could not be converted');
     expect(await render({ success: 'video_deleted' })).toContain('Video deleted.');
+    expect(await render({ error: 'push_cooldown' })).toContain('pushed a moment ago');
+    expect(await render({ error: 'video_disabled' })).toContain('Enable it before pushing');
   });
 });
