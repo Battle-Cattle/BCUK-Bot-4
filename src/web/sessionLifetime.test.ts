@@ -131,7 +131,12 @@ describe('with express-session', () => {
   function buildApp() {
     const store = new session.MemoryStore();
     const app = express();
-    app.use(session({ secret: 'x'.repeat(32), resave: false, saveUninitialized: false, store, cookie: { maxAge: SESSION_IDLE_MS } }));
+    // Secure cookie as in production: requests come "through the proxy" over HTTPS.
+    app.set('trust proxy', 1);
+    app.use(session({
+      secret: 'x'.repeat(32), resave: false, saveUninitialized: false, store,
+      cookie: { secure: true, httpOnly: true, sameSite: 'lax', maxAge: SESSION_IDLE_MS },
+    }));
     app.use(enforceSessionLifetime);
     app.get('/login', (req, res) => {
       req.session.user = USER as any;
@@ -144,6 +149,21 @@ describe('with express-session', () => {
     return { app, store };
   }
 
+  /**
+   * A client that keeps the session cookie by hand (supertest's agent won't send a `Secure` cookie
+   * over plain HTTP) and sends each request as if over HTTPS through the proxy.
+   */
+  function makeClient(app: express.Express) {
+    let cookie = '';
+    const get = async (path: string, headers: Record<string, string> = {}) => {
+      const res = await supertest(app).get(path).set({ ...headers, 'X-Forwarded-Proto': 'https', Cookie: cookie });
+      const setCookie = ([] as string[]).concat(res.headers['set-cookie'] ?? [])[0];
+      if (setCookie) cookie = setCookie.split(';')[0]!;
+      return res;
+    };
+    return { get };
+  }
+
   /** The `Expires` date of a response's session cookie, or undefined if none was set. */
   function cookieExpiry(res: supertest.Response): number | undefined {
     const cookie = ([] as string[]).concat(res.headers['set-cookie'] ?? [])[0];
@@ -153,30 +173,30 @@ describe('with express-session', () => {
 
   it('re-sends the cookie with a fresh expiry on a page load, but not on a background request', async () => {
     const { app } = buildApp();
-    const agent = supertest.agent(app);
+    const agent = makeClient(app);
     const login = await agent.get('/login');
     expect(cookieExpiry(login)).toBe(Math.floor((NOW + SESSION_IDLE_MS) / 1000) * 1000);
 
     vi.setSystemTime(NOW + 6 * 3_600_000);
-    const background = await agent.get('/api').set(FETCH);
+    const background = await agent.get('/api', FETCH);
     expect(background.status).toBe(200);
     expect(cookieExpiry(background)).toBeUndefined();
 
-    const page = await agent.get('/page').set(NAVIGATE);
+    const page = await agent.get('/page', NAVIGATE);
     expect(page.status).toBe(200);
     expect(cookieExpiry(page)).toBe(Math.floor((NOW + 6 * 3_600_000 + SESSION_IDLE_MS) / 1000) * 1000);
   });
 
   it('logs the user out once the absolute cap has passed, even with daily page loads', async () => {
     const { app } = buildApp();
-    const agent = supertest.agent(app);
+    const agent = makeClient(app);
     await agent.get('/login');
     for (let day = 1; day <= 7; day++) {
       vi.setSystemTime(NOW + day * 23 * 3_600_000);
-      expect((await agent.get('/page').set(NAVIGATE)).status).toBe(200);
+      expect((await agent.get('/page', NAVIGATE)).status).toBe(200);
     }
     vi.setSystemTime(NOW + SESSION_ABSOLUTE_MAX_MS + 1);
-    expect((await agent.get('/api').set(FETCH)).status).toBe(401);
-    expect((await agent.get('/page').set(NAVIGATE)).status).toBe(401);
+    expect((await agent.get('/api', FETCH)).status).toBe(401);
+    expect((await agent.get('/page', NAVIGATE)).status).toBe(401);
   });
 });
