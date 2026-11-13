@@ -623,6 +623,8 @@ mv "$BUILD_DIR" dist
 ENV_FILE=.env
 # shellcheck source=scripts/lib/dotenv.sh
 source scripts/lib/dotenv.sh
+# A restored backup or re-created .env can come back readable by every user on the host.
+warn_if_env_readable_by_others
 WEB_PORT_SETTING="$(trim "$(env_setting WEB_PORT)")"
 WEB_PORT="${WEB_PORT_SETTING:-3000}"
 WEB_HOST_SETTING="$(trim "$(env_setting WEB_HOST)")"

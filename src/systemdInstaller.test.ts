@@ -69,9 +69,14 @@ afterEach(() => {
   fs.rmSync(nodePrefix, { recursive: true, force: true });
 });
 
-/** Runs the installer with `env` as the checkout's .env, returning the rendered unit file. */
-function install(env: string, nodeBinDir = path.join(nodePrefix, 'bin')): string {
-  fs.writeFileSync(path.join(repo, '.env'), env);
+/**
+ * Runs the installer with `env` as the checkout's .env (given `envMode`), returning the rendered
+ * unit file and what the installer printed to stderr.
+ */
+function runInstaller(env: string, nodeBinDir = path.join(nodePrefix, 'bin'), envMode = 0o600): { unit: string; stderr: string } {
+  const envFile = path.join(repo, '.env');
+  fs.writeFileSync(envFile, env);
+  fs.chmodSync(envFile, envMode);
   const result = spawnSync('bash', [path.join(repo, 'scripts/install-systemd-service.sh')], {
     cwd: repo,
     encoding: 'utf8',
@@ -82,7 +87,12 @@ function install(env: string, nodeBinDir = path.join(nodePrefix, 'bin')): string
     },
   });
   if (result.status !== 0) throw new Error(`installer failed:\n${result.stdout}\n${result.stderr}`);
-  return fs.readFileSync(path.join(state, 'bcuk-bot.service'), 'utf8');
+  return { unit: fs.readFileSync(path.join(state, 'bcuk-bot.service'), 'utf8'), stderr: result.stderr };
+}
+
+/** Runs the installer with `env` as the checkout's .env, returning the rendered unit file. */
+function install(env: string, nodeBinDir = path.join(nodePrefix, 'bin')): string {
+  return runInstaller(env, nodeBinDir).unit;
 }
 
 /** The value of `key=` in a unit file. */
@@ -137,5 +147,54 @@ describe.skipIf(!canRunInstaller)('install-systemd-service.sh', () => {
 
   it.each(['100%videos', 'videos:ro', 'say"hi'])('refuses a folder path the unit cannot express (%s)', (name) => {
     expect(() => install(`OVERLAY_FOLDER='${root}/${name}'\n`)).toThrow(/can't express/);
+  });
+
+  it('adds the second round of sandbox settings (#958), and never an active MemoryDenyWriteExecute', () => {
+    const unit = install('');
+    expect(setting(unit, 'CapabilityBoundingSet')).toBe('');
+    expect(setting(unit, 'AmbientCapabilities')).toBe('');
+    expect(setting(unit, 'SystemCallArchitectures')).toBe('native');
+    expect(setting(unit, 'SystemCallFilter')).toBe('@system-service');
+    expect(setting(unit, 'SystemCallErrorNumber')).toBe('EPERM');
+    expect(setting(unit, 'RestrictAddressFamilies')).toBe('AF_INET AF_INET6 AF_UNIX');
+    expect(setting(unit, 'PrivateDevices')).toBe('true');
+    expect(setting(unit, 'ProtectClock')).toBe('true');
+    expect(setting(unit, 'ProtectProc')).toBe('invisible');
+    expect(setting(unit, 'ProcSubset')).toBe('pid');
+    expect(setting(unit, 'UMask')).toBe('0077');
+    expect(setting(unit, 'RemoveIPC')).toBe('true');
+    // V8's JIT needs writable+executable memory: the comment saying so stays, the setting never appears.
+    expect(setting(unit, 'MemoryDenyWriteExecute')).toBeUndefined();
+    expect(unit).toContain('# Not MemoryDenyWriteExecute=true');
+  });
+
+  it.each([0o664, 0o644, 0o640])('warns about a .env readable by group or others (mode %o), and still installs', (mode) => {
+    const { unit, stderr } = runInstaller('', path.join(nodePrefix, 'bin'), mode);
+    expect(stderr).toContain(`WARNING: ${repo}/.env is readable by other users on this host (mode ${mode.toString(8)})`);
+    expect(stderr).toContain(`chmod 600 ${repo}/.env`);
+    expect(unit).toContain('[Service]');
+  });
+
+  it.each([0o600, 0o400])('says nothing about a private .env (mode %o)', (mode) => {
+    const { stderr } = runInstaller('', path.join(nodePrefix, 'bin'), mode);
+    expect(stderr).not.toContain('WARNING');
+  });
+});
+
+// `systemd-analyze verify` catches an unknown or misspelt setting. It needs systemd on the test host,
+// and checks the rendered unit with the placeholders filled by the test's own values.
+const canVerifyUnit =
+  canRunInstaller && spawnSync('systemd-analyze', ['--version'], { stdio: 'ignore' }).status === 0;
+
+describe.skipIf(!canVerifyUnit)('bcuk-bot.service under systemd-analyze verify', () => {
+  it('has no unknown or invalid settings', () => {
+    const unitDir = path.join(root, 'units');
+    fs.mkdirSync(unitDir);
+    const unitPath = path.join(unitDir, 'bcuk-bot.service');
+    fs.writeFileSync(unitPath, install(''));
+    const result = spawnSync('systemd-analyze', ['verify', '--man=no', unitPath], { encoding: 'utf8' });
+    // Warnings about the host (a missing user, a dependency unit it lacks, the binary's path) are
+    // fine here; an unknown lvalue or a value systemd can't parse is what this is for.
+    expect(result.stderr).not.toMatch(/Unknown (key|lvalue)|Failed to parse|Invalid|unknown/i);
   });
 });

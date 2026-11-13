@@ -44,6 +44,7 @@ fi
 ENV_FILE="$REPO_DIR/.env"
 # shellcheck source=lib/dotenv.sh
 source "$REPO_DIR/scripts/lib/dotenv.sh"
+warn_if_env_readable_by_others
 
 # Prints the absolute path of an upload folder setting, falling back to config.ts's default. A
 # relative path is relative to the checkout, which is the unit's WorkingDirectory.

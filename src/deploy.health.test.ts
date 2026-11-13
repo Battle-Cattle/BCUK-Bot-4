@@ -21,6 +21,21 @@ describe.skipIf(notLinux)('deploy.sh (health)', { timeout: SCRIPT_TEST_TIMEOUT_M
     expect(fs.readdirSync(sandbox.backups).filter((f) => f.endsWith('-pre-deploy.sql.gz'))).toHaveLength(1);
   });
 
+  it('warns, without failing, when .env is readable by other users, and not when it is private (#959)', () => {
+    const envFile = path.join(sandbox.work, '.env');
+    fs.chmodSync(envFile, 0o644);
+    pushV2();
+    const shared = deploy();
+    expect(shared.status).toBe(0);
+    expect(shared.stderr).toContain('WARNING: .env is readable by other users on this host (mode 644)');
+    expect(shared.stderr).toContain('chmod 600 .env');
+
+    fs.chmodSync(envFile, 0o600);
+    const privateEnv = deploy();
+    expect(privateEnv.status).toBe(0);
+    expect(privateEnv.stderr).not.toContain('is readable by other users');
+  });
+
   it('sends every health probe straight to the bot, never through a proxy', () => {
     pushV2();
     // A proxy the deploy shell has set would otherwise carry the probe and could fail it.
