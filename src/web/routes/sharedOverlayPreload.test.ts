@@ -14,7 +14,7 @@ vi.mock('../../shared/config', () => ({ OVERLAY_FOLDER: dir, SHARED_OVERLAY_PREL
 import express from 'express';
 import { rateLimit } from 'express-rate-limit';
 import supertest from 'supertest';
-import { servePreloadVideo, parseByteRange, preloadBudget } from './sharedOverlayPreload';
+import { servePreloadVideo, parseByteRange, preloadBudget, openPreloadCount } from './sharedOverlayPreload';
 
 const content = Buffer.from(Array.from({ length: 1000 }, (_v, i) => i % 251));
 
@@ -126,3 +126,60 @@ describe('servePreloadVideo', () => {
     await new Promise<void>((resolve) => { server.close(() => { resolve(); }); });
   });
 });
+
+describe('servePreloadVideo — open preloads per IP (#1006)', () => {
+  /** The handler behind `trust proxy`, so each request can say which client IP it comes from. */
+  const proxiedApp = () => {
+    const a = express();
+    a.set('trust proxy', true);
+    a.get('/videos/:filename', testLimiter, servePreloadVideo);
+    return a;
+  };
+
+  /** Starts a (slow, budget-limited) download of big.webm from `ip`, without waiting for any bytes. */
+  function openSlowDownload(port: number, ip: string): http.ClientRequest {
+    const req = http.get({ port, path: '/videos/big.webm', headers: { 'X-Forwarded-For': ip } }, (res) => { res.resume(); });
+    req.on('error', () => {});
+    return req;
+  }
+
+  it('refuses a third concurrent preload from one IP with 429, allows another IP, and frees the slot when one closes', async () => {
+    const server = http.createServer(proxiedApp());
+    await new Promise<void>((resolve) => { server.listen(0, resolve); });
+    const { port } = server.address() as AddressInfo;
+    const base = `http://127.0.0.1:${port}`;
+    const open: http.ClientRequest[] = [];
+    try {
+      open.push(openSlowDownload(port, '203.0.113.1'), openSlowDownload(port, '203.0.113.1'));
+      await waitFor(() => { expect(openPreloadCount()).toBe(2); });
+
+      const refused = await supertest(base).get('/videos/small.webm').set('X-Forwarded-For', '203.0.113.1');
+      expect(refused.status).toBe(429);
+      expect(refused.headers['retry-after']).toBe('10');
+      expect(openPreloadCount()).toBe(2);
+
+      // Another client's preloads don't count against the first one's.
+      open.push(openSlowDownload(port, '203.0.113.2'));
+      await waitFor(() => { expect(openPreloadCount()).toBe(3); });
+
+      // Closing one of the first client's downloads gives it a slot back.
+      open[0]!.destroy();
+      await waitFor(() => { expect(openPreloadCount()).toBe(2); });
+      open.push(openSlowDownload(port, '203.0.113.1'));
+      await waitFor(() => { expect(openPreloadCount()).toBe(3); });
+    } finally {
+      for (const req of open) req.destroy();
+      await waitFor(() => { expect(openPreloadCount()).toBe(0); });
+      await waitFor(() => { expect(preloadBudget.pending()).toBe(0); });
+      await new Promise<void>((resolve) => { server.closeAllConnections(); server.close(() => { resolve(); }); });
+    }
+  });
+
+  it('releases the slot after a finished, refused or missing-file response', async () => {
+    await get('small.webm');
+    await get('nope.webm').expect(404);
+    await get('small.webm', 'bytes=5000-').expect(416);
+    expect(openPreloadCount()).toBe(0);
+  });
+});
+
