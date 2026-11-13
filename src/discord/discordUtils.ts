@@ -45,6 +45,25 @@ export function mentionsWrittenIn(template: string): MessageMentionOptions {
   };
 }
 
+/** Zero-width space: put after an `@`, it stops Discord reading the text as a mention. */
+const ZERO_WIDTH_SPACE = '\u200b';
+
+/**
+ * Makes text that came from someone other than the message's author unable to mention anyone:
+ * `@everyone`, `@here`, and `<@…>` user/role mentions get a zero-width space after the `@`, so they
+ * show as written but are plain text to Discord. Needed on top of `allowedMentions`, which allows
+ * mention types and ids but can't tell where in the content a mention came from: with `@here`
+ * allowed by a template, an `@everyone` from a filled-in placeholder would otherwise ping too,
+ * because Discord's `everyone` parse type covers both.
+ * @param text - Untrusted text, such as a stream title, about to be put into message content.
+ * @returns The same text with every mention neutralised.
+ */
+export function neutralizeMentions(text: string): string {
+  return text
+    .replace(/@(everyone|here)/g, `@${ZERO_WIDTH_SPACE}$1`)
+    .replace(/<@/g, `<@${ZERO_WIDTH_SPACE}`);
+}
+
 /** Discord's limit on a message's `content`. */
 export const DISCORD_MESSAGE_CONTENT_LIMIT = 2000;
 

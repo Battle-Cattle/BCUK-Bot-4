@@ -42,6 +42,7 @@ import {
   tryEditDiscordMessage,
   trySendDiscordReply,
   mentionsWrittenIn,
+  neutralizeMentions,
   truncateMessageContent,
   DISCORD_MESSAGE_CONTENT_LIMIT,
 } from './discordUtils';
@@ -414,6 +415,17 @@ describe('truncateMessageContent', () => {
     const result = truncateMessageContent(content);
     expect(result.length).toBeLessThanOrEqual(DISCORD_MESSAGE_CONTENT_LIMIT);
     expect(result).toBe(`${'a'.repeat(DISCORD_MESSAGE_CONTENT_LIMIT - 2)}…`);
+  });
+});
+
+describe('neutralizeMentions', () => {
+  it('puts a zero-width space after the @ of @everyone, @here, and user/role mentions', () => {
+    expect(neutralizeMentions('@everyone @here <@123456789012345678> <@!123456789012345678> <@&123456789012345678>'))
+      .toBe('@\u200beveryone @\u200bhere <@\u200b123456789012345678> <@\u200b!123456789012345678> <@\u200b&123456789012345678>');
+  });
+
+  it('leaves text without mentions, and plain @names, unchanged', () => {
+    expect(neutralizeMentions('Elden Ring w/ @someone #1 <3')).toBe('Elden Ring w/ @someone #1 <3');
   });
 });
 

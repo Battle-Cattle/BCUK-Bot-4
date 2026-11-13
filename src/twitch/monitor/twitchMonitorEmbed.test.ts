@@ -222,8 +222,27 @@ describe('renderAnnouncementContent (#1010)', () => {
   it('lets a template\'s own @everyone ping, but not a role or @here put into the stream title', () => {
     const vars = templateVars('streamer1', makeStream({ title: '<@&123456789012345678> @here' }));
     const result = renderAnnouncementContent('@everyone {streamer} is live: {title}', vars);
-    expect(result.content).toBe('@everyone streamer1 is live: <@&123456789012345678> @here');
+    // The title's mentions are neutralised (zero-width space after the @), the template's stays live.
+    expect(result.content).toBe('@everyone streamer1 is live: <@\u200b&123456789012345678> @\u200bhere');
     expect(result.allowedMentions).toEqual({ parse: ['everyone'], roles: [], users: [] });
+  });
+
+  it('does not let a title\'s @everyone ping when the template only uses @here, nor the reverse', () => {
+    const everyoneTitle = templateVars('streamer1', makeStream({ title: '@everyone come watch' }));
+    const hereTemplate = renderAnnouncementContent('@here {title}', everyoneTitle);
+    expect(hereTemplate.content).toBe('@here @\u200beveryone come watch');
+    expect(hereTemplate.content).not.toMatch(/@everyone/);
+
+    const hereTitle = templateVars('streamer1', makeStream({ title: '@here now' }));
+    const everyoneTemplate = renderAnnouncementContent('@everyone {title}', hereTitle);
+    expect(everyoneTemplate.content).toBe('@everyone @\u200bhere now');
+    expect(everyoneTemplate.content).not.toMatch(/@here/);
+  });
+
+  it('neutralises a role that the template also names when it arrives through the title', () => {
+    const role = '<@&123456789012345678>';
+    const result = renderAnnouncementContent(`${role} {title}`, templateVars('streamer1', makeStream({ title: role })));
+    expect(result.content).toBe(`${role} <@\u200b&123456789012345678>`);
   });
 
   it('allows a role written in the template, but not the same role arriving only through the title', () => {
