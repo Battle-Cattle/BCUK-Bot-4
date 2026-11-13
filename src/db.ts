@@ -112,6 +112,7 @@ export { initAlertConfigs, saveAlertConfig, setAlertImage, setAlertSound } from 
 
 export type { StreamerEventType, StreamerEvent } from './db/eventLog';
 export { recordStreamerEvent, getRecentStreamerEvents } from './db/eventLog';
+export { fitStreamerEventText } from './db/eventLogText';
 export type { RedemptionProgress, RedemptionEffect } from './db/redemptionLedger';
 export { getRedemptionProgress, markRedemptionEffect, pruneRedemptionLedger } from './db/redemptionLedger';
 export type {

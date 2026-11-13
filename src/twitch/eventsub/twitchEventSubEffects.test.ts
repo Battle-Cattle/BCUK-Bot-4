@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockLogger } from '../../test-utils/loggerMock';
 
-vi.mock('../../db', () => ({
+vi.mock('../../db', async () => ({
   getStreamerById: vi.fn(), findCachedAlertConfig: vi.fn(), recordStreamerEvent: vi.fn(),
+  // The real text fitting: it has no DB dependency.
+  fitStreamerEventText: (await import('../../db/eventLogText.js')).fitStreamerEventText,
 }));
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
