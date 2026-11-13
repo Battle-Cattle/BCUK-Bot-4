@@ -23,6 +23,7 @@ import {
   buildEmbed,
   templateVars,
   buildMessagePreview,
+  renderAnnouncementContent,
 } from './twitchMonitorEmbed';
 import type { TwitchStream } from '../twitchApi';
 import type { LiveState } from './twitchMonitorTypes';
@@ -216,3 +217,32 @@ describe('buildMessagePreview', () => {
     expect(preview.content).toBe('Watch streamer1 play {typo_field}');
   });
 });
+
+describe('renderAnnouncementContent (#1010)', () => {
+  it('lets a template\'s own @everyone ping, but not a role or @here put into the stream title', () => {
+    const vars = templateVars('streamer1', makeStream({ title: '<@&123456789012345678> @here' }));
+    const result = renderAnnouncementContent('@everyone {streamer} is live: {title}', vars);
+    expect(result.content).toBe('@everyone streamer1 is live: <@&123456789012345678> @here');
+    expect(result.allowedMentions).toEqual({ parse: ['everyone'], roles: [], users: [] });
+  });
+
+  it('allows a role written in the template, but not the same role arriving only through the title', () => {
+    const role = '<@&123456789012345678>';
+    const vars = templateVars('streamer1', makeStream({ title: role }));
+    expect(renderAnnouncementContent(`${role} {title}`, vars).allowedMentions.roles).toEqual(['123456789012345678']);
+    expect(renderAnnouncementContent('{title}', vars).allowedMentions.roles).toEqual([]);
+  });
+
+  it('sends parse: [] for a template without mentions', () => {
+    const vars = templateVars('streamer1', makeStream({ title: '@everyone' }));
+    expect(renderAnnouncementContent('{streamer}: {title}', vars).allowedMentions.parse).toEqual([]);
+  });
+
+  it('truncates filled content longer than Discord\'s 2000 characters', () => {
+    const vars = templateVars('streamer1', makeStream({ title: 't'.repeat(140) }));
+    const result = renderAnnouncementContent(`${'x'.repeat(2000)} {title}`, vars);
+    expect(result.content).toHaveLength(2000);
+    expect(result.content.endsWith('…')).toBe(true);
+  });
+});
+

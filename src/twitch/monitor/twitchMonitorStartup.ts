@@ -6,11 +6,10 @@ import { getTextChannel, tryDeleteDiscordMessage, tryEditDiscordMessage } from '
 import { setStreamerLive, clearStreamerLive, DbStreamerFull } from '../../db';
 import { getStreams, TwitchStream } from '../twitchApi';
 import { LiveState, makeLiveState } from './twitchMonitorTypes';
-import { buildEmbed, templateVars } from './twitchMonitorEmbed';
+import { buildEmbed, renderAnnouncementContent, templateVars } from './twitchMonitorEmbed';
 import { updateMultitwitch } from './twitchMonitorMultitwitch';
 import { postAnnouncement } from './twitchMonitorAnnouncements';
 import { withLoginLock } from './twitchMonitorLoginLock';
-import { fillTemplate } from '../../shared/textTemplate';
 
 /**
  * Tries to edit the streamer's existing startup-time "now live" message in place
@@ -42,9 +41,9 @@ export async function tryEditStartupMessage(
     const channel = await getTextChannel(discordClient, streamer.discord_channel_id);
     if (!channel || !isCurrent()) return false;
     const vars = templateVars(liveStream.user_login, liveStream);
-    const content = fillTemplate(streamer.group.live_message, vars, 'keep');
+    const message = renderAnnouncementContent(streamer.group.live_message, vars);
     const embed = buildEmbed(liveStream);
-    const edited = await tryEditDiscordMessage(discordClient, streamer.discord_channel_id, streamer.discord_message_id, { content, embeds: [embed] });
+    const edited = await tryEditDiscordMessage(discordClient, streamer.discord_channel_id, streamer.discord_message_id, { ...message, embeds: [embed] });
     if (!edited || !isCurrent()) return false;
     liveStates.set(String(streamer.id), makeLiveState(streamer, liveStream, streamer.discord_message_id, streamer.discord_channel_id));
     await setStreamerLive(streamer.id, streamer.discord_message_id, streamer.discord_channel_id, liveStream.game_name);

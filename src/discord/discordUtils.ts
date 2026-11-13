@@ -20,6 +20,50 @@ const TRANSIENT_ERROR_RETRY_DELAYS_MS = [5_000, 15_000];
  */
 export const NO_MENTIONS: MessageMentionOptions = { parse: [] };
 
+/** Discord's limit on how many role or user ids `allowedMentions` may list (each). */
+const MAX_ALLOWED_MENTION_IDS = 100;
+
+/**
+ * Builds `allowedMentions` that allow exactly the mentions written into a message template:
+ * `@everyone`/`@here` only if the template has one, and the role (`<@&id>`) and user (`<@id>`,
+ * `<@!id>`) ids it names. Pass it with the content made by filling that template, so a mention
+ * that arrives through a placeholder (e.g. a stream title a streamer sets freely) shows as text
+ * without notifying anyone, while the ones the panel user wrote still ping.
+ * @param template - The message template as written, before its placeholders are filled.
+ * @returns The mention options to send with the filled content.
+ */
+export function mentionsWrittenIn(template: string): MessageMentionOptions {
+  const roles = new Set<string>();
+  const users = new Set<string>();
+  for (const match of template.matchAll(/<@(&|!)?(\d{17,20})>/g)) {
+    (match[1] === '&' ? roles : users).add(match[2]!);
+  }
+  return {
+    parse: /@(everyone|here)\b/.test(template) ? ['everyone'] : [],
+    roles: [...roles].slice(0, MAX_ALLOWED_MENTION_IDS),
+    users: [...users].slice(0, MAX_ALLOWED_MENTION_IDS),
+  };
+}
+
+/** Discord's limit on a message's `content`. */
+export const DISCORD_MESSAGE_CONTENT_LIMIT = 2000;
+
+/**
+ * Shortens message content to Discord's {@link DISCORD_MESSAGE_CONTENT_LIMIT}, ending it with `…`,
+ * so content filled from a long template and placeholder (e.g. a 140-character stream title)
+ * can't make the send fail. Never splits a surrogate pair.
+ * @param content - The content to send.
+ * @returns `content` unchanged when it fits, otherwise its start plus `…`, within the limit.
+ */
+export function truncateMessageContent(content: string): string {
+  if (content.length <= DISCORD_MESSAGE_CONTENT_LIMIT) return content;
+  let end = DISCORD_MESSAGE_CONTENT_LIMIT - 1;
+  // Don't leave half of a surrogate pair (e.g. an emoji) before the ellipsis.
+  const last = content.charCodeAt(end - 1);
+  if (last >= 0xd800 && last <= 0xdbff) end--;
+  return `${content.slice(0, end)}…`;
+}
+
 /**
  * Checks whether `err` is a transient Discord API failure (5xx `HTTPError`/`DiscordAPIError`)
  * worth retrying, as opposed to a permanent failure like missing access or malformed input.

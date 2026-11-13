@@ -1,7 +1,9 @@
 import { EmbedBuilder } from '@discordjs/builders';
 import { TwitchStream } from '../twitchApi';
 import { LiveState } from './twitchMonitorTypes';
+import type { MessageMentionOptions } from 'discord.js';
 import { fillTemplate } from '../../shared/textTemplate';
+import { mentionsWrittenIn, truncateMessageContent } from '../../discord/discordUtils';
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
@@ -107,6 +109,30 @@ export function templateVars(login: string, stream: TwitchStream): Record<string
     game: stream.game_name || 'Unknown',
     title: stream.title,
     url: getStreamUrl(login),
+  };
+}
+
+/** An announcement's message content and the mentions it may ping. */
+export interface AnnouncementContent {
+  /** The filled template, within Discord's content limit. */
+  content: string;
+  /** Only the mentions the template's author wrote (see `mentionsWrittenIn`). */
+  allowedMentions: MessageMentionOptions;
+}
+
+/**
+ * Fills a live/new-game announcement template for sending to Discord. Mentions are limited to
+ * the ones written in the template, so `@everyone`, a role or a user put into a stream title (or
+ * game) through `{title}`/`{game}` doesn't ping anyone, and the content is cut to Discord's
+ * limit so a long title can't make every send fail.
+ * @param template - The group's `live_message` or `new_game_message`.
+ * @param vars - The placeholder values from {@link templateVars}.
+ * @returns Content and `allowedMentions` to spread into a send or edit payload.
+ */
+export function renderAnnouncementContent(template: string, vars: Record<string, string>): AnnouncementContent {
+  return {
+    content: truncateMessageContent(fillTemplate(template, vars, 'keep')),
+    allowedMentions: mentionsWrittenIn(template),
   };
 }
 

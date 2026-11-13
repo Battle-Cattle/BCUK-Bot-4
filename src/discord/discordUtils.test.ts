@@ -41,6 +41,9 @@ import {
   getTextChannel,
   tryEditDiscordMessage,
   trySendDiscordReply,
+  mentionsWrittenIn,
+  truncateMessageContent,
+  DISCORD_MESSAGE_CONTENT_LIMIT,
 } from './discordUtils';
 import { DiscordAPIError, HTTPError } from '@discordjs/rest';
 import { getDiscordClient } from './discordClientStore';
@@ -370,3 +373,47 @@ describe('getAvailableVoiceChannels', () => {
     await expect(getAvailableVoiceChannels('guild1')).rejects.toThrow('api down');
   });
 });
+
+describe('mentionsWrittenIn (#1010)', () => {
+  const ROLE = '123456789012345678';
+  const USER = '234567890123456789';
+
+  it('allows @everyone only when the template has @everyone or @here, and no roles or users', () => {
+    expect(mentionsWrittenIn('@everyone {streamer} is live: {title}')).toEqual({ parse: ['everyone'], roles: [], users: [] });
+    expect(mentionsWrittenIn('@here {streamer} is live')).toEqual({ parse: ['everyone'], roles: [], users: [] });
+  });
+
+  it('allows nothing for a template without mentions', () => {
+    expect(mentionsWrittenIn('{streamer} is live: {title} {url}')).toEqual({ parse: [], roles: [], users: [] });
+  });
+
+  it('allows the role and user ids written in the template, once each, including the <@!id> form', () => {
+    expect(mentionsWrittenIn(`<@&${ROLE}> <@${USER}> <@!${USER}> <@&${ROLE}> {title}`)).toEqual({ parse: [], roles: [ROLE], users: [USER] });
+  });
+
+  it('caps each id list at Discord\'s 100', () => {
+    const roles = Array.from({ length: 120 }, (_v, i) => `<@&${String(100000000000000000n + BigInt(i))}>`).join(' ');
+    expect(mentionsWrittenIn(roles).roles).toHaveLength(100);
+  });
+});
+
+describe('truncateMessageContent', () => {
+  it('leaves content within the limit unchanged', () => {
+    const exact = 'a'.repeat(DISCORD_MESSAGE_CONTENT_LIMIT);
+    expect(truncateMessageContent(exact)).toBe(exact);
+  });
+
+  it('cuts longer content to the limit, ending with an ellipsis', () => {
+    const result = truncateMessageContent('a'.repeat(2140));
+    expect(result).toHaveLength(DISCORD_MESSAGE_CONTENT_LIMIT);
+    expect(result.endsWith('…')).toBe(true);
+  });
+
+  it('does not split a surrogate pair at the cut', () => {
+    const content = `${'a'.repeat(DISCORD_MESSAGE_CONTENT_LIMIT - 2)}😀${'b'.repeat(10)}`;
+    const result = truncateMessageContent(content);
+    expect(result.length).toBeLessThanOrEqual(DISCORD_MESSAGE_CONTENT_LIMIT);
+    expect(result).toBe(`${'a'.repeat(DISCORD_MESSAGE_CONTENT_LIMIT - 2)}…`);
+  });
+});
+
