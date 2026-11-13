@@ -1,6 +1,6 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
-import { getStreamGroupsForGuild, getStreamersForGuild, getAllEventSubStreamers, getGuildMemberUsers } from '../../db';
+import { getStreamGroupsForGuild, getStreamersForGuild, getEventSubConnectionStatusForGuild, getGuildMemberUsers } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireManager, requireManagerJson } from '../middleware';
 import { getCurrentGuildId } from '../session';
@@ -32,7 +32,8 @@ function getFriendlyError(key: string): string {
 /**
  * GET /streams — renders the streams page with the session's current guild's
  * stream groups, streamers, the guild's members eligible to be added as
- * streamers, and (admin only) EventSub status per streamer.
+ * streamers, and (admin only) whether each of the guild's streamers has connected
+ * Twitch for EventSub.
  * @param req - Express request; reads `req.session.user` (including
  *   `currentGuildId`), `error`, and `success` query params.
  * @param res - Express response; renders the `streams` view, or a 500 error page
@@ -42,16 +43,16 @@ router.get('/streams', requireManager, csrfProtection, async (req, res) => {
   try {
     const isAdmin = (req.session.user?.accessLevel ?? 0) >= AccessLevel.ADMIN;
     const guildId = getCurrentGuildId(req);
-    const [groups, streamers, eventSubStreamers, guildUsers] = await Promise.all([
+    const [groups, streamers, eventSubConnected, guildUsers] = await Promise.all([
       getStreamGroupsForGuild(guildId),
       getStreamersForGuild(guildId),
-      isAdmin ? getAllEventSubStreamers() : Promise.resolve([]),
+      isAdmin ? getEventSubConnectionStatusForGuild(guildId) : Promise.resolve(new Map<number, boolean>()),
       getGuildMemberUsers(guildId),
     ]);
 
-    // EventSub status keyed by streamer row id — admin only
-    const eventSubById: Record<number, (typeof eventSubStreamers)[0]> = {};
-    for (const s of eventSubStreamers) eventSubById[s.id] = s;
+    // EventSub connected flag keyed by streamer row id — admin only. Only booleans reach the
+    // view: it shows a badge, so it never needs (and never gets) a streamer's OAuth tokens.
+    const eventSubConnectedById: Record<number, boolean> = Object.fromEntries(eventSubConnected);
 
     // Users eligible to be added as streamers: members of this guild with a Twitch name,
     // not already a streamer
@@ -65,7 +66,7 @@ router.get('/streams', requireManager, csrfProtection, async (req, res) => {
       groups,
       streamers,
       isAdmin,
-      eventSubById,
+      eventSubConnectedById,
       eligibleUsers,
       csrfToken: req.csrfToken(),
       error:   filterQueryParam(req.query.error,   KNOWN_ERRORS),

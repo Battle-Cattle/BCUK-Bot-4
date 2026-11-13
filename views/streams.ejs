@@ -187,14 +187,15 @@
           </thead>
           <tbody>
             <% streamers.forEach(function(s) {
-              const esData = isAdmin ? (eventSubById[s.id] || null) : null;
-              const isConnected = !!(esData && esData.eventsub_access_token);
+              const esConnected = isAdmin ? eventSubConnectedById[s.id] : undefined;
+              const hasEventSubStatus = esConnected !== undefined;
+              const isConnected = esConnected === true;
             %>
             <tr>
               <td class="mono">
                 <%= s.twitch_name ?? '–' %>
                 <% if (s.discord_name) { %><br><small class="hint"><%= s.discord_name %></small><% } %>
-                <% if (isAdmin && esData) { %>
+                <% if (hasEventSubStatus) { %>
                   <% if (isConnected) { %>
                   <span class="badge badge-active" title="EventSub connected">🔔</span>
                   <% } else { %>

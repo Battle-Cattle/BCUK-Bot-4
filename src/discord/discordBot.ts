@@ -1,5 +1,5 @@
 import { Client, GatewayIntentBits, Guild, Partials } from 'discord.js';
-import { DISCORD_TOKEN } from '../shared/config';
+import { DISCORD_TOKEN, DISCORD_AUTO_PROVISION_GUILD_IDS } from '../shared/config';
 import { handleCommand, forgetGuildCommandState } from '../commands/commandRouter';
 import { fireAndForget, extractCommand } from '../commands/commandUtils';
 import { executeCustomCommandForDiscord, forgetGuildCustomCommandCooldown } from '../commands/customCommandHandler';
@@ -9,6 +9,7 @@ import { recordDiscordConnected } from '../shared/healthStore';
 import { executeHealthCommandForDiscord } from '../commands/healthCommandHandler';
 import { forgetGuild as forgetGuildVoiceState, disconnect as disconnectAllVoice } from '../audio/audioPlayer';
 import { forgetGuildRefreshState } from './guildRefreshState';
+import { sendOwnerAlert } from './ownerAlerts';
 import { isRegisteredGuild, reloadGuildRegistry } from './guildRegistry';
 import { upsertGuild, getGuildById, findUser, upsertUser, setMemberAccessLevel, AccessLevel } from '../db';
 import { runUserMutation } from '../shared/userMutationQueue';
@@ -111,8 +112,8 @@ export function __getReadyWaiterCountForTests(): number {
 /**
  * Grants the Discord server's owner Admin access to a brand-new guild, creating
  * their whitelist `user` row first if they don't already have one. Only ever
- * called for a guild's first-ever appearance (see the `guildCreate` handler in
- * {@link startDiscordBot}) — never on a reconnect — so a deliberately
+ * called for an allowlisted guild's first-ever appearance (see
+ * {@link handleFirstGuildJoin}) — never on a reconnect — so a deliberately
  * de-provisioned guild is never silently re-granted. Never overwrites an
  * existing user's identity/legacy fields.
  *
@@ -182,16 +183,40 @@ function registerMessageCreateHandler(client: Client): void {
 }
 
 /**
+ * Handles the bot's first-ever appearance in a guild. A guild on
+ * `DISCORD_AUTO_PROVISION_GUILD_IDS` gets its Discord owner granted Admin access
+ * ({@link provisionGuildOwner}). Any other guild is left inert: no member is
+ * added, so it isn't served and nobody can sign in to it, and the bot owner is
+ * alerted so they can add its first member on the panel's Users page if the
+ * server is wanted. Without this gate, anyone able to invite the bot would
+ * become a panel Admin with reach into the catalogs every guild shares.
+ * @param guild - The discord.js Guild that was just joined for the first time.
+ * @returns Resolves once the owner is provisioned, or straight away for a guild left inert.
+ */
+async function handleFirstGuildJoin(guild: Guild): Promise<void> {
+  if (DISCORD_AUTO_PROVISION_GUILD_IDS.has(guild.id)) {
+    await provisionGuildOwner(guild);
+    return;
+  }
+  log.warn(`Joined guild '${guild.name}' (${guild.id}), which is not on DISCORD_AUTO_PROVISION_GUILD_IDS; leaving it unprovisioned.`);
+  // Not awaited: sendOwnerAlert waits for Discord to be ready and never throws, and the
+  // registry reload after this shouldn't wait on a DM.
+  void sendOwnerAlert(
+    `🟡 The bot was added to the Discord server '${guild.name}' (${guild.id}). It isn't on DISCORD_AUTO_PROVISION_GUILD_IDS, `
+      + 'so nobody was given access and the bot ignores it. If you want it served, add its first member on the panel\'s Users page.',
+  );
+}
+
+/**
  * Bootstrap: when the bot is added to a server for the first time, record the
- * guild row and auto-grant the Discord server's owner Admin access to it, so
- * they can self-serve the panel without the bot owner manually provisioning the
- * first member. guildCreate also fires on reconnect, and `guild` rows are never
- * deleted on leave, so the owner grant runs only the first time a guild_id is
- * ever seen (detected via getGuildById returning null beforehand) — never on a
- * reconnect or a kick-then-reinvite. This preserves the existing invariant that
- * a deliberately de-provisioned guild (all members removed) stays inert until
- * someone manually re-provisions it; upsertGuild itself is insert-if-not-exists
- * and never wipes existing per-guild config.
+ * guild row and hand it to {@link handleFirstGuildJoin}, which provisions the
+ * server's owner only for an allowlisted guild. guildCreate also fires on
+ * reconnect, and `guild` rows are never deleted on leave, so that runs only the
+ * first time a guild_id is ever seen (detected via getGuildById returning null
+ * beforehand) — never on a reconnect or a kick-then-reinvite. This preserves
+ * the invariant that a deliberately de-provisioned guild (all members removed)
+ * stays inert until someone manually re-provisions it; upsertGuild itself is
+ * insert-if-not-exists and never wipes existing per-guild config.
  * @param client - The Discord client to register the handler on.
  */
 function registerGuildCreateHandler(client: Client): void {
@@ -200,7 +225,7 @@ function registerGuildCreateHandler(client: Client): void {
       const isNewGuild = (await getGuildById(guild.id)) === null;
       await upsertGuild(guild.id, guild.name);
       if (isNewGuild) {
-        await provisionGuildOwner(guild);
+        await handleFirstGuildJoin(guild);
       }
       await reloadGuildRegistry();
       log.info(`Registered guild '${guild.name}' (${guild.id}).`);
