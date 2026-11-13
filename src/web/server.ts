@@ -21,6 +21,7 @@ import { renderView } from './routes/viewHelpers';
 import {
   ipKey,
   generalLimiterSkip,
+  overlayTrafficLimiter,
   isSessionStoreBusyError,
   limitReachedHandler,
   markSessionStoreError,
@@ -215,6 +216,7 @@ app.use((req, res, next) => {
 
 // Rate limiters — placed after session middleware so req.session is populated
 app.use(generalLimiter);
+app.use(overlayTrafficLimiter);
 app.use(sessionLimiter);
 
 app.use((req, res, next) => {

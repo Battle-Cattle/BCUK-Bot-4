@@ -165,6 +165,7 @@ vi.mock('./routes/health', () => ({ default: markerRouter('health') }));
 vi.mock('./routes/healthStatusEvents', () => ({ default: emptyRouter() }));
 
 import { app, generalLimiter, preSessionLimiter, sessionLimiter, startWebPanel, stopWebPanel } from './server';
+import { overlayTrafficLimiter } from './rateLimits';
 import { createHmac } from 'crypto';
 import { requireAuth, requireAuthJson, requireGuildContext } from './middleware';
 
@@ -536,6 +537,61 @@ describe('generalLimiter wiring (server.ts)', () => {
   it('skips an authenticated caller (per-account throttling is sessionLimiter’s job)', async () => {
     const testApp = buildLimiterTestApp(generalLimiter, { discordId: 'general-limiter-skip-test' });
     await withListeningServer(testApp, (probe) => expectProbeStatuses(probe, 105, 200));
+  });
+});
+
+describe('overlay traffic and the general limiter (#1011)', () => {
+  const LOOPBACK_KEYS = ['::ffff:127.0.0.1', '127.0.0.1', '::1'];
+
+  beforeEach(async () => {
+    for (const key of LOOPBACK_KEYS) {
+      await generalLimiter.resetKey(key);
+      await overlayTrafficLimiter.resetKey(key);
+    }
+  });
+
+  /** The real general and overlay limiters, as server.ts mounts them, in front of 200-returning routes. */
+  function buildOverlayTestApp(): express.Express {
+    const testApp = express();
+    testApp.use((req, _res, next) => {
+      (req as unknown as { session: Record<string, unknown> }).session = {};
+      next();
+    });
+    testApp.use(generalLimiter);
+    testApp.use(overlayTrafficLimiter);
+    testApp.all(/.*/, (_req, res) => res.json({ ok: true }));
+    return testApp;
+  }
+
+  it('lets an OBS shared-overlay sync run without tripping the general limit, which still limits other routes', async () => {
+    const server = http.createServer(buildOverlayTestApp());
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address() as AddressInfo;
+    const agent = new http.Agent({ keepAlive: true, maxSockets: 1 });
+    /** Sends one request over the shared keep-alive socket and resolves with its status. */
+    const send = (method: string, path: string): Promise<number> => new Promise((resolve, reject) => {
+      const req = http.request({ host: '127.0.0.1', port, path, method, agent }, (res) => {
+        res.resume();
+        res.on('end', () => resolve(res.statusCode ?? 0));
+      });
+      req.on('error', reject);
+      req.end();
+    });
+    try {
+      // 150 preload range requests and 60 readiness reports: well past the general limit of 100.
+      for (let i = 0; i < 150; i++) expect(await send('GET', '/overlay/shared/videos/a.webm?preload=1')).toBe(200);
+      for (let i = 0; i < 60; i++) expect(await send('POST', '/overlay/shared/streamer1/report')).toBe(200);
+      // The streamer's other overlay requests from the same IP still go through.
+      expect(await send('GET', '/overlay/videos/5/clip.webm')).toBe(200);
+      expect(await send('GET', '/alerts/streamer1/events')).toBe(200);
+      expect(await send('GET', '/alerts/assets/5/ding.mp3')).toBe(200);
+      // An unrelated unauthenticated route is still limited at 100 per window.
+      for (let i = 0; i < 100; i++) expect(await send('GET', '/auth/login')).toBe(200);
+      expect(await send('GET', '/auth/login')).toBe(429);
+    } finally {
+      agent.destroy();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 });
 
