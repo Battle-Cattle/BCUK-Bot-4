@@ -1,15 +1,17 @@
-/* global syncYieldsToPush, fetchSyncNow, planSharedSync, nextSharedChunkRange, checkedRangeTotal, handleSyncFailure, forgetSyncRetry, takeReadyEntry, msUntilNextRetry */
+/* global pauseAfterSyncChunk, fetchSyncNow, planSharedSync, nextSharedChunkRange, checkedRangeTotal, handleSyncFailure, forgetSyncRetry, takeReadyEntry, msUntilNextRetry */
 /**
  * Background sync of shared overlay videos into the overlay's own storage (#917). The queue, diff
  * and resume decisions live here as plain functions over injected storage and fetch layers, so they
  * can be tested outside a browser; shared-overlay-storage.js supplies the real Cache Storage and
- * IndexedDB layers.
+ * IndexedDB layers, shared-overlay-retry.js the schedule for retrying a failed download, and
+ * shared-overlay-source.js the choice of what to play a video from.
  */
 
 /** Bytes requested per range request while storing a video. */
 const SHARED_SYNC_CHUNK_BYTES = 2 * 1024 * 1024;
 /** Pause between chunks, spreading the load (the server-side speed limit is the hard cap). */
 const SHARED_SYNC_CHUNK_PAUSE_MS = 1000;
+/** How often to re-check whether a shared video is still playing, while a download is paused. */
 const SHARED_SYNC_PAUSE_POLL_MS = 500;
 
 /**
@@ -95,8 +97,7 @@ async function downloadSyncVideo(s, entry) {
     if (total === null) return restartSyncDownload(s, entry);
     count++;
     emitSyncEvent(s, { type: 'progress', url: entry.url, percent: Math.min(100, Math.round((count * s.chunkBytes / total) * 100)) });
-    if (count * s.chunkBytes < total && syncYieldsToPush(s, entry)) return;
-    if (count * s.chunkBytes < total && !s.fast.has(entry.url)) await s.deps.sleep(s.chunkPauseMs);
+    if (await pauseAfterSyncChunk(s, entry, count * s.chunkBytes < total)) return;
   }
   if (await storeCompletedVideo(s, entry.url)) emitSyncEvent(s, { type: 'stored', url: entry.url });
 }
@@ -239,7 +240,8 @@ function syncVideoList(s, list) {
  *   (`removed`), and when the queue drains (`idle`), so the page can report readiness.
  * @param {function(): number} [deps.now] - Current time in milliseconds (defaults to `Date.now`); schedules retries.
  * @param {number} [deps.chunkBytes] - Bytes per chunk (defaults to the constant above).
- * @param {number} [deps.chunkPauseMs] - Pause between chunks (defaults to the constant above).
+ * @param {number|function(): number} [deps.chunkPauseMs] - Pause between chunks, or a function giving
+ *   it each time (defaults to the live-streamer constant above).
  * @returns {{sync: function(Array<{url: string}>): Promise<void>, fetchNow: function({url: string}): Promise<string>, idle: function(): Promise<void>}}
  *   `sync` takes a new list (queueing downloads and deleting removed videos); `fetchNow` handles a
  *   Manager push; `idle` resolves once the queue has drained.

@@ -1,24 +1,31 @@
 <%# "OBS Browser Source" card for a streamer's overlay page: the browser-source URL plus a live
     connection-status dot. Locals: streamer (the streamer row), baseUrl, overlayPath — the overlay's
-    path segment ('alerts' or 'overlay'), used for both the browser-source URL and its events stream. -%>
-<% const login = streamer.twitch_name ? streamer.twitch_name.toLowerCase() : ''; %>
+    path segment ('alerts', 'overlay' or 'overlay/shared'), used for the browser-source URL and its
+    events stream. Optional: heading (the card's title, default "OBS Browser Source") and showStatus
+    (false leaves out the status dot and its script, for an overlay with no per-streamer events
+    stream to watch, like the shared one). -%>
+<% const login = streamer.twitch_name ? streamer.twitch_name.toLowerCase() : '';
+   const heading = locals.heading || 'OBS Browser Source';
+   const showStatus = locals.showStatus !== false; %>
 <!-- ── Browser Source URL ──────────────────────────────────────── -->
 <section class="section">
-  <h2 class="section-title">OBS Browser Source</h2>
+  <h2 class="section-title"><%= heading %></h2>
   <div class="card">
     <div class="card-body">
       <p class="hint hint-compact">Add this URL as a Browser Source in OBS (1920×1080, transparent background):</p>
       <code class="mono overlay-url-display"><%= baseUrl %>/<%= overlayPath %>/<%= login %></code>
       <p class="hint mt-05">In OBS: Sources → Add → Browser → check "Local file" OFF, paste the URL above.</p>
+      <% if (showStatus) { %>
       <div class="overlay-status">
         <span class="dot dot--offline" id="overlay-status-dot"></span>
         <span id="overlay-status-text"><%= login ? 'Checking…' : 'Not connected' %></span>
       </div>
+      <% } %>
     </div>
   </div>
 </section>
 
-<% if (login) { %>
+<% if (login && showStatus) { %>
 <script src="/sseClient.js"></script>
 <script src="/overlayConnectionStatus.js" data-events-url="/<%= overlayPath %>/settings/events"></script>
 <% } %>

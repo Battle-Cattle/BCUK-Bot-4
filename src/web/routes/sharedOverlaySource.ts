@@ -14,6 +14,7 @@ import { broadcastToChannel } from './sseChannel';
 import { createSseEventsHandler, createLoginValidator } from './sseEventsHandlers';
 import { SHARED_FOLDER } from './sharedOverlayVideoFiles';
 import { servePreloadVideo } from './sharedOverlayPreload';
+import { isStreamerLive, noteLiveSent } from './sharedOverlayLiveState';
 
 // The shared video overlay (#917): a separate OBS browser source at /overlay/shared/:login that
 // plays the same video on every connected streamer's stream, so it never queues behind
@@ -117,16 +118,21 @@ export function getSharedOverlayConnectionCount(): number {
 }
 
 /**
- * Sends a newly connected overlay its server time (for the clock offset), the late-start limit
- * and the enabled video list. On a failed list lookup the connection is closed so the overlay's
+ * Sends a newly connected overlay its server time (for the clock offset), the late-start limit,
+ * the enabled video list and whether its streamer is live. On a failed list lookup the connection is closed so the overlay's
  * reconnect backoff retries, rather than leaving it without a list.
  * @param res - The overlay's SSE response.
+ * @param login - Lowercase Twitch login the overlay is connected for, to tell it whether they are live.
  */
-async function sendInit(res: Response): Promise<void> {
+async function sendInit(res: Response, login: string): Promise<void> {
   try {
     const videos = await getSharedVideoEntries();
-    const init = { type: 'init', serverTime: Date.now(), maxLateMs: SHARED_OVERLAY_MAX_LATE_SECONDS * 1000, videos };
+    const live = isStreamerLive(login);
+    const init = {
+      type: 'init', serverTime: Date.now(), maxLateMs: SHARED_OVERLAY_MAX_LATE_SECONDS * 1000, videos, live,
+    };
     if (!res.writableEnded) {
+      noteLiveSent(login, live);
       res.write(`data: ${JSON.stringify(init)}\n\n`);
       initialised.add(res);
     }

@@ -4,15 +4,15 @@ import path from 'path';
 import vm from 'vm';
 import { waitFor } from '../test-utils/waitFor';
 
-// The syncer's script is split over five files that share one global scope on the page.
-const source = ['shared-overlay-plan.js', 'shared-overlay-retry.js', 'shared-overlay-source.js', 'shared-overlay-push.js', 'shared-overlay-sync.js']
+// The syncer's script is split over six files that share one global scope on the page.
+const source = ['shared-overlay-plan.js', 'shared-overlay-retry.js', 'shared-overlay-source.js', 'shared-overlay-push.js', 'shared-overlay-pacing.js', 'shared-overlay-sync.js']
   .map((name) => fs.readFileSync(path.join(__dirname, '../../public', name), 'utf8'))
   .join('\n');
 // Top-level const/function declarations aren't properties of a vm context, so export them explicitly.
 const context: Record<string, any> = { setTimeout, clearTimeout, AbortController };
 vm.createContext(context);
-vm.runInContext(`${source}\nthis.api = { planSharedSync, nextSharedChunkRange, createSharedSyncer, resolveSharedSource, checkedRangeTotal, fetchSharedRange, holdSyncOwnership, fallBackToRoute, playSource, buildReadinessReport };`, context);
-const { planSharedSync, nextSharedChunkRange, createSharedSyncer, resolveSharedSource, checkedRangeTotal, fetchSharedRange, holdSyncOwnership, fallBackToRoute, playSource, buildReadinessReport } = context.api;
+vm.runInContext(`${source}\nthis.api = { planSharedSync, nextSharedChunkRange, createSharedSyncer, resolveSharedSource, checkedRangeTotal, fetchSharedRange, holdSyncOwnership, fallBackToRoute, playSource, buildReadinessReport, chunkPauseFor };`, context);
+const { planSharedSync, nextSharedChunkRange, createSharedSyncer, resolveSharedSource, checkedRangeTotal, fetchSharedRange, holdSyncOwnership, fallBackToRoute, playSource, buildReadinessReport, chunkPauseFor } = context.api;
 
 const v = (url: string) => ({ url });
 
@@ -80,6 +80,14 @@ function memoryStorage(initial: { videos?: string[]; chunks?: Record<string, str
 function fakeFetch(size: number) {
   return vi.fn(async (url: string, start: number, _end: number) => ({ buffer: `${url}:${start}`, total: size }));
 }
+
+describe('chunkPauseFor', () => {
+  it('preloads faster while the streamer is offline than while they are live', () => {
+    expect(chunkPauseFor(true)).toBe(1000);
+    expect(chunkPauseFor(false)).toBe(250);
+    expect(chunkPauseFor(false)).toBeLessThan(chunkPauseFor(true));
+  });
+});
 
 describe('buildReadinessReport', () => {
   const list = [{ id: 1, url: '/a' }, { id: 2, url: '/b' }];
@@ -178,6 +186,18 @@ describe('createSharedSyncer', () => {
     expect(fetchRange).toHaveBeenCalledTimes(1);
     expect(storage.videos.has('/a')).toBe(false);
     expect(storage.chunks.has('/a')).toBe(false);
+  });
+
+  it('takes the pause between chunks from a function, so a live-state change applies mid-download', async () => {
+    const sleeps: number[] = [];
+    let pause = 900;
+    const fetchRange = vi.fn(async (url: string) => { pause = 120; return { buffer: url, total: 300 }; });
+    const syncer = createSharedSyncer(deps(memoryStorage(), fetchRange, {
+      chunkPauseMs: () => pause, sleep: async (ms: number) => { sleeps.push(ms); },
+    }));
+    await syncer.sync([v('/a')]);
+    await syncer.idle();
+    expect(sleeps).toEqual([120, 120]);
   });
 
   it('starts a video over when it is removed and added back while a chunk is in flight', async () => {
@@ -1005,7 +1025,7 @@ describe('resolveSharedSource', () => {
 describe('shared overlay page', () => {
   it('loads the helper scripts before the page script that uses them', () => {
     const view = fs.readFileSync(path.join(__dirname, '../../views/sharedOverlaySource.ejs'), 'utf8');
-    const order = ['sseClient', 'shared-overlay-timing', 'shared-overlay-plan', 'shared-overlay-retry', 'shared-overlay-source', 'shared-overlay-push', 'shared-overlay-sync', 'shared-overlay-storage', 'shared-overlay-report', 'shared-overlay.js']
+    const order = ['sseClient', 'shared-overlay-timing', 'shared-overlay-plan', 'shared-overlay-retry', 'shared-overlay-source', 'shared-overlay-push', 'shared-overlay-pacing', 'shared-overlay-sync', 'shared-overlay-storage', 'shared-overlay-report', 'shared-overlay.js']
       .map((name) => view.indexOf(`/${name}`));
     expect(order.every((i) => i >= 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);

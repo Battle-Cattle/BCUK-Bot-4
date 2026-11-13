@@ -6,7 +6,8 @@ import { SHARED_OVERLAY_LEAD_MS, SHARED_OVERLAY_TRIGGER_COOLDOWN_MS } from '../.
 import { Router, type Request } from 'express';
 import { getSharedVideo, listEnabledSharedVideos } from '../../db';
 import { requireApiKey } from '../middleware';
-import { pushSharedPlay, sharedVideoUrl } from './sharedOverlaySource';
+import { pushSharedPlay, sharedConnections, sharedVideoUrl } from './sharedOverlaySource';
+import { getReadinessSnapshot } from './sharedOverlayReadiness';
 
 const log = createLogger('StreamdeckSharedVideos');
 const router = Router();
@@ -26,13 +27,25 @@ function parseVideoId(req: Request): number | null {
 }
 
 /**
- * GET /api/streamdeck/shared-videos — lists the enabled shared videos for the plugin's dropdown.
+ * GET /api/streamdeck/shared-videos — lists the enabled shared videos for the plugin's dropdown, with
+ * how many connected overlays have each stored.
+ * The Stream Deck plugin's Play Shared Video action (BCUK-StreamDeck-Plugin 2.1.0+) reads `id`, `name`
+ * and the `ready` / `connected` pair from this response: both must stay non-negative integers (it
+ * drops the pair otherwise), and `connected: 0` means "no overlay online". Changing them needs a
+ * plugin update; adding other fields is safe.
  * @param _req - Express request; authenticated by `requireApiKey`.
- * @param res - `{ ok, videos: [{ id, name }] }`, or 500 on a DB error.
+ * @param res - `{ ok, videos: [{ id, name, ready, connected }] }` (`ready` of `connected` overlays
+ *   have the video stored), or 500 on a DB error.
  */
 router.get('/shared-videos', requireApiKey, async (_req, res) => {
   try {
-    const videos = (await listEnabledSharedVideos()).map((v) => ({ id: v.id, name: v.name }));
+    const enabled = await listEnabledSharedVideos();
+    // Additive fields (older plugin versions ignore them): how many connected overlays have each
+    // video stored, so the plugin can mark videos that are not ready everywhere yet.
+    const readiness = new Map(getReadinessSnapshot(enabled, new Set(sharedConnections.keys())).videos.map((r) => [r.id, r]));
+    const videos = enabled.map((v) => ({
+      id: v.id, name: v.name, ready: readiness.get(v.id)?.ready ?? 0, connected: readiness.get(v.id)?.online ?? 0,
+    }));
     res.json({ ok: true, videos });
   } catch (err) {
     log.error('Failed to list shared videos:', err);

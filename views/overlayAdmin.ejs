@@ -56,6 +56,9 @@
     <% } else { %>
 
     <%- include('partials/obsBrowserSource', { overlayPath: 'overlay' }) %>
+    <%# The shared overlay is the one every Stream Deck key can play videos on at once (a Manager
+        manages its videos), so each streamer needs their own link to it too. -%>
+    <%- include('partials/obsBrowserSource', { overlayPath: 'overlay/shared', heading: 'Shared Video Overlay — OBS Browser Source', showStatus: false }) %>
 
     <!-- ── Video Library ──────────────────────────────────────────── -->
     <section class="section">
