@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { lastSentLive } from './sharedOverlayLiveState';
 import { mockLogger } from '../../test-utils/loggerMock';
 
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
@@ -117,6 +118,8 @@ describe('events', () => {
     const live = fake('livechannel');
     await handler('/:login/events')(live.req, live.res, vi.fn());
     expect(frames(live.res)[0].live).toBe(true);
+    expect(lastSentLive.get('livechannel')).toBe(true); // so the first later change is pushed
+    expect(lastSentLive.get('alice')).toBe(false);
   });
 
   it('closes the connection when the list lookup fails', async () => {

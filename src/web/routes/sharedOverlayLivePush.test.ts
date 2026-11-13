@@ -11,7 +11,7 @@ vi.mock('./sharedOverlaySource', () => ({ sharedConnections: conns.sharedConnect
 const broadcast = vi.hoisted(() => vi.fn());
 vi.mock('./sseChannel', () => ({ broadcastToChannel: broadcast }));
 
-import { isStreamerLive } from './sharedOverlayLiveState';
+import { isStreamerLive, lastSentLive, noteLiveSent } from './sharedOverlayLiveState';
 import './sharedOverlayLivePush';
 
 const change = () => listener.fn!();
@@ -20,6 +20,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   conns.sharedConnections.clear();
   live.states.clear();
+  lastSentLive.clear();
   change(); // forget what the previous test saw
 });
 
@@ -36,17 +37,28 @@ describe('live-state push', () => {
     expect(listener.fn).toBeTypeOf('function');
   });
 
-  it('sends nothing the first time a login is seen (its state travels in init)', () => {
+  it('sends nothing for a login whose init has not been sent yet (its state travels in init)', () => {
     conns.sharedConnections.set('alice', new Set());
     live.states.set('alice', true);
     change();
     expect(broadcast).not.toHaveBeenCalled();
   });
 
+  it('sends the first live transition after init, even with no notification in between', () => {
+    conns.sharedConnections.set('alice', new Set());
+    noteLiveSent('alice', false); // init said offline
+    live.states.set('alice', true);
+    change();
+    expect(broadcast).toHaveBeenCalledWith(conns.sharedConnections, 'alice', { type: 'live', live: true });
+    change(); // same state again
+    expect(broadcast).toHaveBeenCalledTimes(1);
+  });
+
   it('sends the new state to that login only when it changes', () => {
     conns.sharedConnections.set('alice', new Set());
     conns.sharedConnections.set('bob', new Set());
-    change();
+    noteLiveSent('alice', false);
+    noteLiveSent('bob', false);
     live.states.set('alice', true);
     change();
     expect(broadcast).toHaveBeenCalledTimes(1);
@@ -60,7 +72,7 @@ describe('live-state push', () => {
 
   it('forgets a login once its overlays are gone, so a reconnect is treated as new', () => {
     conns.sharedConnections.set('alice', new Set());
-    change();
+    noteLiveSent('alice', false);
     conns.sharedConnections.delete('alice');
     change();
     live.states.set('alice', true);

@@ -14,7 +14,7 @@ import { broadcastToChannel } from './sseChannel';
 import { createSseEventsHandler, createLoginValidator } from './sseEventsHandlers';
 import { SHARED_FOLDER } from './sharedOverlayVideoFiles';
 import { servePreloadVideo } from './sharedOverlayPreload';
-import { isStreamerLive } from './sharedOverlayLiveState';
+import { isStreamerLive, noteLiveSent } from './sharedOverlayLiveState';
 
 // The shared video overlay (#917): a separate OBS browser source at /overlay/shared/:login that
 // plays the same video on every connected streamer's stream, so it never queues behind
@@ -127,10 +127,12 @@ export function getSharedOverlayConnectionCount(): number {
 async function sendInit(res: Response, login: string): Promise<void> {
   try {
     const videos = await getSharedVideoEntries();
+    const live = isStreamerLive(login);
     const init = {
-      type: 'init', serverTime: Date.now(), maxLateMs: SHARED_OVERLAY_MAX_LATE_SECONDS * 1000, videos, live: isStreamerLive(login),
+      type: 'init', serverTime: Date.now(), maxLateMs: SHARED_OVERLAY_MAX_LATE_SECONDS * 1000, videos, live,
     };
     if (!res.writableEnded) {
+      noteLiveSent(login, live);
       res.write(`data: ${JSON.stringify(init)}\n\n`);
       initialised.add(res);
     }

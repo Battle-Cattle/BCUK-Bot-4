@@ -11,3 +11,16 @@ import { getStatus } from '../../shared/statusStore';
 export function isStreamerLive(login: string): boolean {
   return getStatus(null).twitch[login]?.isLive === true;
 }
+
+/** The live state last sent to each connected login's overlays (in init or a push), to send only changes. */
+export const lastSentLive = new Map<string, boolean>();
+
+/**
+ * Records the live state an overlay was just told for a login, so the next status change is compared
+ * against what it knows rather than being swallowed as a first sight.
+ * @param login - Lowercase Twitch login the overlay is connected for.
+ * @param live - The live state that was sent.
+ */
+export function noteLiveSent(login: string, live: boolean): void {
+  lastSentLive.set(login, live);
+}
