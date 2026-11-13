@@ -40,14 +40,17 @@
   }
 
   /**
-   * Fetches one inclusive byte range of a video from the normal route.
+   * Fetches one inclusive byte range of a video. Background downloads use the speed-limited
+   * `?preload=1` route; a Manager push uses the normal route at full speed.
    * @param {string} url - The video's URL path.
    * @param {number} start - First byte, inclusive.
    * @param {number} end - Last byte, inclusive.
+   * @param {boolean} fullSpeed - True for a pushed video.
    * @returns {Promise<{buffer: ArrayBuffer, total: number}>} The bytes and the file's total size.
    */
-  function fetchRange(url, start, end) {
-    return fetchSharedRange(function (u, options) { return fetch(u, options); }, url, start, end, RANGE_DEADLINE_MS);
+  function fetchRange(url, start, end, fullSpeed) {
+    const route = fullSpeed ? url : url + '?preload=1';
+    return fetchSharedRange(function (u, options) { return fetch(u, options); }, route, start, end, RANGE_DEADLINE_MS);
   }
 
   /**

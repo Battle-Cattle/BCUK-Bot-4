@@ -43,7 +43,7 @@ async function waitWhileSyncPaused(s) {
  */
 async function downloadSyncChunk(s, entry, count, generation) {
   const range = nextSharedChunkRange(count, s.chunkBytes);
-  const part = await s.deps.fetchRange(entry.url, range.start, range.end);
+  const part = await s.deps.fetchRange(entry.url, range.start, range.end, s.fast.has(entry.url));
   if ((s.removals.get(entry.url) || 0) !== generation) return null;
   await s.deps.storage.putChunk(entry.url, count, part.buffer, part.total);
   return part.total;
@@ -228,8 +228,9 @@ function syncVideoList(s, list) {
  * @param {object} deps.storage - `listVideos()`, `listPartial()`, `countChunks(url)`, `chunkTotal(url)`
  *   (the file size stored with the chunks, or null), `getChunks(url)`,
  *   `putChunk(url, index, buffer, total)`, `putVideo(url, chunks)`, `deleteVideo(url)`, `clearChunks(url)`.
- * @param {function(string, number, number): Promise<{buffer: ArrayBuffer, total: number}>} deps.fetchRange -
- *   Fetches an inclusive byte range, reporting the file's total size.
+ * @param {function(string, number, number, boolean): Promise<{buffer: ArrayBuffer, total: number}>} deps.fetchRange -
+ *   Fetches an inclusive byte range, reporting the file's total size. The last argument is true for
+ *   a Manager-pushed video, which downloads at full speed instead of through the preload limit.
  * @param {function(): boolean} deps.isPaused - True while a shared video is triggered or playing.
  * @param {function(number): Promise<void>} deps.sleep - Resolves after the given milliseconds.
  * @param {function(string, *): void} [deps.log] - Reports a failed download.

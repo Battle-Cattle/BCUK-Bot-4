@@ -13,6 +13,7 @@ import { resolveSharedFile, sendStreamerFile } from './streamerFileServing';
 import { broadcastToChannel } from './sseChannel';
 import { createSseEventsHandler, createLoginValidator } from './sseEventsHandlers';
 import { SHARED_FOLDER } from './sharedOverlayVideoFiles';
+import { servePreloadVideo } from './sharedOverlayPreload';
 
 // The shared video overlay (#917): a separate OBS browser source at /overlay/shared/:login that
 // plays the same video on every connected streamer's stream, so it never queues behind
@@ -137,11 +138,14 @@ async function sendInit(res: Response): Promise<void> {
 
 /**
  * GET /overlay/shared/videos/:filename — serves a shared video from the shared folder (no auth;
- * filenames are unguessable and never reused). Range requests work via `sendFile`.
+ * filenames are unguessable and never reused). Range requests work via `sendFile`. With
+ * `?preload=1` the same file is served through the shared preload speed limit instead (background
+ * syncs); trigger fallbacks and Manager pushes use this route without it, at full speed.
  * @param req - Express request; reads the `filename` route param.
  * @param res - Express response; sends the file, or 400 for a malformed name / 404 if missing.
  */
 router.get('/videos/:filename', async (req, res) => {
+  if (req.query.preload === '1') { await servePreloadVideo(req, res); return; }
   // POSIX join, like safeResolve (which the file helpers use on it) and the bot's Linux target.
   const folder = path.posix.join(OVERLAY_FOLDER, SHARED_FOLDER);
   const file = await resolveSharedFile(res, folder, req.params.filename, FILENAME_RE);

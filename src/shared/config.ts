@@ -100,6 +100,8 @@ export const SHARED_OVERLAY_LEAD_MS = parsePositiveIntEnv(process.env.SHARED_OVE
 export const SHARED_OVERLAY_TRIGGER_COOLDOWN_MS = parsePositiveIntEnv(process.env.SHARED_OVERLAY_TRIGGER_COOLDOWN_MS, 3000);
 /** Milliseconds before the same shared video may be pushed to the overlays again (#917). */
 export const SHARED_OVERLAY_PUSH_COOLDOWN_MS = parsePositiveIntEnv(process.env.SHARED_OVERLAY_PUSH_COOLDOWN_MS, 60000);
+/** Kilobytes per second all background shared-video preloads may use together, across every overlay (#917). */
+export const SHARED_OVERLAY_PRELOAD_KB_PER_SECOND = parsePositiveIntEnv(process.env.SHARED_OVERLAY_PRELOAD_KB_PER_SECOND, 2048);
 export const ALERT_ASSETS_FOLDER = process.env.ALERT_ASSETS_FOLDER?.trim() || './alert-assets';
 export const ALERT_MAX_IMAGE_MB = parsePositiveIntEnv(process.env.ALERT_MAX_IMAGE_MB, 10);
 export const ALERT_MAX_SOUND_MB = parsePositiveIntEnv(process.env.ALERT_MAX_SOUND_MB, 5);
