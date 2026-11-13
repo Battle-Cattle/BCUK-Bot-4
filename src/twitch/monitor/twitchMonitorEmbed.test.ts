@@ -23,6 +23,8 @@ import {
   buildEmbed,
   templateVars,
   buildMessagePreview,
+  renderAnnouncementContent,
+  truncateMessageContent,
 } from './twitchMonitorEmbed';
 import type { TwitchStream } from '../twitchApi';
 import type { LiveState } from './twitchMonitorTypes';
@@ -214,5 +216,94 @@ describe('buildMessagePreview', () => {
     });
     const preview = buildMessagePreview(state, 'live_message', { url: null });
     expect(preview.content).toBe('Watch streamer1 play {typo_field}');
+  });
+});
+
+describe('renderAnnouncementContent (#1010)', () => {
+  it('lets a template\'s own @everyone ping, but not a role or @here put into the stream title', () => {
+    const vars = templateVars('streamer1', makeStream({ title: '<@&123456789012345678> @here' }));
+    const result = renderAnnouncementContent('@everyone {streamer} is live: {title}', vars);
+    // The title's mentions are neutralised (zero-width space after the @), the template's stays live.
+    expect(result.content).toBe('@everyone streamer1 is live: <@\u200b&123456789012345678> @\u200bhere');
+    expect(result.allowedMentions).toEqual({ parse: ['everyone'], roles: [], users: [] });
+  });
+
+  it('does not let a title\'s @everyone ping when the template only uses @here, nor the reverse', () => {
+    const everyoneTitle = templateVars('streamer1', makeStream({ title: '@everyone come watch' }));
+    const hereTemplate = renderAnnouncementContent('@here {title}', everyoneTitle);
+    expect(hereTemplate.content).toBe('@here @\u200beveryone come watch');
+    expect(hereTemplate.content).not.toMatch(/@everyone/);
+
+    const hereTitle = templateVars('streamer1', makeStream({ title: '@here now' }));
+    const everyoneTemplate = renderAnnouncementContent('@everyone {title}', hereTitle);
+    expect(everyoneTemplate.content).toBe('@everyone @\u200bhere now');
+    expect(everyoneTemplate.content).not.toMatch(/@here/);
+  });
+
+  it('does not let a mention form across the edge of a placeholder (#1010 review)', () => {
+    const title = (t: string) => templateVars('streamer1', makeStream({ title: t }));
+    // Template '@' + title 'everyone'.
+    expect(renderAnnouncementContent('@here @{title}', title('everyone')).content).toBe('@here @\u200beveryone');
+    // Title ending in '@' + template 'here'.
+    expect(renderAnnouncementContent('{title}here', title('hi @')).content).toBe('hi @\u200bhere');
+    // Template '<@&' + title of digits, and '<@' + title of digits (the zero-width space goes after the '@').
+    expect(renderAnnouncementContent('<@&{title}>', title('123456789012345678')).content).toBe('<@\u200b&123456789012345678>');
+    expect(renderAnnouncementContent('<@{title}>', title('123456789012345678')).content).toBe('<@\u200b123456789012345678>');
+    // Title ending in '<' + template '@&id>'.
+    expect(renderAnnouncementContent('{title}@&123456789012345678>', title('x <')).content).toBe('x <@\u200b&123456789012345678>');
+    // A partial mention in the template completed by the title, and an empty title between two template pieces.
+    expect(renderAnnouncementContent('@here @eve{title}', title('ryone')).content).toBe('@here @\u200beveryone');
+    expect(renderAnnouncementContent('@here @{title}everyone', title('')).content).toBe('@here @\u200beveryone');
+  });
+
+  it('leaves the stream URL and ordinary text untouched', () => {
+    const vars = templateVars('streamer1', makeStream({ title: 'Speedrun any%' }));
+    expect(renderAnnouncementContent('{streamer} is live: {title} {url}', vars).content)
+      .toBe('streamer1 is live: Speedrun any% https://www.twitch.tv/streamer1');
+  });
+
+  it('neutralises a role that the template also names when it arrives through the title', () => {
+    const role = '<@&123456789012345678>';
+    const result = renderAnnouncementContent(`${role} {title}`, templateVars('streamer1', makeStream({ title: role })));
+    expect(result.content).toBe(`${role} <@\u200b&123456789012345678>`);
+  });
+
+  it('allows a role written in the template, but not the same role arriving only through the title', () => {
+    const role = '<@&123456789012345678>';
+    const vars = templateVars('streamer1', makeStream({ title: role }));
+    expect(renderAnnouncementContent(`${role} {title}`, vars).allowedMentions.roles).toEqual(['123456789012345678']);
+    expect(renderAnnouncementContent('{title}', vars).allowedMentions.roles).toEqual([]);
+  });
+
+  it('sends parse: [] for a template without mentions', () => {
+    const vars = templateVars('streamer1', makeStream({ title: '@everyone' }));
+    expect(renderAnnouncementContent('{streamer}: {title}', vars).allowedMentions.parse).toEqual([]);
+  });
+
+  it('truncates filled content longer than Discord\'s 2000 characters', () => {
+    const vars = templateVars('streamer1', makeStream({ title: 't'.repeat(140) }));
+    const result = renderAnnouncementContent(`${'x'.repeat(2000)} {title}`, vars);
+    expect(result.content).toHaveLength(2000);
+    expect(result.content.endsWith('…')).toBe(true);
+  });
+});
+
+describe('truncateMessageContent', () => {
+  it('leaves content within the limit unchanged', () => {
+    const exact = 'a'.repeat(2000);
+    expect(truncateMessageContent(exact)).toBe(exact);
+  });
+
+  it('cuts longer content to the limit, ending with an ellipsis', () => {
+    const result = truncateMessageContent('a'.repeat(2140));
+    expect(result).toHaveLength(2000);
+    expect(result.endsWith('…')).toBe(true);
+  });
+
+  it('does not split a surrogate pair at the cut', () => {
+    const content = `${'a'.repeat(2000 - 2)}😀${'b'.repeat(10)}`;
+    const result = truncateMessageContent(content);
+    expect(result.length).toBeLessThanOrEqual(2000);
+    expect(result).toBe(`${'a'.repeat(2000 - 2)}…`);
   });
 });
