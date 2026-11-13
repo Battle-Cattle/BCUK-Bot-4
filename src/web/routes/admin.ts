@@ -1,9 +1,7 @@
 import { createLogger } from '../../shared/logger';
 import { Router, type Response } from 'express';
 import {
-  findUser,
   getGuildMemberUsers,
-  getGuildsForMember,
   setMemberAccessLevel,
   removeGuildMember,
   ACCESS_LEVEL_LABELS,
@@ -17,8 +15,7 @@ import { renderView } from './viewHelpers';
 import { renderOrError } from './errorHandling';
 import { runUserMutationForActorAndTarget } from '../../shared/userMutationQueue';
 import adminRefreshRouter from './adminRefresh';
-import { disconnectGuildStatusConnectionsForMember } from './dashboardStatusEvents';
-import { disconnectCompanionConnections } from './companionEvents';
+import { closeRemovedMemberConnections } from './memberRemovalConnections';
 import { getRefreshState } from '../../discord/guildRefreshState';
 import {
   DuplicateTwitchNameError,
@@ -230,32 +227,11 @@ router.post('/users/update', requireManager, csrfProtection, async (req, res) =>
 // Twitch identity are left intact — they may belong to other guilds.
 
 /**
- * Closes a member's open companion app event streams once they have no panel access left: no
- * guild membership and not the bot owner. Their token is already refused from then on (see
- * `findDiscordIdByTokenHash`), but a stream opened before the removal would otherwise stay open.
- * A failed lookup is logged, never thrown.
- * @param discordId - Discord snowflake of the member just removed from a guild.
- * @returns Resolves once the check (and any disconnect) is done.
- */
-async function disconnectCompanionIfNoAccessLeft(discordId: string): Promise<void> {
-  try {
-    const [user, guilds] = await Promise.all([findUser(discordId), getGuildsForMember(discordId)]);
-    if (guilds.length === 0 && !user?.is_owner) {
-      disconnectCompanionConnections(discordId);
-    }
-  } catch (err) {
-    // The removal itself succeeded, and the token is refused on its next use anyway, so a failed
-    // check mustn't turn this into a "remove failed" or skip the registry reload after it.
-    log.error(`Failed to check companion access for removed member ${discordId}:`, err);
-  }
-}
-
-/**
  * POST /admin/users/remove — removes a member from the current guild. Refuses to
  * let an admin remove themselves, re-checks the acting admin's own current
  * authorization inside the queued operation (see `checkRemoveAuth`'s doc comment),
- * closes the removed member's open dashboard status streams for the guild
- * (and their companion app streams if this was their last guild), and reloads the guild registry afterwards since removing the last member
+ * closes the removed member's open streams (see `closeRemovedMemberConnections`),
+ * and reloads the guild registry afterwards since removing the last member
  * un-provisions the guild.
  * @param req - Express request; reads `discord_id` from `req.body`.
  * @param res - Express response; redirects to `/admin/users` on success, or to
@@ -280,11 +256,9 @@ router.post('/users/remove', requireAdmin, csrfProtection, async (req, res) => {
     const removeAuthErr = await checkRemoveAuth(sessionUser, guildId);
     if (removeAuthErr) throw new ManagerEditAuthError(removeAuthErr);
     await removeGuildMember(guildId, trimmedDiscordId);
-    // Their open dashboard status streams for this guild were admitted before the removal.
-    disconnectGuildStatusConnectionsForMember(guildId, trimmedDiscordId);
-    // Their web session ends on its next request (requireAuth re-checks membership); their
-    // companion app's open streams are closed here if this was their last guild.
-    await disconnectCompanionIfNoAccessLeft(trimmedDiscordId);
+    // Their open dashboard (and, if this was their last guild, companion) streams were admitted
+    // before the removal; their web session ends on its next request.
+    await closeRemovedMemberConnections(guildId, trimmedDiscordId);
     // Reloaded here, inside the guarded operation — see the /users/add route's comment on
     // reloadRegistrySafe for why (removing the guild's last member un-provisions it, and this
     // must still happen even if the caller times out waiting on the queue).

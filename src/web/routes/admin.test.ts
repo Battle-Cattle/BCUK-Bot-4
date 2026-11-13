@@ -51,8 +51,7 @@ vi.mock('../../shared/mutationQueue', async () => {
   };
 });
 
-vi.mock('./dashboardStatusEvents', () => ({ disconnectGuildStatusConnectionsForMember: vi.fn() }));
-vi.mock('./companionEvents', () => ({ disconnectCompanionConnections: vi.fn() }));
+vi.mock('./memberRemovalConnections', () => ({ closeRemovedMemberConnections: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('./adminRefresh', async () => {
   const { Router } = await import('express');
   return {
@@ -82,8 +81,7 @@ vi.mock('../../shared/logger', () => ({
 import supertest from 'supertest';
 import router from './admin';
 import { findUser, getMemberAccessLevel, getEffectiveAccessLevelForUser, getGuildMemberUsers, getGuildsForMember, setMemberAccessLevel, removeGuildMember } from '../../db';
-import { disconnectGuildStatusConnectionsForMember } from './dashboardStatusEvents';
-import { disconnectCompanionConnections } from './companionEvents';
+import { closeRemovedMemberConnections } from './memberRemovalConnections';
 import { reloadGuildRegistry } from '../../discord/guildRegistry';
 import { AccessLevel } from '../../db';
 import { normalizeTwitchChannelName } from '../../twitch/twitchChannelName';
@@ -400,42 +398,15 @@ describe('POST /users/remove', () => {
     expect(vi.mocked(reloadGuildRegistry)).toHaveBeenCalled();
   });
 
-  it('closes the removed member\'s open dashboard status streams for the guild', async () => {
+  it('closes the removed member\'s open streams for the guild', async () => {
     await supertest(buildApp()).post('/users/remove').type('form').send({ discord_id: VALID_ID });
-    expect(vi.mocked(disconnectGuildStatusConnectionsForMember)).toHaveBeenCalledWith(GUILD_ID, VALID_ID);
-  });
-
-  it('closes the removed member\'s companion app streams when this was their last guild (#1004)', async () => {
-    vi.mocked(getGuildsForMember).mockResolvedValue([]);
-    await supertest(buildApp()).post('/users/remove').type('form').send({ discord_id: VALID_ID });
-    expect(vi.mocked(getGuildsForMember)).toHaveBeenCalledWith(VALID_ID);
-    expect(vi.mocked(disconnectCompanionConnections)).toHaveBeenCalledWith(VALID_ID);
-  });
-
-  it('leaves the companion app connected when the member still belongs to another guild', async () => {
-    vi.mocked(getGuildsForMember).mockResolvedValue([{ guild_id: '900000000000000002', name: 'g', voice_channel_id: null, access_level: 0 }] as any);
-    await supertest(buildApp()).post('/users/remove').type('form').send({ discord_id: VALID_ID });
-    expect(vi.mocked(disconnectCompanionConnections)).not.toHaveBeenCalled();
-  });
-
-  it('leaves the bot owner\'s companion app connected with no guild left', async () => {
-    vi.mocked(findUser).mockImplementation(async (id: string) => ({ discord_id: id, is_owner: id === VALID_ID }) as any);
-    await supertest(buildApp()).post('/users/remove').type('form').send({ discord_id: VALID_ID });
-    expect(vi.mocked(disconnectCompanionConnections)).not.toHaveBeenCalled();
-  });
-
-  it('still completes the removal and reloads the registry when the companion access check fails', async () => {
-    vi.mocked(getGuildsForMember).mockRejectedValue(new Error('db down'));
-    const res = await supertest(buildApp()).post('/users/remove').type('form').send({ discord_id: VALID_ID });
-    expect(res.headers.location).toBe('/admin/users');
-    expect(vi.mocked(disconnectCompanionConnections)).not.toHaveBeenCalled();
-    expect(vi.mocked(reloadGuildRegistry)).toHaveBeenCalled();
+    expect(vi.mocked(closeRemovedMemberConnections)).toHaveBeenCalledWith(GUILD_ID, VALID_ID);
   });
 
   it('does not close any status streams when the removal fails', async () => {
     vi.mocked(removeGuildMember).mockRejectedValue(new Error('unexpected'));
     await supertest(buildApp()).post('/users/remove').type('form').send({ discord_id: VALID_ID });
-    expect(vi.mocked(disconnectGuildStatusConnectionsForMember)).not.toHaveBeenCalled();
+    expect(vi.mocked(closeRemovedMemberConnections)).not.toHaveBeenCalled();
   });
 
   // Regression coverage for the actor-side TOCTOU on removal (CodeRabbit finding on PR #657):
