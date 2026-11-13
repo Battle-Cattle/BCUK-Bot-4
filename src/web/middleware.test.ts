@@ -40,41 +40,103 @@ const next = vi.fn();
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(getGuildsForMember).mockResolvedValue([]);
+  vi.mocked(getAllGuilds).mockResolvedValue([]);
 });
+
+const GUILD = { guild_id: 'g1', name: 'Guild 1', voice_channel_id: null, access_level: AccessLevel.USER };
 
 // ─── requireAuth ─────────────────────────────────────────────────────────────
 
 describe('requireAuth', () => {
-  it('calls next() when session.user is set', () => {
-    const req = makeReq({ session: { user: { accessLevel: AccessLevel.USER } } });
-    requireAuth(req, makeRes(), next);
+  it('calls next() when the session user still belongs to a guild', async () => {
+    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: false } as any);
+    vi.mocked(getGuildsForMember).mockResolvedValue([GUILD] as any);
+    const req = makeReq({ session: { user: { discordId: 'u1', accessLevel: AccessLevel.USER } } });
+    await requireAuth(req, makeRes(), next);
+    expect(vi.mocked(getGuildsForMember)).toHaveBeenCalledWith('u1');
     expect(next).toHaveBeenCalledOnce();
   });
 
-  it('redirects to /auth/login when session.user is absent', () => {
+  it('redirects to /auth/login when session.user is absent, without querying the DB', async () => {
     const req = makeReq({ session: {} });
     const res = makeRes();
-    requireAuth(req, res, next);
+    await requireAuth(req, res, next);
     expect(res.redirect).toHaveBeenCalledWith('/auth/login');
     expect(next).not.toHaveBeenCalled();
+    expect(vi.mocked(findUser)).not.toHaveBeenCalled();
+  });
+
+  it('destroys the session and redirects when the user was removed from their last guild (#1004)', async () => {
+    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: false } as any);
+    const destroy = vi.fn((cb: () => void) => { cb(); });
+    const req = makeReq({ session: { user: { discordId: 'u1', accessLevel: AccessLevel.USER }, destroy } });
+    const res = makeRes();
+    await requireAuth(req, res, next);
+    expect(destroy).toHaveBeenCalledOnce();
+    expect(res.redirect).toHaveBeenCalledWith('/auth/login');
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('destroys the session and redirects when the user row no longer exists', async () => {
+    vi.mocked(findUser).mockResolvedValue(null);
+    const destroy = vi.fn((cb: () => void) => { cb(); });
+    const req = makeReq({ session: { user: { discordId: 'u1', accessLevel: AccessLevel.USER }, destroy } });
+    const res = makeRes();
+    await requireAuth(req, res, next);
+    expect(destroy).toHaveBeenCalledOnce();
+    expect(res.redirect).toHaveBeenCalledWith('/auth/login');
+  });
+
+  it('keeps the bot owner signed in even with no guild_member rows', async () => {
+    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: true } as any);
+    vi.mocked(getAllGuilds).mockResolvedValue([]);
+    const req = makeReq({ session: { user: { discordId: 'u1', accessLevel: AccessLevel.USER } } });
+    await requireAuth(req, makeRes(), next);
+    expect(next).toHaveBeenCalledOnce();
+  });
+
+  it('reads the DB once per request, however many gates run on it', async () => {
+    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: false } as any);
+    vi.mocked(getGuildsForMember).mockResolvedValue([GUILD] as any);
+    const req = makeReq({ session: { user: { discordId: 'u1', accessLevel: AccessLevel.USER, currentGuildId: 'g1' } } });
+    await requireAuth(req, makeRes(), next);
+    await requireAuth(req, makeRes(), next);
+    await requireGuildContext(req, makeRes(), next);
+    await requireOwner(req, makeRes(), vi.fn());
+    expect(vi.mocked(findUser)).toHaveBeenCalledOnce();
+    expect(vi.mocked(getGuildsForMember)).toHaveBeenCalledOnce();
+    expect(next).toHaveBeenCalledTimes(3);
   });
 });
 
 // ─── requireAuthJson ─────────────────────────────────────────────────────────
 
 describe('requireAuthJson', () => {
-  it('calls next() when session.user is set', () => {
-    const req = makeReq({ session: { user: { accessLevel: AccessLevel.USER } } });
-    requireAuthJson(req, makeRes(), next);
+  it('calls next() when the session user still belongs to a guild', async () => {
+    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: false } as any);
+    vi.mocked(getGuildsForMember).mockResolvedValue([GUILD] as any);
+    const req = makeReq({ session: { user: { discordId: 'u1', accessLevel: AccessLevel.USER } } });
+    await requireAuthJson(req, makeRes(), next);
     expect(next).toHaveBeenCalledOnce();
   });
 
-  it('answers 401 JSON instead of redirecting when session.user is absent', () => {
+  it('answers 401 JSON instead of redirecting when session.user is absent', async () => {
     const res = makeRes();
-    requireAuthJson(makeReq({ session: {} }), res, next);
+    await requireAuthJson(makeReq({ session: {} }), res, next);
     expect(res.status).toHaveBeenCalledWith(401);
     expect(res.json).toHaveBeenCalledWith({ ok: false, error: 'unauthenticated' });
     expect(res.redirect).not.toHaveBeenCalled();
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('destroys the session and answers 401 when the user has no guild left', async () => {
+    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: false } as any);
+    const destroy = vi.fn((cb: () => void) => { cb(); });
+    const res = makeRes();
+    await requireAuthJson(makeReq({ session: { user: { discordId: 'u1', accessLevel: AccessLevel.USER }, destroy } }), res, next);
+    expect(destroy).toHaveBeenCalledOnce();
+    expect(res.status).toHaveBeenCalledWith(401);
     expect(next).not.toHaveBeenCalled();
   });
 });

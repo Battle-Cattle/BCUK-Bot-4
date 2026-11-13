@@ -1,6 +1,6 @@
 import { Request, Response } from 'express';
 import type { Client } from 'discord.js';
-import { isKeyApprovedForGuild } from '../../db';
+import { getApprovedGuildIdsForKey, isKeyApprovedForGuild } from '../../db';
 import { getActiveGuildForUser } from '../../discord/voicePresence';
 import { getDiscordClient } from '../../discord/discordClientStore';
 import { createLogger } from '../../shared/logger';
@@ -62,6 +62,33 @@ export async function ensureGuildApproved(req: Request, res: Response, guildId: 
   }
   if (!approved) {
     res.status(403).json({ ok: false, error: 'Key not approved for this guild' });
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Confirms the request's API key is approved for at least one guild, sending a 403 and returning
+ * false if not. The gate for Stream Deck routes that aren't tied to one guild (the SFX list,
+ * streamer-scoped routes, the shared video overlay): a key that is only pending, denied or
+ * revoked everywhere, or whose owner has no guild membership left, is refused.
+ * `getApprovedGuildIdsForKey` already drops guilds the owner is no longer a member of. A failed
+ * lookup sends a JSON 500 rather than rejecting, as {@link ensureGuildApproved} does.
+ * @param req - Request whose `apiKeyOwner` was set by `requireApiKey`.
+ * @param res - Response used to send the 403 or 500.
+ * @returns True when the key is approved for some guild, false after sending a 403 or 500.
+ */
+export async function ensureKeyApprovedAnywhere(req: Request, res: Response): Promise<boolean> {
+  let approvedGuildIds: string[];
+  try {
+    approvedGuildIds = await getApprovedGuildIdsForKey(req.apiKeyOwner!);
+  } catch (err) {
+    log.error('Failed to check key approval:', err);
+    res.status(500).json({ ok: false, error: 'Database error' });
+    return false;
+  }
+  if (approvedGuildIds.length === 0) {
+    res.status(403).json({ ok: false, error: 'Key not approved for any guild' });
     return false;
   }
   return true;

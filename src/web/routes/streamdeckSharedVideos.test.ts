@@ -4,10 +4,16 @@ import { mockLogger } from '../../test-utils/loggerMock';
 vi.mock('../middleware', () => ({
   requireApiKey: (req: any, res: any, next: any) => {
     if (req.headers.authorization !== 'Bearer key') { res.status(401).json({ ok: false }); return; }
+    req.apiKeyOwner = '100000000000000001';
     next();
   },
 }));
-vi.mock('../../db', () => ({ getSharedVideo: vi.fn(), listEnabledSharedVideos: vi.fn() }));
+vi.mock('../../db', () => ({
+  getSharedVideo: vi.fn(),
+  listEnabledSharedVideos: vi.fn(),
+  getApprovedGuildIdsForKey: vi.fn(),
+  isKeyApprovedForGuild: vi.fn(),
+}));
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 vi.mock('../../shared/config', () => ({
   SHARED_OVERLAY_LEAD_MS: 4000,
@@ -22,7 +28,7 @@ vi.mock('./sharedOverlaySource', () => ({
 
 import supertest from 'supertest';
 import router, { resetSharedVideoCooldown } from './streamdeckSharedVideos';
-import { getSharedVideo, listEnabledSharedVideos } from '../../db';
+import { getSharedVideo, listEnabledSharedVideos, getApprovedGuildIdsForKey } from '../../db';
 import { pushSharedPlay } from './sharedOverlaySource';
 import { recordReadinessReport, resetReadiness } from './sharedOverlayReadiness';
 import { buildTestApp } from '../../test-utils/expressTestApp';
@@ -40,6 +46,7 @@ beforeEach(() => {
   resetReadiness();
   vi.mocked(getSharedVideo).mockResolvedValue(video as any);
   vi.mocked(pushSharedPlay).mockReturnValue(3);
+  vi.mocked(getApprovedGuildIdsForKey).mockResolvedValue(['900000000000000001']);
 });
 afterEach(() => { vi.useRealTimers(); });
 
@@ -47,6 +54,35 @@ describe('auth', () => {
   it('refuses both routes without a valid API key', async () => {
     await supertest(app()).get('/shared-videos').expect(401);
     await supertest(app()).post('/shared-videos/trigger').send({ videoId: 2 }).expect(401);
+    expect(pushSharedPlay).not.toHaveBeenCalled();
+  });
+});
+
+describe('key approval (#1002)', () => {
+  it('refuses both routes with 403 for a key not approved for any guild, without broadcasting or claiming the cooldown', async () => {
+    vi.mocked(getApprovedGuildIdsForKey).mockResolvedValue([]);
+    vi.mocked(listEnabledSharedVideos).mockResolvedValue([video as any]);
+
+    const list = await supertest(app()).get('/shared-videos').set(auth).expect(403);
+    expect(list.body).toEqual({ ok: false, error: 'Key not approved for any guild' });
+    const trigger = await supertest(app()).post('/shared-videos/trigger').set(auth).send({ videoId: 2 }).expect(403);
+    expect(trigger.body).toEqual({ ok: false, error: 'Key not approved for any guild' });
+
+    expect(getApprovedGuildIdsForKey).toHaveBeenCalledWith('100000000000000001');
+    expect(listEnabledSharedVideos).not.toHaveBeenCalled();
+    expect(getSharedVideo).not.toHaveBeenCalled();
+    expect(pushSharedPlay).not.toHaveBeenCalled();
+
+    // The refused press didn't claim the global cooldown: an approved key can trigger straight away.
+    vi.mocked(getApprovedGuildIdsForKey).mockResolvedValue(['900000000000000001']);
+    const ok = await supertest(app()).post('/shared-videos/trigger').set(auth).send({ videoId: 2 }).expect(200);
+    expect(ok.body).toEqual({ ok: true, triggered: true, reached: 3 });
+  });
+
+  it('answers 500 when the approval lookup fails', async () => {
+    vi.mocked(getApprovedGuildIdsForKey).mockRejectedValue(new Error('db down'));
+    await supertest(app()).get('/shared-videos').set(auth).expect(500);
+    await supertest(app()).post('/shared-videos/trigger').set(auth).send({ videoId: 2 }).expect(500);
     expect(pushSharedPlay).not.toHaveBeenCalled();
   });
 });

@@ -1,6 +1,6 @@
 // Stream Deck API for the shared video overlay (#917): list the enabled shared videos, and play
-// one on every connected shared overlay at once. Any approved API key may trigger; the shared
-// list belongs to no single streamer, so nothing here resolves a streamer.
+// one on every connected shared overlay at once. Any API key approved for at least one guild may
+// list and trigger; the shared list belongs to no single streamer, so nothing here resolves a streamer.
 import { createLogger } from '../../shared/logger';
 import { SHARED_OVERLAY_LEAD_MS, SHARED_OVERLAY_TRIGGER_COOLDOWN_MS } from '../../shared/config';
 import { Router, type Request } from 'express';
@@ -8,6 +8,7 @@ import { getSharedVideo, listEnabledSharedVideos } from '../../db';
 import { requireApiKey } from '../middleware';
 import { pushSharedPlay, sharedConnections, sharedVideoUrl } from './sharedOverlaySource';
 import { getReadinessSnapshot } from './sharedOverlayReadiness';
+import { ensureKeyApprovedAnywhere } from './streamdeckGuildResolution';
 
 const log = createLogger('StreamdeckSharedVideos');
 const router = Router();
@@ -33,11 +34,12 @@ function parseVideoId(req: Request): number | null {
  * and the `ready` / `connected` pair from this response: both must stay non-negative integers (it
  * drops the pair otherwise), and `connected: 0` means "no overlay online". Changing them needs a
  * plugin update; adding other fields is safe.
- * @param _req - Express request; authenticated by `requireApiKey`.
+ * @param req - Express request; authenticated by `requireApiKey`.
  * @param res - `{ ok, videos: [{ id, name, ready, connected }] }` (`ready` of `connected` overlays
- *   have the video stored), or 500 on a DB error.
+ *   have the video stored), 403 for a key not approved for any guild, or 500 on a DB error.
  */
-router.get('/shared-videos', requireApiKey, async (_req, res) => {
+router.get('/shared-videos', requireApiKey, async (req, res) => {
+  if (!(await ensureKeyApprovedAnywhere(req, res))) return;
   try {
     const enabled = await listEnabledSharedVideos();
     // Additive fields (older plugin versions ignore them): how many connected overlays have each
@@ -59,7 +61,8 @@ router.get('/shared-videos', requireApiKey, async (_req, res) => {
  * last accepted one is answered with `triggered: false` and nothing is sent.
  * @param req - Express request; JSON body `{ videoId }`.
  * @param res - `{ ok: true, triggered: true, reached }`, `{ ok: true, triggered: false, reason:
- *   'cooldown' }`, 400 for a bad id, 404 `video_not_found` (unknown or disabled), or 500.
+ *   'cooldown' }`, 400 for a bad id, 403 for a key not approved for any guild, 404
+ *   `video_not_found` (unknown or disabled), or 500.
  */
 router.post('/shared-videos/trigger', requireApiKey, async (req, res) => {
   const videoId = parseVideoId(req);
@@ -67,6 +70,7 @@ router.post('/shared-videos/trigger', requireApiKey, async (req, res) => {
     res.status(400).json({ ok: false, error: 'Missing or invalid "videoId" field' });
     return;
   }
+  if (!(await ensureKeyApprovedAnywhere(req, res))) return;
   try {
     const video = await getSharedVideo(videoId);
     if (!video?.enabled) {
