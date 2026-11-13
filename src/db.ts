@@ -86,7 +86,7 @@ export type {
 // ─── EventSub ────────────────────────────────────────────────────────────────
 
 export {
-  getAllEventSubStreamers, getStreamerByDiscordId, getStreamerById, getStreamerByTwitchUserId,
+  getAllEventSubStreamers, getEventSubConnectionStatusForGuild, getStreamerByDiscordId, getStreamerById, getStreamerByTwitchUserId,
   saveStreamerToken, clearStreamerToken, initEventConfig, saveEventConfig,
   DEFAULT_EVENT_CONFIG,
 } from './db/eventSub';

@@ -24,6 +24,12 @@ npm run build    # compile TypeScript
 npm start        # production
 ```
 
+## Adding the bot to a Discord server
+
+In the Discord developer portal, open the application's **Bot** tab and turn **Public Bot** off, so only you can invite the bot. With it on, anyone who has the client ID can add the bot to a server they own.
+
+The bot also doesn't trust the invite on its own. When it joins a server for the first time, it gives that server's owner Admin access to the panel only if the server's ID is in `DISCORD_AUTO_PROVISION_GUILD_IDS` (comma-separated, empty by default). Any other server is recorded but ignored: nobody gets access, the bot doesn't answer commands there, and you (the bot owner) get a DM. To start serving it, pick it in the panel's server switcher and add its first member on the Users page. This matters because some catalogs (custom commands, timers, SFX, the shared video overlay) are shared by every server, so a panel Admin in any server can change what the bot does on every stream.
+
 ## Running the bot
 
 In production the bot runs as a systemd service, `bcuk-bot`. systemd restarts it 10 seconds after a crash and starts it on boot. It never stops retrying, so the bot comes back by itself after a database or network outage. Repeated failures back off to one attempt every 5 minutes (on systemd 254+), so a long outage doesn't hammer the Discord and Twitch logins.

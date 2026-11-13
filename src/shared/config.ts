@@ -133,6 +133,31 @@ export const DISCORD_CLIENT_SECRET = require_env('DISCORD_CLIENT_SECRET');
 export const DISCORD_CALLBACK_URL = require_env('DISCORD_CALLBACK_URL');
 export const PUBLIC_URL = new URL(DISCORD_CALLBACK_URL).origin;
 
+const DISCORD_SNOWFLAKE_RE = /^\d{17,20}$/;
+
+/**
+ * Parses a comma-separated list of Discord snowflakes. Blank entries are ignored; anything
+ * that isn't a snowflake is a startup error, so a typo can't silently leave a guild off a
+ * security allowlist.
+ * @param name - Environment variable name.
+ * @returns The set of snowflakes (empty when the variable is unset or blank).
+ * @throws If any entry isn't a 17–20 digit Discord snowflake.
+ */
+function parseSnowflakeListEnv(name: string): ReadonlySet<string> {
+  const ids = (process.env[name] ?? '').split(',').map((entry) => entry.trim()).filter(Boolean);
+  const invalid = ids.find((id) => !DISCORD_SNOWFLAKE_RE.test(id));
+  if (invalid !== undefined) {
+    throw new Error(`Invalid ${name}: '${invalid}' is not a Discord server ID`);
+  }
+  return new Set(ids);
+}
+
+// Discord servers whose owner is made a panel Admin automatically the first time the bot joins
+// them. Any other server the bot is added to is recorded but stays inert (no member, not served)
+// until the bot owner adds its first member on the panel's Users page. Empty by default, so
+// adding the bot to a server never grants anyone panel access on its own.
+export const DISCORD_AUTO_PROVISION_GUILD_IDS = parseSnowflakeListEnv('DISCORD_AUTO_PROVISION_GUILD_IDS');
+
 // Twitch EventSub OAuth callback URL — required when any channel enables follow/sub notifications.
 // Must be registered in the Twitch developer console for the same app as TWITCH_CLIENT_ID.
 export const TWITCH_EVENTSUB_REDIRECT_URI = process.env.TWITCH_EVENTSUB_REDIRECT_URI ?? '';

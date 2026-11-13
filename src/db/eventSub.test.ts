@@ -17,6 +17,7 @@ import { getPool } from './pool';
 import { encryptToken, decryptToken } from '../shared/crypto';
 import {
   getAllEventSubStreamers,
+  getEventSubConnectionStatusForGuild,
   getStreamerByDiscordId,
   getStreamerById,
   getStreamerByTwitchUserId,
@@ -79,6 +80,24 @@ beforeEach(() => {
 });
 
 // ─── getAllEventSubStreamers ───────────────────────────────────────────────────
+
+describe('getEventSubConnectionStatusForGuild', () => {
+  it('returns a connected flag per streamer id without selecting or decrypting tokens, scoped to the guild', async () => {
+    const pool = makePool([{ id: 42, connected: 1 }, { id: 43, connected: 0 }]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+
+    const result = await getEventSubConnectionStatusForGuild('900000000000000001');
+
+    expect(result).toEqual(new Map([[42, true], [43, false]]));
+    const [sql, params] = vi.mocked(pool.execute).mock.calls[0]!;
+    expect(sql).toContain('g.guild_id = ?');
+    expect(sql).toContain('u.is_twitch_bot_enabled = 1');
+    expect(sql).not.toMatch(/eventsub_refresh_token/);
+    expect(sql).toMatch(/eventsub_access_token IS NOT NULL AS connected/);
+    expect(params).toEqual(['900000000000000001']);
+    expect(decryptToken).not.toHaveBeenCalled();
+  });
+});
 
 describe('getAllEventSubStreamers', () => {
   it('returns empty array when no rows', async () => {

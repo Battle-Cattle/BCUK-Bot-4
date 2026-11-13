@@ -6,7 +6,7 @@ const { middlewareCallOrder } = vi.hoisted(() => ({ middlewareCallOrder: [] as s
 vi.mock('../../db', () => ({
   getStreamGroupsForGuild: vi.fn(),
   getStreamersForGuild: vi.fn(),
-  getAllEventSubStreamers: vi.fn(),
+  getEventSubConnectionStatusForGuild: vi.fn(),
   getGuildMemberUsers: vi.fn(),
   addStreamGroup: vi.fn(),
   updateStreamGroup: vi.fn(),
@@ -47,7 +47,7 @@ import express from 'express';
 import supertest from 'supertest';
 import router from './streams';
 import {
-  getStreamGroupsForGuild, getStreamersForGuild, getGuildMemberUsers, getAllEventSubStreamers,
+  getStreamGroupsForGuild, getStreamersForGuild, getGuildMemberUsers, getEventSubConnectionStatusForGuild,
   addStreamGroup, addStreamer, findUser, getMemberAccessLevel,
 } from '../../db';
 import { getLiveStates } from '../../twitch/monitor/twitchMonitor';
@@ -69,7 +69,7 @@ beforeEach(() => {
   vi.mocked(getStreamGroupsForGuild).mockResolvedValue([]);
   vi.mocked(getStreamersForGuild).mockResolvedValue([]);
   vi.mocked(getGuildMemberUsers).mockResolvedValue([]);
-  vi.mocked(getAllEventSubStreamers).mockResolvedValue([]);
+  vi.mocked(getEventSubConnectionStatusForGuild).mockResolvedValue(new Map());
   vi.mocked(getLiveStates).mockReturnValue([]);
   vi.mocked(addStreamGroup).mockResolvedValue(true);
   vi.mocked(addStreamer).mockResolvedValue(undefined);
@@ -138,23 +138,25 @@ describe('GET /streams — eligible users and admin EventSub status', () => {
     expect(getGuildMemberUsers).toHaveBeenCalledWith(GUILD_ID);
   });
 
-  it('builds eventSubById keyed by streamer row id for admin users, and skips the lookup for non-admins', async () => {
-    vi.mocked(getAllEventSubStreamers).mockResolvedValue([{ id: 42, twitch_name: 'admineligible' }] as any);
+  it('passes the current guild\'s EventSub connected flags keyed by streamer row id to admins, and no tokens', async () => {
+    vi.mocked(getEventSubConnectionStatusForGuild).mockResolvedValue(new Map([[42, true], [43, false]]));
     const admin: SessionUser = { discordId: '300000000000000001', discordName: 'AdminUser', discordAvatar: null, accessLevel: AccessLevel.ADMIN, currentGuildId: GUILD_ID };
 
     const res = await supertest(buildApp(admin)).get('/streams');
 
     expect(res.status).toBe(200);
-    expect(getAllEventSubStreamers).toHaveBeenCalled();
-    expect(res.body.eventSubById).toEqual({ 42: { id: 42, twitch_name: 'admineligible' } });
+    expect(getEventSubConnectionStatusForGuild).toHaveBeenCalledWith(GUILD_ID);
+    expect(res.body.eventSubConnectedById).toEqual({ 42: true, 43: false });
+    expect(res.body).not.toHaveProperty('eventSubById');
+    expect(JSON.stringify(res.body)).not.toMatch(/eventsub_(access|refresh)_token/);
   });
 
   it('does not query EventSub streamers for a non-admin manager', async () => {
     const res = await supertest(buildApp()).get('/streams');
 
     expect(res.status).toBe(200);
-    expect(getAllEventSubStreamers).not.toHaveBeenCalled();
-    expect(res.body.eventSubById).toEqual({});
+    expect(getEventSubConnectionStatusForGuild).not.toHaveBeenCalled();
+    expect(res.body.eventSubConnectedById).toEqual({});
   });
 });
 

@@ -404,3 +404,21 @@ describe('config — SFX/OVERLAY folder defaults', () => {
     expect(config.ALERT_ASSETS_FOLDER).toBe('/custom/alerts');
   });
 });
+
+describe('config — DISCORD_AUTO_PROVISION_GUILD_IDS', () => {
+  it('is empty when unset, so no guild is auto-provisioned', async () => {
+    const config = await loadConfig({ DISCORD_AUTO_PROVISION_GUILD_IDS: undefined });
+    expect(config.DISCORD_AUTO_PROVISION_GUILD_IDS.size).toBe(0);
+  });
+
+  it('parses a comma-separated list, trimming spaces and ignoring blank entries', async () => {
+    const config = await loadConfig({ DISCORD_AUTO_PROVISION_GUILD_IDS: ' 123456789012345678 ,, 98765432109876543210 ' });
+    expect([...config.DISCORD_AUTO_PROVISION_GUILD_IDS]).toEqual(['123456789012345678', '98765432109876543210']);
+  });
+
+  it.each(['my-server', '1234', '123456789012345678x'])('throws for an entry that is not a Discord server ID (%s)', async (value) => {
+    await expect(loadConfig({ DISCORD_AUTO_PROVISION_GUILD_IDS: `123456789012345678,${value}` })).rejects.toThrow(
+      `Invalid DISCORD_AUTO_PROVISION_GUILD_IDS: '${value}' is not a Discord server ID`,
+    );
+  });
+});

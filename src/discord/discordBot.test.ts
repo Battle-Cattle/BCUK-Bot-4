@@ -10,6 +10,8 @@ vi.mock('../shared/config', () => ({
   OVERLAY_FOLDER: '/tmp/overlay',
   GLOBAL_COOLDOWN_MS: 0,
   EVENTSUB_TOKEN_SECRET: undefined,
+  // The guilds the guildCreate tests treat as allowlisted for auto-provisioning.
+  DISCORD_AUTO_PROVISION_GUILD_IDS: new Set(['new-guild', 'guild-a', 'guild-b']),
 }));
 vi.mock('../commands/commandRouter', () => ({
   handleCommand: vi.fn().mockResolvedValue(undefined),
@@ -284,6 +286,37 @@ describe('startDiscordBot — guildCreate handler', () => {
     const [reloadOrder] = vi.mocked(registry.reloadGuildRegistry).mock.invocationCallOrder;
     expect(upsertOrder).toBeLessThan(grantOrder!);
     expect(grantOrder).toBeLessThan(reloadOrder!);
+  });
+
+  it('leaves a brand-new guild that is not allowlisted unprovisioned and alerts the bot owner', async () => {
+    const guilds = await import('../db.js');
+    const registry = await import('./guildRegistry.js');
+    const ownerAlerts = await import('./ownerAlerts.js');
+    const guild = { ...makeNewGuild(), id: 'stranger-guild', name: 'Stranger Server' };
+    const cb = getGuildCreateCb();
+
+    await cb(guild);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(vi.mocked(guilds.upsertGuild)).toHaveBeenCalledWith('stranger-guild', 'Stranger Server');
+    expect(guild.fetchOwner).not.toHaveBeenCalled();
+    expect(vi.mocked(guilds.upsertUser)).not.toHaveBeenCalled();
+    expect(vi.mocked(guilds.setMemberAccessLevel)).not.toHaveBeenCalled();
+    expect(vi.mocked(registry.reloadGuildRegistry)).toHaveBeenCalled();
+    expect(vi.mocked(ownerAlerts.sendOwnerAlert)).toHaveBeenCalledWith(expect.stringContaining('stranger-guild'));
+    expect(mockLog.warn).toHaveBeenCalledWith(expect.stringContaining('not on DISCORD_AUTO_PROVISION_GUILD_IDS'));
+  });
+
+  it('does not wait for the owner alert before reloading the registry for a guild left unprovisioned', async () => {
+    const registry = await import('./guildRegistry.js');
+    const ownerAlerts = await import('./ownerAlerts.js');
+    vi.mocked(ownerAlerts.sendOwnerAlert).mockReturnValueOnce(new Promise(() => { /* never settles */ }));
+    const cb = getGuildCreateCb();
+
+    await cb({ ...makeNewGuild(), id: 'stranger-guild' });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(vi.mocked(registry.reloadGuildRegistry)).toHaveBeenCalled();
   });
 
   it('does not overwrite an already-whitelisted owner, but still grants them guild access', async () => {

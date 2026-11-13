@@ -105,6 +105,30 @@ export async function getAllEventSubStreamers(): Promise<DbStreamerEventSub[]> {
 }
 
 /**
+ * Returns whether each Twitch-bot-enabled streamer in a guild has connected Twitch for EventSub,
+ * without reading their OAuth tokens. For pages that only show a connected/not-connected badge:
+ * unlike {@link getAllEventSubStreamers}, it never decrypts a token, so no plaintext token
+ * reaches a view's locals, and it only covers the guild's own streamers.
+ *
+ * "Connected" means a stored access token, as the disconnect route clears it. A stored token
+ * that no longer decrypts still counts, so an Admin can still disconnect it.
+ *
+ * @param guildId - Discord snowflake of the guild whose stream groups to read.
+ * @returns Connected flag keyed by `streamer.id`; streamers without the Twitch bot enabled are absent.
+ */
+export async function getEventSubConnectionStatusForGuild(guildId: string): Promise<Map<number, boolean>> {
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+    `SELECT s.id, s.eventsub_access_token IS NOT NULL AS connected
+     FROM streamer s
+     JOIN \`user\` u ON u.discord_id = s.discord_id
+     JOIN stream_group g ON g.id = s.group_id
+     WHERE g.guild_id = ? AND u.is_twitch_bot_enabled = 1`,
+    [guildId],
+  );
+  return new Map(rows.map((r) => [Number(r.id), Number(r.connected) === 1]));
+}
+
+/**
  * Look up a streamer by their Discord snowflake ID. Returns null if not found.
  *
  * @param discordId - Discord user snowflake to search for.
