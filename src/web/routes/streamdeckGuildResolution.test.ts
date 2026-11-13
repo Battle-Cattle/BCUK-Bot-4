@@ -5,6 +5,7 @@ vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
 vi.mock('../../db', () => ({
   isKeyApprovedForGuild: vi.fn(),
+  getApprovedGuildIdsForKey: vi.fn(),
 }));
 
 vi.mock('../../discord/voicePresence', () => ({
@@ -15,12 +16,13 @@ vi.mock('../../discord/discordClientStore', () => ({
   getDiscordClient: vi.fn(),
 }));
 
-import { isKeyApprovedForGuild } from '../../db';
+import { isKeyApprovedForGuild, getApprovedGuildIdsForKey } from '../../db';
 import { getActiveGuildForUser } from '../../discord/voicePresence';
 import { getDiscordClient } from '../../discord/discordClientStore';
 import {
   resolveGuildIdFromChannelId,
   ensureGuildApproved,
+  ensureKeyApprovedAnywhere,
   resolveChannelGuildOrRespond,
   resolvePresenceGuildOrRespond,
   getReadyDiscordClientOrRespond,
@@ -90,6 +92,32 @@ describe('ensureGuildApproved', () => {
     await expect(ensureGuildApproved(req, res, 'guild-123')).resolves.toBe(false);
     expect(res.status).toHaveBeenCalledWith(403);
     expect(res.json).toHaveBeenCalledWith({ ok: false, error: 'Key not approved for this guild' });
+  });
+});
+
+describe('ensureKeyApprovedAnywhere', () => {
+  it('returns true and sends nothing when the key is approved for some guild', async () => {
+    vi.mocked(getApprovedGuildIdsForKey).mockResolvedValue(['guild-123']);
+    const { req, res } = makeReqRes();
+    await expect(ensureKeyApprovedAnywhere(req, res)).resolves.toBe(true);
+    expect(getApprovedGuildIdsForKey).toHaveBeenCalledWith(API_KEY_OWNER);
+    expect(res.status).not.toHaveBeenCalled();
+  });
+
+  it('returns false and sends 403 when the key is approved for no guild', async () => {
+    vi.mocked(getApprovedGuildIdsForKey).mockResolvedValue([]);
+    const { req, res } = makeReqRes();
+    await expect(ensureKeyApprovedAnywhere(req, res)).resolves.toBe(false);
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.json).toHaveBeenCalledWith({ ok: false, error: 'Key not approved for any guild' });
+  });
+
+  it('returns false and sends a JSON 500 when the lookup fails', async () => {
+    vi.mocked(getApprovedGuildIdsForKey).mockRejectedValue(new Error('db down'));
+    const { req, res } = makeReqRes();
+    await expect(ensureKeyApprovedAnywhere(req, res)).resolves.toBe(false);
+    expect(res.status).toHaveBeenCalledWith(500);
+    expect(res.json).toHaveBeenCalledWith({ ok: false, error: 'Database error' });
   });
 });
 

@@ -56,12 +56,23 @@ export async function issueToken(discordId: string): Promise<string> {
  * since the table's case-insensitive collation could otherwise match hashes
  * that differ only by case.
  *
+ * A token only counts while its owner can still use the panel: they belong to at
+ * least one guild or are the bot owner, the same rule sign-in and Stream Deck keys
+ * apply. A member removed from their last guild is refused without their token
+ * being revoked, so it works again if they are added back.
+ *
  * @param hash - SHA-256 hash of the submitted plaintext token.
- * @returns The owning Discord ID, or null if no active token matches.
+ * @returns The owning Discord ID, or null if no active token of a member with access matches.
  */
 export async function findDiscordIdByTokenHash(hash: string): Promise<string | null> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    `SELECT discord_id, key_hash FROM companion_app_tokens WHERE key_hash = ? AND revoked_at IS NULL`,
+    `SELECT t.discord_id, t.key_hash
+     FROM companion_app_tokens t
+     WHERE t.key_hash = ? AND t.revoked_at IS NULL
+       AND (
+         EXISTS (SELECT 1 FROM guild_member gm WHERE gm.discord_id = t.discord_id)
+         OR EXISTS (SELECT 1 FROM \`user\` u WHERE u.discord_id = t.discord_id AND u.is_owner = 1)
+       )`,
     [hash],
   );
   const row = rows[0];
