@@ -42,10 +42,10 @@ export function createByteBudget(bytesPerSecond: number): ByteBudget {
   const queue: Waiter[] = [];
   let timer: NodeJS.Timeout | null = null;
 
-  /** Adds the tokens earned since the last refill, up to the capacity. */
+  /** Adds the tokens earned since the last refill, up to the capacity (a clock stepped back earns none and costs none). */
   const refill = (): void => {
     const now = Date.now();
-    tokens = Math.min(capacity, tokens + ((now - lastRefill) / 1000) * bytesPerSecond);
+    tokens = Math.min(capacity, tokens + (Math.max(0, now - lastRefill) / 1000) * bytesPerSecond);
     lastRefill = now;
   };
 
@@ -112,6 +112,9 @@ export function createThrottle(budget: ByteBudget): Transform {
       cancelWait = wait.cancel;
       await wait.granted;
       cancelWait = null;
+      // Destroyed while the grant was on its way: stop here, so no budget is drawn for data that
+      // will never be sent.
+      if (throttle.destroyed) return;
       throttle.push(slice);
     }
   }
