@@ -181,10 +181,20 @@ describe.skipIf(!canRunInstaller)('install-systemd-service.sh', () => {
   });
 });
 
+/** The host's systemd version (e.g. 255 from `systemd 255 (255.4-1ubuntu8)`), or 0 without systemd-analyze. */
+function systemdVersion(): number {
+  const result = spawnSync('systemd-analyze', ['--version'], { encoding: 'utf8' });
+  if (result.status !== 0) return 0;
+  return Number(/^systemd (\d+)/.exec(result.stdout)?.[1] ?? 0);
+}
+
 // `systemd-analyze verify` catches an unknown or misspelt setting. It needs systemd on the test host,
-// and checks the rendered unit with the placeholders filled by the test's own values.
-const canVerifyUnit =
-  canRunInstaller && spawnSync('systemd-analyze', ['--version'], { stdio: 'ignore' }).status === 0;
+// and checks the rendered unit with the placeholders filled by the test's own values. Only on systemd
+// 254 or later: every setting in the unit exists there (RestartSteps and RestartMaxDelaySec are the
+// newest, from 254), while older systemd reports those two as unknown and ignores them, as the unit's
+// comments say it may. Strict checking there would fail `npm test`, and so deploy.sh, on such a host.
+const MIN_SYSTEMD_FOR_VERIFY = 254;
+const canVerifyUnit = canRunInstaller && systemdVersion() >= MIN_SYSTEMD_FOR_VERIFY;
 
 describe.skipIf(!canVerifyUnit)('bcuk-bot.service under systemd-analyze verify', () => {
   it('has no unknown or invalid settings', () => {
