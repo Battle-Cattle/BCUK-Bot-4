@@ -61,6 +61,16 @@ describe('createByteBudget', () => {
     await budget.take(25_000).granted;
   });
 
+  it('is not stalled by the wall clock stepping backwards', async () => {
+    const budget = createByteBudget(RATE);
+    await budget.take(25_000).granted; // empties the bucket
+    vi.setSystemTime(new Date(Date.now() - 10_000)); // the clock is set back ten seconds
+    let granted = false;
+    void budget.take(10_000).granted.then(() => { granted = true; });
+    await vi.advanceTimersByTimeAsync(500);
+    expect(granted).toBe(true); // earned from the new time, not in debt for the ten seconds
+  });
+
   it('stops its timer when nobody waits', async () => {
     const budget = createByteBudget(RATE);
     await budget.take(25_000).granted;
@@ -99,6 +109,16 @@ describe('createThrottle', () => {
     expect(Buffer.concat(out).length).toBeLessThanOrEqual(PRELOAD_SLICE_BYTES * 5 + PRELOAD_SLICE_BYTES);
     await vi.advanceTimersByTimeAsync(5000);
     expect(Buffer.concat(out).length).toBe(PRELOAD_SLICE_BYTES * 8);
+  });
+
+  it('asks for no more budget once destroyed, even if a grant was already on its way', async () => {
+    const take = vi.fn(() => ({ granted: Promise.resolve(), cancel: () => {} }));
+    const throttle = createThrottle({ take, pending: () => 0 });
+    collect(throttle, []);
+    throttle.write(Buffer.alloc(PRELOAD_SLICE_BYTES * 3));
+    throttle.destroy(); // before the (already settled) first grant is acted on
+    await vi.advanceTimersByTimeAsync(0);
+    expect(take).toHaveBeenCalledTimes(1); // not once per remaining slice
   });
 
   it('gives up its wait for tokens when destroyed, so a client that left does not hold a share', async () => {
