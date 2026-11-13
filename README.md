@@ -107,6 +107,10 @@ The web panel serves uploaded files straight from disk: overlay videos from `OVE
 - Keep them outside the repo checkout and away from `.env` and other secrets.
 - The same applies to `UPLOAD_INCOMING_FOLDER`, where SFX and alert uploads are assembled before they're checked (overlay videos use `OVERLAY_FOLDER/.incoming`).
 
+### Web panel sessions
+
+A web panel login lasts 24 hours from the last time a page of the panel was loaded, and never more than 7 days from login; after that the user logs in again. Only real page loads renew it: the dashboard's background refreshes and live connections don't, so a tab left open still logs out a day after it was last used. A page load renews the session at most once every 5 minutes. Browsers that don't send `Sec-Fetch-Mode` headers never renew, so their sessions end 24 hours after login, as before.
+
 ### Uploads and reverse proxies
 
 Every web panel upload is sent as a chunked, resumable upload: the page sends the file in 8 MB pieces, each its own short request, and re-sends a piece that fails from the last one the server confirmed. A reverse proxy in front of the panel therefore only needs a request body limit above one piece (say 10 MB, e.g. nginx `client_max_body_size 10m;`), whatever the largest file is. Each piece is a short request, but completing a MOV overlay upload waits for its conversion to WebM, which can take up to `OVERLAY_TRANSCODE_TIMEOUT_MINUTES` (30 by default), longer if other conversions are queued, so give the proxy a read timeout comfortably above that for the panel (nginx: e.g. `proxy_read_timeout 3600s;`; its default is 60 seconds). The page sends smaller pieces after a piece fails, so slow connections still get through within Node's default 5-minute request timeout. Each user can have one upload in progress per upload area at a time, and each area holds a limited number of unfinished uploads across all users (3 for overlay videos); an upload with no new piece for an hour is abandoned and its pieces are removed. Starting a different file while one is unfinished asks whether to cancel the unfinished one.

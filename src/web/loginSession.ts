@@ -16,6 +16,7 @@ import {
 import { fetchMemberDisplayName } from '../discord/discordApi';
 import { runUserMutation } from '../shared/userMutationQueue';
 import type { SessionUser } from '../types/express';
+import { startSessionLifetime } from './sessionLifetime';
 
 const log = createLogger('Web');
 
@@ -113,7 +114,7 @@ function buildSessionUser(
 
 /**
  * Regenerates the session ID (to prevent session fixation) and saves the
- * given user payload onto the fresh session.
+ * given user payload onto the fresh session, starting its lifetime (see `sessionLifetime.ts`).
  * @param req - Express request whose session is regenerated and saved.
  * @param userData - The `SessionUser` payload to store.
  * @param discordAuthAt - When the user completed Discord OAuth, for a Discord login; omitted for
@@ -124,6 +125,7 @@ async function saveSessionUser(req: Request, userData: SessionUser, discordAuthA
   await promisify(req.session.regenerate.bind(req.session))();
   // regenerate() replaces req.session, so read it again only after it has finished.
   req.session.user = userData;
+  startSessionLifetime(req.session, Date.now());
   if (discordAuthAt !== undefined) req.session.discordAuthAt = discordAuthAt;
   await promisify(req.session.save.bind(req.session))();
 }
