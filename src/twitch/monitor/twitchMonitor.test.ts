@@ -24,6 +24,7 @@ vi.mock('./twitchMonitorOffline', () => ({
 }));
 vi.mock('./twitchMonitorStartup', () => ({ performStartupLiveCheck: vi.fn().mockResolvedValue(undefined) }));
 
+import { setTwitchChannelLive } from '../../shared/statusStore';
 import {
   startTwitchMonitor, stopTwitchMonitor, triggerImmediateLiveCheck, getLiveStates,
   shutdownTwitchMonitor, restartTwitchMonitor, getMultiTwitchDataForChannel, isChannelLive,
@@ -385,6 +386,23 @@ describe('shutdown, restart, multitwitch lookup, and live-state ordering', () =>
     expect(channel._message.delete).not.toHaveBeenCalled();
     // Restart clears in-memory state; the startup live-check (mocked) doesn't repopulate it.
     expect(getLiveStates('guild-1')).toHaveLength(0);
+  });
+
+  it('clears the live flag of a login no longer monitored after a restart, and leaves the others to the startup check (#1013)', async () => {
+    vi.mocked(getAllStreamersWithGroups).mockResolvedValue([
+      makeStreamer(), makeStreamer({ id: 6, twitch_name: 'removedstreamer' }),
+    ] as any);
+    vi.mocked(getUsers).mockResolvedValue([{ login: 'teststreamer', id: 'uid-5' }, { login: 'removedstreamer', id: 'uid-6' }]);
+    await startTwitchMonitor();
+    vi.mocked(setTwitchChannelLive).mockClear();
+
+    // removedstreamer has been removed from stream monitoring.
+    vi.mocked(getAllStreamersWithGroups).mockResolvedValue([makeStreamer()] as any);
+    vi.mocked(getUsers).mockResolvedValue([{ login: 'teststreamer', id: 'uid-5' }]);
+    await restartTwitchMonitor();
+
+    expect(setTwitchChannelLive).toHaveBeenCalledWith('removedstreamer', false);
+    expect(setTwitchChannelLive).not.toHaveBeenCalledWith('teststreamer', false);
   });
 
   it('getMultiTwitchDataForChannel returns null for a login with no live state', async () => {

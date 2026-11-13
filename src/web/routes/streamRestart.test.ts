@@ -3,10 +3,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const { logMock } = vi.hoisted(() => ({
   logMock: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
 }));
+vi.mock('../../twitch/eventsub/twitchEventSub', () => ({ reloadEventSubSubscriptions: vi.fn() }));
 vi.mock('../../shared/logger', () => ({ createLogger: () => logMock }));
 vi.mock('../../twitch/monitor/twitchMonitor', () => ({ restartTwitchMonitor: vi.fn() }));
 
-import { triggerRestart } from './streamRestart';
+import { afterStreamersRemoved, triggerRestart } from './streamRestart';
+import { reloadEventSubSubscriptions } from '../../twitch/eventsub/twitchEventSub';
 import { restartTwitchMonitor } from '../../twitch/monitor/twitchMonitor';
 
 beforeEach(() => {
@@ -53,3 +55,14 @@ describe('triggerRestart', () => {
     expect(order).toEqual(['first', 'second']);
   });
 });
+
+describe('afterStreamersRemoved (#1008)', () => {
+  it('restarts the monitor and reloads EventSub, so removed streamers\' connections stop', async () => {
+    vi.mocked(restartTwitchMonitor).mockResolvedValue(undefined);
+    afterStreamersRemoved();
+    await flush();
+    expect(restartTwitchMonitor).toHaveBeenCalled();
+    expect(reloadEventSubSubscriptions).toHaveBeenCalledOnce();
+  });
+});
+

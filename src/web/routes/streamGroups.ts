@@ -6,7 +6,7 @@ import { requireManager } from '../middleware';
 import { getCurrentGuildId } from '../session';
 import { parsePositiveIntId, parseCheckboxField } from './validation';
 import { redirectStreamsInvalid, redirectStreamsFailure } from './streamsErrors';
-import { triggerRestart } from './streamRestart';
+import { afterStreamersRemoved, triggerRestart } from './streamRestart';
 import { DiscordAPIError } from '@discordjs/rest';
 import { ChannelType } from 'discord-api-types/v10';
 import { getDiscordClient } from '../../discord/discordClientStore';
@@ -171,7 +171,7 @@ router.post('/streams/groups/remove', requireManager, csrfProtection, async (req
     const guildId = getCurrentGuildId(req);
     const removed = await removeStreamGroupAndStreamers(parsedGroupId, guildId);
     if (!removed) return redirectStreamsInvalid(res, 'remove_group_failed');
-    triggerRestart();
+    afterStreamersRemoved();
   } catch (err) {
     return redirectStreamsFailure(res, log, 'Remove stream group error:', err, 'remove_group_failed');
   }

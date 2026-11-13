@@ -18,6 +18,7 @@ import { performStartupLiveCheck } from './twitchMonitorStartup';
 import { handlePollStreamer, dispatchStreamerPolls } from './twitchMonitorPoll';
 import { withLoginLock } from './twitchMonitorLoginLock';
 import { recordMonitorPoll, normalizeError } from '../../shared/healthStore';
+import { setTwitchChannelLive } from '../../shared/statusStore';
 
 const log = createLogger('TwitchMonitor');
 
@@ -192,11 +193,14 @@ export async function shutdownTwitchMonitor(): Promise<void> {
 
 /**
  * Restarts the monitor without deleting live messages.
- * The startup live-check will re-sync with any posts made before the restart.
+ * The startup live-check will re-sync with any posts made before the restart, and sets each
+ * watched login's live flag; logins no longer watched have theirs cleared here.
+ * @returns Resolves once the monitor has restarted.
  */
 export async function restartTwitchMonitor(): Promise<void> {
   log.info('Restarting...');
   await teardown();
+  const previousLogins = monitoredLogins();
 
   // Don't delete messages — startup live-check handles re-syncing
   liveStates.clear();
@@ -204,6 +208,29 @@ export async function restartTwitchMonitor(): Promise<void> {
   streamersData = [];
 
   await startTwitchMonitor();
+  clearLiveFlagForUnmonitored(previousLogins);
+}
+
+/**
+ * The lowercased Twitch logins the monitor currently watches.
+ * @returns The logins of `streamersData`.
+ */
+function monitoredLogins(): Set<string> {
+  return new Set(streamersData.flatMap((s) => (s.twitch_name ? [s.twitch_name.toLowerCase()] : [])));
+}
+
+/**
+ * Clears the live flag of logins the monitor watched before a restart and no longer does (a
+ * streamer removed, possibly while live). Nothing else would ever clear it, because the offline
+ * check only runs for logins it watches (#1013). The startup check sets the flag for every login
+ * still watched.
+ * @param previousLogins - The logins watched before the restart.
+ */
+function clearLiveFlagForUnmonitored(previousLogins: Set<string>): void {
+  const current = monitoredLogins();
+  for (const login of previousLogins) {
+    if (!current.has(login)) setTwitchChannelLive(login, false);
+  }
 }
 
 /**
