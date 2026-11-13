@@ -47,7 +47,7 @@ function smallerPiece(current, fileSize) {
 /**
  * How long to wait after the session's request limit answered 429: its `Retry-After` seconds,
  * kept within {@link MAX_RETRY_AFTER_MS}, or {@link DEFAULT_RETRY_AFTER_MS} when it names none.
- * @param {Response} res - The 429 response.
+ * @param {{headers: {get: function(string): (string|null)}}} res - The 429 response.
  * @returns {number} Milliseconds to wait.
  */
 function rateLimitWaitMs(res) {
@@ -68,14 +68,15 @@ function delay(ms) {
 /**
  * Sends a piece, waiting out the session's request limit (a 429 says how long) up to
  * {@link MAX_RATE_LIMIT_WAITS} times instead of failing the upload.
- * @param {{base: string, id: string, file: File}} upload - The upload.
+ * @param {{base: string, id: string, file: File, onSent?: function(number): void}} upload - The
+ *   upload; `onSent` is told how far into the file each attempt has got.
  * @param {{offset: number, size: number}} piece - Where the piece starts and its largest size.
  * @returns {Promise<{received?: number, error?: string}>} As {@link sendPiece}, with a limit
  *   that never lifts reported as `upload_failed`.
  */
 async function sendPacedPiece(upload, piece) {
   for (var waits = 0; ; waits++) {
-    var answer = await sendPiece(upload.base, upload.id, upload.file, piece);
+    var answer = await sendPiece(upload.base, upload.id, upload.file, piece, upload.onSent);
     if (!answer.retryAfterMs) return answer;
     if (waits >= MAX_RATE_LIMIT_WAITS) return { error: 'upload_failed' };
     await delay(answer.retryAfterMs);

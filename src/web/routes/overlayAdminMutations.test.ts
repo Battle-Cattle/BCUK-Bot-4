@@ -77,7 +77,8 @@ vi.mock('./overlayVideoTranscode', () => ({ isWebmTranscodeQueueFull: vi.fn() })
 import { uploadRequest } from '../../test-utils/chunkedUploadTest';
 import type { UploadedFile } from '../uploadedFile';
 import supertest from 'supertest';
-import { router, limitConcurrentUploads, MAX_CONCURRENT_OVERLAY_UPLOADS } from './overlayAdminMutations';
+import { router, overlayUploadSlots, MAX_CONCURRENT_OVERLAY_UPLOADS } from './overlayAdminMutations';
+import { waitFor } from '../../test-utils/waitFor';
 import { getStreamerByDiscordId, addVideo, deleteVideo, getVideosForStreamer } from '../../db';
 import { videoFileSize } from './overlayVideoLibraryFiles';
 import { AccessLevel } from '../../db';
@@ -117,6 +118,23 @@ function buildApp(sessionUser: SessionUser = USER, before: RequestHandler[] = []
 function storedVideos(sizes: Record<string, number>, newFileBytes = 8) {
   vi.mocked(getVideosForStreamer).mockResolvedValue(Object.keys(sizes).map((filename) => ({ filename })) as any);
   vi.mocked(videoFileSize).mockImplementation(async ({ filename }) => sizes[filename] ?? newFileBytes);
+}
+
+/**
+ * Takes `count` upload slots with handlers that stay pending, as if that many uploads were being
+ * processed. `release` lets them finish.
+ */
+function holdUploadSlots(count: number) {
+  const finishers: Array<() => void> = [];
+  const runs = Array.from({ length: count }, () => overlayUploadSlots.admit(
+    () => new Promise<void>((resolve) => { finishers.push(resolve); }),
+  )({} as any, { redirect: vi.fn() } as any));
+  return {
+    release: async () => {
+      finishers.forEach((finish) => finish());
+      await Promise.all(runs);
+    },
+  };
 }
 
 beforeEach(() => {
@@ -354,19 +372,48 @@ describe('POST /settings/videos/upload', () => {
 
   it('refuses to start any upload with upload_busy while the most uploads are already being processed', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
-    const held = Array.from({ length: MAX_CONCURRENT_OVERLAY_UPLOADS }, () => {
-      const listeners: Record<string, () => void> = {};
-      const res = { redirect: vi.fn(), once: (event: string, cb: () => void) => { listeners[event] = cb; } };
-      void limitConcurrentUploads({} as any, res as any, vi.fn());
-      return listeners;
-    });
+    const held = holdUploadSlots(MAX_CONCURRENT_OVERLAY_UPLOADS);
     const res = await uploadRequest(buildApp())
       .post('/settings/videos/upload')
       .attach('video', WEBM_BUF, { filename: 'clip.webm', contentType: 'video/webm' });
-    for (const listeners of held) listeners.close?.();
+    await held.release();
     expect(res.status).toBe(409);
     expect(res.body).toEqual({ error: 'upload_busy' });
     expect(vi.mocked(addVideo)).not.toHaveBeenCalled();
+  });
+
+  it('holds its upload slot for the whole conversion and frees it once the upload is processed', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    let finishConversion!: () => void;
+    vi.mocked(storeMovAsWebm).mockImplementation((_dir, baseName) =>
+      new Promise((resolve) => { finishConversion = () => resolve(`${baseName}.webm`); }));
+    const held = holdUploadSlots(MAX_CONCURRENT_OVERLAY_UPLOADS - 1);
+    const upload = uploadRequest(buildApp())
+      .post('/settings/videos/upload')
+      .attach('video', MOV_BUF, { filename: 'clip.mov', contentType: 'video/quicktime' })
+      .then((r) => r);
+    await waitFor(() => expect(vi.mocked(storeMovAsWebm)).toHaveBeenCalled());
+    expect(overlayUploadSlots.isFull()).toBe(true);
+    finishConversion();
+    expect((await upload).headers.location).toBe('/overlay/settings?success=video_uploaded');
+    expect(overlayUploadSlots.isFull()).toBe(false);
+    await held.release();
+  });
+
+  it.each([
+    ['an invalid file', MP4_BUF.subarray(0, 2), undefined],
+    ['a DB failure', MP4_BUF, () => vi.mocked(addVideo).mockRejectedValue(new Error('DB error'))],
+  ])('frees its upload slot after %s', async (_label, buffer, arrange) => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    arrange?.();
+    // More uploads in a row than there are slots: each one only gets in if the last freed its slot.
+    for (let i = 0; i <= MAX_CONCURRENT_OVERLAY_UPLOADS; i++) {
+      const res = await uploadRequest(buildApp())
+        .post('/settings/videos/upload')
+        .attach('video', buffer, { filename: 'clip.mp4', contentType: 'video/mp4' });
+      expect(res.headers.location).toMatch(/\?error=(invalid_file|upload_failed)$/);
+    }
+    expect(overlayUploadSlots.isFull()).toBe(false);
   });
 
   it.each([
@@ -645,50 +692,4 @@ describe('POST /settings/videos/:id/delete', () => {
   });
 });
 
-describe('limitConcurrentUploads', () => {
-  /** A response stub whose `finish`/`close` listeners can be fired. */
-  function makeTrackedRes() {
-    const listeners: Record<string, () => void> = {};
-    return {
-      redirect: vi.fn(),
-      once: vi.fn((event: string, cb: () => void) => { listeners[event] = cb; }),
-      fire: (event: string) => listeners[event]?.(),
-    };
-  }
-
-  it('turns away an upload once the limit is reached, until one of them finishes', () => {
-    const admitted = Array.from({ length: MAX_CONCURRENT_OVERLAY_UPLOADS }, () => makeTrackedRes());
-    const next = vi.fn();
-    for (const res of admitted) void limitConcurrentUploads({} as any, res as any, next);
-    expect(next).toHaveBeenCalledTimes(MAX_CONCURRENT_OVERLAY_UPLOADS);
-
-    const refused = makeTrackedRes();
-    void limitConcurrentUploads({} as any, refused as any, next);
-    expect(refused.redirect).toHaveBeenCalledWith('/overlay/settings?error=upload_busy');
-    expect(next).toHaveBeenCalledTimes(MAX_CONCURRENT_OVERLAY_UPLOADS);
-
-    // Both events firing for one response frees only its own slot.
-    admitted[0]!.fire('finish');
-    admitted[0]!.fire('close');
-    const nextOne = makeTrackedRes();
-    void limitConcurrentUploads({} as any, nextOne as any, next);
-    expect(nextOne.redirect).not.toHaveBeenCalled();
-    const overLimit = makeTrackedRes();
-    void limitConcurrentUploads({} as any, overLimit as any, next);
-    expect(overLimit.redirect).toHaveBeenCalledWith('/overlay/settings?error=upload_busy');
-
-    for (const res of [...admitted.slice(1), nextOne]) res.fire('close');
-  });
-
-  it('removes a turned-away upload\'s file', async () => {
-    const admitted = Array.from({ length: MAX_CONCURRENT_OVERLAY_UPLOADS }, () => makeTrackedRes());
-    for (const res of admitted) void limitConcurrentUploads({} as any, res as any, vi.fn());
-    const file = { filename: 'x.incoming' };
-    const refused = makeTrackedRes();
-    await limitConcurrentUploads({ file } as any, refused as any, vi.fn());
-    expect(vi.mocked(discardUpload)).toHaveBeenCalledWith(file);
-    expect(refused.redirect).toHaveBeenCalledWith('/overlay/settings?error=upload_busy');
-    for (const res of admitted) res.fire('close');
-  });
-});
 

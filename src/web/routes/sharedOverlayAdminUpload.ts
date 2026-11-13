@@ -1,5 +1,5 @@
 import path from 'path';
-import { Router, type NextFunction, type Request, type Response } from 'express';
+import { Router, type Request, type Response } from 'express';
 import { createLogger } from '../../shared/logger';
 import { csrfProtection } from '../csrf';
 import { getSessionUser } from '../session';
@@ -13,6 +13,7 @@ import {
   adoptChunkedUpload, INCOMING_DIR, detectUploadedVideoType, placeUpload, discardUpload, sweepStaleIncomingUploads,
 } from './overlayUploadStorage';
 import { storeSharedVideo, recordSharedVideo } from './sharedOverlayVideoStorage';
+import { createUploadSlots } from './uploadSlots';
 import { broadcastSharedVideoList } from './sharedOverlaySource';
 import { SHARED_SETTINGS_PATH, SHARED_PROGRESS_KEY } from './sharedOverlayAdminShared';
 
@@ -27,8 +28,8 @@ const MAX_CONCURRENT_OVERLAY_UPLOADS = 3;
 
 const MAX_FILE_BYTES = OVERLAY_MAX_FILE_MB * 1024 * 1024;
 
-/** Shared-video uploads being completed (checked, converted, stored) right now. */
-let activeUploads = 0;
+/** Slots for shared-video uploads being completed (checked, converted, stored), held until processing ends. */
+const uploadSlots = createUploadSlots(MAX_CONCURRENT_OVERLAY_UPLOADS, `${SHARED_SETTINGS_PATH}?error=upload_busy`);
 
 /** Error codes the upload completion reports as themselves. */
 const UPLOAD_ERROR_CODES = new Set(['invalid_file', 'transcode_failed', 'transcode_busy']);
@@ -41,38 +42,13 @@ const chunkedStore = new ChunkedUploadStore({
 
 /**
  * Turns an upload away before any of it is sent while too many are being processed or the
- * conversion queue is full (every shared upload is converted).
+ * conversion queue is full (every shared upload is converted). These are hints so a whole file
+ * isn't sent only to be refused; nothing is reserved, and completion checks again.
  * @returns `upload_busy`, `transcode_busy`, or null to let the upload start.
  */
 function checkStart(): string | null {
-  if (activeUploads >= MAX_CONCURRENT_OVERLAY_UPLOADS) return 'upload_busy';
+  if (uploadSlots.isFull()) return 'upload_busy';
   return isWebmTranscodeQueueFull() ? 'transcode_busy' : null;
-}
-
-/**
- * Admits a finished upload only while fewer than {@link MAX_CONCURRENT_OVERLAY_UPLOADS} are being
- * processed; a further one is turned away with `upload_busy` and its file removed.
- * @param req - Express request carrying the finished upload in `req.file`.
- * @param res - Express response; redirected when the limit is reached.
- * @param next - Continues to the upload handler when admitted.
- * @returns Resolves once the upload is admitted or turned away.
- */
-async function limitConcurrentUploads(req: Request, res: Response, next: NextFunction): Promise<void> {
-  if (activeUploads >= MAX_CONCURRENT_OVERLAY_UPLOADS) {
-    if (req.file) await discardUpload(req.file);
-    res.redirect(`${SHARED_SETTINGS_PATH}?error=upload_busy`);
-    return;
-  }
-  activeUploads++;
-  let released = false;
-  const release = (): void => {
-    if (released) return;
-    released = true;
-    activeUploads--;
-  };
-  res.once('finish', release);
-  res.once('close', release);
-  next();
 }
 
 /**
@@ -134,7 +110,7 @@ mountChunkedUploadRoutes(router, {
   field: 'video',
   checkStart,
   toFile: adoptChunkedUpload,
-  complete: [limitConcurrentUploads, handleSharedUpload],
+  complete: [uploadSlots.admit(handleSharedUpload)],
   basePath: SHARED_SETTINGS_PATH,
   log,
   onSweep: sweepStaleIncomingUploads,
