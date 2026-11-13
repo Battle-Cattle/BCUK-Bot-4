@@ -42,7 +42,6 @@ import {
   tryEditDiscordMessage,
   trySendDiscordReply,
   mentionsWrittenIn,
-  neutralizeMentions,
   fillTemplateWithoutPlaceholderMentions,
   truncateMessageContent,
   DISCORD_MESSAGE_CONTENT_LIMIT,
@@ -419,35 +418,37 @@ describe('truncateMessageContent', () => {
   });
 });
 
-describe('neutralizeMentions', () => {
-  it('puts a zero-width space after the @ of @everyone, @here, and user/role mentions', () => {
-    expect(neutralizeMentions('@everyone @here <@123456789012345678> <@!123456789012345678> <@&123456789012345678>'))
-      .toBe('@\u200beveryone @\u200bhere <@\u200b123456789012345678> <@\u200b!123456789012345678> <@\u200b&123456789012345678>');
-  });
-
-  it('leaves text without mentions, and plain @names, unchanged', () => {
-    expect(neutralizeMentions('Elden Ring w/ @someone #1 <3')).toBe('Elden Ring w/ @someone #1 <3');
-  });
-});
-
 describe('fillTemplateWithoutPlaceholderMentions', () => {
   it('fills placeholders, keeps an unknown one as written, and keeps the template\'s own mentions', () => {
-    expect(fillTemplateWithoutPlaceholderMentions('@everyone {a} {missing} <@&123456789012345678>', { a: 'x' }))
-      .toBe('@everyone x {missing} <@&123456789012345678>');
+    expect(fillTemplateWithoutPlaceholderMentions('@everyone {a} {missing} <@&123456789012345678> @here', { a: 'x' }))
+      .toBe('@everyone x {missing} <@&123456789012345678> @here');
   });
 
-  it('neutralises mentions inside a value, and at either edge of it', () => {
-    expect(fillTemplateWithoutPlaceholderMentions('{a}', { a: '@here' })).toBe('@\u200bhere');
-    expect(fillTemplateWithoutPlaceholderMentions('@{a}', { a: 'everyone' })).toBe('@\u200beveryone');
-    expect(fillTemplateWithoutPlaceholderMentions('<@!{a}>', { a: '123456789012345678' })).toBe('<@!\u200b123456789012345678>');
-    expect(fillTemplateWithoutPlaceholderMentions('<@&1234{a}>', { a: '56789012345678' })).toBe('<@&1234\u200b56789012345678>');
-    expect(fillTemplateWithoutPlaceholderMentions('{a}everyone', { a: '@' })).toBe('@\u200beveryone');
-    expect(fillTemplateWithoutPlaceholderMentions('{a}{b}', { a: 'x @', b: 'here' })).toBe('x @\u200bhere');
+  it('neutralises every kind of mention inside a value', () => {
+    expect(fillTemplateWithoutPlaceholderMentions('{a}', { a: '@everyone @here <@1> <@!2> <@&3>' }))
+      .toBe('@\u200beveryone @\u200bhere <@\u200b1> <@\u200b!2> <@\u200b&3>');
   });
 
-  it('adds nothing for an empty value or one that can\'t form a mention', () => {
-    expect(fillTemplateWithoutPlaceholderMentions('@{a}', { a: '' })).toBe('@');
+  it.each([
+    ['template @ + value', '@{a}', { a: 'everyone' }, '@\u200beveryone'],
+    ['partial mention in the template', '@eve{a}', { a: 'ryone' }, '@\u200beveryone'],
+    ['value ending in @ + template text', '{a}here', { a: 'hi @' }, 'hi @\u200bhere'],
+    ['empty value between template pieces', '@{a}everyone', { a: '' }, '@\u200beveryone'],
+    ['role mention around a value', '<@&{a}>', { a: '123' }, '<@\u200b&123>'],
+    ['user mention around a value', '<@!{a}>', { a: '123456789012345678' }, '<@\u200b!123456789012345678>'],
+    ['digits split across the edge', '<@&1234{a}>', { a: '5678' }, '<@\u200b&12345678>'],
+    ['two adjacent values', '{a}{b}', { a: 'x @', b: 'here' }, 'x @\u200bhere'],
+  ])('neutralises a mention formed across a placeholder edge: %s', (_name, template, vars, expected) => {
+    expect(fillTemplateWithoutPlaceholderMentions(template, vars)).toBe(expected);
+  });
+
+  it('leaves text with no mention unchanged, and a template mention next to a value live', () => {
     expect(fillTemplateWithoutPlaceholderMentions('Watch {a}!', { a: 'https://twitch.tv/x' })).toBe('Watch https://twitch.tv/x!');
+    expect(fillTemplateWithoutPlaceholderMentions('@here{a}', { a: ' is live' })).toBe('@here is live');
+  });
+
+  it('keeps track of positions past a value with emoji (two UTF-16 units each)', () => {
+    expect(fillTemplateWithoutPlaceholderMentions('{a} @here {b}', { a: '😀😀', b: '@everyone' }))
+      .toBe('😀😀 @here @\u200beveryone');
   });
 });
-

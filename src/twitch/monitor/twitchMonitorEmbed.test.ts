@@ -245,11 +245,14 @@ describe('renderAnnouncementContent (#1010)', () => {
     expect(renderAnnouncementContent('@here @{title}', title('everyone')).content).toBe('@here @\u200beveryone');
     // Title ending in '@' + template 'here'.
     expect(renderAnnouncementContent('{title}here', title('hi @')).content).toBe('hi @\u200bhere');
-    // Template '<@&' + title of digits, and '<@' + title of digits.
-    expect(renderAnnouncementContent('<@&{title}>', title('123456789012345678')).content).toBe('<@&\u200b123456789012345678>');
+    // Template '<@&' + title of digits, and '<@' + title of digits (the zero-width space goes after the '@').
+    expect(renderAnnouncementContent('<@&{title}>', title('123456789012345678')).content).toBe('<@\u200b&123456789012345678>');
     expect(renderAnnouncementContent('<@{title}>', title('123456789012345678')).content).toBe('<@\u200b123456789012345678>');
     // Title ending in '<' + template '@&id>'.
-    expect(renderAnnouncementContent('{title}@&123456789012345678>', title('x <')).content).toBe('x <\u200b@&123456789012345678>');
+    expect(renderAnnouncementContent('{title}@&123456789012345678>', title('x <')).content).toBe('x <@\u200b&123456789012345678>');
+    // A partial mention in the template completed by the title, and an empty title between two template pieces.
+    expect(renderAnnouncementContent('@here @eve{title}', title('ryone')).content).toBe('@here @\u200beveryone');
+    expect(renderAnnouncementContent('@here @{title}everyone', title('')).content).toBe('@here @\u200beveryone');
   });
 
   it('leaves the stream URL and ordinary text untouched', () => {
