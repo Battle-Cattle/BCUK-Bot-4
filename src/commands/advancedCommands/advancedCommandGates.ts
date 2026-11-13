@@ -1,6 +1,7 @@
 // Pure checks for a chat use of an advanced command: the viewer's role, the escalating cost, and
 // the in-memory global/per-viewer cooldowns. Kept free of I/O so they're unit-tested directly.
 import type { AdvancedCommandRole, DbAdvancedCommand } from '../../db';
+import { pruneOlderThan } from '../timestampPruning';
 
 /** The chat badges that decide whether a viewer meets a command's minimum role. */
 export interface ChatRoleInfo {
@@ -70,11 +71,14 @@ type CooldownCommand = Pick<DbAdvancedCommand, 'id' | 'globalCooldownSeconds' | 
 
 /**
  * Creates a cooldown store keyed by command (global) and command+viewer (per-user). Entries are
- * last-use timestamps, so changing a command's cooldown applies to uses already made.
+ * last-use timestamps, so changing a command's cooldown applies to uses already made. Once the
+ * store is large, uses older than the longest cooldown it has been asked about are forgotten,
+ * since they can't block anyone any more (#1005).
  * @returns The store.
  */
 export function createAdvancedCommandCooldowns(): AdvancedCommandCooldowns {
   const lastUse = new Map<string, number>();
+  let longestCooldownMs = 0;
 
   /**
    * Seconds left on one cooldown, given its length and the key's last use.
@@ -84,6 +88,7 @@ export function createAdvancedCommandCooldowns(): AdvancedCommandCooldowns {
    * @returns Whole seconds remaining (rounded up), or 0 if off cooldown or never used.
    */
   const left = (key: string, seconds: number, now: number): number => {
+    longestCooldownMs = Math.max(longestCooldownMs, seconds * 1000);
     const last = lastUse.get(key);
     if (last === undefined || seconds <= 0) return 0;
     return Math.max(0, Math.ceil((last + seconds * 1000 - now) / 1000));
@@ -95,10 +100,15 @@ export function createAdvancedCommandCooldowns(): AdvancedCommandCooldowns {
       userSeconds: left(`${command.id}:${login}`, command.userCooldownSeconds, now),
     }),
     claim: (command, login, now = Date.now()) => {
+      longestCooldownMs = Math.max(longestCooldownMs, command.globalCooldownSeconds * 1000, command.userCooldownSeconds * 1000);
       if (command.globalCooldownSeconds > 0) lastUse.set(`${command.id}`, now);
       if (command.userCooldownSeconds > 0) lastUse.set(`${command.id}:${login}`, now);
+      pruneOlderThan(lastUse, longestCooldownMs, now);
     },
-    clear: () => lastUse.clear(),
+    clear: () => {
+      lastUse.clear();
+      longestCooldownMs = 0;
+    },
   };
 }
 
@@ -128,9 +138,7 @@ export function createNoticeThrottle(windowMs: number): { tryClaim: (key: string
       if (last !== undefined && now - last < windowMs) return false;
       sentAt.set(key, now);
       // Bounded: drop stale entries once the map grows, so a long uptime can't grow it forever.
-      if (sentAt.size > 1000) {
-        for (const [k, t] of sentAt) if (now - t >= windowMs) sentAt.delete(k);
-      }
+      pruneOlderThan(sentAt, windowMs, now);
       return true;
     },
     clear: () => sentAt.clear(),

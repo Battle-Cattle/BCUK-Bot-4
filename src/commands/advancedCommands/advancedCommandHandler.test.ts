@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockLogger } from '../../test-utils/loggerMock';
+import { waitFor } from '../../test-utils/waitFor';
 
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 vi.mock('../../db', () => ({
@@ -286,5 +287,82 @@ describe('triggerAdvancedCommandFromStreamDeck', () => {
     vi.mocked(db.getAdvancedCommand).mockResolvedValueOnce(command({ isEnabled: false }));
     expect(await triggerAdvancedCommandFromStreamDeck(streamer, 7)).toBe('command_disabled');
     expect(runAdvancedCommandEffects).not.toHaveBeenCalled();
+  });
+});
+
+describe('executeAdvancedCommandForTwitch — uses arriving together (#1003)', () => {
+  /**
+   * Backs the usage ledger with an in-memory list whose reads and writes each resolve on a later
+   * tick, like a real DB, so two uses started together interleave unless something serialises them.
+   */
+  function slowLedger(): string[] {
+    const recorded: string[] = [];
+    const later = <T>(value: () => T): Promise<T> => new Promise((resolve) => { setTimeout(() => resolve(value()), 1); });
+    vi.mocked(db.countAdvancedCommandUses).mockImplementation((_id, _window, login?: string) =>
+      later(() => recorded.filter((l) => login === undefined || l === login).length));
+    vi.mocked(db.recordAdvancedCommandUsage).mockImplementation((usage) => later(() => { recorded.push(usage.twitchUsername!); }));
+    vi.mocked(db.spendLoyaltyPoints).mockImplementation(() => later(() => 400));
+    return recorded;
+  }
+
+  it('lets only one of two simultaneous uses through a global cooldown; the other gets the cooldown notice, uncharged', async () => {
+    vi.mocked(db.getAdvancedCommand).mockResolvedValue(command({ globalCooldownSeconds: 60 }));
+    vi.mocked(db.getLoyaltyPointsBalance).mockResolvedValue(400);
+    slowLedger();
+
+    await Promise.all([
+      executeAdvancedCommandForTwitch(message({ userLogin: 'alice' })),
+      executeAdvancedCommandForTwitch(message({ userLogin: 'bob', userName: 'Bob' })),
+    ]);
+
+    expect(runAdvancedCommandEffects).toHaveBeenCalledOnce();
+    expect(db.spendLoyaltyPoints).toHaveBeenCalledOnce();
+    expect(send).toHaveBeenCalledWith('streamer', expect.stringContaining('@bob Hydrate is on cooldown'));
+  });
+
+  it('lets only one of two simultaneous uses through maxUsesPerStream: 1', async () => {
+    vi.mocked(db.getAdvancedCommand).mockResolvedValue(command({ maxUsesPerStream: 1 }));
+    const recorded = slowLedger();
+
+    await Promise.all([
+      executeAdvancedCommandForTwitch(message({ userLogin: 'alice' })),
+      executeAdvancedCommandForTwitch(message({ userLogin: 'bob', userName: 'Bob' })),
+    ]);
+
+    expect(recorded).toEqual(['alice']);
+    expect(runAdvancedCommandEffects).toHaveBeenCalledOnce();
+    expect(db.spendLoyaltyPoints).toHaveBeenCalledOnce();
+    expect(send).toHaveBeenCalledWith('streamer', 'Hydrate has been used the maximum 1 times this stream.');
+  });
+
+  it('charges two simultaneous uses the first and second escalating price', async () => {
+    vi.mocked(db.getAdvancedCommand).mockResolvedValue(command({ pointCost: 100, priceStep: 50 }));
+    slowLedger();
+
+    await Promise.all([
+      executeAdvancedCommandForTwitch(message({ userLogin: 'alice' })),
+      executeAdvancedCommandForTwitch(message({ userLogin: 'bob', userName: 'Bob' })),
+    ]);
+
+    expect(vi.mocked(db.spendLoyaltyPoints).mock.calls.map((call) => call[2]).sort((a, b) => a - b)).toEqual([100, 150]);
+    expect(runAdvancedCommandEffects).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not hold one command\'s uses behind another\'s', async () => {
+    let releaseFirst!: () => void;
+    vi.mocked(db.countAdvancedCommandUses).mockImplementationOnce(() => new Promise((resolve) => { releaseFirst = () => resolve(0); }));
+    vi.mocked(db.getAdvancedCommand).mockImplementation(async (_streamerId, commandId) =>
+      command({ id: commandId, maxUsesPerStream: 5 }));
+    vi.mocked(db.getAdvancedCommandForTwitchChannel).mockImplementation(async (_channel, trigger) =>
+      ({ ...ROUTE, commandId: trigger === '!other' ? 8 : 7 }));
+
+    const blocked = executeAdvancedCommandForTwitch(message());
+    await waitFor(() => { expect(db.countAdvancedCommandUses).toHaveBeenCalledOnce(); });
+    await executeAdvancedCommandForTwitch(message({ command: '!other', message: '!other' }));
+    expect(runAdvancedCommandEffects).toHaveBeenCalledOnce();
+
+    releaseFirst();
+    await blocked;
+    expect(runAdvancedCommandEffects).toHaveBeenCalledTimes(2);
   });
 });
