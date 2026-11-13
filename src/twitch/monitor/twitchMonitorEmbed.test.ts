@@ -24,6 +24,7 @@ import {
   templateVars,
   buildMessagePreview,
   renderAnnouncementContent,
+  truncateMessageContent,
 } from './twitchMonitorEmbed';
 import type { TwitchStream } from '../twitchApi';
 import type { LiveState } from './twitchMonitorTypes';
@@ -287,3 +288,22 @@ describe('renderAnnouncementContent (#1010)', () => {
   });
 });
 
+describe('truncateMessageContent', () => {
+  it('leaves content within the limit unchanged', () => {
+    const exact = 'a'.repeat(2000);
+    expect(truncateMessageContent(exact)).toBe(exact);
+  });
+
+  it('cuts longer content to the limit, ending with an ellipsis', () => {
+    const result = truncateMessageContent('a'.repeat(2140));
+    expect(result).toHaveLength(2000);
+    expect(result.endsWith('…')).toBe(true);
+  });
+
+  it('does not split a surrogate pair at the cut', () => {
+    const content = `${'a'.repeat(2000 - 2)}😀${'b'.repeat(10)}`;
+    const result = truncateMessageContent(content);
+    expect(result.length).toBeLessThanOrEqual(2000);
+    expect(result).toBe(`${'a'.repeat(2000 - 2)}…`);
+  });
+});

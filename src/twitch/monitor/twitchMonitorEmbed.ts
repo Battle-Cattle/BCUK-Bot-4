@@ -3,7 +3,7 @@ import { TwitchStream } from '../twitchApi';
 import { LiveState } from './twitchMonitorTypes';
 import type { MessageMentionOptions } from 'discord.js';
 import { fillTemplate } from '../../shared/textTemplate';
-import { fillTemplateWithoutPlaceholderMentions, mentionsWrittenIn, truncateMessageContent } from '../../discord/discordUtils';
+import { fillTemplateWithoutPlaceholderMentions, mentionsWrittenIn } from '../../discord/templateMentions';
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
@@ -110,6 +110,25 @@ export function templateVars(login: string, stream: TwitchStream): Record<string
     title: stream.title,
     url: getStreamUrl(login),
   };
+}
+
+/** Discord's limit on a message's `content`. */
+const DISCORD_MESSAGE_CONTENT_LIMIT = 2000;
+
+/**
+ * Shortens message content to Discord's {@link DISCORD_MESSAGE_CONTENT_LIMIT}, ending it with `…`,
+ * so content filled from a long template and placeholder (e.g. a 140-character stream title)
+ * can't make the send fail. Never splits a surrogate pair.
+ * @param content - The content to send.
+ * @returns `content` unchanged when it fits, otherwise its start plus `…`, within the limit.
+ */
+export function truncateMessageContent(content: string): string {
+  if (content.length <= DISCORD_MESSAGE_CONTENT_LIMIT) return content;
+  let end = DISCORD_MESSAGE_CONTENT_LIMIT - 1;
+  // Don't leave half of a surrogate pair (e.g. an emoji) before the ellipsis.
+  const last = content.charCodeAt(end - 1);
+  if (last >= 0xd800 && last <= 0xdbff) end--;
+  return `${content.slice(0, end)}…`;
 }
 
 /** An announcement's message content and the mentions it may ping. */
