@@ -12,6 +12,7 @@ vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 vi.mock('../../shared/config', () => ({ OVERLAY_FOLDER: dir, SHARED_OVERLAY_PRELOAD_KB_PER_SECOND: 1 }));
 
 import express from 'express';
+import { rateLimit } from 'express-rate-limit';
 import supertest from 'supertest';
 import { servePreloadVideo, parseByteRange, preloadBudget } from './sharedOverlayPreload';
 
@@ -25,9 +26,12 @@ beforeAll(() => {
 });
 afterAll(() => { fs.rmSync(dir, { recursive: true, force: true }); });
 
+// A generous limiter in front of the handler, as route handlers that read files are expected to have
+// one (the real route sits behind the app's limiters); it never trips in these tests.
+const testLimiter = rateLimit({ windowMs: 60 * 1000, limit: 10_000, standardHeaders: false, legacyHeaders: false });
 const app = () => {
   const a = express();
-  a.get('/videos/:filename', servePreloadVideo);
+  a.get('/videos/:filename', testLimiter, servePreloadVideo);
   return a;
 };
 const get = (name: string, range?: string) => {
