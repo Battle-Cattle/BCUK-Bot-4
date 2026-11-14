@@ -141,6 +141,15 @@ function sendMessage(
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // clearAllMocks keeps implementations but these mocks have none by default, and every result
+  // reaches fireAndForget, which needs a promise. Defaulted here so each test passes run alone.
+  for (const handler of [
+    executeCustomCommandForTwitch, executeCounterCommandForTwitch, executeMultiCommandForTwitch,
+    executeShoutoutForTwitch, handleCommand, executeCountdownForTwitch, executeFollowageForTwitch,
+    awardPointsForChatMessage, executePointsCommandForTwitch, executeGambleCommandForTwitch,
+  ]) {
+    vi.mocked(handler).mockResolvedValue(undefined);
+  }
   vi.useFakeTimers();
 });
 
