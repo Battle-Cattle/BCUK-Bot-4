@@ -4,7 +4,7 @@
 // failures so one effect can never block the next.
 import type { AlertEventType, StreamerEventType } from '../../db';
 import type { CompanionActivityEvent, CompanionActivityEventType } from './twitchEventSubRuntime';
-import { getStreamerById, findCachedAlertConfig, recordStreamerEvent } from '../../db';
+import { getStreamerById, findCachedAlertConfig, recordStreamerEvent, fitStreamerEventText } from '../../db';
 import { createLogger } from '../../shared/logger';
 import { fillTemplate } from '../../shared/textTemplate';
 import {
@@ -131,11 +131,12 @@ export async function recordAndPushDashboardEvent(
   try {
     // No `redemptionId` is passed here, so recordStreamerEvent never skips the insert as an
     // already-recorded duplicate — the returned id is always the new row's, never null.
-    const eventId = (await recordStreamerEvent(streamerId, eventType, displayName, detail))!;
+    const fitted = fitStreamerEventText(displayName, detail);
+    const eventId = (await recordStreamerEvent(streamerId, eventType, fitted.displayName, fitted.detail))!;
     const occurredAt = new Date().toISOString();
-    dashboardEventRuntimeRegistry.get()?.pushDashboardEvent(streamerId, { eventType, displayName, detail, occurredAt });
+    dashboardEventRuntimeRegistry.get()?.pushDashboardEvent(streamerId, { eventType, ...fitted, occurredAt });
     await pushCompanionActivityEvent(streamerId, {
-      type: eventType as CompanionActivityEventType, id: eventId, displayName, detail, occurredAt,
+      type: eventType as CompanionActivityEventType, id: eventId, ...fitted, occurredAt,
     });
   } catch (err) {
     log.error(`Failed to record ${eventType} dashboard event for streamer ${streamerId}:`, err);

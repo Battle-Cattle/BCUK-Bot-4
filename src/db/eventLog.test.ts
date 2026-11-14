@@ -40,6 +40,18 @@ describe('recordStreamerEvent', () => {
     expect(insertParams).toEqual([5, 'follow', 'someviewer', null, null]);
   });
 
+  it('fits an over-long detail and display name to their columns before inserting (#1012)', async () => {
+    const pool = makeInsertPool(1);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+
+    await recordStreamerEvent(5, 'redemption', 'n'.repeat(300), `${'T'.repeat(45)}: ${'x'.repeat(500)}`, 'redemption-1');
+
+    const [, insertParams] = pool.execute.mock.calls[0]!;
+    expect((insertParams as string[])[2]).toHaveLength(255);
+    expect((insertParams as string[])[3]).toHaveLength(500);
+    expect((insertParams as string[])[3]!.endsWith('…')).toBe(true);
+  });
+
   it('prunes the streamer down to the retention cap once the prune-cadence threshold is reached', async () => {
     const pool = makeInsertPool(1);
     vi.mocked(getPool).mockReturnValue(pool as any);

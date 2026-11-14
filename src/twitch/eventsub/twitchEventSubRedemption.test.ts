@@ -4,8 +4,10 @@ const { mockLog } = vi.hoisted(() => ({
   mockLog: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
-vi.mock('../../db', () => ({
+vi.mock('../../db', async () => ({
   getVideosForReward: vi.fn(), getStreamerById: vi.fn(), recordStreamerEvent: vi.fn(),
+  // The real text fitting: it has no DB dependency.
+  fitStreamerEventText: (await import('../../db/eventLogText.js')).fitStreamerEventText,
   getRedemptionProgress: vi.fn(), markRedemptionEffect: vi.fn(),
 }));
 vi.mock('../../audio/soundSelector', () => ({ pickWeightedRandom: vi.fn() }));
@@ -104,6 +106,28 @@ describe('handleRedemption', () => {
       redeemedAt: expect.any(String),
     });
     expect(pushRedemptionForConfirmation).not.toHaveBeenCalled();
+  });
+
+  it('handles a redemption whose title plus viewer text is longer than the event log column (#1012)', async () => {
+    const title = 'T'.repeat(45);
+    const input = 'x'.repeat(500);
+    const videos = [{ file: 'clip1.mp4', weight: 1 }] as any[];
+    vi.mocked(getVideosForReward).mockResolvedValue(videos);
+    vi.mocked(pickWeightedRandom).mockReturnValue('clip1.mp4');
+
+    await handleRedemption('streamer', { ...event, reward: { id: 'reward-abc', title }, user_input: input }, CONFIG, streamerId);
+
+    // The stored (and live-pushed) detail fits the VARCHAR(500) column, ending in an ellipsis.
+    const detail = vi.mocked(recordStreamerEvent).mock.calls[0]![3]!;
+    expect(detail).toHaveLength(500);
+    expect(detail.startsWith(`${title}: xxx`)).toBe(true);
+    expect(detail.endsWith('…')).toBe(true);
+    expect(mockPushDashboardEvent).toHaveBeenCalledWith(streamerId, expect.objectContaining({ detail }));
+    // The rest of the redemption still runs.
+    expect(applyRedemptionPricing).toHaveBeenCalled();
+    expect(mockPushOverlayEvent).toHaveBeenCalledWith('streamer', '/overlay/videos/7/clip1.mp4');
+    // The companion app still gets the viewer's full, untruncated text.
+    expect(mockPushCompanionEvent).toHaveBeenCalledWith('999888777', expect.objectContaining({ userInput: input, rewardTitle: title }));
   });
 
   it('records a confirmation (which arms its timer) and pushes for confirmation when the reward requires it', async () => {
