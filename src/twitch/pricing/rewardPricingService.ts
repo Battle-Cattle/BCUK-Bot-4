@@ -1,11 +1,11 @@
 import { createMutationQueue } from '../../shared/mutationQueue';
 import {
-  getPricingForReward, recordPricingUpdate, recordPricingHistory, markPricingUnsupported, deletePricingConfig,
-  getPricingSettingsForStreamer, getStreamerById, getRedemptionProgress, markRedemptionEffect,
-  type StreamerPricingSettings, type DbStreamerEventSub, type RewardPricingRow,
+  getPricingForReward, recordPricingUpdate, recordPricingHistory, deletePricingConfig,
+  getPricingSettingsForStreamer, getRedemptionProgress, markRedemptionEffect,
+  type StreamerPricingSettings, type RewardPricingRow,
 } from '../../db';
-import { getValidToken } from '../twitchUserTokens';
-import { updateRewardCost, deleteCustomReward, TwitchRewardUnsupportedError, TwitchRewardAuthError } from '../twitchRewardsApi';
+import { updateRewardCost, deleteCustomReward } from '../twitchRewardsApi';
+import { rewardKey, resolveBroadcasterToken, pushRewardCostUpdate } from './rewardPricePush';
 import { computePrice, decayDemand, applyRedemption, computeRedemptionIncrement, revertRedemption } from './rewardPricingMath';
 import { createLogger } from '../../shared/logger';
 import { createRuntimeRegistry } from '../../shared/runtimeRegistry';
@@ -32,56 +32,12 @@ export function registerRewardPricingRuntime(runtime: RewardPricingRuntime): voi
 // (different keys) run fully concurrently.
 const pricingQueue = createMutationQueue();
 
-/**
- * Builds the {@link pricingQueue} key that serialises work on one streamer's reward.
- * @param streamerId - Streamer DB row ID.
- * @param twitchRewardId - Twitch custom reward ID.
- * @returns The `streamerId:rewardId` key.
- */
-function queueKey(streamerId: number, twitchRewardId: string): string {
-  return `${streamerId}:${twitchRewardId}`;
-}
-
-/** A streamer paired with a currently-valid broadcaster token, as resolved by {@link resolveBroadcasterToken}. */
-interface ResolvedBroadcasterToken {
-  streamer: DbStreamerEventSub & { twitch_user_id: string };
-  token: string;
-}
-
-/**
- * Looks up a streamer and their currently-valid broadcaster token together, since every
- * reward-management call needs both. Shared by `pushRewardCostUpdate`, `resetAndDeletePricing`,
- * and `deleteRewardAndPricing`.
- * @param streamerId - DB row ID of the streamer.
- * @returns The streamer (with `twitch_user_id` guaranteed non-null) and their valid token, or
- *   null if the streamer doesn't exist, has no linked Twitch account, or has no usable token.
- */
-async function resolveBroadcasterToken(streamerId: number): Promise<ResolvedBroadcasterToken | null> {
-  const streamer = await getStreamerById(streamerId);
-  const token = streamer ? await getValidToken(streamer) : null;
-  if (!streamer?.twitch_user_id || !token) return null;
-  return { streamer: streamer as DbStreamerEventSub & { twitch_user_id: string }, token };
-}
-
-// Caps how often a single reward's cost is actually pushed to Twitch, even if demand keeps
-// changing faster than that (e.g. a redemption burst during a raid/hype train) — every
-// redemption still updates demand immediately, but the resulting price is coalesced onto
-// Twitch at most this often. Skipped pushes aren't lost: since last_pushed_cost is left
-// unchanged, the next redemption (once the window has passed) or the next decay tick
-// (every 30s, well above this interval) will push the fully caught-up price.
-const MIN_PUSH_INTERVAL_MS = 5_000;
-const lastPushedAt = new Map<string, number>();
-
-/** Test-only: clears the in-memory last-pushed-at cache so each test starts from a clean slate. */
-export function __resetPushRateLimiterForTests(): void {
-  lastPushedAt.clear();
-}
-
 // How long after a redemption its raised price is pushed to Twitch. Pushing straight away can
 // land before Twitch has finished processing the redemption itself, and Twitch then shows the new
 // (higher) price as what the viewer paid. The redemption's demand is still recorded immediately;
-// only the Twitch push waits. Long enough that the push rate limiter's window (`MIN_PUSH_INTERVAL_MS`)
-// has normally passed by the time it fires, so the deferred push isn't skipped.
+// only the Twitch push waits. Long enough that the push rate limiter's window
+// (`MIN_PUSH_INTERVAL_MS` in `rewardPricePush.ts`) has normally passed by the time it fires, so
+// the deferred push isn't skipped.
 const REDEMPTION_PUSH_DELAY_MS = 5_000;
 const pendingRedemptionPushes = new Map<string, ReturnType<typeof setTimeout>>();
 
@@ -96,7 +52,7 @@ const pendingRedemptionPushes = new Map<string, ReturnType<typeof setTimeout>>()
  * @returns void
  */
 function scheduleRedemptionPush(streamerId: number, twitchRewardId: string): void {
-  const key = queueKey(streamerId, twitchRewardId);
+  const key = rewardKey(streamerId, twitchRewardId);
   if (pendingRedemptionPushes.has(key)) return;
   const timer = setTimeout(() => {
     pendingRedemptionPushes.delete(key);
@@ -120,7 +76,7 @@ function scheduleRedemptionPush(streamerId: number, twitchRewardId: string): voi
  */
 function isPushDeferred(streamerId: number, twitchRewardId: string, change: PricingChange): boolean {
   if (change.kind === 'redemption') return true;
-  return change.kind === 'decay' && pendingRedemptionPushes.has(queueKey(streamerId, twitchRewardId));
+  return change.kind === 'decay' && pendingRedemptionPushes.has(rewardKey(streamerId, twitchRewardId));
 }
 
 /**
@@ -132,66 +88,6 @@ function isPushDeferred(streamerId: number, twitchRewardId: string, change: Pric
 export function cancelPendingRedemptionPushes(): void {
   for (const timer of pendingRedemptionPushes.values()) clearTimeout(timer);
   pendingRedemptionPushes.clear();
-}
-
-/** Outcome of {@link pushRewardCostUpdate}. */
-interface PushCostResult {
-  /** The cost to persist as `last_pushed_cost` — the new cost on success, otherwise unchanged. */
-  lastPushedCost: number | null;
-  /** True when the reward was found to be permanently unsupported (403) — `markPricingUnsupported` has already run. */
-  unsupported: boolean;
-}
-
-/**
- * Resolves the streamer's broadcaster token and pushes a recomputed cost to Twitch for one
- * reward, unless `MIN_PUSH_INTERVAL_MS` hasn't yet elapsed since the last successful push for
- * this reward (see `lastPushedAt`), in which case the push is skipped entirely (no DB/token
- * lookups) and `previousLastPushedCost` is returned unchanged. A 403 (the reward was created
- * outside this app and can never be managed by it) is treated as permanent: the row is
- * disabled via `markPricingUnsupported`. A 401 (invalid token, or missing the
- * channel:manage:redemptions scope) is logged with an actionable message but otherwise
- * treated like any other transient failure — the token is shared with other bot features, so
- * it's never cleared from here; reconnecting Twitch in User Settings (to grant the scope, or
- * replace a revoked token) is what actually resolves it. Any other failure is also logged and
- * swallowed. In every failure/rate-limited case, `previousLastPushedCost` is returned
- * unchanged so the price is simply retried on the next redemption/decay tick.
- *
- * @param streamerId - DB row ID of the owning streamer.
- * @param twitchRewardId - Twitch reward UUID.
- * @param newCost - The recomputed cost to push.
- * @param previousLastPushedCost - The reward's current `last_pushed_cost`, returned unchanged on failure.
- * @returns The `last_pushed_cost` to persist, and whether the reward was marked unsupported (403).
- */
-async function pushRewardCostUpdate(
-  streamerId: number, twitchRewardId: string, newCost: number, previousLastPushedCost: number | null,
-): Promise<PushCostResult> {
-  const key = queueKey(streamerId, twitchRewardId);
-  const lastPush = lastPushedAt.get(key) ?? 0;
-  if (Date.now() - lastPush < MIN_PUSH_INTERVAL_MS) {
-    return { lastPushedCost: previousLastPushedCost, unsupported: false };
-  }
-  try {
-    const resolved = await resolveBroadcasterToken(streamerId);
-    if (!resolved) {
-      log.warn(`No valid broadcaster token for streamer ${streamerId} — skipping Twitch price push for reward ${twitchRewardId}`);
-      return { lastPushedCost: previousLastPushedCost, unsupported: false };
-    }
-    await updateRewardCost(resolved.streamer.twitch_user_id, twitchRewardId, newCost, resolved.token);
-    lastPushedAt.set(key, Date.now());
-    return { lastPushedCost: newCost, unsupported: false };
-  } catch (err) {
-    if (err instanceof TwitchRewardUnsupportedError) {
-      log.warn(`Reward ${twitchRewardId} (streamer ${streamerId}) can't be managed by this app — disabling dynamic pricing:`, err);
-      await markPricingUnsupported(streamerId, twitchRewardId);
-      return { lastPushedCost: previousLastPushedCost, unsupported: true };
-    }
-    if (err instanceof TwitchRewardAuthError) {
-      log.warn(`Broadcaster token for streamer ${streamerId} is invalid or missing the channel:manage:redemptions scope — reconnect Twitch in User Settings to fix reward ${twitchRewardId}:`, err);
-    } else {
-      log.error(`Failed to push new price for reward ${twitchRewardId}:`, err);
-    }
-    return { lastPushedCost: previousLastPushedCost, unsupported: false };
-  }
 }
 
 /**
@@ -355,7 +251,7 @@ async function publishPricingSideEffects(
  * @param redemptionId - Twitch's own id of the redemption being applied.
  */
 export async function applyRedemptionPricing(streamerId: number, twitchRewardId: string, redemptionId: string): Promise<void> {
-  await pricingQueue.run(queueKey(streamerId, twitchRewardId), () => syncRewardPrice(streamerId, twitchRewardId, { kind: 'redemption', redemptionId }));
+  await pricingQueue.run(rewardKey(streamerId, twitchRewardId), () => syncRewardPrice(streamerId, twitchRewardId, { kind: 'redemption', redemptionId }));
 }
 
 /**
@@ -370,7 +266,7 @@ export async function applyRedemptionPricing(streamerId: number, twitchRewardId:
  * @param redeemedAtMs - When the redemption's increment was applied (epoch ms).
  */
 export async function revertRedemptionPricing(streamerId: number, twitchRewardId: string, redeemedAtMs: number): Promise<void> {
-  await pricingQueue.run(queueKey(streamerId, twitchRewardId), () => syncRewardPrice(streamerId, twitchRewardId, { kind: 'revert', redeemedAtMs }));
+  await pricingQueue.run(rewardKey(streamerId, twitchRewardId), () => syncRewardPrice(streamerId, twitchRewardId, { kind: 'revert', redeemedAtMs }));
 }
 
 /**
@@ -383,7 +279,7 @@ export async function revertRedemptionPricing(streamerId: number, twitchRewardId
  * @param settingsHint - Optional pre-fetched settings for this streamer; see {@link syncRewardPrice}.
  */
 export async function applyDecayTick(streamerId: number, twitchRewardId: string, settingsHint?: StreamerPricingSettings): Promise<void> {
-  await pricingQueue.run(queueKey(streamerId, twitchRewardId), () => syncRewardPrice(streamerId, twitchRewardId, { kind: 'decay' }, settingsHint));
+  await pricingQueue.run(rewardKey(streamerId, twitchRewardId), () => syncRewardPrice(streamerId, twitchRewardId, { kind: 'decay' }, settingsHint));
 }
 
 /**
@@ -400,7 +296,7 @@ export async function applyDecayTick(streamerId: number, twitchRewardId: string,
  * @param twitchRewardId - Twitch reward UUID.
  */
 export async function resetAndDeletePricing(streamerId: number, twitchRewardId: string): Promise<void> {
-  await pricingQueue.run(queueKey(streamerId, twitchRewardId), async () => {
+  await pricingQueue.run(rewardKey(streamerId, twitchRewardId), async () => {
     const row = await getPricingForReward(streamerId, twitchRewardId);
     if (!row) return;
     if (!row.twitch_unsupported) {
@@ -432,7 +328,7 @@ export async function resetAndDeletePricing(streamerId: number, twitchRewardId: 
  *   (e.g. `TwitchRewardUnsupportedError` for a reward this app didn't create).
  */
 export async function deleteRewardAndPricing(streamerId: number, twitchRewardId: string): Promise<void> {
-  await pricingQueue.run(queueKey(streamerId, twitchRewardId), async () => {
+  await pricingQueue.run(rewardKey(streamerId, twitchRewardId), async () => {
     const resolved = await resolveBroadcasterToken(streamerId);
     if (!resolved) {
       throw new Error(`No valid broadcaster token for streamer ${streamerId} — cannot delete reward ${twitchRewardId}`);
