@@ -469,6 +469,24 @@ describe('requireApiKey', () => {
     expect(next).not.toHaveBeenCalled();
   });
 
+  it.each(['bearer validtoken', 'BEARER validtoken'])('accepts a valid token whatever the scheme\'s case (%s, #923)', async (header) => {
+    vi.mocked(findKeyByHash).mockResolvedValue({ discordId: 'user42' } as any);
+    const req = makeReq({ headers: { authorization: header } });
+    const res = makeRes();
+    await requireApiKey(req, res, next);
+    expect(req.apiKeyOwner).toBe('user42');
+    expect(vi.mocked(findKeyByHash).mock.calls[0]![0]).toBe(createHash('sha256').update('validtoken').digest('hex'));
+    expect(next).toHaveBeenCalled();
+  });
+
+  it.each(['Bearer', 'Bearertoken'])('returns 401 for a Bearer header with no token (%s)', async (header) => {
+    const req = makeReq({ headers: { authorization: header } });
+    const res = makeRes();
+    await requireApiKey(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(next).not.toHaveBeenCalled();
+  });
+
   it('returns 401 when findKeyByHash returns null', async () => {
     vi.mocked(findKeyByHash).mockResolvedValue(null);
     const req = makeReq({ headers: { authorization: 'Bearer mytoken' } });

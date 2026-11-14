@@ -2,6 +2,8 @@ import { createHash } from 'crypto';
 import rateLimit, { ipKeyGenerator, type AugmentedRequest, type Options, type RateLimitExceededEventHandler } from 'express-rate-limit';
 import type { Request, Response } from 'express';
 import { createLogger } from '../shared/logger';
+import { isOverlayTraffic } from './overlayTraffic';
+import { parseBearerToken } from './bearerToken';
 
 const log = createLogger('RateLimit');
 
@@ -96,14 +98,33 @@ export function ipKey(req: Request): string {
 
 /**
  * Determines whether to skip the general IP-based rate limiter.
- * Skips for authenticated session users (covered by sessionLimiter) and
- * for the Streamdeck API (its own token-keyed limiter).
+ * Skips for authenticated session users (covered by sessionLimiter), for the Streamdeck API (its
+ * own token-keyed limiter), and for an OBS overlay's own requests (covered by
+ * {@link overlayTrafficLimiter}; see `isOverlayTraffic`).
  * @param req - Express request object
  * @returns true if the general limiter should be skipped
  */
 export function generalLimiterSkip(req: Request): boolean {
-  return req.path.startsWith('/api/streamdeck') || !!maybeSession(req)?.user;
+  return req.path.startsWith('/api/streamdeck') || isOverlayTraffic(req) || !!maybeSession(req)?.user;
 }
+
+/**
+ * Per-IP limit for the requests an OBS overlay makes by itself (`isOverlayTraffic`), which skip
+ * the general limiter. A shared overlay syncing videos sends a 2 MB range request every second or
+ * two plus a readiness report every few seconds, alongside the reward and alerts overlays' streams
+ * and files, so the general limiter's 100 per 15 minutes ran out within minutes and then refused
+ * every overlay request from the streamer's IP (#1011). 3000 per 15 minutes leaves room for all of
+ * it while still capping a client that floods these routes.
+ */
+export const overlayTrafficLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 3000,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  keyGenerator: ipKey,
+  skip: (req) => !isOverlayTraffic(req),
+  handler: limitReachedHandler('overlay'),
+});
 
 /**
  * Tells whether a request carries an express-session cookie (`connect.sid`), i.e. whether the
@@ -118,14 +139,15 @@ function hasSessionCookie(req: Request): boolean {
 
 /**
  * Determines whether to skip the coarse IP-keyed limiter that runs ahead of the session middleware.
- * Only Streamdeck API calls without a session cookie are skipped: those never touch the session
- * store and have their own limiters. One that carries a cookie still costs a store lookup (the
- * session middleware runs on every path), so it is counted like any other request.
+ * Only Streamdeck API calls and an OBS overlay's own requests (`isOverlayTraffic`) without a session
+ * cookie are skipped: those never touch the session store and have their own limiters. One that
+ * carries a cookie still costs a store lookup (the session middleware runs on every path), so it is
+ * counted like any other request.
  * @param req - Express request object
  * @returns true if the pre-session limiter should be skipped
  */
 export function preSessionLimiterSkip(req: Request): boolean {
-  return req.path.startsWith('/api/streamdeck') && !hasSessionCookie(req);
+  return (req.path.startsWith('/api/streamdeck') || isOverlayTraffic(req)) && !hasSessionCookie(req);
 }
 
 /** Marks an error as coming from the session store, so the error handler can tell it apart. */
@@ -188,8 +210,7 @@ export function sessionLimiterSkip(req: Request): boolean {
  * @returns SHA-256 hash of the Bearer token, or IP-based fallback key
  */
 export function streamdeckLimiterKey(req: Request): string {
-  const auth = req.headers['authorization'];
-  const token = auth?.startsWith('Bearer ') ? auth.slice(7) : null;
+  const token = parseBearerToken(req.headers['authorization']);
   if (token) return createHash('sha256').update(token).digest('hex');
   return ipKeyGenerator(req.ip ?? req.socket.remoteAddress ?? 'unknown');
 }

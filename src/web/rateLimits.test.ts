@@ -39,14 +39,16 @@ const authedUser: SessionUser = {
 };
 
 function makeReq(overrides: Partial<{
+  method: string;
   path: string;
   ip: string;
   sessionUser: SessionUser | undefined;
   authHeader: string | undefined;
   socketRemoteAddress: string | undefined;
 }>): Request {
-  const { path = '/dashboard', ip = '1.2.3.4', sessionUser, authHeader, socketRemoteAddress } = overrides;
+  const { method = 'GET', path = '/dashboard', ip = '1.2.3.4', sessionUser, authHeader, socketRemoteAddress } = overrides;
   return {
+    method,
     path,
     ip,
     socket: { remoteAddress: socketRemoteAddress },
@@ -78,6 +80,11 @@ describe('ipKey', () => {
 // generalLimiterSkip
 // ---------------------------------------------------------------------------
 describe('generalLimiterSkip', () => {
+  it('skips (true) for an OBS overlay request without a session, which has its own limiter (#1011)', () => {
+    expect(generalLimiterSkip(makeReq({ path: '/overlay/shared/videos/a.webm' }))).toBe(true);
+    expect(generalLimiterSkip(makeReq({ method: 'POST', path: '/overlay/shared/streamer1/report' }))).toBe(true);
+  });
+
   it('skips (true) for unauthenticated request to /api/streamdeck path', () => {
     expect(generalLimiterSkip(makeReq({ path: '/api/streamdeck/sfx', sessionUser: undefined }))).toBe(true);
   });
@@ -103,6 +110,13 @@ describe('generalLimiterSkip', () => {
 // sessionLimiterSkip
 // ---------------------------------------------------------------------------
 describe('preSessionLimiterSkip', () => {
+  it('skips an OBS overlay request without a session cookie, and counts one that carries a cookie', () => {
+    expect(preSessionLimiterSkip(makeReq({ path: '/alerts/streamer1/events' }))).toBe(true);
+    const withCookie = makeReq({ path: '/alerts/streamer1/events' });
+    withCookie.headers.cookie = 'connect.sid=s%3Aabc.def';
+    expect(preSessionLimiterSkip(withCookie)).toBe(false);
+  });
+
   it('skips a Streamdeck API call that carries no session cookie', () => {
     expect(preSessionLimiterSkip(makeReq({ path: '/api/streamdeck/sfx' }))).toBe(true);
   });
@@ -199,6 +213,18 @@ describe('sessionLimiterKey', () => {
 // streamdeckLimiterKey
 // ---------------------------------------------------------------------------
 describe('streamdeckLimiterKey', () => {
+  it.each(['bearer my-secret-token', 'BEARER my-secret-token', 'Bearer   my-secret-token '])(
+    'keys the token the same whatever the scheme\'s case or spacing (%s, #923)',
+    (header) => {
+      const expected = createHash('sha256').update('my-secret-token').digest('hex');
+      expect(streamdeckLimiterKey(makeReq({ authHeader: header }))).toBe(expected);
+    },
+  );
+
+  it.each(['Basic abc', 'Bearer', 'Bearertoken'])('falls back to the IP for a malformed header (%s)', (header) => {
+    expect(streamdeckLimiterKey(makeReq({ authHeader: header, ip: '1.2.3.4' }))).toBe(streamdeckLimiterKey(makeReq({ ip: '1.2.3.4' })));
+  });
+
   it('returns the SHA-256 hash of the Bearer token when a valid Authorization header is present', () => {
     const expected = createHash('sha256').update('my-secret-token').digest('hex');
     expect(streamdeckLimiterKey(makeReq({ authHeader: 'Bearer my-secret-token' }))).toBe(expected);
