@@ -319,7 +319,10 @@ describe('POST /users/update', () => {
 
     const [runOrder] = mockQueueRunMany.mock.invocationCallOrder;
     const [checkOrder] = vi.mocked(getMemberAccessLevel).mock.invocationCallOrder;
-    expect(runOrder).toBeLessThan(checkOrder!);
+    if (runOrder === undefined || checkOrder === undefined) {
+      throw new Error('expected both the queue and the authorization check to run');
+    }
+    expect(runOrder).toBeLessThan(checkOrder);
   });
 });
 
