@@ -70,6 +70,10 @@ describe('ownerAlertWatcher', () => {
     healthStore.recordDbPing(true);
     await flush();
     send.mockClear();
+    // Seed the baseline from that healthy state, as production does before starting the watcher,
+    // so the tests below that fail 'db' etc. take the tracked-component path whatever order they
+    // run in. (Without it, the first test to run in a fresh module would see 'db' as first-seen.)
+    await primeOwnerAlertBaseline();
     startOwnerAlertWatcher();
   });
 
@@ -78,13 +82,6 @@ describe('ownerAlertWatcher', () => {
   });
 
   it('does not alert at all on a quick reconnect that recovers within the grace period', async () => {
-    // Ensures 'db' is already a *tracked* component (as it always is in production, where
-    // primeOwnerAlertBaseline() seeds every component before the watcher ever starts). A
-    // first-seen failing component goes through the same grace period (see
-    // handleFirstSeenComponent), so this priming isn't strictly required for this test, but
-    // it matches the production sequencing this scenario is meant to exercise.
-    await primeOwnerAlertBaseline();
-
     healthStore.recordDbPing(false, 'connection refused');
     await vi.advanceTimersByTimeAsync(DOWN_ALERT_GRACE_MS / 2);
     healthStore.recordDbPing(true);
@@ -93,8 +90,7 @@ describe('ownerAlertWatcher', () => {
   });
 
   // These two use an EventSub streamer no other test uses, so the component is genuinely first-seen
-  // whatever order the tests run in. 'db' isn't: the watcher's healthStore listener outlives each
-  // test, so beforeEach's baseline writes put 'db' back into the watcher's tracked state.
+  // whatever order the tests run in. 'db' isn't: beforeEach primes it into the watcher's tracked state.
   it('applies the grace period to a component seen failing for the first time, not an immediate alert', async () => {
     try {
       healthStore.recordEventSubConnected('firstseenstreamer', false, 'socket closed');
