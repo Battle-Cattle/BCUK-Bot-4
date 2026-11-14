@@ -202,11 +202,10 @@ export type {
 export {
   ADVANCED_COMMAND_ROLES, MAX_ADVANCED_COMMAND_PARAMS, AdvancedCommandValidationError,
 } from './db/advancedCommandValidation';
-export type { DbAdvancedCommand, AdvancedCommandVideo, AdvancedCommandChatRoute } from './db/advancedCommands';
-export {
-  AdvancedCommandConflictError, listAdvancedCommands, getAdvancedCommand,
-  saveAdvancedCommandEffects, setAdvancedCommandAlertAsset,
-} from './db/advancedCommands';
+export type { DbAdvancedCommand, AdvancedCommandChatRoute } from './db/advancedCommands';
+export { AdvancedCommandConflictError, listAdvancedCommands, getAdvancedCommand } from './db/advancedCommands';
+export type { AdvancedCommandVideo } from './db/advancedCommandEffects';
+export { saveAdvancedCommandEffects, setAdvancedCommandAlertAsset } from './db/advancedCommandEffects';
 export { getAdvancedCommandForTwitchChannel } from './db/advancedCommandCache';
 export {
   addAdvancedCommand, updateAdvancedCommand, setAdvancedCommandEnabled, removeAdvancedCommand,
