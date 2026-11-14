@@ -85,3 +85,32 @@ describe('public/streams-live-poll.js', () => {
     expect(intervals.size).toBe(1);
   });
 });
+
+describe('removal confirmations (#1008)', () => {
+  /** Runs the script and returns its global scope, where its top-level functions live. */
+  function loadScript(): Record<string, (t: { dataset: Record<string, string> }) => string> {
+    const context: Record<string, unknown> = {
+      URL, AbortController, fetch: vi.fn(() => new Promise(() => {})),
+      document: { addEventListener: () => {}, getElementById: () => null },
+      registerToggleEditHandler: () => {}, confirmSubmit: () => false, setLiveTableMessage: () => {},
+      renderLiveRows: () => {}, setTimeout: () => 0, clearTimeout: () => {}, setInterval: () => 0, clearInterval: () => {},
+    };
+    vm.runInNewContext(fs.readFileSync(scriptPath, 'utf8'), context);
+    return context as never;
+  }
+
+  it('says what removing a streamer deletes, and points to Move', () => {
+    const message = loadScript().getRemoveStreamerConfirmationMessage!({ dataset: { streamerName: 'streamer1' } });
+    expect(message).toContain('Remove streamer "streamer1"?');
+    expect(message).toContain("every viewer's balance");
+    expect(message).toContain('advanced commands');
+    expect(message).toContain('use Move instead');
+  });
+
+  it('says the same for each streamer when removing a group', () => {
+    const message = loadScript().getRemoveGroupConfirmationMessage!({ dataset: { groupName: 'Main' } });
+    expect(message).toContain('Remove group "Main" and all its streamers?');
+    expect(message).toContain("every viewer's balance");
+  });
+});
+

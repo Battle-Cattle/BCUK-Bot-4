@@ -32,14 +32,38 @@ function getDisconnectTwitchConfirmationMessage(t) {
   return 'Disconnect Twitch for ' + (t.dataset.twitchName || 'this streamer') + '?';
 }
 
+/**
+ * What removing a streamer deletes along with them (#1008): every per-streamer table cascades from
+ * the streamer row, so the prompt says so rather than looking like an announcement-list edit.
+ */
+var STREAMER_REMOVAL_LOSES =
+  'This permanently deletes everything tied to them: their loyalty points settings and every viewer\'s balance, '
+  + 'overlay videos and reward mappings, alerts, advanced commands, dynamic pricing, event log, and their Twitch '
+  + 'connection (they would have to reconnect). To change their group, use Move instead.';
+
+/**
+ * Returns the confirmation message for removing a stream group and its streamers.
+ * @param t - The submitted form; its `data-group-name` names the group.
+ * @returns The text shown in the remove-group confirm() prompt.
+ */
+function getRemoveGroupConfirmationMessage(t) {
+  return 'Remove group "' + (t.dataset.groupName || 'this group') + '" and all its streamers?\n\n'
+    + 'For each of its streamers: ' + STREAMER_REMOVAL_LOSES;
+}
+
+/**
+ * Returns the confirmation message for removing one streamer.
+ * @param t - The submitted form; its `data-streamer-name` names the streamer.
+ * @returns The text shown in the remove-streamer confirm() prompt.
+ */
+function getRemoveStreamerConfirmationMessage(t) {
+  return 'Remove streamer "' + (t.dataset.streamerName || 'this streamer') + '"?\n\n' + STREAMER_REMOVAL_LOSES;
+}
+
 /** Confirms group/streamer removal and Twitch disconnects before the forms submit. */
 document.addEventListener('submit', function (event) {
-  if (confirmSubmit(event, 'js-confirm-remove-group', function (t) {
-    return 'Remove group "' + (t.dataset.groupName || 'this group') + '" and all its streamers?';
-  })) return;
-  if (confirmSubmit(event, 'js-confirm-remove-streamer', function (t) {
-    return 'Remove streamer "' + (t.dataset.streamerName || 'this streamer') + '"?';
-  })) return;
+  if (confirmSubmit(event, 'js-confirm-remove-group', getRemoveGroupConfirmationMessage)) return;
+  if (confirmSubmit(event, 'js-confirm-remove-streamer', getRemoveStreamerConfirmationMessage)) return;
   confirmSubmit(event, 'js-confirm-disconnect-twitch', getDisconnectTwitchConfirmationMessage);
 });
 

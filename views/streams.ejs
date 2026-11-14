@@ -212,6 +212,19 @@
                     <button type="submit" class="btn btn-ghost btn-sm">Disconnect</button>
                   </form>
                   <% } %>
+                  <% const otherGroups = groups.filter(function(g) { return g.id !== s.group_id; }); %>
+                  <% if (otherGroups.length > 0) { %>
+                  <form method="POST" action="/admin/streams/streamers/move" class="inline-form-sm">
+                    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+                    <input type="hidden" name="streamer_id" value="<%= s.id %>">
+                    <select class="input input-sm" name="group_id" aria-label="Move <%= s.twitch_name ?? s.discord_id %> to another group" required>
+                      <% otherGroups.forEach(function(g) { %>
+                      <option value="<%= g.id %>"><%= g.name %></option>
+                      <% }) %>
+                    </select>
+                    <button type="submit" class="btn btn-ghost btn-sm" title="Move to another group, keeping their points, videos, alerts and commands">Move</button>
+                  </form>
+                  <% } %>
                   <form method="POST" action="/admin/streams/streamers/remove" class="inline-form-sm js-confirm-remove-streamer" data-streamer-name="<%= s.twitch_name ?? s.discord_id %>">
                     <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                     <input type="hidden" name="streamer_id" value="<%= s.id %>">

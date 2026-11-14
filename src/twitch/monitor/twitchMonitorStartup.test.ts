@@ -9,6 +9,7 @@ const { isDiscordNotFoundErrorMock } = vi.hoisted(() => ({
 }));
 
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
+vi.mock('../../shared/statusStore', () => ({ setTwitchChannelLive: vi.fn() }));
 vi.mock('../../discord/discordClientStore', () => ({ getDiscordClient: vi.fn() }));
 vi.mock('../../discord/discordUtils', () => ({
   isDiscordNotFoundError: isDiscordNotFoundErrorMock,
@@ -57,6 +58,7 @@ vi.mock('./twitchMonitorAnnouncements', () => ({
   postAnnouncement: vi.fn().mockResolvedValue(undefined),
 }));
 
+import { setTwitchChannelLive } from '../../shared/statusStore';
 import {
   tryEditStartupMessage,
   handleLiveStreamerOnStartup,
@@ -288,6 +290,22 @@ describe('performStartupLiveCheck', () => {
     const streamer = makeStreamer({ twitch_name: 'alice', discord_message_id: 'msg1', discord_channel_id: 'ch1' });
     await performStartupLiveCheck(new Map(), new Map([['alice', 'u1']]), [streamer]);
     expect(clearStreamerLive).toHaveBeenCalledWith(10, 'msg1');
+  });
+
+  it('sets the live flag for a live streamer straight away, and clears it for an offline one with no message (#1013)', async () => {
+    vi.mocked(getStreams).mockResolvedValue([makeStream({ user_id: 'u1', type: 'live' })]);
+    const live = makeStreamer({ twitch_name: 'Alice', discord_message_id: null });
+    const offline = makeStreamer({ id: 11, twitch_name: 'bob', discord_message_id: null });
+    await performStartupLiveCheck(new Map(), new Map([['alice', 'u1'], ['bob', 'u2']]), [live, offline]);
+    expect(setTwitchChannelLive).toHaveBeenCalledWith('alice', true);
+    expect(setTwitchChannelLive).toHaveBeenCalledWith('bob', false);
+  });
+
+  it('clears the live flag for a stream that ended during a restart (stored message, now offline)', async () => {
+    vi.mocked(getStreams).mockResolvedValue([]);
+    const streamer = makeStreamer({ twitch_name: 'alice', discord_message_id: 'msg1', discord_channel_id: 'ch1' });
+    await performStartupLiveCheck(new Map(), new Map([['alice', 'u1']]), [streamer]);
+    expect(setTwitchChannelLive).toHaveBeenCalledWith('alice', false);
   });
 
   it('skips streamers with no matching loginToUserId entry', async () => {

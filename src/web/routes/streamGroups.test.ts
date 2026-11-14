@@ -23,6 +23,7 @@ vi.mock('../middleware', () => ({
 vi.mock('../../twitch/monitor/twitchMonitor', () => ({
   restartTwitchMonitor: vi.fn(),
 }));
+vi.mock('../../twitch/eventsub/twitchEventSub', () => ({ reloadEventSubSubscriptions: vi.fn() }));
 
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
@@ -33,6 +34,7 @@ vi.mock('../../discord/discordClientStore', () => ({
 import supertest from 'supertest';
 import router from './streamGroups';
 import { addStreamGroup, updateStreamGroup, removeStreamGroupAndStreamers } from '../../db';
+import { reloadEventSubSubscriptions } from '../../twitch/eventsub/twitchEventSub';
 import { restartTwitchMonitor } from '../../twitch/monitor/twitchMonitor';
 import { AccessLevel } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
@@ -309,6 +311,8 @@ describe('POST /streams/groups/remove', () => {
     expect(removeStreamGroupAndStreamers).toHaveBeenCalledWith(5, GUILD_ID);
     await flushRestartChain();
     expect(restartTwitchMonitor).toHaveBeenCalled();
+    // Its streamers' EventSub connections are stopped too (#1008).
+    expect(reloadEventSubSubscriptions).toHaveBeenCalledOnce();
   });
 
   it('redirects with remove_group_failed when the DB delete rejects', async () => {

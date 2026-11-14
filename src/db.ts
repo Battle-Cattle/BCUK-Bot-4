@@ -75,6 +75,9 @@ export {
   getStreamGroupsForGuild, addStreamGroup, updateStreamGroup,
   getStreamersForGuild, getAllStreamersWithGroups,
   setStreamerLive, clearStreamerLive,
+  // Not wrapped in streamMonitorWrites: a move keeps the streamer's id and discord_id, the only
+  // things the streamer-ID cache holds.
+  moveStreamerToGroup,
 } from './db/streamMonitor';
 export { addStreamer, removeStreamer, removeStreamGroupAndStreamers } from './db/streamMonitorWrites';
 export { findStreamerIdByDiscordId } from './db/streamerIdCache';

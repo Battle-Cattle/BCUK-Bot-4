@@ -34,6 +34,7 @@ vi.mock('../../twitch/monitor/twitchMonitor', () => ({
   restartTwitchMonitor: vi.fn(),
   getLiveStates: vi.fn().mockReturnValue([]),
 }));
+vi.mock('../../twitch/eventsub/twitchEventSub', () => ({ reloadEventSubSubscriptions: vi.fn() }));
 
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 

@@ -10,6 +10,7 @@ import { buildEmbed, renderAnnouncementContent, templateVars } from './twitchMon
 import { updateMultitwitch } from './twitchMonitorMultitwitch';
 import { postAnnouncement } from './twitchMonitorAnnouncements';
 import { withLoginLock } from './twitchMonitorLoginLock';
+import { setTwitchChannelLive } from '../../shared/statusStore';
 
 /**
  * Tries to edit the streamer's existing startup-time "now live" message in place
@@ -178,6 +179,10 @@ export async function performStartupLiveCheck(
       if (!loginKey || !userId) return;
 
       const liveStream = liveByUserId.get(userId);
+      // The dashboard's and shared overlay's live flag follows this check straight away, rather
+      // than waiting up to a poll interval to be set, or, for a stream that ended while the bot
+      // was down or the monitor was restarting, never being cleared (#1013).
+      setTwitchChannelLive(loginKey, liveStream !== undefined);
 
       if (liveStream) {
         await withLoginLock(loginKey, (isCurrent) => handleLiveStreamerOnStartup(liveStates, streamer, liveStream, groupsWithChanges, isCurrent));

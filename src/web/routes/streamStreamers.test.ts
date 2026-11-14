@@ -5,6 +5,7 @@ import { ACCESS_LEVEL_MOCK } from '../../test-utils/accessLevelMock';
 vi.mock('../../db', () => ({
   addStreamer: vi.fn(),
   removeStreamer: vi.fn(),
+  moveStreamerToGroup: vi.fn(),
   findUser: vi.fn(),
   getMemberAccessLevel: vi.fn(),
   AccessLevel: ACCESS_LEVEL_MOCK,
@@ -24,12 +25,14 @@ vi.mock('../middleware', () => ({
 vi.mock('../../twitch/monitor/twitchMonitor', () => ({
   restartTwitchMonitor: vi.fn(),
 }));
+vi.mock('../../twitch/eventsub/twitchEventSub', () => ({ reloadEventSubSubscriptions: vi.fn() }));
 
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
 import supertest from 'supertest';
 import router from './streamStreamers';
-import { addStreamer, removeStreamer, findUser, getMemberAccessLevel } from '../../db';
+import { addStreamer, removeStreamer, moveStreamerToGroup, findUser, getMemberAccessLevel } from '../../db';
+import { reloadEventSubSubscriptions } from '../../twitch/eventsub/twitchEventSub';
 import { restartTwitchMonitor } from '../../twitch/monitor/twitchMonitor';
 import { AccessLevel, AccessLevelValue } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
@@ -187,6 +190,8 @@ describe('POST /streams/streamers/remove', () => {
     expect(removeStreamer).toHaveBeenCalledWith(7, GUILD_ID);
     await flushRestartChain();
     expect(restartTwitchMonitor).toHaveBeenCalled();
+    // The removed streamer's EventSub connection is stopped too (#1008).
+    expect(reloadEventSubSubscriptions).toHaveBeenCalledOnce();
   });
 
   it('redirects with remove_streamer_failed when the DB delete rejects', async () => {
@@ -202,5 +207,47 @@ describe('POST /streams/streamers/remove', () => {
     expect(res.status).toBe(302);
     expect(res.headers.location).toContain('error=remove_streamer_failed');
     expect(restartTwitchMonitor).not.toHaveBeenCalled();
+    expect(reloadEventSubSubscriptions).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST /streams/streamers/move (#1008)', () => {
+  beforeEach(() => {
+    vi.mocked(moveStreamerToGroup).mockResolvedValue(true);
+  });
+
+  it('moves the streamer to the group within the current guild and restarts the monitor, without an EventSub reload', async () => {
+    const res = await supertest(buildApp()).post('/streams/streamers/move').send('streamer_id=7&group_id=3');
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('/admin/streams');
+    expect(moveStreamerToGroup).toHaveBeenCalledWith(7, 3, GUILD_ID);
+    expect(removeStreamer).not.toHaveBeenCalled();
+    await flushRestartChain();
+    expect(restartTwitchMonitor).toHaveBeenCalled();
+    expect(reloadEventSubSubscriptions).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['streamer_id=7', 'missing_fields'],
+    ['group_id=3', 'missing_fields'],
+    ['streamer_id=abc&group_id=3', 'invalid_id'],
+    ['streamer_id=7&group_id=-1', 'invalid_id'],
+  ])('redirects with an error and moves nothing for %s', async (body, error) => {
+    const res = await supertest(buildApp()).post('/streams/streamers/move').send(body);
+    expect(res.headers.location).toContain(`error=${error}`);
+    expect(moveStreamerToGroup).not.toHaveBeenCalled();
+  });
+
+  it('redirects with move_streamer_failed when the streamer or the group is outside this guild', async () => {
+    vi.mocked(moveStreamerToGroup).mockResolvedValueOnce(false);
+    const res = await supertest(buildApp()).post('/streams/streamers/move').send('streamer_id=7&group_id=3');
+    expect(res.headers.location).toContain('error=move_streamer_failed');
+    expect(restartTwitchMonitor).not.toHaveBeenCalled();
+  });
+
+  it('redirects with move_streamer_failed when the DB update rejects', async () => {
+    vi.mocked(moveStreamerToGroup).mockRejectedValueOnce(new Error('DB down'));
+    const res = await supertest(buildApp()).post('/streams/streamers/move').send('streamer_id=7&group_id=3');
+    expect(res.headers.location).toContain('error=move_streamer_failed');
   });
 });

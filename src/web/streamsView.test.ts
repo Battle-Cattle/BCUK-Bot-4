@@ -9,7 +9,7 @@ function render(locals: Record<string, unknown> = {}): Promise<string> {
   return ejs.renderFile(viewPath, {
     user: { discordId: '1', discordName: 'A', accessLevel: 3, isOwner: false, currentGuildId: null, guilds: [] },
     csrfToken: 'tok',
-    groups: [],
+    groups: [{ id: 1, name: 'G' }, { id: 2, name: 'Second' }],
     streamers: [
       { id: 42, discord_id: '10', twitch_name: 'connected_one', discord_name: null, group_id: 1, group_name: 'G' },
       { id: 43, discord_id: '11', twitch_name: 'not_connected', discord_name: null, group_id: 1, group_name: 'G' },
@@ -42,3 +42,18 @@ describe('streams view — EventSub badge', () => {
     expect(asManager).not.toContain('twitch-disconnect');
   });
 });
+
+describe('streams view — moving a streamer (#1008)', () => {
+  it('offers the guild\'s other groups as Move targets, without the streamer\'s own group', async () => {
+    const html = await render();
+    expect(html).toContain('action="/admin/streams/streamers/move"');
+    expect(html).toContain('<option value="2">Second</option>');
+    expect(html).not.toMatch(/name="group_id"[^>]*>\s*<option value="1">/);
+  });
+
+  it('has no Move control when there is no other group to move to', async () => {
+    const html = await render({ groups: [{ id: 1, name: 'G' }] });
+    expect(html).not.toContain('/admin/streams/streamers/move');
+  });
+});
+
