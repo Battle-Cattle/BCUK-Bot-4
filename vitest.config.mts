@@ -22,6 +22,11 @@ export default defineConfig({
     // assertion (e.g. check `.name`/`.code`); a separate `projects` entry with `pool: 'forks'` is the fallback.
     pool: 'vmThreads',
     vmMemoryLimit: '300MB',
+    // One worker per core, not Vitest's default of one fewer. The shell-script tests (deploy.sh,
+    // backup/restore, systemd installer) leave their worker blocked on a child process, so the spare
+    // core otherwise sits mostly idle: on 4 cores this takes `npm test` from ~25s to ~23s. On the
+    // 6-vCPU deploy server it adds one worker (5 -> 6), up to one more vmMemoryLimit of memory.
+    maxWorkers: '100%',
     coverage: {
       provider: 'v8',
       reporter: [['text', { file: 'coverage-report.txt' }], 'lcov'],
