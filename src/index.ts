@@ -1,7 +1,8 @@
 import 'mediaplex'; // Must be imported first to register as Opus provider
 import { getPool, closePool, pingDb, runMigrations, reencryptStoredTokens } from './db';
 import { recordDbPing } from './shared/healthStore';
-import { registerOwnerAlertRuntime, primeOwnerAlertBaseline, startOwnerAlertWatcher, stopOwnerAlertWatcher, announceShutdown, announceStartup } from './discord/ownerAlerts';
+import { registerOwnerAlertRuntime, announceShutdown, announceStartup } from './discord/ownerAlerts';
+import { primeOwnerAlertBaseline, startOwnerAlertWatcher, stopOwnerAlertWatcher } from './discord/ownerAlertWatcher';
 import { startTwitchBot, stopTwitchBot, sayInChannel } from './twitch/twitchBot';
 import { getActiveChannels, getActiveChannelUserIds, setChannelJoinedHook } from './twitch/twitchChannelMembership';
 import { startChannelReconciliationPoll, stopChannelReconciliationPoll } from './twitch/twitchChannelReconciliationPoll';
@@ -128,7 +129,7 @@ async function safeStop(name: string, fn: () => void | Promise<void>): Promise<v
 /**
  * Gracefully stops schedulers and bot connections, closes the DB pool, and exits the process.
  * Turns off owner-alert status reporting first and sends the owner a "shutting down" DM (see
- * `ownerAlerts.ts`'s `stopOwnerAlertWatcher`/`announceShutdown`) before anything actually
+ * `ownerAlertWatcher.ts`'s `stopOwnerAlertWatcher` and `ownerAlerts.ts`'s `announceShutdown`) before anything actually
  * disconnects. Each teardown step is isolated via {@link safeStop} so a failure in one component
  * (e.g. the Twitch monitor) can't skip the rest — `closePool()` and `process.exit(0)` always run.
  * Re-entrant calls (a second signal while teardown is still running) are logged and ignored.
