@@ -233,6 +233,8 @@ function monitoredLogins(): Set<string> {
  * streamer removed, possibly while live). Nothing else would ever clear it, because the offline
  * check only runs for logins it watches (#1013). The startup check sets the flag for every login
  * still watched. Called by {@link startTwitchMonitor} as soon as `streamersData` holds the new list.
+ * The pending set is emptied only once every flag is cleared, so if a status listener throws part
+ * way, the next start retries the whole set.
  */
 function clearLiveFlagForUnmonitored(): void {
   const current = monitoredLogins();

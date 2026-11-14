@@ -438,6 +438,25 @@ describe('shutdown, restart, multitwitch lookup, and live-state ordering', () =>
     expect(setTwitchChannelLive).toHaveBeenCalledWith('removedstreamer', false);
   });
 
+  it('keeps a removed login pending when clearing its live flag throws, and clears it on the next start', async () => {
+    vi.mocked(getAllStreamersWithGroups).mockResolvedValue([
+      makeStreamer(), makeStreamer({ id: 6, twitch_name: 'removedstreamer' }),
+    ] as any);
+    vi.mocked(getUsers).mockResolvedValue([{ login: 'teststreamer', id: 'uid-5' }, { login: 'removedstreamer', id: 'uid-6' }]);
+    await startTwitchMonitor();
+    vi.mocked(setTwitchChannelLive).mockClear();
+
+    // A status-change listener throwing inside setTwitchChannelLive.
+    vi.mocked(setTwitchChannelLive).mockImplementationOnce(() => { throw new Error('listener failed'); });
+    vi.mocked(getAllStreamersWithGroups).mockResolvedValue([makeStreamer()] as any);
+    vi.mocked(getUsers).mockResolvedValue([{ login: 'teststreamer', id: 'uid-5' }]);
+    await expect(restartTwitchMonitor()).rejects.toThrow('listener failed');
+
+    vi.mocked(setTwitchChannelLive).mockClear();
+    await restartTwitchMonitor();
+    expect(setTwitchChannelLive).toHaveBeenCalledWith('removedstreamer', false);
+  });
+
   it('getMultiTwitchDataForChannel returns null for a login with no live state', async () => {
     vi.mocked(getAllStreamersWithGroups).mockResolvedValue([makeStreamer()] as any);
     vi.mocked(getUsers).mockResolvedValue([{ login: 'teststreamer', id: 'uid-5' }]);
