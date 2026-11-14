@@ -2,7 +2,7 @@
  * Per-guild progress state for the Discord-name-refresh job, shared between the Discord bot
  * (which forgets a guild's state on `guildDelete`) and the admin web panel (which drives and
  * polls the job). Lives in its own module — rather than in `web/routes/adminRefresh.ts`, which
- * the Discord bot would otherwise have to import from directly — so `discord/discordBot.ts` and
+ * the Discord bot would otherwise have to import from directly — so `discord/discordGuildEvents.ts` and
  * `web/routes/adminRefresh.ts` can both depend on this without importing from each other.
  */
 
