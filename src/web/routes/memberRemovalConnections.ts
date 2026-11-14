@@ -4,7 +4,7 @@ import { disconnectGuildStatusConnectionsForMember } from './dashboardStatusEven
 import { disconnectCompanionConnections } from './companionEvents';
 
 // Closes the live connections a member opened before being removed from a guild, for
-// `POST /admin/users/remove` (admin.ts). Their web session ends on its next request on its own
+// `POST /admin/users/remove` (adminUsersMutations.ts). Their web session ends on its next request on its own
 // (requireAuth re-checks membership); open event streams don't make new requests, so they are
 // closed here.
 
