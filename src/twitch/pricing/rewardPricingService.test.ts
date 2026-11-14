@@ -32,8 +32,9 @@ import { getValidToken } from '../twitchUserTokens';
 import { updateRewardCost, deleteCustomReward, TwitchRewardUnsupportedError, TwitchRewardAuthError } from '../twitchRewardsApi';
 import {
   applyRedemptionPricing, applyDecayTick, resetAndDeletePricing, deleteRewardAndPricing, revertRedemptionPricing,
-  registerRewardPricingRuntime, __resetPushRateLimiterForTests, cancelPendingRedemptionPushes,
+  registerRewardPricingRuntime, cancelPendingRedemptionPushes,
 } from './rewardPricingService';
+import { __resetPushRateLimiterForTests } from './rewardPricePush';
 
 const settings = { half_life_seconds: 1800, time_to_max_multiplier: 2 };
 const streamer = { id: 1, twitch_user_id: 'bc1', eventsub_access_token: 'tok' } as any;
