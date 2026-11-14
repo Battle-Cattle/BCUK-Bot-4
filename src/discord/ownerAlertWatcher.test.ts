@@ -92,23 +92,31 @@ describe('ownerAlertWatcher', () => {
     expect(send).not.toHaveBeenCalled();
   });
 
+  // These two use an EventSub streamer no other test uses, so the component is genuinely first-seen
+  // whatever order the tests run in. 'db' isn't: the watcher's healthStore listener outlives each
+  // test, so beforeEach's baseline writes put 'db' back into the watcher's tracked state.
   it('applies the grace period to a component seen failing for the first time, not an immediate alert', async () => {
-    // 'db' hasn't gone through handleHealthChanged yet at this point (the outer beforeEach's
-    // recordDbPing(true) ran before startOwnerAlertWatcher() was listening), so this is a
-    // genuinely first-seen component.
-    healthStore.recordDbPing(false, 'connection refused');
-    await flush();
-    expect(send).not.toHaveBeenCalled();
-    await advanceGrace();
-    expect(send).toHaveBeenCalledTimes(1);
+    try {
+      healthStore.recordEventSubConnected('firstseenstreamer', false, 'socket closed');
+      await flush();
+      expect(send).not.toHaveBeenCalled();
+      await advanceGrace();
+      expect(send).toHaveBeenCalledExactlyOnceWith(OWNER_ID, expect.stringContaining('eventsub:firstseenstreamer'));
+    } finally {
+      healthStore.removeEventSubHealth('firstseenstreamer');
+    }
   });
 
   it('sends no alert when a first-seen failing component recovers within the grace period', async () => {
-    healthStore.recordDbPing(false, 'connection refused');
-    await vi.advanceTimersByTimeAsync(DOWN_ALERT_GRACE_MS / 2);
-    healthStore.recordDbPing(true);
-    await advanceGrace();
-    expect(send).not.toHaveBeenCalled();
+    try {
+      healthStore.recordEventSubConnected('quickstreamer', false, 'socket closed');
+      await vi.advanceTimersByTimeAsync(DOWN_ALERT_GRACE_MS / 2);
+      healthStore.recordEventSubConnected('quickstreamer', true);
+      await advanceGrace();
+      expect(send).not.toHaveBeenCalled();
+    } finally {
+      healthStore.removeEventSubHealth('quickstreamer');
+    }
   });
 
   it('sends exactly one alert on an ok→fail transition that outlasts the grace period', async () => {
