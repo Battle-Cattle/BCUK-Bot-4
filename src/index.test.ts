@@ -22,11 +22,13 @@ vi.mock('./shared/healthStore', () => ({
 }));
 vi.mock('./discord/ownerAlerts', () => ({
   registerOwnerAlertRuntime: vi.fn(),
+  announceShutdown: vi.fn().mockResolvedValue(undefined),
+  announceStartup: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock('./discord/ownerAlertWatcher', () => ({
   primeOwnerAlertBaseline: vi.fn(),
   startOwnerAlertWatcher: vi.fn(),
   stopOwnerAlertWatcher: vi.fn(),
-  announceShutdown: vi.fn().mockResolvedValue(undefined),
-  announceStartup: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('./discord/discordBot', () => ({
   startDiscordBot: vi.fn(),
@@ -247,7 +249,8 @@ describe('startup — guild registry preload', () => {
 
   it('records the startup DB ping and registers/primes/starts the owner-alert runtime, in order, on a clean startup', async () => {
     const { recordDbPing } = await import('./shared/healthStore.js');
-    const { registerOwnerAlertRuntime, primeOwnerAlertBaseline, startOwnerAlertWatcher } = await import('./discord/ownerAlerts.js');
+    const { registerOwnerAlertRuntime } = await import('./discord/ownerAlerts.js');
+    const { primeOwnerAlertBaseline, startOwnerAlertWatcher } = await import('./discord/ownerAlertWatcher.js');
 
     await runMain();
 
@@ -257,7 +260,7 @@ describe('startup — guild registry preload', () => {
     expect(vi.mocked(startOwnerAlertWatcher)).toHaveBeenCalledOnce();
     // primeOwnerAlertBaseline must run before the watcher starts listening — otherwise its
     // first health-changed notification compares against an empty baseline (see
-    // ownerAlerts.ts's primeOwnerAlertBaseline JSDoc for why that causes false "down" alerts).
+    // ownerAlertWatcher.ts's primeOwnerAlertBaseline JSDoc for why that causes false "down" alerts).
     expect(vi.mocked(primeOwnerAlertBaseline).mock.invocationCallOrder[0])
       .toBeLessThan(vi.mocked(startOwnerAlertWatcher).mock.invocationCallOrder[0]!);
   });
@@ -595,7 +598,8 @@ describe('shutdown', () => {
   });
 
   it('turns off owner-alert reporting and announces the shutdown before any component disconnects', async () => {
-    const { stopOwnerAlertWatcher, announceShutdown } = await import('./discord/ownerAlerts.js');
+    const { announceShutdown } = await import('./discord/ownerAlerts.js');
+    const { stopOwnerAlertWatcher } = await import('./discord/ownerAlertWatcher.js');
     const { stopDiscordBot } = await import('./discord/discordBot.js');
     const { stopTwitchBot } = await import('./twitch/twitchBot.js');
 
