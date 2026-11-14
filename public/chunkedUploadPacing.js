@@ -69,7 +69,8 @@ function delay(ms) {
  * Sends a piece, waiting out the session's request limit (a 429 says how long) up to
  * {@link MAX_RATE_LIMIT_WAITS} times instead of failing the upload.
  * @param {{base: string, id: string, file: File, onSent?: function(number): void}} upload - The
- *   upload; `onSent` is told how far into the file each attempt has got.
+ *   upload; `onSent` is told how far into the file each attempt has got, and is set back to the
+ *   piece's start while a 429 is waited out.
  * @param {{offset: number, size: number}} piece - Where the piece starts and its largest size.
  * @returns {Promise<{received?: number, error?: string}>} As {@link sendPiece}, with a limit
  *   that never lifts reported as `upload_failed`.
@@ -78,6 +79,8 @@ async function sendPacedPiece(upload, piece) {
   for (var waits = 0; ; waits++) {
     var answer = await sendPiece(upload.base, upload.id, upload.file, piece, upload.onSent);
     if (!answer.retryAfterMs) return answer;
+    // The refused piece wasn't stored: show only what the server holds while waiting.
+    if (upload.onSent) upload.onSent(piece.offset);
     if (waits >= MAX_RATE_LIMIT_WAITS) return { error: 'upload_failed' };
     await delay(answer.retryAfterMs);
   }

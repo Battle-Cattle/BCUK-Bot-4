@@ -703,6 +703,28 @@ describe('registerUploadFormHandler', () => {
     expect(fetch.mock.calls.filter(([u]) => String(u).includes('/chunk'))).toHaveLength(2);
   });
 
+  it('drops the bar back to the confirmed offset while it waits out a 429', async () => {
+    const file = makeFile(16 * 1024 * 1024);
+    const { display, fetch, xhrs, submit } = setup({ file });
+    const firstPiece = deferred();
+    fetch.mockImplementation((url: string) => {
+      if (url === `${BASE}/start`) return response(200, { id: ID });
+      if (url === `${BASE}/${ID}`) return response(200, { received: 0, size: file.size });
+      if (url.includes('/chunk?offset=0') && xhrs.length === 1) return firstPiece.promise;
+      return pending();
+    });
+    submit();
+    await flush();
+    xhrs[0]!.upload.fire('progress', { loaded: 8 * 1024 * 1024 });
+    expect(display.label.textContent).toBe('Uploading… 50%');
+    firstPiece.resolve({ ok: false, status: 429, redirected: false, headers: { get: () => '120' }, json: () => Promise.resolve(null) });
+    await flush();
+    // Still inside the 120-second wait: no retry has been sent yet.
+    expect(xhrs).toHaveLength(1);
+    expect(display.bar.value).toBe(0);
+    expect(display.label.textContent).toBe('Uploading… 0%');
+  });
+
   it('gives up with upload_failed when the request limit never lifts', async () => {
     const { fetch, submit, assign } = setup();
     fetch.mockImplementation((url: string) => {
