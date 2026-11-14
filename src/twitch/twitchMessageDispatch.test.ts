@@ -1,10 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { waitFor } from '../test-utils/waitFor';
-import { mockLogger } from '../test-utils/loggerMock';
 
 // ─── Module mocks (must precede imports) ─────────────────────────────────────
 
-vi.mock('../shared/logger', () => ({ createLogger: mockLogger }));
+// One shared logger instance, so tests can assert on what the handler logs.
+const mockLog = vi.hoisted(() => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }));
+vi.mock('../shared/logger', () => ({ createLogger: () => mockLog }));
 
 // Only `streamer` is an active channel; membership itself is tested in twitchChannelMembership.test.ts.
 vi.mock('./twitchChannelMembership', () => ({
@@ -390,6 +391,15 @@ describe('handleTwitchMessage', () => {
     vi.mocked(executeShoutoutForTwitch).mockResolvedValue(undefined);
     sendMessage('#streamer', 'alice', '!so alice', { isBroadcaster: true });
     expect(executeShoutoutForTwitch).toHaveBeenCalledWith('streamer', '!so alice', 'alice', true, '!so');
+  });
+
+  it('logs and swallows an unexpected synchronous error from a handler, without throwing', () => {
+    const err = new Error('boom');
+    vi.mocked(executeCustomCommandForTwitch).mockImplementation(() => { throw err; });
+
+    expect(() => sendMessage('#streamer', 'alice', '!cmd')).not.toThrow();
+
+    expect(mockLog.error).toHaveBeenCalledWith('Unexpected error in message handler:', err);
   });
 
   it('passes isMod=false when neither isMod nor isBroadcaster is set', () => {
