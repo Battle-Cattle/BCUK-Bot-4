@@ -89,3 +89,22 @@ write_mysql_credentials() {
 mysql_option_escape() {
     printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
 }
+
+# Warns, without failing, when $ENV_FILE can be read by its group or by other users: it holds the
+# database password, EVENTSUB_TOKEN_SECRET and the Discord/Twitch credentials, and only the bot's
+# own user needs to read it. Prints the chmod that fixes it, but never changes the mode itself.
+# A symlinked .env is checked by the file it points to (stat -L), the one the bot actually reads
+# and the one chmod changes. Says nothing when the file is missing or its mode can't be read (GNU
+# stat; these scripts are Linux-only). The path in the printed command is shell-quoted, so it can
+# be copied as is even when it contains spaces.
+warn_if_env_readable_by_others() {
+    local mode
+    mode="$(stat -L -c %a "$ENV_FILE" 2>/dev/null)" || return 0
+    [[ "$mode" =~ ^[0-7]+$ ]] || return 0
+    if (( (8#$mode & 8#044) != 0 )); then
+        echo "WARNING: $ENV_FILE is readable by other users on this host (mode $mode). It holds the" >&2
+        echo "         database password and the bot's credentials. Make it private with:" >&2
+        printf '             chmod 600 %q\n' "$ENV_FILE" >&2
+    fi
+    return 0
+}

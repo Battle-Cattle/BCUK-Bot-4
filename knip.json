@@ -17,6 +17,9 @@
       "src/test-utils/**/*.ts"
     ]
   },
+  "ignoreBinaries": [
+    "systemd-analyze"
+  ],
   "ignoreDependencies": [
     "@simplewebauthn/browser",
     "express-serve-static-core"

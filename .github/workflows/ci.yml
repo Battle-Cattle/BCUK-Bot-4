@@ -22,6 +22,10 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          # Don't leave the job's GITHUB_TOKEN in .git/config for later steps (npm ci runs
+          # third-party install scripts). Nothing in this job needs authenticated git.
+          persist-credentials: false
 
       - name: Set up Node.js
         id: setup-node
