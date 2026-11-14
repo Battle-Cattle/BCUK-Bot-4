@@ -83,3 +83,27 @@ describe('createNoticeThrottle', () => {
     expect(throttle.tryClaim('k0', 100)).toBe(true);
   });
 });
+
+describe('cooldown and notice stores past the sweep threshold (#1005)', () => {
+  it('a long per-user cooldown survives a sweep and still blocks, and new viewers can still claim', () => {
+    const cooldowns = createAdvancedCommandCooldowns();
+    const longCommand = { id: 1, globalCooldownSeconds: 0, userCooldownSeconds: 3600 };
+    const shortCommand = { id: 2, globalCooldownSeconds: 0, userCooldownSeconds: 60 };
+    cooldowns.claim(longCommand, 'still-cooling', 0);
+    for (let i = 0; i < 1100; i++) cooldowns.claim(shortCommand, `viewer${i}`, 10 * 60_000);
+
+    expect(cooldowns.remaining(longCommand, 'still-cooling', 20 * 60_000).userSeconds).toBe(40 * 60);
+    expect(cooldowns.remaining(shortCommand, 'viewer0', 20 * 60_000).userSeconds).toBe(0);
+    cooldowns.claim(shortCommand, 'newcomer', 20 * 60_000);
+    expect(cooldowns.remaining(shortCommand, 'newcomer', 20 * 60_000 + 1000).userSeconds).toBe(59);
+  });
+
+  it('the notice throttle still throttles a recent key after a sweep', () => {
+    const throttle = createNoticeThrottle(10_000);
+    for (let i = 0; i < 1100; i++) expect(throttle.tryClaim(`old${i}`, 0)).toBe(true);
+    expect(throttle.tryClaim('recent', 50_000)).toBe(true);
+    expect(throttle.tryClaim('recent', 55_000)).toBe(false);
+    expect(throttle.tryClaim('old0', 55_000)).toBe(true);
+  });
+});
+
