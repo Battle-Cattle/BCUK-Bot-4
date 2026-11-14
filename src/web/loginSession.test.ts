@@ -107,4 +107,12 @@ describe('establishDashboardSession — display-name sync', () => {
     await establishDashboardSession(req, { id: '42', username: 'alice', avatar: null }, { discord_id: '42', discord_name: 'Alice', is_owner: false } as any, [guild], { discordAuthAt: 123 });
     expect(req.session.discordAuthAt).toBe(123);
   });
+
+  it('starts the session lifetime at login', async () => {
+    const req = makeReq();
+    const before = Date.now();
+    await establishDashboardSession(req, { id: '42', username: 'alice', avatar: null }, { discord_id: '42', discord_name: 'Alice', is_owner: false } as any, [guild]);
+    expect(req.session.loginAt).toBeGreaterThanOrEqual(before);
+    expect(req.session.lastSeenAt).toBe(req.session.loginAt);
+  });
 });

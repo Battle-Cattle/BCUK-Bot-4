@@ -17,6 +17,7 @@ import serviceWorkerRouter from './routes/serviceWorker';
 import streamdeckPluginDownloadRouter from './routes/streamdeckPluginDownload';
 import { mountRoutes } from './routes/index';
 import { ensureSessionCsrfToken } from './csrf';
+import { enforceSessionLifetime, SESSION_IDLE_MS } from './sessionLifetime';
 import { renderView } from './routes/viewHelpers';
 import {
   ipKey,
@@ -186,7 +187,7 @@ app.use(preSessionLimiter);
 // listens. The store's own expired-session timer is off (clearExpired: false): see startSessionCleanup.
 const sessionStore = new (MySQLStore(session))(
   {
-    expiration: 24 * 60 * 60 * 1000,
+    expiration: SESSION_IDLE_MS,
     createDatabaseTable: false,
     clearExpired: false,
     schema: { tableName: 'sessions' },
@@ -198,7 +199,7 @@ const sessionMiddleware = session({
   resave: false,
   saveUninitialized: false,
   store: sessionStore,
-  cookie: { secure: isProduction, httpOnly: true, sameSite: 'lax', maxAge: 24 * 60 * 60 * 1000 },
+  cookie: { secure: isProduction, httpOnly: true, sameSite: 'lax', maxAge: SESSION_IDLE_MS },
 });
 /**
  * Runs the session middleware, marking any error it passes on as a session-store failure so the
@@ -213,6 +214,9 @@ app.use((req, res, next) => {
     else next();
   });
 });
+// Ends a session past 7 days since login or 24h since its last page load, and renews one on a page
+// load (not on background requests, so an abandoned tab still logs out). See sessionLifetime.ts.
+app.use(enforceSessionLifetime);
 
 // Rate limiters — placed after session middleware so req.session is populated
 app.use(generalLimiter);

@@ -29,6 +29,10 @@ export interface SessionUser {
 declare module 'express-session' {
   interface SessionData {
     user?: SessionUser;
+    /** When (ms epoch) the user logged in: the session ends 7 days after it (see `sessionLifetime.ts`). */
+    loginAt?: number;
+    /** When (ms epoch) a page load last renewed the session: it ends 24 hours after it. */
+    lastSeenAt?: number;
     /** Pending Discord OAuth login; `returnTo` is a fixed, allowlisted path to land on afterwards. */
     oauthState?: { value: string; expiresAt: number; returnTo?: string };
     /**
