@@ -8,8 +8,10 @@ import { waitFor } from '../../test-utils/waitFor';
 
 const dir = vi.hoisted(() => `${process.env.TMPDIR ?? '/tmp'}/shared-preload-${process.pid}-${Date.now()}`);
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
-// 1 KB/s: the quarter-second bucket holds one 16 KB slice, so a big file is slow but small ones pass.
-vi.mock('../../shared/config', () => ({ OVERLAY_FOLDER: dir, SHARED_OVERLAY_PRELOAD_KB_PER_SECOND: 1 }));
+// 16 KB/s: the bucket holds one 16 KB slice, so the 400 KB file takes ~25s (slow enough to hold a
+// preload open) while a test that drains the bucket leaves the next small read only ~60ms of refill
+// to wait for, not the ~1s a 1 KB/s budget would.
+vi.mock('../../shared/config', () => ({ OVERLAY_FOLDER: dir, SHARED_OVERLAY_PRELOAD_KB_PER_SECOND: 16 }));
 
 import express from 'express';
 import { rateLimit } from 'express-rate-limit';
