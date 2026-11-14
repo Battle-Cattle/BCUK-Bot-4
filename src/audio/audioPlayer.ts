@@ -1,24 +1,20 @@
 import { createLogger } from '../shared/logger';
 import {
-  createAudioPlayer,
   joinVoiceChannel,
-  AudioPlayerStatus,
   VoiceConnectionStatus,
   entersState,
-  NoSubscriberBehavior,
   type AudioResource,
   type VoiceConnection,
-  type AudioPlayer as DjsAudioPlayer,
 } from '@discordjs/voice';
 import { ChannelType } from 'discord-api-types/v10';
 import type { Client, Guild, VoiceChannel } from 'discord.js';
-import { setVoiceConnected, setVoiceDisconnected, setVoiceIdle } from '../shared/statusStore';
+import { setVoiceConnected, setVoiceDisconnected } from '../shared/statusStore';
 
 const log = createLogger('AudioPlayer');
 import { isPermanentVoiceMisconfigurationError } from '../discord/discordUtils';
 import { getOrCreate } from '../shared/mapUtils';
 import { createVoiceAdapterFactory, type VoiceAdapterFactory } from './voiceAdapter';
-import { syncRtpTimestamp } from './rtpClock';
+import { type GuildPlaybackState, getPlayer, stopGuildPlayer, playOnGuildPlayer } from './guildAudioPlayback';
 import {
   type ConnectionHandlerDeps,
   setupConnectionHandlers,
@@ -33,13 +29,11 @@ import {
 // by guild ID. The reconnect state machine (attempt IDs, timers, backoff) runs
 // independently per guild so a drop in one guild never disturbs another.
 //
-// Each guild also gets its own @discordjs/voice AudioPlayer, subscribed only to
-// that guild's connection, so two guilds can play independent audio
-// concurrently — playing a sound in one guild is never heard in another.
+// Each guild also gets its own @discordjs/voice AudioPlayer (see
+// guildAudioPlayback.ts), subscribed only to that guild's connection, so two
+// guilds can play independent audio concurrently.
 
-interface GuildVoiceState {
-  guildId: string;
-  connection: VoiceConnection | null;
+interface GuildVoiceState extends GuildPlaybackState {
   // The connection the newest in-flight connect() attempt has joined, until it promotes or fails
   // (null before it joins).
   // @discordjs/voice returns the same VoiceConnection for every join in a guild while one is
@@ -55,12 +49,6 @@ interface GuildVoiceState {
   currentAttemptId: number;
   // Builds this guild's raw-gateway voice adapters and tracks their cleanup.
   adapterFactory: VoiceAdapterFactory;
-  player: DjsAudioPlayer | null;
-  playing: boolean;
-  // When the current connection became Ready (Date.now()), for the playback-start log's connection age.
-  connectedAt: number | null;
-  // When startPlayback last handed the player a resource, until the player reports Playing.
-  playRequestedAt: number | null;
 }
 
 const states = new Map<string, GuildVoiceState>();
@@ -108,12 +96,6 @@ const RECONNECT_MAX_DELAY_MS = 60_000;
 const VOICE_CONNECT_TIMEOUT_MS = 30_000;
 
 /**
- * A sound that takes longer than this from {@link startPlayback} to its first audio frame is
- * logged as a warning instead of at debug level, so a growing SFX delay shows up in the logs.
- */
-const SLOW_PLAYBACK_START_MS = 500;
-
-/**
  * Cancels and nulls any pending reconnect timer for the given guild state.
  * @param state - The guild voice state whose reconnect timer to clear.
  */
@@ -145,83 +127,6 @@ function scheduleReconnect(state: GuildVoiceState, reason: string): void {
       log.error(`Voice rejoin failed for guild ${state.guildId}:`, err);
     });
   }, delay);
-}
-
-/**
- * Returns this guild's audio player, lazily creating it with playing, idle and error handlers on first use.
- * @param state - The guild voice state that owns the player.
- * @returns The guild's audio player.
- */
-function getPlayer(state: GuildVoiceState): DjsAudioPlayer {
-  if (!state.player) {
-    const guildPlayer = createAudioPlayer({
-      behaviors: { noSubscriber: NoSubscriberBehavior.Pause },
-    });
-    guildPlayer.on(AudioPlayerStatus.Playing, () => {
-      syncRtpClock(state);
-      logPlaybackStart(state);
-    });
-    guildPlayer.on(AudioPlayerStatus.Idle, () => {
-      state.playing = false;
-      state.playRequestedAt = null;
-      setVoiceIdle(state.guildId);
-    });
-    guildPlayer.on('error', (err) => {
-      log.error(`Error: ${err.message}`, err);
-      state.playing = false;
-      state.playRequestedAt = null;
-      setVoiceIdle(state.guildId);
-    });
-    state.player = guildPlayer;
-  }
-  return state.player;
-}
-
-/**
- * Brings the guild connection's RTP timestamp up to real time whenever the player enters Playing:
- * a new sound once it has buffered, a replacement, or a resume from auto-pause. That runs before
- * any packet of what follows is prepared, so the next frame carries a timestamp that matches when
- * it is sent, however long the bot sent nothing. See {@link syncRtpTimestamp}. Logs a move at
- * debug level, so production can confirm the correction is happening.
- * @param state - The guild's voice state.
- */
-function syncRtpClock(state: GuildVoiceState): void {
-  if (!state.connection) return;
-  const movedMs = syncRtpTimestamp(state.connection, performance.now());
-  if (movedMs) log.debug(`Moved the RTP clock forward ${Math.round(movedMs)}ms in guild ${state.guildId}`);
-}
-
-/**
- * Logs how long the sound handed to {@link startPlayback} took to reach its first audio frame
- * (ffmpeg spawn and decode), with the voice connection's age and gateway/UDP ping, so a growing
- * SFX delay can be traced to the audio pipeline, the voice connection or neither. A no-op when no
- * start is pending, e.g. when the player resumes from auto-pause mid-sound.
- * @param state - The guild's voice state.
- */
-function logPlaybackStart(state: GuildVoiceState): void {
-  if (state.playRequestedAt === null) return;
-  const now = Date.now();
-  const startupMs = now - state.playRequestedAt;
-  state.playRequestedAt = null;
-  const ping = state.connection?.ping;
-  const ageMin = state.connectedAt === null ? '?' : Math.round((now - state.connectedAt) / 60_000);
-  const message = `Playback started in guild ${state.guildId} after ${startupMs}ms`
-    + ` (voice connected ${ageMin}min, ping ws ${ping?.ws ?? '?'}ms / udp ${ping?.udp ?? '?'}ms)`;
-  if (startupMs > SLOW_PLAYBACK_START_MS) log.warn(message);
-  else log.debug(message);
-}
-
-/**
- * Stops this guild's audio player (if any) and marks it not-playing, ignoring stop errors.
- * @param state - The guild voice state whose player to stop.
- */
-function stopGuildPlayer(state: GuildVoiceState): void {
-  try {
-    state.player?.stop(true);
-  } catch {
-    // Ignore audio stop errors during disconnect cleanup.
-  }
-  state.playing = false;
 }
 
 /**
@@ -516,8 +421,5 @@ export function forgetGuild(guildId: string): void {
  * @param guildId - Guild to play the resource in.
  */
 export function startPlayback(resource: AudioResource, guildId: string): void {
-  const state = getState(guildId);
-  state.playing = true;
-  state.playRequestedAt = Date.now();
-  getPlayer(state).play(resource);
+  playOnGuildPlayer(getState(guildId), resource);
 }
