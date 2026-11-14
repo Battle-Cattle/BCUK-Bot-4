@@ -474,6 +474,9 @@ async function expectExactThreshold(testApp: express.Express, limit: number): Pr
  * @param headers - Extra headers sent with every probe (e.g. `X-Forwarded-For`).
  * @returns Resolves once `fn` has finished and the server has closed.
  */
+/** How many probe requests {@link expectProbeStatuses} keeps in flight at once (and sockets per probe agent). */
+const PROBE_BATCH_SIZE = 16;
+
 async function withListeningServer(
   testApp: express.Express,
   fn: (probe: () => Promise<number>) => Promise<void>,
@@ -482,9 +485,9 @@ async function withListeningServer(
   const server = http.createServer(testApp);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const { port } = server.address() as AddressInfo;
-  const agent = new http.Agent({ keepAlive: true, maxSockets: 1 });
+  const agent = new http.Agent({ keepAlive: true, maxSockets: PROBE_BATCH_SIZE });
   /**
-   * Sends one GET to the probe route over the shared keep-alive socket, draining the body so the
+   * Sends one GET to the probe route over the shared keep-alive sockets, draining the body so the
    * socket is reused. Rejects on a request/response error or a response cut off before its end,
    * so a broken probe fails the test at once instead of hanging the loop until the timeout.
    */
@@ -507,7 +510,11 @@ async function withListeningServer(
 }
 
 /**
- * Sends `count` sequential probe requests, asserting each returns `status`.
+ * Sends `count` probe requests in parallel batches of {@link PROBE_BATCH_SIZE}, asserting each
+ * returns `status`. Batching keeps the counts exact: every request here expects the same status,
+ * the limiters count each hit as it arrives, and the next call only starts once these have all
+ * finished, so a threshold check right after still sees exactly `count` earlier hits. It just
+ * skips waiting for each round trip in turn, which made the 1800-request tests take seconds.
  *
  * @param probe - Probe sender from {@link withListeningServer}.
  * @param count - Number of requests to send.
@@ -515,8 +522,10 @@ async function withListeningServer(
  * @returns Resolves once all `count` requests have completed and been asserted.
  */
 async function expectProbeStatuses(probe: () => Promise<number>, count: number, status: number): Promise<void> {
-  for (let i = 0; i < count; i++) {
-    expect(await probe()).toBe(status);
+  for (let sent = 0; sent < count; sent += PROBE_BATCH_SIZE) {
+    const batch = Math.min(PROBE_BATCH_SIZE, count - sent);
+    const statuses = await Promise.all(Array.from({ length: batch }, () => probe()));
+    expect(statuses).toEqual(Array.from({ length: batch }, () => status));
   }
 }
 
@@ -773,6 +782,10 @@ describe('preSessionLimiter (server.ts)', () => {
     await Promise.all(accounts.map((discordId) => sessionLimiter.resetKey(discordId)));
     storeGet.mockImplementation((sid, cb) =>
       cb(null, { cookie: { originalMaxAge: 60_000, expires: new Date(Date.now() + 60_000).toISOString() }, user: { discordId: sid } }));
+    // Every probe 404s through the error page. Express only caches compiled views in production,
+    // so without this EJS recompiles error.ejs and its partials 1800 times, most of this test's time.
+    const viewCache = app.enabled('view cache');
+    app.enable('view cache');
     try {
       for (const discordId of accounts) {
         await withListeningServer(app, async (probe) => {
@@ -785,6 +798,7 @@ describe('preSessionLimiter (server.ts)', () => {
       const res = await request(app).get('/__limiter_probe').set('X-Forwarded-For', CLIENT_IP);
       expect(res.status).toBe(404);
     } finally {
+      app.set('view cache', viewCache);
       storeGet.mockImplementation((_id, cb) => cb(null, undefined));
       await Promise.all(accounts.map((discordId) => sessionLimiter.resetKey(discordId)));
     }
