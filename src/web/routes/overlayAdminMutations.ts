@@ -1,5 +1,5 @@
 import { createLogger } from '../../shared/logger';
-import { Router, type NextFunction, type Request, type Response } from 'express';
+import { Router, type Request, type Response } from 'express';
 import path from 'path';
 import fs from 'fs';
 import { randomUUID } from 'crypto';
@@ -26,6 +26,7 @@ import {
   adoptChunkedUpload, INCOMING_DIR, detectUploadedVideoType, placeUpload, discardUpload, sweepStaleIncomingUploads, type OverlayVideoType,
 } from './overlayUploadStorage';
 import { streamerFolder, videoFileSize } from './overlayVideoLibraryFiles';
+import { createUploadSlots } from './uploadSlots';
 import { exceedsStreamerStorage, isStreamerStorageFull, withStreamerQuota } from './overlayStorageQuota';
 
 const log = createLogger('OverlayAdmin');
@@ -37,8 +38,11 @@ const log = createLogger('OverlayAdmin');
  */
 export const MAX_CONCURRENT_OVERLAY_UPLOADS = 3;
 
-/** Number of overlay uploads in progress (see {@link MAX_CONCURRENT_OVERLAY_UPLOADS}). */
-let activeUploads = 0;
+/**
+ * Slots for overlay uploads being completed (see {@link MAX_CONCURRENT_OVERLAY_UPLOADS}). A slot
+ * is held until processing ends, even when the client leaves the page first.
+ */
+export const overlayUploadSlots = createUploadSlots(MAX_CONCURRENT_OVERLAY_UPLOADS, '/overlay/settings?error=upload_busy');
 
 /** Error codes `saveVideoFile` throws that the upload route reports as themselves. */
 const UPLOAD_ERROR_CODES = new Set(['invalid_path', 'invalid_file', 'transcode_failed', 'transcode_busy', 'storage_limit']);
@@ -159,34 +163,6 @@ async function saveVideoFile(streamer: DbStreamerEventSub, file: UploadedFile, n
   log.info(`Overlay video uploaded for ${streamer.twitch_name}: ${filename}${type === 'mov' ? ' (converted from MOV)' : ''}`);
 }
 
-/**
- * Express middleware admitting a finished upload for processing only while fewer than
- * {@link MAX_CONCURRENT_OVERLAY_UPLOADS} are being processed; a further one is turned away with
- * `upload_busy` and its file removed. The slot is released once the response has been sent or
- * the connection closes, whichever comes first.
- * @param req - Express request carrying the finished upload in `req.file`.
- * @param res - Express response; redirected when the limit is reached.
- * @param next - Continues to the upload handler when the upload is admitted.
- * @returns Resolves once the upload is admitted or turned away.
- */
-export async function limitConcurrentUploads(req: Request, res: Response, next: NextFunction): Promise<void> {
-  if (activeUploads >= MAX_CONCURRENT_OVERLAY_UPLOADS) {
-    if (req.file) await discardUpload(req.file);
-    res.redirect('/overlay/settings?error=upload_busy');
-    return;
-  }
-  activeUploads++;
-  let released = false;
-  const release = (): void => {
-    if (released) return;
-    released = true;
-    activeUploads--;
-  };
-  res.once('finish', release);
-  res.once('close', release);
-  next();
-}
-
 /** Redirects non-streamers before any chunked-upload route runs (see `makeRequireStreamerBeforeUpload`). */
 const requireStreamerBeforeUpload = makeRequireStreamerBeforeUpload({
   notAStreamerRedirect: NOT_A_STREAMER_REDIRECT,
@@ -252,8 +228,9 @@ const chunkedVideoStore = new ChunkedUploadStore({
  * @returns `upload_busy`, `transcode_busy`, `storage_limit`, or null to let the upload start.
  */
 async function checkChunkedVideoStart(declared: ChunkedUploadDeclaration, req: Request): Promise<string | null> {
-  // Turned away now rather than at completion, so the user doesn't send the whole file first.
-  if (activeUploads >= MAX_CONCURRENT_OVERLAY_UPLOADS) return 'upload_busy';
+  // Hints only, so the user doesn't send a whole file that would be refused now: nothing is
+  // reserved, and completion checks the slots (and the conversion queue) again.
+  if (overlayUploadSlots.isFull()) return 'upload_busy';
   if (declaresMov(declared.name, declared.type) && isWebmTranscodeQueueFull()) return 'transcode_busy';
   // The guards already turned non-streamers away; one deleted since then is refused at completion.
   const streamer = await getStreamerByDiscordId(getSessionUser(req).discordId);
@@ -280,7 +257,7 @@ mountChunkedUploadRoutes(router, {
   field: 'video',
   checkStart: checkChunkedVideoStart,
   toFile: adoptChunkedUpload,
-  complete: [limitConcurrentUploads, handleVideoUploadAndCleanUp],
+  complete: [overlayUploadSlots.admit(handleVideoUploadAndCleanUp)],
   basePath: '/overlay/settings',
   log,
   // Leftovers in the incoming folder (e.g. from a restart mid-upload) are swept even when no

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockLogger } from '../../test-utils/loggerMock';
+import { waitFor } from '../../test-utils/waitFor';
 
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 vi.mock('../../shared/config', () => ({ OVERLAY_MAX_FILE_MB: 100, OVERLAY_FOLDER: '/o' }));
@@ -30,19 +31,13 @@ vi.mock('./overlayConversionProgress', () => progress);
 
 import './sharedOverlayAdminUpload';
 
-/** Runs the mounted `complete` chain for a fake request and returns what it redirected to. */
-async function complete(req: any, hold = false) {
-  const releases: Array<() => void> = [];
-  const res: any = {
-    redirect: vi.fn(), once: (_e: string, cb: () => void) => { releases.push(cb); }, status: vi.fn().mockReturnThis(), end: vi.fn(),
-  };
+/** Runs the mounted `complete` handler for a fake request and returns its response stub. */
+async function complete(req: any) {
+  const res: any = { redirect: vi.fn(), status: vi.fn().mockReturnThis(), end: vi.fn() };
   req.get = (h: string) => (h === 'x-upload-id' ? req.uploadId : undefined);
-  const [limit, handle] = mounted.options.complete;
-  let admitted = false;
-  await limit(req, res, () => { admitted = true; });
-  if (admitted) await handle(req, res);
-  if (!hold) releases.forEach((release) => release());
-  return { res, admitted, releases };
+  const [handle] = mounted.options.complete;
+  await handle(req, res);
+  return { res };
 }
 
 const file = { originalname: 'clip.mp4' };
@@ -123,16 +118,17 @@ describe('completing an upload', () => {
     expect(res.redirect).toHaveBeenCalledWith('/overlay/shared/settings?success=video_uploaded');
   });
 
-  it('turns away a fourth concurrent upload with upload_busy', async () => {
+  it('turns away a fourth concurrent upload with upload_busy until one of them has been processed', async () => {
     const pending: Array<() => void> = [];
     files.storeSharedVideo.mockImplementation(() => new Promise<string>((resolve) => { pending.push(() => resolve('x.webm')); }));
-    const running = [1, 2, 3].map(() => complete({ file, body: {}, uploadId: null }, true));
-    await vi.waitFor(() => expect(pending).toHaveLength(3));
+    const running = [1, 2, 3].map(() => complete({ file, body: {}, uploadId: null }));
+    await waitFor(() => expect(pending).toHaveLength(3));
+    expect(mounted.options.checkStart()).toBe('upload_busy');
     const fourth = await complete({ file: { originalname: 'd.mp4' }, body: {}, uploadId: null });
-    expect(fourth.admitted).toBe(false);
     expect(fourth.res.redirect).toHaveBeenCalledWith('/overlay/shared/settings?error=upload_busy');
+    expect(storage.discardUpload).toHaveBeenCalledWith({ originalname: 'd.mp4' });
     pending.forEach((done) => done());
-    const finished = await Promise.all(running);
-    finished.forEach((r) => r.releases.forEach((release) => release()));
+    await Promise.all(running);
+    expect(mounted.options.checkStart()).toBeNull();
   });
 });
