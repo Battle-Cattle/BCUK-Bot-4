@@ -405,6 +405,39 @@ describe('shutdown, restart, multitwitch lookup, and live-state ordering', () =>
     expect(setTwitchChannelLive).not.toHaveBeenCalledWith('teststreamer', false);
   });
 
+  it('still clears a removed login\'s live flag when the restart fails after loading the streamer list', async () => {
+    vi.mocked(getAllStreamersWithGroups).mockResolvedValue([
+      makeStreamer(), makeStreamer({ id: 6, twitch_name: 'removedstreamer' }),
+    ] as any);
+    vi.mocked(getUsers).mockResolvedValue([{ login: 'teststreamer', id: 'uid-5' }, { login: 'removedstreamer', id: 'uid-6' }]);
+    await startTwitchMonitor();
+    vi.mocked(setTwitchChannelLive).mockClear();
+
+    vi.mocked(getAllStreamersWithGroups).mockResolvedValue([makeStreamer()] as any);
+    vi.mocked(getUsers).mockRejectedValueOnce(new Error('helix down'));
+    await expect(restartTwitchMonitor()).rejects.toThrow('helix down');
+
+    expect(setTwitchChannelLive).toHaveBeenCalledWith('removedstreamer', false);
+  });
+
+  it('keeps a removed login pending when the restart fails before the streamer list loads, and clears it on the next start', async () => {
+    vi.mocked(getAllStreamersWithGroups).mockResolvedValue([
+      makeStreamer(), makeStreamer({ id: 6, twitch_name: 'removedstreamer' }),
+    ] as any);
+    vi.mocked(getUsers).mockResolvedValue([{ login: 'teststreamer', id: 'uid-5' }, { login: 'removedstreamer', id: 'uid-6' }]);
+    await startTwitchMonitor();
+    vi.mocked(setTwitchChannelLive).mockClear();
+
+    vi.mocked(getAllStreamersWithGroups).mockRejectedValueOnce(new Error('db down'));
+    await expect(restartTwitchMonitor()).rejects.toThrow('db down');
+    expect(setTwitchChannelLive).not.toHaveBeenCalledWith('removedstreamer', false);
+
+    vi.mocked(getAllStreamersWithGroups).mockResolvedValue([makeStreamer()] as any);
+    vi.mocked(getUsers).mockResolvedValue([{ login: 'teststreamer', id: 'uid-5' }]);
+    await restartTwitchMonitor();
+    expect(setTwitchChannelLive).toHaveBeenCalledWith('removedstreamer', false);
+  });
+
   it('getMultiTwitchDataForChannel returns null for a login with no live state', async () => {
     vi.mocked(getAllStreamersWithGroups).mockResolvedValue([makeStreamer()] as any);
     vi.mocked(getUsers).mockResolvedValue([{ login: 'teststreamer', id: 'uid-5' }]);

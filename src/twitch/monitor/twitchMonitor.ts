@@ -133,6 +133,8 @@ async function teardown(): Promise<void> {
  */
 export async function startTwitchMonitor(): Promise<void> {
   streamersData = await getAllStreamersWithGroups();
+  // Straight after the authoritative list loads, so a later failure (e.g. getUsers) can't skip it.
+  clearLiveFlagForUnmonitored();
   if (streamersData.length === 0) {
     log.warn('No streamers configured in DB — nothing to monitor');
   }
@@ -194,13 +196,14 @@ export async function shutdownTwitchMonitor(): Promise<void> {
 /**
  * Restarts the monitor without deleting live messages.
  * The startup live-check will re-sync with any posts made before the restart, and sets each
- * watched login's live flag; logins no longer watched have theirs cleared here.
+ * watched login's live flag; logins no longer watched have theirs cleared as soon as the new
+ * streamer list loads (see {@link clearLiveFlagForUnmonitored}).
  * @returns Resolves once the monitor has restarted.
  */
 export async function restartTwitchMonitor(): Promise<void> {
   log.info('Restarting...');
   await teardown();
-  const previousLogins = monitoredLogins();
+  for (const login of monitoredLogins()) loginsToRecheck.add(login);
 
   // Don't delete messages — startup live-check handles re-syncing
   liveStates.clear();
@@ -208,8 +211,14 @@ export async function restartTwitchMonitor(): Promise<void> {
   streamersData = [];
 
   await startTwitchMonitor();
-  clearLiveFlagForUnmonitored(previousLogins);
 }
+
+/**
+ * Logins watched before a restart whose live flag still needs checking against the new list. Kept
+ * until a start has loaded the streamer list, so a restart that fails before then (the DB read
+ * itself) doesn't lose them: the next start clears them instead.
+ */
+const loginsToRecheck = new Set<string>();
 
 /**
  * The lowercased Twitch logins the monitor currently watches.
@@ -223,14 +232,14 @@ function monitoredLogins(): Set<string> {
  * Clears the live flag of logins the monitor watched before a restart and no longer does (a
  * streamer removed, possibly while live). Nothing else would ever clear it, because the offline
  * check only runs for logins it watches (#1013). The startup check sets the flag for every login
- * still watched.
- * @param previousLogins - The logins watched before the restart.
+ * still watched. Called by {@link startTwitchMonitor} as soon as `streamersData` holds the new list.
  */
-function clearLiveFlagForUnmonitored(previousLogins: Set<string>): void {
+function clearLiveFlagForUnmonitored(): void {
   const current = monitoredLogins();
-  for (const login of previousLogins) {
+  for (const login of loginsToRecheck) {
     if (!current.has(login)) setTwitchChannelLive(login, false);
   }
+  loginsToRecheck.clear();
 }
 
 /**
