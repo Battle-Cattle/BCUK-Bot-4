@@ -7,6 +7,7 @@ import {
   findDiscordIdByTokenHash,
 } from '../db';
 import { renderView } from './routes/viewHelpers';
+import { parseBearerToken } from './bearerToken';
 import { getLiveAccessForRequest, hasPanelAccess, resolveAccessLevelForGuild } from './guildAccess';
 
 /**
@@ -180,7 +181,8 @@ export const requireModJson = requireAccessLevelJson(AccessLevel.MOD);
 export const requireManagerJson = requireAccessLevelJson(AccessLevel.MANAGER);
 
 /**
- * Creates a middleware that authenticates a request via a `Bearer` token: hashes it with
+ * Creates a middleware that authenticates a request via a `Bearer` token (scheme matched
+ * case-insensitively, see `parseBearerToken`): hashes it with
  * SHA-256, resolves the hash to an identity via `lookup`, and stores it on `req` via `assign`
  * on success. Responds 401 when the header is missing/empty or `lookup` finds no match, and
  * 500 on any other lookup failure. Shared factory behind `requireApiKey`/`requireCompanionKey`.
@@ -194,8 +196,7 @@ function authenticateBearerToken<T>(
   assign: (req: Request, value: T, hash: string) => void,
 ): (req: Request, res: Response, next: NextFunction) => Promise<void> {
   return async (req, res, next) => {
-    const authHeader = req.headers['authorization'];
-    const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : '';
+    const token = parseBearerToken(req.headers['authorization']);
     if (!token) {
       res.status(401).json({ ok: false, error: 'Unauthorized' });
       return;
