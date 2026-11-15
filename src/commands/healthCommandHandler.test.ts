@@ -159,7 +159,7 @@ describe('executeHealthCommandForDiscord', () => {
     vi.mocked(getHealthSnapshot).mockReturnValue(EMPTY_SNAPSHOT as any);
     const before = makeMockMessage('!health', OWNER_ID);
     await executeHealthCommandForDiscord(before as any);
-    expect(before.author.send.mock.calls[0]![0]).not.toContain('Disk:');
+    expect(before.author.send).toHaveBeenCalledWith(expect.not.stringContaining('Disk:'));
 
     vi.mocked(getHealthSnapshot).mockReturnValue({
       ...EMPTY_SNAPSHOT,
@@ -167,7 +167,7 @@ describe('executeHealthCommandForDiscord', () => {
     } as any);
     const after = makeMockMessage('!health', OWNER_ID);
     await executeHealthCommandForDiscord(after as any);
-    expect(after.author.send.mock.calls[0]![0]).toContain('Disk: 🔴 low (512 MB free at /srv/overlay');
+    expect(after.author.send).toHaveBeenCalledWith(expect.stringContaining('Disk: 🔴 low (512 MB free at /srv/overlay'));
   });
 
   it('includes recent errors, newest first', async () => {
