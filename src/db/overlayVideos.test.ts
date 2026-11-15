@@ -38,6 +38,7 @@ vi.mock('mysql2/promise', () => ({ default: {} }));
 import { getPool } from './pool';
 import {
   getVideosForStreamer,
+  getRecordedVideoFilenames,
   addVideo,
   deleteVideo,
   getRewardsForStreamer,
@@ -57,6 +58,19 @@ beforeEach(() => {
 });
 
 // ─── getVideosForStreamer ─────────────────────────────────────────────────────
+
+describe('getRecordedVideoFilenames', () => {
+  it('returns which of the filenames have a row for that streamer, in one IN query', async () => {
+    const pool = makePool([{ filename: 'a.webm' }]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+
+    await expect(getRecordedVideoFilenames(7, ['a.webm', 'b.mp4'])).resolves.toEqual(new Set(['a.webm']));
+    expect(pool.execute).toHaveBeenCalledWith(
+      expect.stringContaining('FROM overlay_video WHERE streamer_id = ? AND filename IN (?, ?)'),
+      [7, 'a.webm', 'b.mp4'],
+    );
+  });
+});
 
 describe('getVideosForStreamer', () => {
   it('returns empty array when no rows', async () => {

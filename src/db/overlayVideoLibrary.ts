@@ -1,6 +1,6 @@
 import mysql, { type PoolConnection } from 'mysql2/promise';
 import { getPool, withTransaction, withTransactionOrNotFound } from './pool';
-import { isMysqlDuplicateEntryError } from './utils';
+import { buildInClausePlaceholders, isMysqlDuplicateEntryError } from './utils';
 
 /** One entry in the public overlay video library, with its contributor's Twitch login. */
 export interface OverlayLibraryVideo {
@@ -116,6 +116,20 @@ export async function getLibraryVideoFilename(libraryId: number): Promise<string
     [libraryId],
   );
   return rows[0]?.filename ?? null;
+}
+
+/**
+ * Picks out which of the given filenames have an `overlay_video_library` row, for the sweep of
+ * library files no entry refers to (`overlayOrphanSweep.ts`).
+ * @param filenames - Stored filenames found in the library folder; must not be empty.
+ * @returns The filenames, as stored in the rows, that have an entry.
+ */
+export async function getRecordedLibraryFilenames(filenames: string[]): Promise<Set<string>> {
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+    `SELECT filename FROM overlay_video_library WHERE filename IN (${buildInClausePlaceholders(filenames.length)})`,
+    filenames,
+  );
+  return new Set(rows.map((r) => r.filename as string));
 }
 
 /**

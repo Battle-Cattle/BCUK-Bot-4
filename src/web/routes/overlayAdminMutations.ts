@@ -26,6 +26,7 @@ import {
   adoptChunkedUpload, INCOMING_DIR, detectUploadedVideoType, placeUpload, discardUpload, sweepStaleIncomingUploads, type OverlayVideoType,
 } from './overlayUploadStorage';
 import { streamerFolder, videoFileSize } from './overlayVideoLibraryFiles';
+import { withInFlightVideoFile } from './overlayInFlightFiles';
 import { createUploadSlots } from './uploadSlots';
 import { exceedsStreamerStorage, isStreamerStorageFull, withStreamerQuota } from './overlayStorageQuota';
 
@@ -63,21 +64,36 @@ function declaresMov(name: string, type: string): boolean {
   return type === 'video/quicktime' || path.extname(name).toLowerCase() === '.mov';
 }
 
+/** Where an upload is stored: its format and the random name (without extension) it's stored under. */
+interface StoredVideoName {
+  type: OverlayVideoType;
+  baseName: string;
+}
+
 /**
- * Moves an uploaded overlay video into `dir` under a random name: WebM and MP4 as uploaded, MOV
+ * Names the file an upload is stored as: `<baseName>.webm` for a MOV (stored converted, see
+ * `storeMovAsWebm`), `<baseName>.<type>` otherwise.
+ * @param name - The upload's format and random base name.
+ * @returns The stored filename.
+ */
+function storedVideoFilename({ type, baseName }: StoredVideoName): string {
+  return `${baseName}.${type === 'mov' ? 'webm' : type}`;
+}
+
+/**
+ * Moves an uploaded overlay video into `dir` under its random name: WebM and MP4 as uploaded, MOV
  * converted to WebM first (see `storeMovAsWebm`).
  * @param dir - Absolute path of the streamer's overlay folder (already safe-resolved).
  * @param file - The finished upload, kept on disk in the incoming folder (see `adoptChunkedUpload`).
- * @param type - The upload's format, from `detectUploadedVideoType`.
+ * @param name - The upload's format, from `detectUploadedVideoType`, and its random base name.
  * @param onProgress - Told a MOV conversion's stage and percentage as it goes (optional).
- * @returns The stored file's name within `dir`.
+ * @returns The stored file's name within `dir` (see {@link storedVideoFilename}).
  * @throws With `code: 'transcode_busy'`/`'transcode_failed'` if a MOV can't be converted now
  *   or at all, or the error from moving the file.
  */
-async function storeVideoFile(dir: string, file: UploadedFile, type: OverlayVideoType, onProgress?: ProgressListener): Promise<string> {
-  const baseName = randomUUID();
-  if (type === 'mov') return storeMovAsWebm(dir, baseName, (sourcePath) => placeUpload(file, sourcePath), onProgress);
-  const filename = `${baseName}.${type}`;
+async function storeVideoFile(dir: string, file: UploadedFile, name: StoredVideoName, onProgress?: ProgressListener): Promise<string> {
+  if (name.type === 'mov') return storeMovAsWebm(dir, name.baseName, (sourcePath) => placeUpload(file, sourcePath), onProgress);
+  const filename = storedVideoFilename(name);
   await placeUpload(file, path.join(dir, filename));
   return filename;
 }
@@ -89,7 +105,8 @@ async function storeVideoFile(dir: string, file: UploadedFile, type: OverlayVide
  * @param streamer - Owning streamer.
  * @param dir - Absolute path of the streamer's overlay folder (already safe-resolved).
  * @param file - The finished upload, kept on disk in the incoming folder (see `adoptChunkedUpload`).
- * @param details - The upload's detected format and, when the page sent one, its upload ID.
+ * @param details - The upload's detected format, its random base name and, when the page sent
+ *   one, its upload ID.
  * @returns The stored file's name within `dir`.
  * @throws Whatever {@link storeVideoFile} throws.
  */
@@ -97,13 +114,13 @@ async function storeWithProgress(
   streamer: DbStreamerEventSub,
   dir: string,
   file: UploadedFile,
-  details: { type: OverlayVideoType; uploadId: string | null },
+  details: StoredVideoName & { uploadId: string | null },
 ): Promise<string> {
-  const { type, uploadId } = details;
+  const { type, baseName, uploadId } = details;
   const owner = uploadId && type === 'mov' ? claimConversionProgress(streamer.id, uploadId) : null;
-  if (!uploadId || !owner) return storeVideoFile(dir, file, type);
+  if (!uploadId || !owner) return storeVideoFile(dir, file, { type, baseName });
   try {
-    return await storeVideoFile(dir, file, type, (progress) => setConversionProgress(streamer.id, uploadId, owner, progress));
+    return await storeVideoFile(dir, file, { type, baseName }, (progress) => setConversionProgress(streamer.id, uploadId, owner, progress));
   } finally {
     releaseConversionProgress(streamer.id, uploadId, owner);
   }
@@ -158,8 +175,14 @@ async function saveVideoFile(streamer: DbStreamerEventSub, file: UploadedFile, n
   const type = await detectUploadedVideoType(file);
   if (!type) throw Object.assign(new Error('Invalid file type'), { code: 'invalid_file' });
   await fs.promises.mkdir(dir, { recursive: true });
-  const filename = await storeWithProgress(streamer, dir, file, { type, uploadId });
-  await recordVideoWithinQuota(streamer.id, name, filename, path.join(dir, filename));
+  const stored = { type, baseName: randomUUID() };
+  // Marked in flight from before the file exists until its row is written or the file removed, so
+  // the sweep of files no row refers to can't take it meanwhile (see `overlayInFlightFiles.ts`).
+  const filename = await withInFlightVideoFile({ folder: streamerFolder(streamer.id), filename: storedVideoFilename(stored) }, async () => {
+    const storedAs = await storeWithProgress(streamer, dir, file, { ...stored, uploadId });
+    await recordVideoWithinQuota(streamer.id, name, storedAs, path.join(dir, storedAs));
+    return storedAs;
+  });
   log.info(`Overlay video uploaded for ${streamer.twitch_name}: ${filename}${type === 'mov' ? ' (converted from MOV)' : ''}`);
 }
 
