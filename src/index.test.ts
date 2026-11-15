@@ -119,6 +119,10 @@ vi.mock('./shared/eventLoopMonitor', () => ({
   startEventLoopMonitor: vi.fn(),
   stopEventLoopMonitor: vi.fn(),
 }));
+vi.mock('./shared/diskSpaceMonitor', () => ({
+  startDiskSpaceMonitor: vi.fn(),
+  stopDiskSpaceMonitor: vi.fn(),
+}));
 vi.mock('./twitch/pricing/rewardPricingService', () => ({
   registerRewardPricingRuntime: vi.fn(),
 }));
@@ -388,6 +392,7 @@ describe('startup — reward pricing scheduler', () => {
     const { startEventSubReconciliation } = await import('./twitch/eventsub/twitchEventSubReconciliation.js');
     const { startChannelReconciliationPoll } = await import('./twitch/twitchChannelReconciliationPoll.js');
     const { startEventLoopMonitor } = await import('./shared/eventLoopMonitor.js');
+    const { startDiskSpaceMonitor } = await import('./shared/diskSpaceMonitor.js');
     const { restoreDebugLogging, startDebugLogPruning } = await import('./shared/debugLogging.js');
 
     await runMain();
@@ -396,6 +401,7 @@ describe('startup — reward pricing scheduler', () => {
     expect(vi.mocked(startDebugLogPruning)).toHaveBeenCalledOnce();
     expect(vi.mocked(startRewardPricingScheduler)).toHaveBeenCalledOnce();
     expect(vi.mocked(startEventLoopMonitor)).toHaveBeenCalledOnce();
+    expect(vi.mocked(startDiskSpaceMonitor)).toHaveBeenCalledOnce();
     expect(vi.mocked(startEventSub)).toHaveBeenCalledOnce();
     expect(vi.mocked(startEventSubReconciliation)).toHaveBeenCalledOnce();
     expect(vi.mocked(startChannelReconciliationPoll)).toHaveBeenCalledOnce();
@@ -584,6 +590,7 @@ describe('shutdown', () => {
     const { stopEventSubReconciliation } = await import('./twitch/eventsub/twitchEventSubReconciliation.js');
     const { stopChannelReconciliationPoll } = await import('./twitch/twitchChannelReconciliationPoll.js');
     const { stopEventLoopMonitor } = await import('./shared/eventLoopMonitor.js');
+    const { stopDiskSpaceMonitor } = await import('./shared/diskSpaceMonitor.js');
     const { stopDebugLogPruning } = await import('./shared/debugLogging.js');
 
     await runMain();
@@ -593,6 +600,7 @@ describe('shutdown', () => {
     expect(vi.mocked(stopDebugLogPruning)).toHaveBeenCalledOnce();
     expect(vi.mocked(stopRewardPricingScheduler)).toHaveBeenCalledOnce();
     expect(vi.mocked(stopEventLoopMonitor)).toHaveBeenCalledOnce();
+    expect(vi.mocked(stopDiskSpaceMonitor)).toHaveBeenCalledOnce();
     expect(vi.mocked(stopEventSubReconciliation)).toHaveBeenCalledOnce();
     expect(vi.mocked(stopChannelReconciliationPoll)).toHaveBeenCalledOnce();
   });

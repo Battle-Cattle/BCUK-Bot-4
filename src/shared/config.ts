@@ -86,6 +86,12 @@ export const OVERLAY_MAX_TOTAL_MB_PER_STREAMER = parsePositiveIntEnv(process.env
 /** Most megabytes the public overlay video library's own files may add up to. */
 export const OVERLAY_LIBRARY_MAX_TOTAL_MB = parsePositiveIntEnv(process.env.OVERLAY_LIBRARY_MAX_TOTAL_MB, 10240);
 /**
+ * Free space (MB) on the volume holding OVERLAY_FOLDER below which the owner gets a `disk` alert DM
+ * (see `diskSpaceMonitor.ts`). 1024 leaves room for a few uploads in progress at the default
+ * OVERLAY_MAX_FILE_MB plus their MOV conversions, with time to act before writes start failing.
+ */
+export const DISK_FREE_ALERT_MB = parsePositiveIntEnv(process.env.DISK_FREE_ALERT_MB, 1024);
+/**
  * Longest one MOV → WebM overlay conversion may run before ffmpeg is killed. Encoding transparent
  * VP9 from a few hundred MB of ProRes 4444 can take well over five minutes on a small server.
  */

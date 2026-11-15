@@ -54,6 +54,7 @@ const EMPTY_SNAPSHOT = {
   eventsub: {},
   monitor: { lastPollOk: true, lastPollAt: new Date('2026-01-01T00:00:00Z'), lastError: null },
   schedulers: {},
+  disk: null,
   errors: [],
 };
 
@@ -152,6 +153,21 @@ describe('executeHealthCommandForDiscord', () => {
     await executeHealthCommandForDiscord(message as any);
     expect(message.author.send).not.toHaveBeenCalled();
     expect(message.reply).not.toHaveBeenCalled();
+  });
+
+  it('includes a disk line once a free-space reading exists, and none before', async () => {
+    vi.mocked(getHealthSnapshot).mockReturnValue(EMPTY_SNAPSHOT as any);
+    const before = makeMockMessage('!health', OWNER_ID);
+    await executeHealthCommandForDiscord(before as any);
+    expect(before.author.send).toHaveBeenCalledWith(expect.not.stringContaining('Disk:'));
+
+    vi.mocked(getHealthSnapshot).mockReturnValue({
+      ...EMPTY_SNAPSHOT,
+      disk: { path: '/srv/overlay', freeBytes: 512 * 1024 * 1024, thresholdBytes: 1024 * 1024 * 1024, ok: false, checkedAt: new Date('2026-01-01T00:00:00Z') },
+    } as any);
+    const after = makeMockMessage('!health', OWNER_ID);
+    await executeHealthCommandForDiscord(after as any);
+    expect(after.author.send).toHaveBeenCalledWith(expect.stringContaining('Disk: 🔴 low (512 MB free at /srv/overlay'));
   });
 
   it('includes recent errors, newest first', async () => {

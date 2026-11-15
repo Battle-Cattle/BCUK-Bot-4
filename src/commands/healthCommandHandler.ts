@@ -95,6 +95,18 @@ function formatSchedulerLines(snapshot: HealthSnapshot): string[] {
 }
 
 /**
+ * Formats the free disk space line, or `[]` before the first successful reading.
+ * @param snapshot - Current health snapshot.
+ * @returns The disk line with free space, the path measured and when, or an empty array.
+ */
+function formatDiskLines(snapshot: HealthSnapshot): string[] {
+  const { disk } = snapshot;
+  if (!disk) return [];
+  const freeMb = Math.floor(disk.freeBytes / (1024 * 1024));
+  return [`Disk: ${disk.ok ? '🟢 ok' : '🔴 low'} (${freeMb} MB free at ${disk.path}, checked ${formatDate(disk.checkedAt)})`];
+}
+
+/**
  * Formats the most recent errors (newest first, capped at {@link RECENT_ERROR_COUNT}), or `[]` if none.
  * @param snapshot - Current health snapshot.
  * @returns A `Recent errors:` header followed by one line per error, or an empty array.
@@ -108,7 +120,7 @@ function formatRecentErrorLines(snapshot: HealthSnapshot): string[] {
 /**
  * Builds the plain-text `!health` summary from a health snapshot: Discord/Twitch chat
  * connection state, the last DB ping, every tracked EventSub streamer's connection status,
- * the last monitor poll, every tracked scheduler's last run, and the most recent errors
+ * the last monitor poll, every tracked scheduler's last run, free disk space, and the most recent errors
  * (newest first, capped at {@link RECENT_ERROR_COUNT}).
  * @param snapshot - The health snapshot to summarize (see `healthStore.getHealthSnapshot`).
  * @returns The formatted summary text.
@@ -120,6 +132,7 @@ function formatHealthSummary(snapshot: HealthSnapshot): string {
     ...formatEventSubLines(snapshot),
     formatMonitorLine(snapshot),
     ...formatSchedulerLines(snapshot),
+    ...formatDiskLines(snapshot),
     ...formatRecentErrorLines(snapshot),
   ].join('\n');
   if (full.length <= DISCORD_MESSAGE_LIMIT) return full;
