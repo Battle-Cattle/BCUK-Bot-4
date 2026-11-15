@@ -200,12 +200,24 @@ describe('sweepOrphanedOverlayVideos', () => {
   });
 
   it('looks filenames up in bounded batches', async () => {
-    for (let i = 0; i < 501; i++) write('5', `f${i}.webm`);
+    // 501 listed files, but only one on disk: creating, stat-ing and removing 500 real files is too
+    // slow for the test timeout on a Windows runner. The listing, ages and removals are stubbed.
+    write('5', 'f0.webm');
+    const names = Array.from({ length: 501 }, (_, i) => `f${i}.webm`);
+    const folder = fs.realpathSync(path.join(overlayFolder, '5'));
+    const readdir = fs.promises.readdir;
+    vi.spyOn(fs.promises, 'readdir').mockImplementation((async (dir: fs.PathLike, options?: unknown) => {
+      if (path.resolve(String(dir)) !== folder) return readdir(dir, options as never);
+      return names.map((name) => ({ name, isFile: () => true, isDirectory: () => false }));
+    }) as never);
+    vi.spyOn(fs.promises, 'lstat').mockResolvedValue({ ctimeMs: 0 } as fs.Stats);
+    const rm = vi.spyOn(fs.promises, 'rm').mockResolvedValue(undefined);
     recordRows({ 5: ['f0.webm'] });
 
     await expect(sweepOrphanedOverlayVideos(later())).resolves.toBe(500);
-    expect(vi.mocked(getRecordedVideoFilenames).mock.calls.map(([, names]) => names.length).sort()).toEqual([1, 500]);
-    expect(exists('5', 'f0.webm')).toBe(true);
+    expect(vi.mocked(getRecordedVideoFilenames).mock.calls.map(([, batch]) => batch.length).sort()).toEqual([1, 500]);
+    expect(rm).toHaveBeenCalledTimes(500);
+    expect(rm).not.toHaveBeenCalledWith(path.join(folder, 'f0.webm'), expect.anything());
   });
 
   it('never removes a file whose write is still in flight, however old', async () => {
