@@ -192,8 +192,10 @@ describe('getRecordedLibraryFilenames', () => {
     vi.mocked(getPool).mockReturnValue(pool as any);
 
     await expect(getRecordedLibraryFilenames(['a.webm', 'b.webm'])).resolves.toEqual(new Set(['b.webm']));
-    expect(pool.execute.mock.calls[0]![0]).toContain('FROM overlay_video_library WHERE filename IN (?, ?)');
-    expect(pool.execute.mock.calls[0]![1]).toEqual(['a.webm', 'b.webm']);
+    expect(pool.execute).toHaveBeenCalledWith(
+      expect.stringContaining('FROM overlay_video_library WHERE filename IN (?, ?)'),
+      ['a.webm', 'b.webm'],
+    );
   });
 });
 

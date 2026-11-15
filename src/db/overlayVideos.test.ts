@@ -65,8 +65,10 @@ describe('getRecordedVideoFilenames', () => {
     vi.mocked(getPool).mockReturnValue(pool as any);
 
     await expect(getRecordedVideoFilenames(7, ['a.webm', 'b.mp4'])).resolves.toEqual(new Set(['a.webm']));
-    expect(pool.execute.mock.calls[0]![0]).toContain('FROM overlay_video WHERE streamer_id = ? AND filename IN (?, ?)');
-    expect(pool.execute.mock.calls[0]![1]).toEqual([7, 'a.webm', 'b.mp4']);
+    expect(pool.execute).toHaveBeenCalledWith(
+      expect.stringContaining('FROM overlay_video WHERE streamer_id = ? AND filename IN (?, ?)'),
+      [7, 'a.webm', 'b.mp4'],
+    );
   });
 });
 

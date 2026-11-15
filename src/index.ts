@@ -46,6 +46,7 @@ import { startTimerCommandScheduler, stopTimerCommandScheduler, registerTimerCom
 import { createLogger } from './shared/logger';
 import { withTimeout } from './shared/withTimeout';
 import { startEventLoopMonitor, stopEventLoopMonitor } from './shared/eventLoopMonitor';
+import { startDiskSpaceMonitor, stopDiskSpaceMonitor } from './shared/diskSpaceMonitor';
 import { restoreDebugLogging, startDebugLogPruning, stopDebugLogPruning } from './shared/debugLogging';
 
 const log = createLogger('Bot');
@@ -157,6 +158,7 @@ async function shutdown(signal: string): Promise<void> {
   stopOverlayOrphanSweep();
   stopDbHealthCheck();
   stopEventLoopMonitor();
+  stopDiskSpaceMonitor();
   stopDebugLogPruning();
   stopCounterScheduler();
   stopAllRaffles();
@@ -371,6 +373,7 @@ async function main(): Promise<void> {
   startOverlayOrphanSweep();
   startDbHealthCheck();
   startEventLoopMonitor();
+  startDiskSpaceMonitor();
 
   startTwitchMonitor().catch((err: unknown) => log.error('TwitchMonitor startup error:', err));
   startEventSub();

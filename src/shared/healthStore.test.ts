@@ -283,3 +283,29 @@ describe('getHealthSnapshot returns copies', () => {
     expect(mod.getHealthSnapshot().errors).toHaveLength(1);
   });
 });
+
+describe('Disk space', () => {
+  it('starts with no reading', () => {
+    expect(mod.getHealthSnapshot().disk).toBeNull();
+  });
+
+  it('recordDiskSpace stores the reading, judges it against the threshold and notifies', () => {
+    const listener = vi.fn();
+    mod.onHealthChanged(listener);
+    mod.recordDiskSpace('/data', 100, 100);
+    expect(mod.getHealthSnapshot().disk).toMatchObject({ path: '/data', freeBytes: 100, thresholdBytes: 100, ok: true });
+    mod.recordDiskSpace('/data', 99, 100);
+    expect(mod.getHealthSnapshot().disk).toMatchObject({ freeBytes: 99, ok: false });
+    expect(listener).toHaveBeenCalledTimes(2);
+  });
+
+  it('mutating a returned disk reading does not affect internal state', () => {
+    mod.recordDiskSpace('/data', 100, 50);
+    const snap = mod.getHealthSnapshot();
+    const checkedAt = snap.disk!.checkedAt.getTime();
+    snap.disk!.checkedAt.setTime(0);
+    snap.disk!.ok = false;
+    expect(mod.getHealthSnapshot().disk).toMatchObject({ ok: true });
+    expect(mod.getHealthSnapshot().disk!.checkedAt.getTime()).toBe(checkedAt);
+  });
+});

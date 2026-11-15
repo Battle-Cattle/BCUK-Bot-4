@@ -11,6 +11,7 @@ function makeSnapshot(overrides: Partial<HealthSnapshot> = {}): HealthSnapshot {
     eventsub: {},
     monitor: { lastPollAt: new Date(), lastPollOk: true, lastError: null },
     schedulers: {},
+    disk: null,
     errors: [],
     ...overrides,
   };
@@ -101,5 +102,28 @@ describe('deriveComponentOks', () => {
     }));
     expect(result.get('monitor')).toEqual({ ok: false, error: 'Stream monitor poll failed' });
     expect(result.get('scheduler:timer')).toEqual({ ok: false, error: 'timer scheduler run failed' });
+  });
+
+  describe('disk', () => {
+    const MB = 1024 * 1024;
+    const reading = (freeMb: number) => ({
+      path: '/srv/bot/overlay-videos', freeBytes: freeMb * MB, thresholdBytes: 1024 * MB, ok: freeMb >= 1024, checkedAt: new Date(),
+    });
+
+    it('leaves the disk component out until a reading has succeeded', () => {
+      expect(deriveComponentOks(makeSnapshot()).has('disk')).toBe(false);
+    });
+
+    it('is ok at or above the threshold', () => {
+      expect(deriveComponentOks(makeSnapshot({ disk: reading(1024) })).get('disk')).toEqual({ ok: true, error: null });
+      expect(deriveComponentOks(makeSnapshot({ disk: reading(5000) })).get('disk')).toEqual({ ok: true, error: null });
+    });
+
+    it('fails below the threshold, giving the free space and the path checked', () => {
+      expect(deriveComponentOks(makeSnapshot({ disk: reading(1023) })).get('disk')).toEqual({
+        ok: false,
+        error: 'Low disk space: 1023 MB free on the volume holding /srv/bot/overlay-videos (alert below 1024 MB)',
+      });
+    });
   });
 });

@@ -183,6 +183,19 @@ describe('sweepOrphanedOverlayVideos', () => {
     await expect(sweepOrphanedOverlayVideos(later())).rejects.toThrow('denied');
   });
 
+  it('removes nothing from any folder when a later folder\'s check fails', async () => {
+    for (const folder of ['5', '6', '7', 'library']) write(folder, 'orphan.webm');
+    // Only streamer 6's lookup fails; every other folder checks out with no rows.
+    vi.mocked(getRecordedVideoFilenames).mockImplementation(async (streamerId) => {
+      if (streamerId === 6) throw new Error('db down');
+      return new Set();
+    });
+    vi.mocked(getRecordedLibraryFilenames).mockResolvedValue(new Set());
+
+    await expect(sweepOrphanedOverlayVideos(later())).rejects.toThrow('db down');
+    for (const folder of ['5', '6', '7', 'library']) expect(exists(folder, 'orphan.webm'), folder).toBe(true);
+  });
+
   it('does nothing when the overlay folder doesn\'t exist yet', async () => {
     fs.rmSync(overlayFolder, { recursive: true, force: true });
     await expect(sweepOrphanedOverlayVideos(later())).resolves.toBe(0);
@@ -320,12 +333,14 @@ describe('sweepOrphanedOverlayVideos in the shared folder', () => {
     expect(exists('shared', 'stalled.webm')).toBe(false);
   });
 
-  it('removes nothing from the shared folder when the DB is unavailable', async () => {
+  it('removes nothing anywhere when the shared folder can\'t be checked against the DB', async () => {
     write('shared', 'orphan.webm');
+    write('5', 'orphan.webm');
     vi.mocked(getRecordedSharedVideoFilenames).mockRejectedValue(new Error('db down'));
 
     await expect(sweepOrphanedOverlayVideos(later())).rejects.toThrow('db down');
     expect(exists('shared', 'orphan.webm')).toBe(true);
+    expect(exists('5', 'orphan.webm')).toBe(true);
   });
 });
 

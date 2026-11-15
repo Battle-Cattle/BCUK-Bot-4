@@ -230,11 +230,13 @@ describe('POST /settings/videos/upload', () => {
       return 1;
     });
     await uploadRequest(buildApp()).post('/settings/videos/upload').attach('video', MP4_BUF, { filename: 'a.mp4', contentType: 'video/mp4' });
-    const stored = vi.mocked(placeUpload).mock.calls[0]![1];
+    expect(placeUpload).toHaveBeenCalledTimes(1);
+    const stored = vi.mocked(placeUpload).mock.calls[0]![1]; // called once, checked above
 
     vi.mocked(addVideo).mockRejectedValue(new Error('DB error'));
     await uploadRequest(buildApp()).post('/settings/videos/upload').attach('video', MP4_BUF, { filename: 'b.mp4', contentType: 'video/mp4' });
-    const failed = vi.mocked(placeUpload).mock.calls[1]![1];
+    expect(placeUpload).toHaveBeenCalledTimes(2);
+    const failed = vi.mocked(placeUpload).mock.calls[1]![1]; // called twice, checked above
 
     expect(seen).toEqual([true, true, true]);
     expect(inFlight(stored)).toBe(false);
