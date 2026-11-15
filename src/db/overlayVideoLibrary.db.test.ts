@@ -82,3 +82,22 @@ describe('overlay video library foreign keys (real MySQL)', () => {
     expect(await row('overlay_video', copyId!)).toMatchObject({ streamer_id: importerId, filename: 'imported.mp4', library_entry_id: null });
   });
 });
+
+describe('overlay video library unique keys (real MySQL)', () => {
+  it('reports a video that is already in the library, and keeps the first entry', async () => {
+    const streamerId = await seedStreamer();
+    const { videoId, libraryId } = await seedLibraryEntry(streamerId);
+
+    expect(await addVideoToLibrary(videoId, streamerId, 'another-copy.mp4')).toEqual({ status: 'already_in_library' });
+    expect(await getLibraryVideos()).toEqual([expect.objectContaining({ id: libraryId })]);
+  });
+
+  it('rethrows a library filename collision, which is a caller bug rather than a duplicate video', async () => {
+    const streamerId = await seedStreamer();
+    await seedLibraryEntry(streamerId);
+    const otherVideoId = await addVideo(streamerId, 'Other clip', 'other.mp4');
+
+    await expect(addVideoToLibrary(otherVideoId, streamerId, `library-${streamerId}.mp4`)).rejects.toMatchObject({ code: 'ER_DUP_ENTRY' });
+  });
+});
+
