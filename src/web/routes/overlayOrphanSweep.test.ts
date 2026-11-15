@@ -204,10 +204,11 @@ describe('sweepOrphanedOverlayVideos', () => {
     // slow for the test timeout on a Windows runner. The listing, ages and removals are stubbed.
     write('5', 'f0.webm');
     const names = Array.from({ length: 501 }, (_, i) => `f${i}.webm`);
-    const folder = fs.realpathSync(path.join(overlayFolder, '5'));
     const readdir = fs.promises.readdir;
+    // Matched by name, not full path: on Windows the sweep's async realpath and a test-side
+    // realpathSync can spell the same folder differently (8.3 short names, drive-letter case).
     vi.spyOn(fs.promises, 'readdir').mockImplementation((async (dir: fs.PathLike, options?: unknown) => {
-      if (path.resolve(String(dir)) !== folder) return readdir(dir, options as never);
+      if (path.basename(String(dir)) !== '5') return readdir(dir, options as never);
       return names.map((name) => ({ name, isFile: () => true, isDirectory: () => false }));
     }) as never);
     vi.spyOn(fs.promises, 'lstat').mockResolvedValue({ ctimeMs: 0 } as fs.Stats);
@@ -217,7 +218,7 @@ describe('sweepOrphanedOverlayVideos', () => {
     await expect(sweepOrphanedOverlayVideos(later())).resolves.toBe(500);
     expect(vi.mocked(getRecordedVideoFilenames).mock.calls.map(([, batch]) => batch.length).sort()).toEqual([1, 500]);
     expect(rm).toHaveBeenCalledTimes(500);
-    expect(rm).not.toHaveBeenCalledWith(path.join(folder, 'f0.webm'), expect.anything());
+    expect(rm.mock.calls.map(([file]) => path.basename(String(file)))).not.toContain('f0.webm');
   });
 
   it('never removes a file whose write is still in flight, however old', async () => {
