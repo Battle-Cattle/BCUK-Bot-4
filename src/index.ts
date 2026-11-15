@@ -16,6 +16,7 @@ import { startEventSub, stopEventSub, reloadEventSubSubscriptions } from './twit
 import { startEventSubReconciliation, stopEventSubReconciliation } from './twitch/eventsub/twitchEventSubReconciliation';
 import { startWebPanel, stopWebPanel } from './web/server';
 import { stopWebmTranscodes } from './web/routes/overlayVideoTranscode';
+import { startOverlayOrphanSweep, stopOverlayOrphanSweep } from './web/routes/overlayOrphanSweep';
 import { disconnect } from './audio/audioPlayer';
 import { registerTwitchChatRuntime } from './commands/customCommandHandler';
 import { registerCounterTwitchRuntime } from './commands/counterHandler';
@@ -45,6 +46,7 @@ import { startTimerCommandScheduler, stopTimerCommandScheduler, registerTimerCom
 import { createLogger } from './shared/logger';
 import { withTimeout } from './shared/withTimeout';
 import { startEventLoopMonitor, stopEventLoopMonitor } from './shared/eventLoopMonitor';
+import { startDiskSpaceMonitor, stopDiskSpaceMonitor } from './shared/diskSpaceMonitor';
 import { restoreDebugLogging, startDebugLogPruning, stopDebugLogPruning } from './shared/debugLogging';
 
 const log = createLogger('Bot');
@@ -153,8 +155,10 @@ async function shutdown(signal: string): Promise<void> {
   // With no more uploads coming in, kill any overlay video conversion still running, so an ffmpeg
   // child isn't left encoding after the bot exits.
   stopWebmTranscodes();
+  stopOverlayOrphanSweep();
   stopDbHealthCheck();
   stopEventLoopMonitor();
+  stopDiskSpaceMonitor();
   stopDebugLogPruning();
   stopCounterScheduler();
   stopAllRaffles();
@@ -366,8 +370,10 @@ async function main(): Promise<void> {
   startCounterScheduler();
   startRewardPricingScheduler();
   startTimerCommandScheduler();
+  startOverlayOrphanSweep();
   startDbHealthCheck();
   startEventLoopMonitor();
+  startDiskSpaceMonitor();
 
   startTwitchMonitor().catch((err: unknown) => log.error('TwitchMonitor startup error:', err));
   startEventSub();

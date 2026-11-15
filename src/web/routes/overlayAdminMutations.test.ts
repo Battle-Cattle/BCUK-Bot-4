@@ -80,6 +80,7 @@ import supertest from 'supertest';
 import { router, overlayUploadSlots, MAX_CONCURRENT_OVERLAY_UPLOADS } from './overlayAdminMutations';
 import { waitFor } from '../../test-utils/waitFor';
 import { getStreamerByDiscordId, addVideo, deleteVideo, getVideosForStreamer } from '../../db';
+import { isVideoFileInFlight } from './overlayInFlightFiles';
 import { videoFileSize } from './overlayVideoLibraryFiles';
 import { AccessLevel } from '../../db';
 import fs from 'fs';
@@ -217,6 +218,41 @@ describe('POST /settings/videos/upload', () => {
     expect(file.originalname).toBe('test.mp4');
     expect(storedPath).toMatch(/[\\/]123[\\/][0-9a-f-]{36}\.mp4$/);
     expect(vi.mocked(addVideo)).toHaveBeenCalledWith(MOCK_STREAMER.id, 'Test Video', storedPath.split(/[\\/]/).at(-1));
+  });
+
+  it('marks the stored file in flight from before it is placed until its row is written, and on failure too', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    const seen: boolean[] = [];
+    const inFlight = (storedPath: string) => isVideoFileInFlight({ folder: '123', filename: storedPath.split(/[\\/]/).at(-1)! });
+    vi.mocked(placeUpload).mockImplementation(async (_file, storedPath) => { seen.push(inFlight(storedPath)); });
+    vi.mocked(addVideo).mockImplementation(async (_streamerId, _name, filename) => {
+      seen.push(isVideoFileInFlight({ folder: '123', filename }));
+      return 1;
+    });
+    await uploadRequest(buildApp()).post('/settings/videos/upload').attach('video', MP4_BUF, { filename: 'a.mp4', contentType: 'video/mp4' });
+    expect(placeUpload).toHaveBeenCalledTimes(1);
+    const stored = vi.mocked(placeUpload).mock.calls[0]![1]; // called once, checked above
+
+    vi.mocked(addVideo).mockRejectedValue(new Error('DB error'));
+    await uploadRequest(buildApp()).post('/settings/videos/upload').attach('video', MP4_BUF, { filename: 'b.mp4', contentType: 'video/mp4' });
+    expect(placeUpload).toHaveBeenCalledTimes(2);
+    const failed = vi.mocked(placeUpload).mock.calls[1]![1]; // called twice, checked above
+
+    expect(seen).toEqual([true, true, true]);
+    expect(inFlight(stored)).toBe(false);
+    expect(inFlight(failed)).toBe(false);
+  });
+
+  it('marks a MOV upload in flight under its converted WebM name while it converts', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    let during = false;
+    vi.mocked(storeMovAsWebm).mockImplementation(async (_dir, baseName) => {
+      during = isVideoFileInFlight({ folder: '123', filename: `${baseName}.webm` });
+      return `${baseName}.webm`;
+    });
+    const res = await uploadRequest(buildApp()).post('/settings/videos/upload').attach('video', MOV_BUF, { filename: 'c.mov', contentType: 'video/quicktime' });
+    expect(res.headers.location).toBe('/overlay/settings?success=video_uploaded');
+    expect(during).toBe(true);
   });
 
   it('names the video after the uploaded file when no name field is sent', async () => {
