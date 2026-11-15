@@ -16,7 +16,7 @@ const storage = vi.hoisted(() => ({
   discardUpload: vi.fn(async () => {}), sweepStaleIncomingUploads: vi.fn(async () => {}), INCOMING_DIR: '/o/.incoming',
 }));
 vi.mock('./overlayUploadStorage', () => storage);
-const files = vi.hoisted(() => ({ storeSharedVideo: vi.fn(), recordSharedVideo: vi.fn() }));
+const files = vi.hoisted(() => ({ storeAndRecordSharedVideo: vi.fn() }));
 vi.mock('./sharedOverlayVideoStorage', () => files);
 const broadcast = vi.fn();
 vi.mock('./sharedOverlaySource', () => ({ broadcastSharedVideoList: (...a: unknown[]) => broadcast(...a) }));
@@ -45,13 +45,12 @@ const file = { originalname: 'clip.mp4' };
 beforeEach(() => {
   vi.clearAllMocks();
   storage.detectUploadedVideoType.mockResolvedValue('mp4');
-  files.storeSharedVideo.mockImplementation(async (place: (p: string) => Promise<void>, onProgress?: (p: unknown) => void) => {
+  files.storeAndRecordSharedVideo.mockImplementation(async (_video: unknown, place: (p: string) => Promise<void>, onProgress?: (p: unknown) => void) => {
     await place('/o/shared/x.mov.upload');
     onProgress?.({ stage: 'converting', percent: 50 });
     return 'x.webm';
   });
   broadcast.mockResolvedValue(1);
-  files.recordSharedVideo.mockResolvedValue(1);
 });
 
 describe('chunked upload mounting', () => {
@@ -71,7 +70,7 @@ describe('completing an upload', () => {
     storage.detectUploadedVideoType.mockResolvedValue(type);
     const { res } = await complete({ file, body: { name: ' Clap ' }, uploadId: 'a'.repeat(32) });
     expect(storage.placeUpload).toHaveBeenCalledWith(file, '/o/shared/x.mov.upload');
-    expect(files.recordSharedVideo).toHaveBeenCalledWith('Clap', 'x.webm', 'u1');
+    expect(files.storeAndRecordSharedVideo).toHaveBeenCalledWith({ name: 'Clap', uploadedBy: 'u1' }, expect.any(Function), expect.any(Function));
     expect(progress.setConversionProgress).toHaveBeenCalled();
     expect(progress.releaseConversionProgress).toHaveBeenCalled();
     expect(broadcast).toHaveBeenCalled();
@@ -81,28 +80,27 @@ describe('completing an upload', () => {
 
   it('falls back to the file name when no name is given', async () => {
     await complete({ file, body: {}, uploadId: null });
-    expect(files.recordSharedVideo).toHaveBeenCalledWith('clip.mp4', 'x.webm', 'u1');
+    expect(files.storeAndRecordSharedVideo).toHaveBeenCalledWith({ name: 'clip.mp4', uploadedBy: 'u1' }, expect.any(Function), undefined);
   });
 
   it('rejects a file that is not a video, recording nothing', async () => {
     storage.detectUploadedVideoType.mockResolvedValue(null);
     const { res } = await complete({ file, body: {}, uploadId: null });
     expect(res.redirect).toHaveBeenCalledWith('/overlay/shared/settings?error=invalid_file');
-    expect(files.storeSharedVideo).not.toHaveBeenCalled();
-    expect(files.recordSharedVideo).not.toHaveBeenCalled();
+    expect(files.storeAndRecordSharedVideo).not.toHaveBeenCalled();
   });
 
   it('reports a failed conversion and records nothing', async () => {
-    files.storeSharedVideo.mockRejectedValue(Object.assign(new Error('x'), { code: 'transcode_failed' }));
+    files.storeAndRecordSharedVideo.mockRejectedValue(Object.assign(new Error('x'), { code: 'transcode_failed' }));
     const { res } = await complete({ file, body: {}, uploadId: 'a'.repeat(32) });
     expect(res.redirect).toHaveBeenCalledWith('/overlay/shared/settings?error=transcode_failed');
-    expect(files.recordSharedVideo).not.toHaveBeenCalled();
+    expect(broadcast).not.toHaveBeenCalled();
     expect(progress.releaseConversionProgress).toHaveBeenCalled();
     expect(storage.discardUpload).toHaveBeenCalled();
   });
 
   it('answers upload_failed on an unexpected error', async () => {
-    files.recordSharedVideo.mockRejectedValue(new Error('db'));
+    files.storeAndRecordSharedVideo.mockRejectedValue(new Error('db'));
     const { res } = await complete({ file, body: {}, uploadId: null });
     expect(res.redirect).toHaveBeenCalledWith('/overlay/shared/settings?error=upload_failed');
   });
@@ -120,7 +118,7 @@ describe('completing an upload', () => {
 
   it('turns away a fourth concurrent upload with upload_busy until one of them has been processed', async () => {
     const pending: Array<() => void> = [];
-    files.storeSharedVideo.mockImplementation(() => new Promise<string>((resolve) => { pending.push(() => resolve('x.webm')); }));
+    files.storeAndRecordSharedVideo.mockImplementation(() => new Promise<string>((resolve) => { pending.push(() => resolve('x.webm')); }));
     const running = [1, 2, 3].map(() => complete({ file, body: {}, uploadId: null }));
     await waitFor(() => expect(pending).toHaveLength(3));
     expect(mounted.options.checkStart()).toBe('upload_busy');

@@ -1,5 +1,6 @@
 import mysql from 'mysql2/promise';
 import { getPool, withTransactionOrNotFound } from './pool';
+import { buildInClausePlaceholders } from './utils';
 
 /** One video in the shared overlay list. */
 export interface SharedOverlayVideo {
@@ -74,6 +75,20 @@ export async function getSharedVideo(id: number): Promise<SharedOverlayVideo | n
     [id],
   );
   return rows[0] ? toVideo(rows[0]) : null;
+}
+
+/**
+ * Picks out which of the given filenames have a `shared_overlay_video` row, for the sweep of
+ * shared-folder files no row refers to (`overlayOrphanSweep.ts`).
+ * @param filenames - Stored filenames found in the shared folder; must not be empty.
+ * @returns The filenames, as stored in the rows, that have a row.
+ */
+export async function getRecordedSharedVideoFilenames(filenames: string[]): Promise<Set<string>> {
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+    `SELECT filename FROM shared_overlay_video WHERE filename IN (${buildInClausePlaceholders(filenames.length)})`,
+    filenames,
+  );
+  return new Set(rows.map((r) => r.filename as string));
 }
 
 /**
