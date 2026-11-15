@@ -74,10 +74,33 @@ function addSchedulerOks(snapshot: HealthSnapshot, result: Map<string, Component
   }
 }
 
+const BYTES_PER_MB = 1024 * 1024;
+
+/**
+ * Sets the `disk` entry into `result` from the last free-space reading, failing when it's below
+ * the threshold. Left out until the first reading succeeds, so a check that has never worked is
+ * unknown rather than ok (which would send a false "recovered" DM after a real failure) or
+ * failing (which would page the owner over a broken check). A later failed check records nothing,
+ * so the last real reading stands.
+ * @param snapshot - The health snapshot to read the disk reading from.
+ * @param result - The map to add the entry to, mutated in place.
+ * @returns void.
+ */
+function addDiskOk(snapshot: HealthSnapshot, result: Map<string, ComponentOk>): void {
+  const { disk } = snapshot;
+  if (!disk) return;
+  const freeMb = Math.floor(disk.freeBytes / BYTES_PER_MB);
+  const thresholdMb = Math.floor(disk.thresholdBytes / BYTES_PER_MB);
+  result.set('disk', {
+    ok: disk.ok,
+    error: disk.ok ? null : `Low disk space: ${freeMb} MB free on the volume holding ${disk.path} (alert below ${thresholdMb} MB)`,
+  });
+}
+
 /**
  * Resolves the current ok/fail boolean and an optional error string for every component
  * `ownerAlerts.ts`'s watcher tracks, from a health snapshot and the staleness constants. One
- * entry per Discord/Twitch-chat/DB/EventSub-streamer/monitor/scheduler component, keyed by a
+ * entry per Discord/Twitch-chat/DB/EventSub-streamer/monitor/scheduler/disk component, keyed by a
  * stable component id used across ticks to track edge transitions.
  * @param snapshot - The health snapshot to derive component states from.
  * @returns A map from component id to `{ ok, error }`.
@@ -88,5 +111,6 @@ export function deriveComponentOks(snapshot: HealthSnapshot): Map<string, Compon
   addEventSubOks(snapshot, result);
   addMonitorOk(snapshot, result);
   addSchedulerOks(snapshot, result);
+  addDiskOk(snapshot, result);
   return result;
 }
