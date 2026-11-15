@@ -1,6 +1,6 @@
 // Sibling to `statusStore.ts`: an in-memory, dependency-free store of live health/liveness
 // signals for the bot's various components (Discord gateway, Twitch chat, DB, per-streamer
-// EventSub connections, the Twitch stream monitor, and the schedulers), consumed by the owner
+// EventSub connections, the Twitch stream monitor, the schedulers, and free disk space), consumed by the owner
 // health dashboard (`src/web/routes/health.ts`), the `!health` Discord command
 // (`src/commands/healthCommandHandler.ts`), and the owner-alert watcher
 // (`src/discord/ownerAlerts.ts`). Zero imports from `db`/`discord`/`web` — same rationale as
@@ -50,6 +50,23 @@ export interface SchedulerHealth {
   lastError: string | null;
 }
 
+/**
+ * Last successful free-space reading of the volume holding the overlay uploads (see
+ * `diskSpaceMonitor.ts`). A failed reading is never recorded, so this is null until the first
+ * one succeeds and otherwise always the latest real measurement.
+ */
+export interface DiskHealth {
+  /** Absolute path whose volume was measured. */
+  path: string;
+  /** Bytes free to the bot's (unprivileged) user, i.e. `bavail * bsize`. */
+  freeBytes: number;
+  /** The alert threshold the reading was compared against, in bytes. */
+  thresholdBytes: number;
+  /** Whether {@link freeBytes} is at or above {@link thresholdBytes}. */
+  ok: boolean;
+  checkedAt: Date;
+}
+
 /** The set of scheduler names tracked by {@link recordSchedulerRun}. */
 export type SchedulerName = 'counter' | 'rewardPricing' | 'timer';
 
@@ -93,6 +110,7 @@ const state = {
     lastError: null as string | null,
   },
   schedulers: new Map<SchedulerName, SchedulerHealth>(),
+  disk: null as DiskHealth | null,
   errors: [] as HealthErrorEntry[],
 };
 
@@ -232,6 +250,19 @@ export function recordSchedulerRun(name: SchedulerName, ok: boolean, error?: str
 }
 
 /**
+ * Records a successful free-space reading of the upload volume, replacing the previous one.
+ * Notifies registered listeners. Call only with a real measurement: a failed check records
+ * nothing, so the last reading (or none) stands and a broken check can't flip the state.
+ * @param path - Absolute path whose volume was measured.
+ * @param freeBytes - Bytes available to the bot's user on that volume.
+ * @param thresholdBytes - Free space below which the reading counts as failing.
+ */
+export function recordDiskSpace(path: string, freeBytes: number, thresholdBytes: number): void {
+  state.disk = { path, freeBytes, thresholdBytes, ok: freeBytes >= thresholdBytes, checkedAt: new Date() };
+  notifyHealthChanged();
+}
+
+/**
  * Appends an error to the bounded ring buffer (see {@link MAX_ERRORS}), evicting the oldest
  * entry first once full. Notifies registered listeners. Intended primarily as the sink for
  * `shared/logger.ts`'s error-capturing transport, but usable directly too.
@@ -252,6 +283,7 @@ export interface HealthSnapshot {
   eventsub: Record<string, EventSubHealth>;
   monitor: { lastPollAt: Date | null; lastPollOk: boolean; lastError: string | null };
   schedulers: Partial<Record<SchedulerName, SchedulerHealth>>;
+  disk: DiskHealth | null;
   errors: HealthErrorEntry[];
 }
 
@@ -279,6 +311,7 @@ export function getHealthSnapshot(): HealthSnapshot {
     schedulers: Object.fromEntries(
       Array.from(state.schedulers, ([key, value]) => [key, { ...value, lastRunAt: cloneDate(value.lastRunAt) }]),
     ),
+    disk: state.disk ? { ...state.disk, checkedAt: new Date(state.disk.checkedAt.getTime()) } : null,
     errors: state.errors.map((e) => ({ ...e, timestamp: cloneDate(e.timestamp) as Date })),
   };
 }

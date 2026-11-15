@@ -261,6 +261,64 @@ describe('ownerAlertWatcher', () => {
     }
   });
 
+  describe('disk', () => {
+    const MB = 1024 * 1024;
+
+    afterEach(async () => {
+      // healthStore's disk reading has no removal operation: leave it healthy for later tests.
+      healthStore.recordDiskSpace('/overlay', 2048 * MB, 1024 * MB);
+      await flush();
+    });
+
+    it('alerts once when free space drops below the threshold, not on every check, and once on recovery', async () => {
+      healthStore.recordDiskSpace('/overlay', 2048 * MB, 1024 * MB);
+      await advanceGrace();
+      send.mockClear();
+
+      healthStore.recordDiskSpace('/overlay', 500 * MB, 1024 * MB);
+      await advanceGrace();
+      healthStore.recordDiskSpace('/overlay', 400 * MB, 1024 * MB);
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      healthStore.recordDiskSpace('/overlay', 300 * MB, 1024 * MB);
+      await flush();
+
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(send).toHaveBeenCalledWith(OWNER_ID, expect.stringContaining('disk is down: Low disk space: 500 MB free'));
+
+      healthStore.recordDiskSpace('/overlay', 2048 * MB, 1024 * MB);
+      await flush();
+      expect(send).toHaveBeenCalledTimes(2);
+      expect(send).toHaveBeenLastCalledWith(OWNER_ID, '✅ disk recovered');
+    });
+
+    it('alerts once after the grace period when the first reading after startup is already low', async () => {
+      // main() starts the disk monitor after the watcher, so its first reading arrives as a
+      // component the watcher has never seen. Drop the tracked state to replay that.
+      __resetOwnerAlertWatcherForTests();
+      startOwnerAlertWatcher();
+
+      healthStore.recordDiskSpace('/overlay', 100 * MB, 1024 * MB);
+      await flush();
+      expect(send).not.toHaveBeenCalled();
+      await advanceGrace();
+
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(send).toHaveBeenCalledWith(OWNER_ID, expect.stringContaining('disk is down: Low disk space: 100 MB free'));
+    });
+
+    it('keeps a low reading failing, with no "recovered" DM, while later health changes bring no new reading', async () => {
+      healthStore.recordDiskSpace('/overlay', 500 * MB, 1024 * MB);
+      await advanceGrace();
+      send.mockClear();
+
+      // A failed statfs records nothing, so the next health change (any component) still sees the
+      // last real reading: no false "recovered" DM, and no new "down" DM either.
+      healthStore.recordDbPing(true);
+      await advanceGrace();
+      expect(send).not.toHaveBeenCalled();
+    });
+  });
+
   it('re-alerts "still down" once the cooldown window has elapsed for a component that never recovered', async () => {
     try {
       healthStore.recordDbPing(false, 'boom');

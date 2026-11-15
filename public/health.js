@@ -66,6 +66,11 @@ function applyHealth(health) {
     body.appendChild(buildHealthRow('Scheduler: ' + name, entry.lastRunOk, formatHealthDate(entry.lastRunAt), entry.lastError));
   });
 
+  if (health.disk) {
+    const freeMb = Math.floor(health.disk.freeBytes / (1024 * 1024));
+    body.appendChild(buildHealthRow('Disk: ' + freeMb + ' MB free at ' + health.disk.path, health.disk.ok, formatHealthDate(health.disk.checkedAt), null));
+  }
+
   const errorsList = document.getElementById('health-errors-list');
   const errorsEmpty = document.getElementById('health-errors-empty');
   if (errorsList && errorsEmpty) {
