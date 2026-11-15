@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import fs from 'fs';
 import { mockLogger } from '../../test-utils/loggerMock';
 
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
@@ -145,6 +146,15 @@ describe('import own video', () => {
     expect(files.storeAndRecordSharedVideo).toHaveBeenCalledWith({ name: 'Mine', uploadedBy: 'u1' }, expect.any(Function));
     expect(broadcast).toHaveBeenCalled();
     expect(loc(res)).toBe('/overlay/shared/settings?success=video_added');
+  });
+
+  it('copies the Manager\'s own file as the conversion source, never overwriting', async () => {
+    files.storeAndRecordSharedVideo.mockImplementation(async (_video: unknown, place: (dest: string) => Promise<void>) => {
+      await place('/o/shared/x.mov.upload');
+      return 'new.webm';
+    });
+    expect(loc(await post('/import/9'))).toBe('/overlay/shared/settings?success=video_added');
+    expect(fs.promises.copyFile).toHaveBeenCalledWith('/o/5/m.mp4', '/o/shared/x.mov.upload', fs.constants.COPYFILE_EXCL);
   });
 
   it('refuses a non-streamer, a bad id and someone else\'s video', async () => {
