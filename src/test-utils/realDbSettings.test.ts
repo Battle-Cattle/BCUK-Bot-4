@@ -8,13 +8,17 @@ describe('readTestDbSettings', () => {
     expect(readTestDbSettings(FULL_ENV)).toEqual({ host: '127.0.0.1', port: 3307, user: 'root', password: 'test' });
   });
 
-  it('defaults the port to 3306 and accepts an empty password', () => {
-    expect(readTestDbSettings({ ...FULL_ENV, TEST_DB_PORT: ' ', TEST_DB_PASSWORD: '' })).toMatchObject({ port: 3306, password: '' });
+  it('defaults the port to 3306', () => {
+    expect(readTestDbSettings({ ...FULL_ENV, TEST_DB_PORT: ' ' })).toMatchObject({ port: 3306 });
+  });
+
+  it("rejects an empty password, which the bot's config would refuse as DB_PASSWORD", () => {
+    expect(() => readTestDbSettings({ ...FULL_ENV, TEST_DB_PASSWORD: '' })).toThrow(/TEST_DB_PASSWORD is not set \(the password can't be empty/);
   });
 
   it('names every missing setting and how to start a server', () => {
     expect(() => readTestDbSettings({})).toThrow(
-      /TEST_DB_HOST, TEST_DB_USER, TEST_DB_PASSWORD are not set\. Start one with `docker compose -f docker-compose\.test-db\.yml/,
+      /TEST_DB_HOST, TEST_DB_USER, TEST_DB_PASSWORD are not set \(.*\)\. Start one with `docker compose -f docker-compose\.test-db\.yml/,
     );
     expect(() => readTestDbSettings({ ...FULL_ENV, TEST_DB_USER: ' ' })).toThrow(/TEST_DB_USER is not set/);
   });

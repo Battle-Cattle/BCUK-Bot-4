@@ -22,17 +22,19 @@ const SETUP_HINT = 'Start one with `docker compose -f docker-compose.test-db.yml
 /**
  * Reads the `TEST_DB_*` settings. They are separate from the app's `DB_*` ones on purpose: the
  * suite drops and recreates databases, so it must never pick up a real database from `.env`.
+ * The password can't be empty: it becomes the app's `DB_PASSWORD`, which `src/shared/config.ts`
+ * requires to be set and non-empty.
  * @param env Environment to read, normally `process.env`.
  * @returns The connection settings.
- * @throws If `TEST_DB_HOST`, `TEST_DB_USER` or `TEST_DB_PASSWORD` is unset, or `TEST_DB_PORT` isn't a valid port.
+ * @throws If `TEST_DB_HOST`, `TEST_DB_USER` or `TEST_DB_PASSWORD` is unset or empty, or `TEST_DB_PORT` isn't a valid port.
  */
 export function readTestDbSettings(env: NodeJS.ProcessEnv): TestDbSettings {
   const host = env.TEST_DB_HOST?.trim();
   const user = env.TEST_DB_USER?.trim();
   const password = env.TEST_DB_PASSWORD;
-  const missing = [!host && 'TEST_DB_HOST', !user && 'TEST_DB_USER', password === undefined && 'TEST_DB_PASSWORD'].filter(Boolean);
+  const missing = [!host && 'TEST_DB_HOST', !user && 'TEST_DB_USER', !password && 'TEST_DB_PASSWORD'].filter(Boolean);
   if (missing.length > 0) {
-    throw new Error(`npm run test:db needs a MySQL server to run against, but ${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} not set. ${SETUP_HINT}`);
+    throw new Error(`npm run test:db needs a MySQL server to run against, but ${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} not set (the password can't be empty: the bot's config requires one). ${SETUP_HINT}`);
   }
   return { host: host!, user: user!, password: password!, port: parsePort(env.TEST_DB_PORT) };
 }

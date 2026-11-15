@@ -51,16 +51,13 @@ async function tablesToClear(conn: mysql.Connection): Promise<string[]> {
 }
 
 /**
- * Creates this worker's scratch database if needed, brings its schema up to date through the
- * real migration runner (`src/db/migrations.ts`), then empties it. The app's config must already
- * point at it (realDbEnv.ts).
- * @param env Environment holding the `TEST_DB_*` settings and `VITEST_POOL_ID`.
- * @returns The worker's database, ready for tests; {@link workerDatabase} returns it too.
- * @throws If the `TEST_DB_*` settings are missing, the server can't be reached, or a migration fails.
+ * Creates the scratch database on `conn` if needed, brings its schema up to date through the real
+ * migration runner (`src/db/migrations.ts`), then empties it.
+ * @param conn The harness's own connection to the test server, which the result keeps.
+ * @param name The worker's scratch database.
+ * @returns The worker's database, ready for tests.
  */
-export async function prepareWorkerDatabase(env: NodeJS.ProcessEnv): Promise<WorkerDatabase> {
-  const name = workerDatabaseName(env.VITEST_POOL_ID);
-  const conn = await openTestServerConnection(readTestDbSettings(env));
+async function setUpWorkerDatabase(conn: mysql.Connection, name: string): Promise<WorkerDatabase> {
   await conn.query(`CREATE DATABASE IF NOT EXISTS \`${name}\`; USE \`${name}\``);
   await runMigrations();
   const clearSql = clearTablesSql(await tablesToClear(conn));
@@ -69,7 +66,7 @@ export async function prepareWorkerDatabase(env: NodeJS.ProcessEnv): Promise<Wor
     if (clearSql) await conn.query(clearSql);
   };
   await clearTables();
-  current = {
+  return {
     name,
     clearTables,
     recreateEmpty: async () => {
@@ -80,5 +77,24 @@ export async function prepareWorkerDatabase(env: NodeJS.ProcessEnv): Promise<Wor
       await Promise.allSettled([conn.end(), closePool()]);
     },
   };
+}
+
+/**
+ * Prepares this worker's scratch database (see {@link setUpWorkerDatabase}). The app's config
+ * must already point at it (realDbEnv.ts). If preparation fails after the connection opens, the
+ * connection is closed before the error propagates, since no `close()` will ever reach it.
+ * @param env Environment holding the `TEST_DB_*` settings and `VITEST_POOL_ID`.
+ * @returns The worker's database, ready for tests; {@link workerDatabase} returns it too.
+ * @throws If the `TEST_DB_*` settings are missing, the server can't be reached, or a migration fails.
+ */
+export async function prepareWorkerDatabase(env: NodeJS.ProcessEnv): Promise<WorkerDatabase> {
+  const name = workerDatabaseName(env.VITEST_POOL_ID);
+  const conn = await openTestServerConnection(readTestDbSettings(env));
+  try {
+    current = await setUpWorkerDatabase(conn, name);
+  } catch (err) {
+    await conn.end().catch(() => {});
+    throw err;
+  }
   return current;
 }
