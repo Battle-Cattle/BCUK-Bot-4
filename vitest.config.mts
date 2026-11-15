@@ -7,10 +7,16 @@ import { configDefaults, defineConfig } from 'vitest/config';
  */
 export const TOOLCHAIN_TEST = 'src/shared/tsNodeDevToolchain.test.ts';
 
+/**
+ * Tests that run against a real MySQL server, via `npm run test:db` (see vitest.db.config.mts),
+ * so `npm test` stays fast and needs no database.
+ */
+export const DB_TESTS = 'src/**/*.db.test.ts';
+
 export default defineConfig({
   test: {
     include: ['src/**/*.test.ts'],
-    exclude: [...configDefaults.exclude, TOOLCHAIN_TEST],
+    exclude: [...configDefaults.exclude, TOOLCHAIN_TEST, DB_TESTS],
     // Run each test file in a fresh VM context on a reused worker thread instead of a fresh
     // child process per file (the default `forks` pool). Module isolation between files is the
     // same, but skipping the per-file process spawn and Node bootstrap roughly halves `npm test`

@@ -10,7 +10,8 @@
   "vitest": {
     "config": [
       "vitest.config.*",
-      "vitest.toolchain.config.*"
+      "vitest.toolchain.config.*",
+      "vitest.db.config.*"
     ],
     "entry": [
       "src/**/*.test.ts",

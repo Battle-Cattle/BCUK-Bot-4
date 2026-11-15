@@ -3,6 +3,7 @@ dist/
 dist.new/
 dist.old/
 coverage/
+coverage-db/
 .vitest-cache/
 TEMP/
 .env
