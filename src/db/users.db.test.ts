@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type mysql from 'mysql2/promise';
 import { getPool } from './pool';
-import { deleteUnlinkedUserRecord, USER_REFERENCING_COLUMNS } from './users';
+import { deleteUnlinkedUserRecord, upsertUserRecord, USER_REFERENCING_COLUMNS } from './users';
 import { insertRow } from '../test-utils/realDbRows';
 
 // deleteUnlinkedUserRecord's guard against a real MySQL (npm run test:db): it must refuse while
@@ -37,3 +37,26 @@ describe('deleteUnlinkedUserRecord (real MySQL)', () => {
     expect(await deleteUnlinkedUserRecord(discordId)).toBe(true);
   });
 });
+
+describe('upsertUserRecord (real MySQL)', () => {
+  async function storedUser(discordId: string): Promise<mysql.RowDataPacket | undefined> {
+    const [rows] = await getPool().execute<mysql.RowDataPacket[]>('SELECT discord_name, twitch_name FROM `user` WHERE discord_id = ?', [discordId]);
+    return rows[0];
+  }
+
+  it('inserts on the first call, then updates the name, keeping the Twitch name unless one is given', async () => {
+    const discordId = '1234567890123456789';
+    await upsertUserRecord(discordId, 'First', 'firstchannel');
+    expect(await storedUser(discordId)).toEqual({ discord_name: 'First', twitch_name: 'firstchannel' });
+
+    await upsertUserRecord(discordId, 'Renamed');
+    expect(await storedUser(discordId)).toEqual({ discord_name: 'Renamed', twitch_name: 'firstchannel' });
+
+    await upsertUserRecord(discordId, 'Renamed', 'secondchannel');
+    expect(await storedUser(discordId)).toEqual({ discord_name: 'Renamed', twitch_name: 'secondchannel' });
+
+    await upsertUserRecord(discordId, '  ', null);
+    expect(await storedUser(discordId)).toEqual({ discord_name: null, twitch_name: null });
+  });
+});
+
