@@ -100,6 +100,18 @@ To change the schema:
 
 MySQL commits each DDL statement on its own, so a migration that fails part-way can't be rolled back, and systemd will keep retrying it on restart. Prefer one change per file, and make statements safe to re-run where you can: `CREATE TABLE IF NOT EXISTS` works, but MySQL has no `ADD COLUMN IF NOT EXISTS`, so check `information_schema` in a prepared statement when it matters. To recover, stop the service, finish or undo the failed file's changes by hand, fix the file (it isn't recorded until it succeeds), and start again.
 
+### Database tests
+
+`npm test` mocks the database. `npm run test:db` runs the `*.db.test.ts` files against a real MySQL instead, for what only MySQL shows: foreign-key `ON DELETE` actions, unique indexes, and every migration applying cleanly to an empty database. CI runs it on every push. To run it locally, start the throwaway server in `docker-compose.test-db.yml` (MySQL 8.4.11, as in production, held in memory on port 3307):
+
+```bash
+docker compose -f docker-compose.test-db.yml up -d --wait
+TEST_DB_HOST=127.0.0.1 TEST_DB_PORT=3307 TEST_DB_USER=root TEST_DB_PASSWORD=test npm run test:db
+docker compose -f docker-compose.test-db.yml down
+```
+
+The suite reads only the `TEST_DB_*` variables, never the bot's `DB_*` ones, and fails straight away if they aren't set. Every database it creates is named `bcuk_test_*`, and each run drops those first, so don't point it at a server whose databases you want to keep under that name. Each Vitest worker migrates its own database once through the bot's migration runner and reuses it for its later files, and every table is emptied after each test. Use `getPool()` from `src/db/pool.ts` in these tests: it is the bot's real pool, with BIGINT columns as strings like production.
+
 ## Deployment
 
 The web panel serves uploaded files straight from disk: overlay videos from `OVERLAY_FOLDER`, alert images and sounds from `ALERT_ASSETS_FOLDER`, and sounds from `SFX_FOLDER`. The bot checks every served path stays inside its folder, following symlinks, but the check can't be atomic with the file read. So:

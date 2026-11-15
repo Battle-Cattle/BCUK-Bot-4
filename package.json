@@ -14,6 +14,8 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:toolchain": "vitest run --config vitest.toolchain.config.mts",
+    "test:db": "vitest run --config vitest.db.config.mts",
+    "test:db:coverage": "vitest run --config vitest.db.config.mts --coverage",
     "lint": "eslint .",
     "check:circular": "node scripts/checkCircularDeps.js",
     "check:unused": "knip",
