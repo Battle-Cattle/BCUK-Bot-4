@@ -16,6 +16,7 @@ import { startEventSub, stopEventSub, reloadEventSubSubscriptions } from './twit
 import { startEventSubReconciliation, stopEventSubReconciliation } from './twitch/eventsub/twitchEventSubReconciliation';
 import { startWebPanel, stopWebPanel } from './web/server';
 import { stopWebmTranscodes } from './web/routes/overlayVideoTranscode';
+import { startOverlayOrphanSweep, stopOverlayOrphanSweep } from './web/routes/overlayOrphanSweep';
 import { disconnect } from './audio/audioPlayer';
 import { registerTwitchChatRuntime } from './commands/customCommandHandler';
 import { registerCounterTwitchRuntime } from './commands/counterHandler';
@@ -153,6 +154,7 @@ async function shutdown(signal: string): Promise<void> {
   // With no more uploads coming in, kill any overlay video conversion still running, so an ffmpeg
   // child isn't left encoding after the bot exits.
   stopWebmTranscodes();
+  stopOverlayOrphanSweep();
   stopDbHealthCheck();
   stopEventLoopMonitor();
   stopDebugLogPruning();
@@ -366,6 +368,7 @@ async function main(): Promise<void> {
   startCounterScheduler();
   startRewardPricingScheduler();
   startTimerCommandScheduler();
+  startOverlayOrphanSweep();
   startDbHealthCheck();
   startEventLoopMonitor();
 

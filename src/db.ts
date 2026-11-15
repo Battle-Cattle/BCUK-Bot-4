@@ -145,7 +145,7 @@ export {
 // ─── Overlay videos ─────────────────────────────────────────────────────────
 
 export {
-  getVideosForStreamer, addVideo, deleteVideo,
+  getVideosForStreamer, getRecordedVideoFilenames, addVideo, deleteVideo,
   getRewardsForStreamer, saveRewardWithVideos, deleteReward,
   getVideosForReward,
 } from './db/overlayVideos';
@@ -157,7 +157,7 @@ export {
 } from './db/sharedOverlayVideos';
 export {
   addVideoToLibrary, getLibraryVideos, getLibraryVideoFilename, getImportedLibraryEntryIds,
-  importLibraryVideo, removeLibraryVideo,
+  getRecordedLibraryFilenames, importLibraryVideo, removeLibraryVideo,
 } from './db/overlayVideoLibrary';
 
 // ─── Channel point pricing ───────────────────────────────────────────────────

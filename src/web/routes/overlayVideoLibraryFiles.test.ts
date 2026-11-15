@@ -16,6 +16,7 @@ import {
   LIBRARY_FOLDER, streamerFolder, linkVideoFile, removeVideoFile, removeLibraryVideoFile, withLinkedVideoFile, videoFileSize,
 } from './overlayVideoLibraryFiles';
 import { OVERLAY_FOLDER as overlayFolder } from '../../shared/config';
+import { isVideoFileInFlight } from './overlayInFlightFiles';
 
 const UUID_WEBM = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.webm$/;
 
@@ -247,6 +248,45 @@ describe('withLinkedVideoFile', () => {
     expect(outcome.keptFile).toBe(false);
     expect(outcome.result).toEqual({ status: 'already_in_library' });
     expect(exists(LIBRARY_FOLDER, outcome.filename)).toBe(false);
+  });
+
+  it('marks the new file in flight from before it exists until the DB step has settled, however it ends', async () => {
+    const source = await writeVideo('5', 'clip.webm');
+    const seen: { filename: string; inFlight: boolean }[] = [];
+    const check = (filename: string) => seen.push({ filename, inFlight: isVideoFileInFlight({ folder: LIBRARY_FOLDER, filename }) });
+    const link = vi.spyOn(fs.promises, 'link');
+    link.mockImplementation(async (from, to) => {
+      // The file doesn't exist yet: it must already be in flight.
+      check(path.basename(String(to)));
+      link.mockRestore();
+      return fs.promises.link(from, to);
+    });
+
+    const kept = await withLinkedVideoFile(source, LIBRARY_FOLDER, async (filename) => {
+      check(filename);
+      return { keepFile: true, result: null };
+    });
+    const dropped = await withLinkedVideoFile(source, LIBRARY_FOLDER, async (filename) => {
+      check(filename);
+      return { keepFile: false, result: null };
+    });
+    let thrown = '';
+    await expect(withLinkedVideoFile(source, LIBRARY_FOLDER, async (filename) => {
+      check(filename);
+      thrown = filename;
+      throw new Error('db down');
+    })).rejects.toThrow('db down');
+
+    if (kept.status !== 'linked' || dropped.status !== 'linked') throw new Error('expected linked');
+    expect(seen).toEqual([
+      { filename: kept.filename, inFlight: true },
+      { filename: kept.filename, inFlight: true },
+      { filename: dropped.filename, inFlight: true },
+      { filename: thrown, inFlight: true },
+    ]);
+    for (const filename of [kept.filename, dropped.filename, thrown]) {
+      expect(isVideoFileInFlight({ folder: LIBRARY_FOLDER, filename })).toBe(false);
+    }
   });
 
   it('returns source_missing without running the DB step when the source is missing', async () => {
