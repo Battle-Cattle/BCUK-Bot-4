@@ -21,12 +21,17 @@ describe('deleteUnlinkedUserRecord (real MySQL)', () => {
     expect(await userExists(discordId)).toBe(false);
   });
 
-  it.each(USER_REFERENCING_COLUMNS)('keeps a user while %s.%s references them', async (table, column) => {
+  it.each(USER_REFERENCING_COLUMNS)('keeps a user while %s.%s references them, and only that user', async (table, column) => {
     const discordId = String((await insertRow('user')).discord_id);
+    const otherId = String((await insertRow('user')).discord_id);
     await insertRow(table, { [column]: discordId });
 
     expect(await deleteUnlinkedUserRecord(discordId)).toBe(false);
     expect(await userExists(discordId)).toBe(true);
+    // Another user isn't held by this user's reference: the guard filters on the user it's deleting.
+    expect(await deleteUnlinkedUserRecord(otherId)).toBe(true);
+    const [references] = await getPool().query<mysql.RowDataPacket[]>(`SELECT 1 FROM \`${table}\` WHERE \`${column}\` = ?`, [discordId]);
+    expect(references).toHaveLength(1);
     // The guard covers this one column: with its row gone, nothing else holds the user.
     await getPool().query(`DELETE FROM \`${table}\` WHERE \`${column}\` = ?`, [discordId]);
     expect(await deleteUnlinkedUserRecord(discordId)).toBe(true);
