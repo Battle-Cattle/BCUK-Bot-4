@@ -291,7 +291,22 @@ describe('ownerAlertWatcher', () => {
       expect(send).toHaveBeenLastCalledWith(OWNER_ID, '✅ disk recovered');
     });
 
-    it('sends nothing when a failed check (which records no reading) follows a low reading', async () => {
+    it('alerts once after the grace period when the first reading after startup is already low', async () => {
+      // main() starts the disk monitor after the watcher, so its first reading arrives as a
+      // component the watcher has never seen. Drop the tracked state to replay that.
+      __resetOwnerAlertWatcherForTests();
+      startOwnerAlertWatcher();
+
+      healthStore.recordDiskSpace('/overlay', 100 * MB, 1024 * MB);
+      await flush();
+      expect(send).not.toHaveBeenCalled();
+      await advanceGrace();
+
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(send).toHaveBeenCalledWith(OWNER_ID, expect.stringContaining('disk is down: Low disk space: 100 MB free'));
+    });
+
+    it('keeps a low reading failing, with no "recovered" DM, while later health changes bring no new reading', async () => {
       healthStore.recordDiskSpace('/overlay', 500 * MB, 1024 * MB);
       await advanceGrace();
       send.mockClear();

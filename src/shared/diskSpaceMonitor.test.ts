@@ -34,7 +34,18 @@ afterEach(() => {
 });
 
 describe('checkDiskSpace', () => {
-  it('records the space free to the bot (bavail, not bfree) on the overlay folder\'s volume, with the threshold in bytes', async () => {
+  it('counts only the blocks free to an unprivileged user (bavail), not those reserved for root (bfree)', async () => {
+    const statfs = vi.spyOn(fs.promises, 'statfs').mockResolvedValue({ bavail: 10, bfree: 50, bsize: 4096 } as fs.StatsFs);
+    try {
+      await checkDiskSpace();
+      expect(statfs).toHaveBeenCalledWith(path.resolve(dir));
+      expect(recordDiskSpace).toHaveBeenCalledWith(path.resolve(dir), 10 * 4096, 1024 * 1024 * 1024);
+    } finally {
+      statfs.mockRestore();
+    }
+  });
+
+  it('records a real reading of the overlay folder\'s volume, with the threshold in bytes', async () => {
     const stats = await fs.promises.statfs(dir);
     await checkDiskSpace();
     expect(recordDiskSpace).toHaveBeenCalledOnce();
@@ -80,5 +91,24 @@ describe('startDiskSpaceMonitor', () => {
     stopDiskSpaceMonitor();
     await vi.advanceTimersByTimeAsync(DISK_CHECK_INTERVAL_MS * 3);
     expect(recordDiskSpace).toHaveBeenCalledTimes(2);
+  });
+
+  it('skips a tick while the previous check is still running', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    let finish!: (stats: fs.StatsFs) => void;
+    const statfs = vi.spyOn(fs.promises, 'statfs').mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    try {
+      startDiskSpaceMonitor();
+      await vi.advanceTimersByTimeAsync(DISK_CHECK_INTERVAL_MS * 2);
+      expect(statfs).toHaveBeenCalledTimes(1);
+
+      finish({ bavail: 1, bsize: 1 } as fs.StatsFs);
+      await waitFor(() => expect(recordDiskSpace).toHaveBeenCalledTimes(1));
+      statfs.mockResolvedValue({ bavail: 2, bsize: 1 } as fs.StatsFs);
+      await vi.advanceTimersByTimeAsync(DISK_CHECK_INTERVAL_MS);
+      await waitFor(() => expect(statfs).toHaveBeenCalledTimes(2));
+    } finally {
+      statfs.mockRestore();
+    }
   });
 });
