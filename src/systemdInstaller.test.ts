@@ -105,6 +105,20 @@ function setting(unit: string, key: string): string | undefined {
 }
 
 describe.skipIf(!canRunInstaller)('install-systemd-service.sh', () => {
+  it('refuses, saying to run npm ci, and installs nothing when the checkout has no dotenv to read .env with', () => {
+    fs.unlinkSync(path.join(repo, 'node_modules/dotenv'));
+    fs.writeFileSync(path.join(repo, '.env'), 'OVERLAY_FOLDER=/elsewhere\n', { mode: 0o600 });
+    const result = spawnSync('bash', [path.join(repo, 'scripts/install-systemd-service.sh')], {
+      cwd: repo,
+      encoding: 'utf8',
+      env: { ...process.env, STATE: state, PATH: `${path.join(root, 'stubs')}:${path.join(nodePrefix, 'bin')}:${process.env.PATH ?? ''}` },
+    });
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('npm ci');
+    expect(fs.existsSync(path.join(state, 'bcuk-bot.service'))).toBe(false);
+  });
+
   it('hides home directories and binds back only the checkout, the node binary and the writable folders', () => {
     const videos = path.join(root, 'videos');
     const unit = install(`OVERLAY_FOLDER=${videos} # absolute\nSFX_FOLDER=" ./my-sfx "\n`);

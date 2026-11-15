@@ -1,7 +1,7 @@
 # Helpers shared by deploy.sh and the backup scripts. Sourced, not run: callers set ENV_FILE first.
 
 # The script env_setting runs: scripts/envSetting.js, next to this lib/ folder.
-DOTENV_SETTING_JS="${DOTENV_SETTING_JS:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/envSetting.js}"
+DOTENV_SETTING_JS="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/envSetting.js"
 
 # Prints the node binary to read .env with: $NODE_BIN if set, else the node on PATH, else the one
 # the bot's systemd service runs (cron's PATH usually lacks a node installed with nvm, and that is
@@ -9,7 +9,7 @@ DOTENV_SETTING_JS="${DOTENV_SETTING_JS:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.."
 dotenv_node() {
     if [ -n "${NODE_BIN:-}" ]; then printf '%s' "$NODE_BIN"; return 0; fi
     command -v node 2>/dev/null && return 0
-    systemctl show -p ExecStart --value bcuk-bot 2>/dev/null | sed -n 's/.*path=\([^ ;]*\).*/\1/p' || true
+    systemctl show -p ExecStart --value "${SERVICE_NAME:-bcuk-bot}" 2>/dev/null | sed -n 's/.*path=\([^ ;]*\).*/\1/p' || true
 }
 
 # Prints a setting from $ENV_FILE exactly as the bot reads it: parsed by the checkout's own dotenv

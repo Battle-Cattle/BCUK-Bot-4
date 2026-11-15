@@ -34,9 +34,10 @@ The bot also doesn't trust the invite on its own. When it joins a server for the
 
 In production the bot runs as a systemd service, `bcuk-bot`. systemd restarts it 10 seconds after a crash and starts it on boot. It never stops retrying, so the bot comes back by itself after a database or network outage. Repeated failures back off to one attempt every 5 minutes (on systemd 254+), so a long outage doesn't hammer the Discord and Twitch logins.
 
-One-time setup, run on the server as the user the bot should run as (not root):
+One-time setup, run on the server as the user the bot should run as (not root), in the checkout after `npm ci` (the installer reads `.env` with the checkout's own dotenv):
 
 ```bash
+npm ci
 bash scripts/install-systemd-service.sh
 ```
 
@@ -145,7 +146,7 @@ Treat dumps as secrets: they hold every stored OAuth token, encrypted with `EVEN
 - **The upload folders** (`OVERLAY_FOLDER`, `ALERT_ASSETS_FOLDER`, `SFX_FOLDER`), which the database rows point at, e.g. `tar czf uploads-$(date +%F).tar.gz <folders>`.
 - **The dumps themselves**: a copy on the same disk doesn't survive losing the disk.
 
-**Restoring.** `bash scripts/restore-db.sh <dump.sql.gz>` replaces the live database. It refuses while the service is running and asks you to type the database name to confirm. Before it changes anything it saves the current data as a `pre-restore` dump (and stops if that fails; a database that is empty or doesn't exist yet, as on a rebuilt server, has nothing to save and skips this); it prints the file's path, which you can restore the same way to undo it:
+**Restoring.** `bash scripts/restore-db.sh <dump.sql.gz>` replaces the live database. On a rebuilt server, run `npm ci` in the checkout first: the script reads `.env` with the checkout's own dotenv. It refuses while the service is running and asks you to type the database name to confirm. Before it changes anything it saves the current data as a `pre-restore` dump (and stops if that fails; a database that is empty or doesn't exist yet, as on a rebuilt server, has nothing to save and skips this); it prints the file's path, which you can restore the same way to undo it:
 
 ```bash
 sudo systemctl stop bcuk-bot
