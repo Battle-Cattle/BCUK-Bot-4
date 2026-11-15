@@ -76,8 +76,9 @@ describe('shared overlay video queries', () => {
     pool.execute.mockResolvedValueOnce([[{ filename: 'a.webm' }], []]);
     vi.mocked(getPool).mockReturnValue(pool as any);
     await expect(getRecordedSharedVideoFilenames(['a.webm', 'b.webm'])).resolves.toEqual(new Set(['a.webm']));
-    expect(pool.execute.mock.calls[0]![0]).toContain('FROM shared_overlay_video WHERE filename IN (?, ?)');
-    expect(pool.execute.mock.calls[0]![1]).toEqual(['a.webm', 'b.webm']);
+    expect(pool.execute).toHaveBeenCalledWith(
+      expect.stringContaining('FROM shared_overlay_video WHERE filename IN (?, ?)'), ['a.webm', 'b.webm'],
+    );
   });
 
   it('adds a video and returns the new id', async () => {
