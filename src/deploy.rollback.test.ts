@@ -25,6 +25,28 @@ describe.skipIf(notLinux)('deploy.sh (rollback)', { timeout: SCRIPT_TEST_TIMEOUT
     expect(result.stdout).toContain('Report saved to logs/last-deploy-failure.log');
   });
 
+  it('reads .env with the previous dotenv in node_modules.old when the new install lacks it', () => {
+    pushV2();
+    const result = deploy({ NPM_CI_NO_DOTENV: '1' });
+
+    expect(result.status).toBe(0);
+    expect(restarts()).toEqual(['v2']);
+  });
+
+  it('rolls back before restarting when neither install has dotenv to read .env with', () => {
+    const before = workHead();
+    fs.unlinkSync(path.join(sandbox.work, 'node_modules/dotenv'));
+    pushV2();
+    const result = deploy({ NPM_CI_NO_DOTENV: '1' });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("Can't load dotenv");
+    expect(restarts()).toEqual([]);
+    expect(workHead()).toBe(before);
+    expect(read(path.join(sandbox.work, 'node_modules/marker'))).toBe('v1');
+    expect(failureReport()).toContain("couldn't read .env with the checkout's dotenv");
+  });
+
   it('says loudly when the previous build fails to come up too', () => {
     pushV2();
     const result = deploy({ UNHEALTHY_BUILDS: 'v1 v2' });

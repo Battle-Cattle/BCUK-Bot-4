@@ -53,6 +53,10 @@ beforeEach(() => {
   fs.copyFileSync(path.join(REPO_ROOT, 'scripts/install-systemd-service.sh'), path.join(repo, 'scripts/install-systemd-service.sh'));
   fs.mkdirSync(path.join(repo, 'scripts/lib'));
   fs.copyFileSync(path.join(REPO_ROOT, 'scripts/lib/dotenv.sh'), path.join(repo, 'scripts/lib/dotenv.sh'));
+  fs.copyFileSync(path.join(REPO_ROOT, 'scripts/envSetting.js'), path.join(repo, 'scripts/envSetting.js'));
+  // The installer reads .env with the checkout's own dotenv: link the real one in.
+  fs.mkdirSync(path.join(repo, 'node_modules'));
+  fs.symlinkSync(path.join(REPO_ROOT, 'node_modules/dotenv'), path.join(repo, 'node_modules/dotenv'));
   fs.copyFileSync(path.join(REPO_ROOT, 'deploy/bcuk-bot.service'), path.join(repo, 'deploy/bcuk-bot.service'));
   fs.writeFileSync(path.join(repo, 'package.json'), JSON.stringify({ engines: { node: '>=1.0.0' } }));
   const stubs = path.join(root, 'stubs');

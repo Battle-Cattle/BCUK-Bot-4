@@ -1,25 +1,44 @@
 # Helpers shared by deploy.sh and the backup scripts. Sourced, not run: callers set ENV_FILE first.
 
-# Prints a setting from $ENV_FILE the way dotenv reads it: an optional `export ` prefix and spaces
-# around `=` are allowed, as is dotenv's `NAME: value` form (a colon straight after the name, then
-# whitespace); last entry wins; a value in double, single or back quotes is taken up to
-# its closing quote (so a `#` inside it stays, and so does an escaped quote); an unquoted one ends at
-# the first `#` and loses surrounding spaces. Prints nothing for no entry (grep finding nothing must
-# not trip pipefail) or a blank one.
+# The script env_setting runs: scripts/envSetting.js, next to this lib/ folder.
+DOTENV_SETTING_JS="${DOTENV_SETTING_JS:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/envSetting.js}"
+
+# Prints the node binary to read .env with: $NODE_BIN if set, else the node on PATH, else the one
+# the bot's systemd service runs (cron's PATH usually lacks a node installed with nvm, and that is
+# the node the bot reads .env with anyway). Prints nothing if none is found.
+dotenv_node() {
+    if [ -n "${NODE_BIN:-}" ]; then printf '%s' "$NODE_BIN"; return 0; fi
+    command -v node 2>/dev/null && return 0
+    systemctl show -p ExecStart --value bcuk-bot 2>/dev/null | sed -n 's/.*path=\([^ ;]*\).*/\1/p' || true
+}
+
+# Prints a setting from $ENV_FILE exactly as the bot reads it: parsed by the checkout's own dotenv
+# package (scripts/envSetting.js), so quoting, `export`, `NAME: value`, multi-line values and
+# escapes all read the same. Prints nothing for no entry or a blank one, or a missing file. Fails
+# (with a message) if node or dotenv can't be found: never reads that as "unset". Sourcing this
+# file has already checked both (see the end of the file), since a failure inside a nested
+# `$(trim "$(env_setting X)")`, or anywhere `set -e` is ignored, would otherwise be lost.
 env_setting() {
-    local value prefix="^[[:space:]]*(export[[:space:]]+)?$1([[:space:]]*=|:[[:space:]])"
-    value="$( { grep -E "$prefix" "$ENV_FILE" 2>/dev/null || true; } | tail -n 1 | sed -E "s/$prefix//")"
-    value="${value#"${value%%[![:space:]]*}"}"
-    # A value in double, single or back quotes runs to the first matching quote not escaped with a
-    # backslash, and keeps the escape, as dotenv does (`"p\"ss"` is `p\"ss`). One with no closing
-    # quote is read as unquoted, quote and all.
-    local double_quoted='^"((\\"|[^"])*)"' single_quoted="^'((\\\\'|[^'])*)'" back_quoted='^`((\\`|[^`])*)`'
-    if [[ $value =~ $double_quoted || $value =~ $single_quoted || $value =~ $back_quoted ]]; then
-        value="${BASH_REMATCH[1]}"
-    else
-        value="${value%%#*}"; value="${value%"${value##*[![:space:]]}"}"
+    local node
+    node="$(dotenv_node)"
+    if [ -z "$node" ]; then
+        echo "ERROR: node not found to read $ENV_FILE. Put it on PATH or set NODE_BIN to its path." >&2
+        return 1
     fi
-    printf '%s' "$value"
+    "$node" "$DOTENV_SETTING_JS" "$ENV_FILE" "$1"
+}
+
+# Checks env_setting can read .env: node is found and loads the checkout's dotenv (from
+# node_modules, or node_modules.old while deploy.sh has it moved aside). Prints why not and returns
+# 1 otherwise.
+check_dotenv_reader() {
+    local node
+    node="$(dotenv_node)"
+    if [ -z "$node" ]; then
+        echo "ERROR: node not found to read $ENV_FILE. Put it on PATH or set NODE_BIN to its path." >&2
+        return 1
+    fi
+    "$node" "$DOTENV_SETTING_JS" --check
 }
 
 # Strips leading and trailing whitespace from $1, as config.ts's trim() does.
@@ -108,3 +127,13 @@ warn_if_env_readable_by_others() {
     fi
     return 0
 }
+
+# Sourcing this file checks env_setting works and exits the script (or the subshell it's sourced
+# in) if not, so nothing carries on reading every setting as unset. That has to be decided here:
+# bash ignores `set -e` inside a function called from an `if`, so a failed env_setting there would
+# go unnoticed. deploy.sh sets DOTENV_RETURN_ON_FAILURE=1 to get a failed `source` instead, and
+# rolls back.
+if ! check_dotenv_reader; then
+    if [ "${DOTENV_RETURN_ON_FAILURE:-0}" = 1 ]; then return 1; fi
+    exit 1
+fi

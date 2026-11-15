@@ -14,6 +14,8 @@ import path from 'path';
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
 const NODE_BIN = process.execPath;
+/** The repo's own dotenv package, linked into the sandbox's node_modules for scripts/envSetting.js. */
+const DOTENV_DIR = path.join(REPO_ROOT, 'node_modules', 'dotenv');
 // The scripts target the Linux server (GNU find's -printf, /proc), so these only run on Linux.
 export const notLinux = process.platform !== 'linux';
 /** These spawn real git and bash processes, which run slowly on a busy CI runner under coverage. */
@@ -72,7 +74,9 @@ if [ -f "$STATE/journal-$running" ]; then cat "$STATE/journal-$running"; else ec
   npm: `#!/usr/bin/env bash
 version="$(cat VERSION)"
 case "$1" in
-  ci) mkdir -p node_modules && echo "$version" > node_modules/marker && echo "{}" > node_modules/.package-lock.json ;;
+  # NPM_CI_NO_DOTENV: an install that leaves out dotenv, which the scripts read .env with.
+  ci) mkdir -p node_modules && echo "$version" > node_modules/marker && echo "{}" > node_modules/.package-lock.json
+      [ -n "\${NPM_CI_NO_DOTENV:-}" ] || ln -s __DOTENV_DIR__ node_modules/dotenv ;;
   install|audit|prune) exit 0 ;;
   test)
     if [ -n "\${NPM_TEST_SIGNAL:-}" ]; then
@@ -272,10 +276,10 @@ function buildSandbox(): Sandbox {
   const { state } = sandbox;
   fs.mkdirSync(state);
   write(path.join(root, 'gitconfig'), '[user]\n\tname = Test\n\temail = test@example.com\n[init]\n\tdefaultBranch = main\n[commit]\n\tgpgsign = false\n');
-  for (const [name, body] of Object.entries(STUBS)) write(path.join(root, 'stubs', name), body.replaceAll("__NODE_BIN__", NODE_BIN), 0o755);
+  for (const [name, body] of Object.entries(STUBS)) write(path.join(root, 'stubs', name), body.replaceAll("__NODE_BIN__", NODE_BIN).replaceAll('__DOTENV_DIR__', DOTENV_DIR), 0o755);
   run('git', ['init', '-q', '--bare', sandbox.origin], root);
   run('git', ['clone', '-q', sandbox.origin, sandbox.dev], root);
-  for (const script of ['deploy.sh', 'scripts/backup-db.sh', 'scripts/restore-db.sh', 'scripts/lib/dotenv.sh']) copyScript(script);
+  for (const script of ['deploy.sh', 'scripts/backup-db.sh', 'scripts/restore-db.sh', 'scripts/lib/dotenv.sh', 'scripts/envSetting.js']) copyScript(script);
   commitVersion('v1', (dev) => {
     write(path.join(dev, 'package.json'), JSON.stringify({ name: 'stub', engines: { node: '>=1.0.0' } }));
     write(path.join(dev, 'package-lock.json'), '{"lockfileVersion":3,"rev":1}\n');
@@ -288,6 +292,8 @@ function buildSandbox(): Sandbox {
   write(path.join(sandbox.work, 'dist/index.js'), '');
   write(path.join(sandbox.work, 'node_modules/marker'), 'v1\n');
   write(path.join(sandbox.work, 'node_modules/.package-lock.json'), '{}\n');
+  // The scripts read .env with the checkout's own dotenv (scripts/envSetting.js): link the real one.
+  fs.symlinkSync(DOTENV_DIR, path.join(sandbox.work, 'node_modules/dotenv'));
   write(path.join(state, 'running'), 'v1\n');
   // The database already records the migration the checkout starts with, as a real one would.
   write(path.join(state, 'applied-migrations'), '0001_baseline\n');
