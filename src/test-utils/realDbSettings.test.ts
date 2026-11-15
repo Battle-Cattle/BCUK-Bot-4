@@ -49,6 +49,7 @@ describe('appEnvFor', () => {
     const env = appEnvFor({ host: 'h', port: 3307, user: 'u', password: 'p' }, 'bcuk_test_w1');
     expect(env).toMatchObject({ DB_HOST: 'h', DB_PORT: '3307', DB_USER: 'u', DB_PASSWORD: 'p', DB_NAME: 'bcuk_test_w1', LOG_LEVEL: 'warn' });
     expect(env.SESSION_SECRET!.length).toBeGreaterThanOrEqual(32);
+    expect(env.EVENTSUB_TOKEN_SECRET).toMatch(/^[0-9a-f]{64}$/);
     for (const name of ['DISCORD_TOKEN', 'TWITCH_USERNAME', 'TWITCH_CLIENT_ID', 'TWITCH_CLIENT_SECRET', 'DISCORD_CLIENT_ID', 'DISCORD_CLIENT_SECRET', 'DISCORD_CALLBACK_URL']) {
       expect(env[name]).toBeTruthy();
     }

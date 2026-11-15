@@ -119,11 +119,18 @@ describe('adjustBalance', () => {
     const conn = pool._conn;
     conn.execute
       .mockResolvedValueOnce([{ affectedRows: 1 }, []])          // INSERT ... ON DUPLICATE KEY UPDATE
-      .mockResolvedValueOnce([[{ balance: 5 }], []]);             // SELECT LAST_INSERT_ID()
+      .mockResolvedValueOnce([[{ balance: 5 }], []]);             // SELECT balance
     vi.mocked(getPool).mockReturnValue(pool as any);
 
     expect(await adjustBalance(1, 'viewer', 5)).toBe(5);
     expect(conn.commit).toHaveBeenCalled();
+    // Read back by key: LAST_INSERT_ID() would hold the new row's id after an insert.
+    expect(conn.execute).toHaveBeenNthCalledWith(
+      2,
+      'SELECT balance FROM loyalty_points WHERE streamer_id = ? AND twitch_username = ?',
+      [1, 'viewer'],
+    );
+    expect(conn.execute.mock.calls[0]![0]).not.toContain('LAST_INSERT_ID');
   });
 
   it('adds delta to an existing balance', async () => {
@@ -162,17 +169,6 @@ describe('adjustBalance', () => {
       expect.stringContaining('LEAST'),
       [1, 'viewer', 4_000_000_000, 2147483647, 4_000_000_000, 2147483647],
     );
-  });
-
-  it('parses a string balance into a number (LAST_INSERT_ID() is a BIGINT expression)', async () => {
-    const pool = makePool();
-    const conn = pool._conn;
-    conn.execute
-      .mockResolvedValueOnce([{ affectedRows: 1 }, []])
-      .mockResolvedValueOnce([[{ balance: '7' }], []]);
-    vi.mocked(getPool).mockReturnValue(pool as any);
-
-    expect(await adjustBalance(1, 'viewer', 7)).toBe(7);
   });
 
   it('rolls back and rethrows on failure', async () => {

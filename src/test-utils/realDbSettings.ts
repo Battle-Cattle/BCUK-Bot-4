@@ -90,6 +90,8 @@ const PLACEHOLDER_APP_ENV: Readonly<Record<string, string>> = {
   DISCORD_CLIENT_ID: 'test-discord-client-id',
   DISCORD_CLIENT_SECRET: 'test-discord-client-secret',
   DISCORD_CALLBACK_URL: 'http://localhost/auth/discord/callback',
+  // Optional for the bot, but the token-storing DB functions refuse to run without one.
+  EVENTSUB_TOKEN_SECRET: '0123456789abcdef'.repeat(4),
   LOG_LEVEL: 'warn',
 };
 
