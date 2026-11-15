@@ -6,7 +6,7 @@ import { realPathWithin } from '../../shared/pathUtils';
 import { getRecordedLibraryFilenames, getRecordedVideoFilenames } from '../../db';
 import { STALE_TEMP_FILE_MS } from './overlayFiles';
 import { isVideoFileInFlight } from './overlayInFlightFiles';
-import { LIBRARY_FOLDER, removeVideoFile } from './overlayVideoLibraryFiles';
+import { LIBRARY_FOLDER, removeVideoFile, type OverlayVideoLocation } from './overlayVideoLibraryFiles';
 
 // Sweeps overlay video files that no DB row refers to (#966). Every write creates its file before
 // its row (upload, library publish and import) and every delete removes the row before the file
@@ -22,7 +22,8 @@ import { LIBRARY_FOLDER, removeVideoFile } from './overlayVideoLibraryFiles';
 // What keeps the sweep from racing a write is the in-flight registry (`overlayInFlightFiles.ts`):
 // a file is skipped while its write is in progress, and the registry is checked *before* the DB,
 // so a write that commits its row and leaves the registry in between is still seen by the query.
-// The age margin is only a safety net for files written some other way.
+// The age margin is only a safety net for files written some other way. Every folder is checked
+// before anything is removed, so a run that fails part way removes nothing.
 
 const log = createLogger('OverlayOrphanSweep');
 
@@ -100,48 +101,56 @@ async function recordedFilenames(folder: string, filenames: string[]): Promise<S
 }
 
 /**
- * Sweeps one folder: lists its old stored-video files, drops any still being written, then (only
- * then, see the module comment) asks the DB which have a row and removes the rest.
+ * Finds one folder's orphans: lists its old stored-video files, drops any still being written,
+ * then (only then, see the module comment) asks the DB which have a row. Removes nothing.
  * @param folder - The folder's name under OVERLAY_FOLDER.
  * @param now - Current time in epoch milliseconds.
- * @returns How many files were removed.
- * @throws A filesystem error listing the folder, or a DB error, before anything in it is removed.
+ * @returns The folder's files that no row refers to.
+ * @throws A filesystem error listing the folder, or a DB error.
  */
-async function sweepFolder(folder: string, now: number): Promise<number> {
+async function findOrphanedFiles(folder: string, now: number): Promise<OverlayVideoLocation[]> {
   const dir = await realPathWithin(OVERLAY_FOLDER, path.resolve(OVERLAY_FOLDER, folder));
-  if (!dir) return 0;
+  if (!dir) return [];
   const candidates = (await listOldVideoFiles(dir, now)).filter((filename) => !isVideoFileInFlight({ folder, filename }));
-  if (candidates.length === 0) return 0;
+  if (candidates.length === 0) return [];
   const recorded = await recordedFilenames(folder, candidates);
-  let removed = 0;
-  for (const filename of candidates) {
-    if (recorded.has(filename)) continue;
-    log.info(`Removing overlay video file ${folder}/${filename}: no database row refers to it`);
-    await removeVideoFile({ folder, filename });
-    removed++;
-  }
-  return removed;
+  return candidates.filter((filename) => !recorded.has(filename)).map((filename) => ({ folder, filename }));
 }
 
 /**
  * Removes overlay video files that no DB row refers to, from every streamer folder and the library
- * folder (see the module comment for what is and isn't touched). Stops at the first folder it
- * can't list or check against the DB, so a DB outage removes nothing.
+ * folder (see the module comment for what is and isn't touched). Every folder is listed and checked
+ * against the DB before anything is removed, so a failure anywhere (a DB outage, a folder it can't
+ * list) removes nothing at all.
  * @param now - Current time in epoch milliseconds (injectable for tests).
  * @returns How many files were removed.
- * @throws A filesystem or DB error; {@link runSweep} catches it.
+ * @throws A filesystem or DB error, before any removal; {@link runSweep} catches it.
  */
 export async function sweepOrphanedOverlayVideos(now = Date.now()): Promise<number> {
+  const orphans: OverlayVideoLocation[] = [];
+  for (const folder of await listSweptFolders()) orphans.push(...await findOrphanedFiles(folder, now));
+  // Every folder has passed its checks: only now remove anything.
+  for (const orphan of orphans) {
+    log.info(`Removing overlay video file ${orphan.folder}/${orphan.filename}: no database row refers to it`);
+    await removeVideoFile(orphan);
+  }
+  return orphans.length;
+}
+
+/**
+ * Lists the folders under OVERLAY_FOLDER this sweep covers (see {@link isSweptFolder}).
+ * @returns Their names, or none if OVERLAY_FOLDER doesn't exist yet.
+ * @throws A filesystem error other than a missing OVERLAY_FOLDER.
+ */
+async function listSweptFolders(): Promise<string[]> {
   let entries: fs.Dirent[];
   try {
     entries = await fs.promises.readdir(OVERLAY_FOLDER, { withFileTypes: true });
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return 0; // nothing uploaded yet
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return []; // nothing uploaded yet
     throw err;
   }
-  let removed = 0;
-  for (const entry of entries.filter(isSweptFolder)) removed += await sweepFolder(entry.name, now);
-  return removed;
+  return entries.filter(isSweptFolder).map((entry) => entry.name);
 }
 
 /**
