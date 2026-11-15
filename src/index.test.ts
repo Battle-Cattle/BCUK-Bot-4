@@ -384,20 +384,20 @@ describe('startup — guild registry preload', () => {
 
 describe('startup — reward pricing scheduler', () => {
   it('starts the scheduler and continues startup through to startEventSub on a clean run', async () => {
+    const { startOverlayOrphanSweep } = await import('./web/routes/overlayOrphanSweep.js');
     const { startRewardPricingScheduler } = await import('./twitch/pricing/rewardPricingScheduler.js');
     const { startEventSub } = await import('./twitch/eventsub/twitchEventSub.js');
     const { startEventSubReconciliation } = await import('./twitch/eventsub/twitchEventSubReconciliation.js');
     const { startChannelReconciliationPoll } = await import('./twitch/twitchChannelReconciliationPoll.js');
     const { startEventLoopMonitor } = await import('./shared/eventLoopMonitor.js');
-    const { startOverlayOrphanSweep } = await import('./web/routes/overlayOrphanSweep.js');
     const { restoreDebugLogging, startDebugLogPruning } = await import('./shared/debugLogging.js');
 
     await runMain();
 
     expect(vi.mocked(restoreDebugLogging)).toHaveBeenCalledOnce();
     expect(vi.mocked(startDebugLogPruning)).toHaveBeenCalledOnce();
-    expect(vi.mocked(startRewardPricingScheduler)).toHaveBeenCalledOnce();
     expect(vi.mocked(startOverlayOrphanSweep)).toHaveBeenCalledOnce();
+    expect(vi.mocked(startRewardPricingScheduler)).toHaveBeenCalledOnce();
     expect(vi.mocked(startEventLoopMonitor)).toHaveBeenCalledOnce();
     expect(vi.mocked(startEventSub)).toHaveBeenCalledOnce();
     expect(vi.mocked(startEventSubReconciliation)).toHaveBeenCalledOnce();
@@ -583,11 +583,11 @@ describe('owner-alert runtime', () => {
 
 describe('shutdown', () => {
   it('stops the reward pricing scheduler on SIGINT', async () => {
+    const { stopOverlayOrphanSweep } = await import('./web/routes/overlayOrphanSweep.js');
     const { stopRewardPricingScheduler } = await import('./twitch/pricing/rewardPricingScheduler.js');
     const { stopEventSubReconciliation } = await import('./twitch/eventsub/twitchEventSubReconciliation.js');
     const { stopChannelReconciliationPoll } = await import('./twitch/twitchChannelReconciliationPoll.js');
     const { stopEventLoopMonitor } = await import('./shared/eventLoopMonitor.js');
-    const { stopOverlayOrphanSweep } = await import('./web/routes/overlayOrphanSweep.js');
     const { stopDebugLogPruning } = await import('./shared/debugLogging.js');
 
     await runMain();
@@ -595,8 +595,8 @@ describe('shutdown', () => {
     await new Promise<void>((resolve) => setImmediate(resolve));
 
     expect(vi.mocked(stopDebugLogPruning)).toHaveBeenCalledOnce();
-    expect(vi.mocked(stopRewardPricingScheduler)).toHaveBeenCalledOnce();
     expect(vi.mocked(stopOverlayOrphanSweep)).toHaveBeenCalledOnce();
+    expect(vi.mocked(stopRewardPricingScheduler)).toHaveBeenCalledOnce();
     expect(vi.mocked(stopEventLoopMonitor)).toHaveBeenCalledOnce();
     expect(vi.mocked(stopEventSubReconciliation)).toHaveBeenCalledOnce();
     expect(vi.mocked(stopChannelReconciliationPoll)).toHaveBeenCalledOnce();

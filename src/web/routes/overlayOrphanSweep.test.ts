@@ -72,6 +72,7 @@ beforeEach(() => {
 afterEach(() => {
   __resetOverlayOrphanSweepForTests();
   vi.useRealTimers();
+  vi.restoreAllMocks();
   fs.rmSync(outside, { recursive: true, force: true });
 });
 
@@ -151,6 +152,33 @@ describe('sweepOrphanedOverlayVideos', () => {
     await expect(sweepOrphanedOverlayVideos(later())).rejects.toThrow('db down');
     expect(exists('5', 'orphan.webm')).toBe(true);
     expect(exists('library', 'lib-orphan.webm')).toBe(true);
+  });
+
+  it('skips a file removed between listing and checking its age, and sweeps the rest', async () => {
+    write('5', 'gone.webm');
+    write('5', 'orphan.webm');
+    const lstat = fs.promises.lstat;
+    vi.spyOn(fs.promises, 'lstat').mockImplementation(async (p, ...rest) => {
+      if (String(p).endsWith('gone.webm')) throw Object.assign(new Error('gone'), { code: 'ENOENT' });
+      return lstat(p, ...rest);
+    });
+
+    await expect(sweepOrphanedOverlayVideos(later())).resolves.toBe(1);
+    expect(getRecordedVideoFilenames).toHaveBeenCalledWith(5, ['orphan.webm']);
+  });
+
+  it('removes nothing from a folder whose files it can\'t check', async () => {
+    write('5', 'orphan.webm');
+    vi.spyOn(fs.promises, 'lstat').mockRejectedValue(Object.assign(new Error('denied'), { code: 'EACCES' }));
+
+    await expect(sweepOrphanedOverlayVideos(later())).rejects.toThrow('denied');
+    vi.mocked(fs.promises.lstat).mockRestore();
+    expect(exists('5', 'orphan.webm')).toBe(true);
+  });
+
+  it('fails the run when the overlay folder can\'t be listed', async () => {
+    vi.spyOn(fs.promises, 'readdir').mockRejectedValue(Object.assign(new Error('denied'), { code: 'EACCES' }));
+    await expect(sweepOrphanedOverlayVideos(later())).rejects.toThrow('denied');
   });
 
   it('does nothing when the overlay folder doesn\'t exist yet', async () => {
@@ -257,6 +285,5 @@ describe('startOverlayOrphanSweep', () => {
     fail(new Error('db down'));
     await waitFor(() => expect(mockLog.warn).toHaveBeenCalledWith(expect.stringContaining('stopped without finishing'), expect.any(Error)));
     expect(exists('5', 'orphan.webm')).toBe(true);
-    vi.mocked(Date.now).mockRestore();
   });
 });
