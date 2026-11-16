@@ -164,6 +164,19 @@ export function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'\\''`)}'`;
 }
 
+/**
+ * Fills a stub script's placeholders: `__NODE_BIN__` with the node binary's path and
+ * `__DOTENV_DIR__` with the dotenv folder's path, quoted as one bash word. Replacement callbacks
+ * keep each path literal: a string replacement would read `$&` or `$$` in a path as a pattern.
+ * @param body - The stub's script text.
+ * @param nodeBin - Path of the node binary.
+ * @param dotenvDir - Path of the dotenv package folder.
+ * @returns The script with its placeholders filled.
+ */
+export function fillStub(body: string, nodeBin: string, dotenvDir: string): string {
+  return body.replaceAll('__NODE_BIN__', () => nodeBin).replaceAll('__DOTENV_DIR__', () => shellQuote(dotenvDir));
+}
+
 /** A throwaway checkout plus everything the scripts need around it. */
 export interface Sandbox {
   root: string;
@@ -286,7 +299,7 @@ function buildSandbox(): Sandbox {
   const { state } = sandbox;
   fs.mkdirSync(state);
   write(path.join(root, 'gitconfig'), '[user]\n\tname = Test\n\temail = test@example.com\n[init]\n\tdefaultBranch = main\n[commit]\n\tgpgsign = false\n');
-  for (const [name, body] of Object.entries(STUBS)) write(path.join(root, 'stubs', name), body.replaceAll("__NODE_BIN__", NODE_BIN).replaceAll('__DOTENV_DIR__', shellQuote(DOTENV_DIR)), 0o755);
+  for (const [name, body] of Object.entries(STUBS)) write(path.join(root, 'stubs', name), fillStub(body, NODE_BIN, DOTENV_DIR), 0o755);
   run('git', ['init', '-q', '--bare', sandbox.origin], root);
   run('git', ['clone', '-q', sandbox.origin, sandbox.dev], root);
   for (const script of ['deploy.sh', 'scripts/backup-db.sh', 'scripts/restore-db.sh', 'scripts/lib/dotenv.sh', 'scripts/envSetting.js']) copyScript(script);

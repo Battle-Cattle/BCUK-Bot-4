@@ -2,7 +2,7 @@ import { describe, it, expect, afterAll, vi } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 import { spawn } from 'child_process';
-import { SCRIPT_TEST_TIMEOUT_MS, commitVersion, createSandbox, isRunning, notLinux, read, removeTemplate, run, shellQuote, write } from './deploySandbox';
+import { SCRIPT_TEST_TIMEOUT_MS, commitVersion, createSandbox, isRunning, notLinux, read, removeTemplate, run, shellQuote, fillStub, write } from './deploySandbox';
 
 describe.skipIf(notLinux)('deploySandbox', { timeout: SCRIPT_TEST_TIMEOUT_MS }, () => {
   const roots: string[] = [];
@@ -24,6 +24,14 @@ describe.skipIf(notLinux)('deploySandbox', { timeout: SCRIPT_TEST_TIMEOUT_MS }, 
       const printed = run('bash', ['-c', `printf '%s|' ${shellQuote(value)}`], process.cwd(), process.env);
       expect(printed).toBe(`${value}|`);
     }
+  });
+
+  it('fills stub placeholders with paths kept literal, including $& and $$', () => {
+    const dir = "/tmp/cash$&path/it's $$ here";
+    const filled = fillStub('ln -s __DOTENV_DIR__ x; exec __NODE_BIN__', '/opt/n$&de', dir);
+    expect(filled).toBe(`ln -s ${shellQuote(dir)} x; exec /opt/n$&de`);
+    // And bash reads the quoted path back as the one original argument.
+    expect(run('bash', ['-c', `printf '%s' ${shellQuote(dir)}`], process.cwd(), process.env)).toBe(dir);
   });
 
   it('gives each copy remotes and a backup folder inside its own directory', () => {
