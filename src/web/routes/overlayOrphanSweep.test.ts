@@ -19,9 +19,10 @@ vi.mock('../../shared/config', async () => {
 vi.mock('../../db', () => ({
   getRecordedVideoFilenames: vi.fn(),
   getRecordedLibraryFilenames: vi.fn(),
+  getRecordedSharedVideoFilenames: vi.fn(),
 }));
 
-import { getRecordedLibraryFilenames, getRecordedVideoFilenames } from '../../db';
+import { getRecordedLibraryFilenames, getRecordedSharedVideoFilenames, getRecordedVideoFilenames } from '../../db';
 import { OVERLAY_FOLDER as overlayFolder } from '../../shared/config';
 import { withInFlightVideoFile } from './overlayInFlightFiles';
 import { linkVideoFile } from './overlayVideoLibraryFiles';
@@ -50,12 +51,14 @@ function exists(folder: string, filename: string): boolean {
   }
 }
 
-/** Makes the DB report rows for these streamer files and library files. */
-function recordRows(streamerRows: Record<number, string[]>, libraryRows: string[] = []): void {
+/** Makes the DB report rows for these streamer files, library files and shared files. */
+function recordRows(streamerRows: Record<number, string[]>, libraryRows: string[] = [], sharedRows: string[] = []): void {
   vi.mocked(getRecordedVideoFilenames).mockImplementation(async (streamerId, filenames) =>
     new Set(filenames.filter((f) => (streamerRows[streamerId] ?? []).includes(f))));
   vi.mocked(getRecordedLibraryFilenames).mockImplementation(async (filenames) =>
     new Set(filenames.filter((f) => libraryRows.includes(f))));
+  vi.mocked(getRecordedSharedVideoFilenames).mockImplementation(async (filenames) =>
+    new Set(filenames.filter((f) => sharedRows.includes(f))));
 }
 
 let outside: string;
@@ -117,9 +120,8 @@ describe('sweepOrphanedOverlayVideos', () => {
     expect(getRecordedLibraryFilenames).toHaveBeenCalledWith(expect.arrayContaining(['lib-kept.webm', 'lib-orphan.webm']));
   });
 
-  it('never touches .incoming, shared/, MOV conversion files, other names, odd folders or symlinks', async () => {
+  it('never touches .incoming, MOV conversion files, other names, odd folders or symlinks', async () => {
     write('.incoming', 'x.webm');
-    write('shared', 'x.webm');
     write('007', 'x.webm');
     write('notes', 'x.webm');
     write('5', 'a1b2.mov.upload');
@@ -133,7 +135,7 @@ describe('sweepOrphanedOverlayVideos', () => {
     await expect(sweepOrphanedOverlayVideos(later())).resolves.toBe(0);
 
     for (const [folder, filename] of [
-      ['.incoming', 'x.webm'], ['shared', 'x.webm'], ['007', 'x.webm'], ['notes', 'x.webm'],
+      ['.incoming', 'x.webm'], ['007', 'x.webm'], ['notes', 'x.webm'],
       ['5', 'a1b2.mov.upload'], ['5', 'a1b2.webm.part'], ['5', 'readme.txt'], ['5', 'link.webm'],
     ] as const) {
       expect(exists(folder, filename), `${folder}/${filename}`).toBe(true);
@@ -275,6 +277,83 @@ describe('sweepOrphanedOverlayVideos', () => {
     await sweepOrphanedOverlayVideos(later());
     expect(exists('5', imported)).toBe(false);
     expect(exists('library', 'lib.webm')).toBe(true);
+  });
+});
+
+describe('sweepOrphanedOverlayVideos in the shared folder', () => {
+  it('removes an old shared file with no row and keeps one with a row, or a new one without', async () => {
+    write('shared', 'orphan.webm');
+    write('shared', 'kept.webm');
+    recordRows({}, [], ['kept.webm']);
+
+    await expect(sweepOrphanedOverlayVideos(Date.now())).resolves.toBe(0);
+    expect(exists('shared', 'orphan.webm')).toBe(true);
+    expect(getRecordedSharedVideoFilenames).not.toHaveBeenCalled();
+
+    await expect(sweepOrphanedOverlayVideos(later())).resolves.toBe(1);
+    expect(exists('shared', 'orphan.webm')).toBe(false);
+    expect(exists('shared', 'kept.webm')).toBe(true);
+    expect(getRecordedSharedVideoFilenames).toHaveBeenCalledWith(expect.arrayContaining(['orphan.webm', 'kept.webm']));
+  });
+
+  it('checks the shared folder against shared videos only, not a streamer\'s or the library\'s rows', async () => {
+    write('shared', 'same.webm');
+    recordRows({ 5: ['same.webm'] }, ['same.webm']);
+
+    await expect(sweepOrphanedOverlayVideos(later())).resolves.toBe(1);
+    expect(exists('shared', 'same.webm')).toBe(false);
+    expect(getRecordedVideoFilenames).not.toHaveBeenCalled();
+    expect(getRecordedLibraryFilenames).not.toHaveBeenCalled();
+  });
+
+  it('only considers WebM names there, leaving conversion files, MP4s, other names and symlinks alone', async () => {
+    write('shared', 'a1b2.mov.upload');
+    write('shared', 'a1b2.webm.part');
+    write('shared', 'clip.mp4');
+    write('shared', 'readme.txt');
+    fs.writeFileSync(path.join(outside, 'target.webm'), 'outside');
+    fs.symlinkSync(path.join(outside, 'target.webm'), path.join(overlayFolder, 'shared', 'link.webm'));
+
+    await expect(sweepOrphanedOverlayVideos(later())).resolves.toBe(0);
+
+    for (const filename of ['a1b2.mov.upload', 'a1b2.webm.part', 'clip.mp4', 'readme.txt', 'link.webm']) {
+      expect(exists('shared', filename), filename).toBe(true);
+    }
+    expect(fs.existsSync(path.join(outside, 'target.webm'))).toBe(true);
+    expect(getRecordedSharedVideoFilenames).not.toHaveBeenCalled();
+  });
+
+  it('leaves a symlinked shared folder alone', async () => {
+    fs.writeFileSync(path.join(outside, 'x.webm'), 'outside');
+    fs.symlinkSync(outside, path.join(overlayFolder, 'shared'));
+
+    await expect(sweepOrphanedOverlayVideos(later())).resolves.toBe(0);
+    expect(fs.existsSync(path.join(outside, 'x.webm'))).toBe(true);
+  });
+
+  it('never removes a shared file whose write is still in flight, however old', async () => {
+    write('shared', 'stalled.webm');
+    let finish!: () => void;
+    const writing = withInFlightVideoFile({ folder: 'shared', filename: 'stalled.webm' }, () => new Promise<void>((resolve) => { finish = resolve; }));
+
+    await expect(sweepOrphanedOverlayVideos(later())).resolves.toBe(0);
+    expect(exists('shared', 'stalled.webm')).toBe(true);
+    expect(getRecordedSharedVideoFilenames).not.toHaveBeenCalled();
+
+    finish();
+    await writing;
+    await expect(sweepOrphanedOverlayVideos(later())).resolves.toBe(1);
+    expect(exists('shared', 'stalled.webm')).toBe(false);
+  });
+
+  it('removes nothing anywhere when the shared folder can\'t be checked against the DB', async () => {
+    write('shared', 'orphan.webm');
+    write('5', 'orphan.webm');
+    vi.mocked(getRecordedSharedVideoFilenames).mockRejectedValue(new Error('db down'));
+
+    await expect(sweepOrphanedOverlayVideos(later())).rejects.toThrow('db down');
+    expect(exists('shared', 'orphan.webm')).toBe(true);
+    expect(exists('5', 'orphan.webm')).toBe(true);
   });
 });
 

@@ -22,7 +22,7 @@ vi.mock('mysql2/promise', () => ({ default: {} }));
 
 import { getPool } from './pool';
 import {
-  listSharedVideos, listEnabledSharedVideos, getSharedVideo, addSharedVideo,
+  listSharedVideos, listEnabledSharedVideos, getSharedVideo, getRecordedSharedVideoFilenames, addSharedVideo,
   renameSharedVideo, setSharedVideoEnabled, removeSharedVideo,
 } from './sharedOverlayVideos';
 import { makeMockPool } from '../test-utils/mockMysqlPool';
@@ -69,6 +69,16 @@ describe('shared overlay video queries', () => {
     vi.mocked(getPool).mockReturnValue(pool as any);
     await expect(getSharedVideo(1)).resolves.toMatchObject({ id: 1, name: 'Clap' });
     await expect(getSharedVideo(9)).resolves.toBeNull();
+  });
+
+  it('returns which of the filenames have a row, in one IN query', async () => {
+    const pool = makeMockPool();
+    pool.execute.mockResolvedValueOnce([[{ filename: 'a.webm' }], []]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await expect(getRecordedSharedVideoFilenames(['a.webm', 'b.webm'])).resolves.toEqual(new Set(['a.webm']));
+    expect(pool.execute).toHaveBeenCalledWith(
+      expect.stringContaining('FROM shared_overlay_video WHERE filename IN (?, ?)'), ['a.webm', 'b.webm'],
+    );
   });
 
   it('adds a video and returns the new id', async () => {
