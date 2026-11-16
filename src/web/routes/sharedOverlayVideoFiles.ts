@@ -10,6 +10,13 @@ import { safeResolve } from '../../shared/pathUtils';
 export const SHARED_FOLDER = 'shared';
 
 /**
+ * Names of stored shared videos (`<uuid>.webm`; every shared video is converted to WebM). The
+ * overlay serves only these, and the sweep of files no row refers to (`overlayOrphanSweep.ts`)
+ * only considers these, so conversion files (`*.mov.upload`, `*.webm.part`) are never matched.
+ */
+export const SHARED_VIDEO_FILENAME_RE = /^[\w-]+\.(webm)$/i;
+
+/**
  * Resolves a shared video's stored filename to its absolute path, refusing anything that is not
  * a single path segment or would leave the shared folder.
  * @param filename - Stored filename, e.g. `<uuid>.webm`.

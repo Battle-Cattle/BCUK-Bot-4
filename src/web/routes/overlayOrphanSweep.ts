@@ -3,21 +3,25 @@ import path from 'path';
 import { OVERLAY_FOLDER } from '../../shared/config';
 import { createLogger } from '../../shared/logger';
 import { realPathWithin } from '../../shared/pathUtils';
-import { getRecordedLibraryFilenames, getRecordedVideoFilenames } from '../../db';
+import { getRecordedLibraryFilenames, getRecordedSharedVideoFilenames, getRecordedVideoFilenames } from '../../db';
 import { STALE_TEMP_FILE_MS } from './overlayFiles';
 import { isVideoFileInFlight } from './overlayInFlightFiles';
 import { LIBRARY_FOLDER, removeVideoFile, type OverlayVideoLocation } from './overlayVideoLibraryFiles';
+import { SHARED_FOLDER, SHARED_VIDEO_FILENAME_RE } from './sharedOverlayVideoFiles';
+import { removeSharedVideoFile } from './sharedOverlayVideoStorage';
 
 // Sweeps overlay video files that no DB row refers to (#966). Every write creates its file before
-// its row (upload, library publish and import) and every delete removes the row before the file
-// (video delete, library entry removal), so a process that dies between the two steps, or a
-// removal that fails, leaves a file nothing refers to and nothing would ever remove.
+// its row (upload, library publish and import, shared video upload and import) and every delete
+// removes the row before the file (video delete, library entry removal, shared video removal), so
+// a process that dies between the two steps, or a removal that fails, leaves a file nothing refers
+// to and nothing would ever remove.
 //
-// Only a streamer's folder (`<OVERLAY_FOLDER>/<streamer id>/`, checked against `overlay_video`) and
-// the library folder (`library/`, checked against `overlay_video_library`) are swept, and in them
-// only files named like a stored video. Everything else under OVERLAY_FOLDER is left alone:
-// `.incoming/` (swept by `sweepStaleTempFiles`), `shared/` (the shared overlay's own videos), MOV
-// conversion files (`*.mov.upload`, `*.webm.part`, swept by `storeMovAsWebm`), and symlinks.
+// Only a streamer's folder (`<OVERLAY_FOLDER>/<streamer id>/`, checked against `overlay_video`),
+// the library folder (`library/`, checked against `overlay_video_library`) and the shared overlay's
+// folder (`shared/`, checked against `shared_overlay_video`) are swept, and in them only files
+// named like a stored video (a shared video is always WebM). Everything else under OVERLAY_FOLDER
+// is left alone: `.incoming/` (swept by `sweepStaleTempFiles`), MOV conversion files
+// (`*.mov.upload`, `*.webm.part`, swept by `storeMovAsWebm`), and symlinks.
 //
 // What keeps the sweep from racing a write is the in-flight registry (`overlayInFlightFiles.ts`):
 // a file is skipped while its write is in progress, and the registry is checked *before* the DB,
@@ -41,7 +45,7 @@ const SWEEP_INTERVAL_MS = 24 * 60 * 60_000;
 /** Most filenames looked up in one DB query, so a large folder can't build an unbounded `IN` list. */
 const LOOKUP_BATCH_SIZE = 500;
 
-/** Names of stored videos (`<uuid>.webm`/`.mp4`), as served by `overlaySource.ts`. */
+/** Names of stored videos (`<uuid>.webm`/`.mp4`), as served by `overlaySource.ts`. The shared folder uses `SHARED_VIDEO_FILENAME_RE`. */
 const VIDEO_FILENAME_RE = /^[\w-]+\.(webm|mp4)$/i;
 
 let sweepTimer: ReturnType<typeof setInterval> | null = null;
@@ -49,27 +53,39 @@ let sweepRunning = false;
 
 /**
  * Picks out the folders under OVERLAY_FOLDER this sweep covers: real directories (not symlinks)
- * named as a streamer's numeric id, in its canonical form (no leading zeros), or as the library.
+ * named as a streamer's numeric id, in its canonical form (no leading zeros), as the library, or
+ * as the shared overlay's folder.
  * @param entry - A directory entry of OVERLAY_FOLDER.
- * @returns True for a streamer folder or the library folder.
+ * @returns True for a streamer folder, the library folder or the shared folder.
  */
 function isSweptFolder(entry: fs.Dirent): boolean {
   if (!entry.isDirectory()) return false;
-  return entry.name === LIBRARY_FOLDER || (/^\d+$/.test(entry.name) && String(Number(entry.name)) === entry.name);
+  if (entry.name === LIBRARY_FOLDER || entry.name === SHARED_FOLDER) return true;
+  return /^\d+$/.test(entry.name) && String(Number(entry.name)) === entry.name;
+}
+
+/**
+ * Gives the pattern a stored video's name in a folder matches.
+ * @param folder - The folder's name under OVERLAY_FOLDER.
+ * @returns `SHARED_VIDEO_FILENAME_RE` for the shared folder, {@link VIDEO_FILENAME_RE} otherwise.
+ */
+function storedNamePattern(folder: string): RegExp {
+  return folder === SHARED_FOLDER ? SHARED_VIDEO_FILENAME_RE : VIDEO_FILENAME_RE;
 }
 
 /**
  * Lists a folder's stored-video files old enough to sweep: regular files (not symlinks) with a
  * stored video's name and a `ctime` older than {@link ORPHAN_MIN_AGE_MS}.
  * @param dir - Real path of the folder.
+ * @param pattern - What a stored video's name looks like in this folder (see {@link storedNamePattern}).
  * @param now - Current time in epoch milliseconds.
  * @returns The filenames.
  */
-async function listOldVideoFiles(dir: string, now: number): Promise<string[]> {
+async function listOldVideoFiles(dir: string, pattern: RegExp, now: number): Promise<string[]> {
   const entries = await fs.promises.readdir(dir, { withFileTypes: true });
   const old: string[] = [];
   for (const entry of entries) {
-    if (!entry.isFile() || !VIDEO_FILENAME_RE.test(entry.name)) continue;
+    if (!entry.isFile() || !pattern.test(entry.name)) continue;
     try {
       const { ctimeMs } = await fs.promises.lstat(path.join(dir, entry.name));
       if (now - ctimeMs > ORPHAN_MIN_AGE_MS) old.push(entry.name);
@@ -81,8 +97,22 @@ async function listOldVideoFiles(dir: string, now: number): Promise<string[]> {
 }
 
 /**
- * Looks up which of a folder's files have a DB row: `overlay_video_library` for the library,
- * the streamer's `overlay_video` rows otherwise. In batches of {@link LOOKUP_BATCH_SIZE}.
+ * Looks up which of one batch of a folder's files have a DB row: `overlay_video_library` for the
+ * library, `shared_overlay_video` for the shared folder, the streamer's `overlay_video` rows otherwise.
+ * @param folder - The folder's name under OVERLAY_FOLDER.
+ * @param batch - Files in it; not empty.
+ * @returns The filenames that have a row.
+ * @throws The DB error.
+ */
+function lookUpRecorded(folder: string, batch: string[]): Promise<Set<string>> {
+  if (folder === LIBRARY_FOLDER) return getRecordedLibraryFilenames(batch);
+  if (folder === SHARED_FOLDER) return getRecordedSharedVideoFilenames(batch);
+  return getRecordedVideoFilenames(Number(folder), batch);
+}
+
+/**
+ * Looks up which of a folder's files have a DB row (see {@link lookUpRecorded}), in batches of
+ * {@link LOOKUP_BATCH_SIZE}.
  * @param folder - The folder's name under OVERLAY_FOLDER.
  * @param filenames - Files in it; may be empty.
  * @returns The filenames that have a row.
@@ -92,10 +122,7 @@ async function recordedFilenames(folder: string, filenames: string[]): Promise<S
   const recorded = new Set<string>();
   for (let i = 0; i < filenames.length; i += LOOKUP_BATCH_SIZE) {
     const batch = filenames.slice(i, i + LOOKUP_BATCH_SIZE);
-    const found = folder === LIBRARY_FOLDER
-      ? await getRecordedLibraryFilenames(batch)
-      : await getRecordedVideoFilenames(Number(folder), batch);
-    for (const filename of found) recorded.add(filename);
+    for (const filename of await lookUpRecorded(folder, batch)) recorded.add(filename);
   }
   return recorded;
 }
@@ -111,17 +138,29 @@ async function recordedFilenames(folder: string, filenames: string[]): Promise<S
 async function findOrphanedFiles(folder: string, now: number): Promise<OverlayVideoLocation[]> {
   const dir = await realPathWithin(OVERLAY_FOLDER, path.resolve(OVERLAY_FOLDER, folder));
   if (!dir) return [];
-  const candidates = (await listOldVideoFiles(dir, now)).filter((filename) => !isVideoFileInFlight({ folder, filename }));
+  const candidates = (await listOldVideoFiles(dir, storedNamePattern(folder), now)).filter((filename) => !isVideoFileInFlight({ folder, filename }));
   if (candidates.length === 0) return [];
   const recorded = await recordedFilenames(folder, candidates);
   return candidates.filter((filename) => !recorded.has(filename)).map((filename) => ({ folder, filename }));
 }
 
 /**
- * Removes overlay video files that no DB row refers to, from every streamer folder and the library
- * folder (see the module comment for what is and isn't touched). Every folder is listed and checked
- * against the DB before anything is removed, so a failure anywhere (a DB outage, a folder it can't
- * list) removes nothing at all.
+ * Removes one orphaned file, logging it: a shared video through `removeSharedVideoFile`, any other
+ * through `removeVideoFile`. Neither throws.
+ * @param orphan - The file's folder under OVERLAY_FOLDER and its filename.
+ * @returns Resolves once removal has been attempted.
+ */
+async function removeOrphan(orphan: OverlayVideoLocation): Promise<void> {
+  log.info(`Removing overlay video file ${orphan.folder}/${orphan.filename}: no database row refers to it`);
+  if (orphan.folder === SHARED_FOLDER) await removeSharedVideoFile(orphan.filename);
+  else await removeVideoFile(orphan);
+}
+
+/**
+ * Removes overlay video files that no DB row refers to, from every streamer folder, the library
+ * folder and the shared folder (see the module comment for what is and isn't touched). Every
+ * folder is listed and checked against the DB before anything is removed, so a failure anywhere
+ * (a DB outage, a folder it can't list) removes nothing at all.
  * @param now - Current time in epoch milliseconds (injectable for tests).
  * @returns How many files were removed.
  * @throws A filesystem or DB error, before any removal; {@link runSweep} catches it.
@@ -130,10 +169,7 @@ export async function sweepOrphanedOverlayVideos(now = Date.now()): Promise<numb
   const orphans: OverlayVideoLocation[] = [];
   for (const folder of await listSweptFolders()) orphans.push(...await findOrphanedFiles(folder, now));
   // Every folder has passed its checks: only now remove anything.
-  for (const orphan of orphans) {
-    log.info(`Removing overlay video file ${orphan.folder}/${orphan.filename}: no database row refers to it`);
-    await removeVideoFile(orphan);
-  }
+  for (const orphan of orphans) await removeOrphan(orphan);
   return orphans.length;
 }
 
