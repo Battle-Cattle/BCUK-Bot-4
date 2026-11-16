@@ -1,13 +1,11 @@
 import { createLogger } from '../../shared/logger';
-import { Router, type Response } from 'express';
+import { Router } from 'express';
 import { setMemberAccessLevel, updateMemberAccessLevel, removeGuildMember } from '../../db';
-import { reloadGuildRegistry } from '../../discord/guildRegistry';
 import { csrfProtection } from '../csrf';
 import { requireFormGuild } from '../formGuild';
 import { requireManager, requireAdmin } from '../middleware';
 import { getSessionUser, getCurrentGuildId } from '../session';
 import { trimField } from './validation';
-import { runUserMutationForActorAndTarget } from '../../shared/userMutationQueue';
 import { closeRemovedMemberConnections } from './memberRemovalConnections';
 import {
   DuplicateTwitchNameError,
@@ -24,6 +22,7 @@ import {
   ManagerEditAuthError,
 } from './adminUserAuth';
 import { handleDbError } from './adminUserErrors';
+import { reloadRegistrySafe, runGuardedUserMutation } from './adminUsersMutationRunner';
 
 // The member-mutation routes of the /admin/users page (add, update level, remove, toggle Twitch),
 // mounted by `admin.ts`, which serves the page itself. Each route validates its input, then runs
@@ -34,54 +33,6 @@ export const router = Router();
 
 // Every form on the page carries the guild it was rendered for; see formGuild.ts.
 const requireUsersPageGuild = requireFormGuild('/admin/users');
-
-/** Refresh the guild registry after a membership change; log but never fail the request. */
-async function reloadRegistrySafe(): Promise<void> {
-  try {
-    await reloadGuildRegistry();
-  } catch (err) {
-    log.error('Guild registry reload after membership change failed:', err);
-  }
-}
-
-/**
- * Runs `operation` (typically a `checkManagerEditAuth`/`checkToggleTwitchAuth` check followed by
- * the write it guards) inside `runUserMutationForActorAndTarget` for `actorId`/`targetId`,
- * centralizing the `ManagerEditAuthError` → `?error=<code>` redirect shared by every queued
- * mutation route below so it isn't repeated at each call site. Any other error is handled by
- * `onOtherError` instead.
- *
- * Serializing against both ids (not just `targetId`) matters here specifically because
- * `operation`'s authorization check re-reads the *acting* user's own current access level — see
- * `runUserMutationForActorAndTarget`'s doc comment for why a target-only lock still leaves that
- * read racing a concurrent demotion of the actor.
- *
- * Redirects to `/admin/users` itself on success, so callers don't need to repeat that redirect.
- * @param res - Express response, used to redirect on success or on a `ManagerEditAuthError`.
- * @param actorId - The acting user's discordId.
- * @param targetId - The user whose mutations `operation` should serialize against.
- * @param operation - The auth-check-then-write to run inside the queue.
- * @param onOtherError - Called (and expected to redirect) for any error other than
- *   `ManagerEditAuthError`.
- */
-async function runGuardedUserMutation(
-  res: Response,
-  actorId: string,
-  targetId: string,
-  operation: () => Promise<void>,
-  onOtherError: (err: unknown) => void,
-): Promise<void> {
-  try {
-    await runUserMutationForActorAndTarget(actorId, targetId, operation);
-    res.redirect('/admin/users');
-  } catch (err) {
-    if (err instanceof ManagerEditAuthError) {
-      res.redirect(`/admin/users?error=${err.code}`);
-    } else {
-      onOtherError(err);
-    }
-  }
-}
 
 // Add a member to the current guild, or update their identity/level (Manager+;
 // managers may only assign levels below their own). Identity and Twitch are global;

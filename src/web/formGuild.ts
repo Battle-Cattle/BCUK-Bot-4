@@ -11,7 +11,7 @@ import { getCurrentGuildId } from './session';
 const log = createLogger('Web');
 
 /** The hidden form field that carries the guild a form was rendered for. */
-export const FORM_GUILD_FIELD = 'guild_id';
+const FORM_GUILD_FIELD = 'guild_id';
 
 /** The `?error=` code a page shows when a form was submitted for a guild the session has left. */
 export const GUILD_CHANGED_ERROR = 'guild_changed';
