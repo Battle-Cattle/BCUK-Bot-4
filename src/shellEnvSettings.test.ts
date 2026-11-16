@@ -31,19 +31,23 @@ afterEach(() => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-/** Runs `body` in bash after the given script blocks, in a directory holding `env` as its .env. */
+/**
+ * Runs `body` in bash after the given script blocks, in a directory holding `env` as its .env.
+ * The real scripts/lib/dotenv.sh is in $DOTENV_SH, passed as data rather than written into the script.
+ */
 function run(env: string, blocks: string[], body: string): string {
   fs.writeFileSync(path.join(dir, '.env'), env);
-  const result = spawnSync('bash', ['-c', `set -euo pipefail\nREPO_DIR="${dir}"\n${blocks.join('\n')}\n${body}`], {
+  const result = spawnSync('bash', ['-c', `set -euo pipefail\n${blocks.join('\n')}\n${body}`], {
     cwd: dir,
     encoding: 'utf8',
+    env: { ...process.env, DOTENV_SH: path.join(REPO_ROOT, 'scripts/lib/dotenv.sh') },
   });
   if (result.status !== 0) throw new Error(result.stderr);
   return result.stdout;
 }
 
-/** Sources the real scripts/lib/dotenv.sh, which reads .env with the repo's own dotenv. */
-const sourceDotenv = () => `ENV_FILE=.env\nsource ${JSON.stringify(path.join(REPO_ROOT, 'scripts/lib/dotenv.sh'))}`;
+/** Sources the real scripts/lib/dotenv.sh (from $DOTENV_SH, set by `run`), which reads .env with the repo's own dotenv. */
+const sourceDotenv = () => 'ENV_FILE=.env\nsource "$DOTENV_SH"';
 
 describe.skipIf(onWindows)('env_setting in scripts/lib/dotenv.sh', () => {
   // Each expected value comes from dotenv itself, so these can't drift from what the bot reads.
@@ -95,7 +99,6 @@ describe.skipIf(onWindows)('env_setting in scripts/lib/dotenv.sh', () => {
 describe.skipIf(onWindows)('finding node and dotenv in scripts/lib/dotenv.sh', () => {
   let checkout: string;
   let tools: string;
-  let dotenvSh: string;
 
   beforeEach(() => {
     // A checkout holding just the two scripts, so where dotenv comes from is up to each test.
@@ -104,7 +107,6 @@ describe.skipIf(onWindows)('finding node and dotenv in scripts/lib/dotenv.sh', (
     for (const file of ['scripts/lib/dotenv.sh', 'scripts/envSetting.js']) {
       fs.copyFileSync(path.join(REPO_ROOT, file), path.join(checkout, file));
     }
-    dotenvSh = JSON.stringify(path.join(checkout, 'scripts/lib/dotenv.sh'));
     // A PATH with the few tools dotenv.sh uses and no node on it.
     tools = path.join(dir, 'tools');
     fs.mkdirSync(tools);
@@ -120,18 +122,26 @@ describe.skipIf(onWindows)('finding node and dotenv in scripts/lib/dotenv.sh', (
     fs.symlinkSync(path.join(REPO_ROOT, 'node_modules/dotenv'), path.join(checkout, folder, 'dotenv'));
   }
 
-  /** Runs `script` in /bin/bash in the test directory, with node on PATH unless `env` says otherwise. */
+  /**
+   * Runs `script` in /bin/bash in the test directory, with node on PATH unless `env` says otherwise.
+   * The checkout's dotenv.sh is in $DOTENV_SH, passed as data rather than written into the script,
+   * since the temporary directory's path comes from $TMPDIR.
+   */
   function bash(script: string, env: NodeJS.ProcessEnv = {}) {
     return spawnSync('/bin/bash', ['-c', script], {
       cwd: dir,
       encoding: 'utf8',
-      env: { PATH: `${path.dirname(process.execPath)}:${process.env.PATH ?? ''}`, ...env },
+      env: {
+        PATH: `${path.dirname(process.execPath)}:${process.env.PATH ?? ''}`,
+        DOTENV_SH: path.join(checkout, 'scripts/lib/dotenv.sh'),
+        ...env,
+      },
     });
   }
 
   /** Sources the checkout's dotenv.sh under set -euo pipefail, then runs `body`. */
   function source(body: string, env: NodeJS.ProcessEnv = {}) {
-    return bash(`set -euo pipefail\nENV_FILE=.env\nsource ${dotenvSh}\n${body}`, env);
+    return bash(`set -euo pipefail\nENV_FILE=.env\nsource "$DOTENV_SH"\n${body}`, env);
   }
 
   it('reads with the checkout\'s node_modules dotenv', () => {
@@ -153,13 +163,13 @@ describe.skipIf(onWindows)('finding node and dotenv in scripts/lib/dotenv.sh', (
   });
 
   it('stops a subshell sourcing it even where bash ignores set -e (a function called from an if)', () => {
-    const result = bash(`f() { ( set -euo pipefail; ENV_FILE=.env; source ${dotenvSh}; echo "read: $(env_setting NAME)" ); }
+    const result = bash(`f() { ( set -euo pipefail; ENV_FILE=.env; source "$DOTENV_SH"; echo "read: $(env_setting NAME)" ); }
 if out="$(f)"; then echo "ok: $out"; else echo "failed"; fi`);
     expect(result.stdout.trim()).toBe('failed');
   });
 
   it('returns a failure instead of exiting when DOTENV_RETURN_ON_FAILURE=1, so deploy.sh can roll back', () => {
-    const result = bash(`ENV_FILE=.env\nif ! DOTENV_RETURN_ON_FAILURE=1 source ${dotenvSh}; then echo "rolling back"; fi`);
+    const result = bash(`ENV_FILE=.env\nif ! DOTENV_RETURN_ON_FAILURE=1 source "$DOTENV_SH"; then echo "rolling back"; fi`);
     expect(result.stdout.trim()).toBe('rolling back');
   });
 
