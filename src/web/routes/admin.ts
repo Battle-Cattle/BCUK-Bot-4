@@ -5,6 +5,7 @@ import { csrfProtection } from '../csrf';
 import { requireManager } from '../middleware';
 import { getCurrentGuildId } from '../session';
 import { filterQueryParam } from './validation';
+import { GUILD_CHANGED_ERROR } from '../formGuild';
 import { renderView } from './viewHelpers';
 import { renderOrError } from './errorHandling';
 import adminRefreshRouter from './adminRefresh';
@@ -21,6 +22,7 @@ const KNOWN_ERRORS = new Set([
   'add_failed', 'duplicate_twitch_name', 'db_busy', 'update_failed', 'remove_failed', 'toggle_failed',
   'invalid_discord_id', 'invalid_access_level', 'access_level_too_high', 'invalid_twitch_name',
   'self_edit_forbidden', 'self_remove_forbidden', 'target_above_level', 'invalid_twitch_state',
+  GUILD_CHANGED_ERROR, 'not_found',
 ]);
 
 // View the current guild's members (Manager+)

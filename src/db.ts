@@ -21,7 +21,7 @@ export {
 export type { DbGuild } from './db/guilds';
 
 export {
-  getMemberAccessLevel, setMemberAccessLevel,
+  getMemberAccessLevel, setMemberAccessLevel, updateMemberAccessLevel,
   removeGuildMember, getEffectiveAccessLevelForUser,
 } from './db/guildMembers';
 
