@@ -31,19 +31,23 @@ afterEach(() => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-/** Runs `body` in bash after the given script blocks, in a directory holding `env` as its .env. */
+/**
+ * Runs `body` in bash after the given script blocks, in a directory holding `env` as its .env.
+ * The real scripts/lib/dotenv.sh is in $DOTENV_SH, passed as data rather than written into the script.
+ */
 function run(env: string, blocks: string[], body: string): string {
   fs.writeFileSync(path.join(dir, '.env'), env);
   const result = spawnSync('bash', ['-c', `set -euo pipefail\n${blocks.join('\n')}\n${body}`], {
     cwd: dir,
     encoding: 'utf8',
+    env: { ...process.env, DOTENV_SH: path.join(REPO_ROOT, 'scripts/lib/dotenv.sh') },
   });
   if (result.status !== 0) throw new Error(result.stderr);
   return result.stdout;
 }
 
-/** Sources the real scripts/lib/dotenv.sh, which reads .env with the repo's own dotenv. */
-const sourceDotenv = () => `ENV_FILE=.env\nsource ${JSON.stringify(path.join(REPO_ROOT, 'scripts/lib/dotenv.sh'))}`;
+/** Sources the real scripts/lib/dotenv.sh (from $DOTENV_SH, set by `run`), which reads .env with the repo's own dotenv. */
+const sourceDotenv = () => 'ENV_FILE=.env\nsource "$DOTENV_SH"';
 
 describe.skipIf(onWindows)('env_setting in scripts/lib/dotenv.sh', () => {
   // Each expected value comes from dotenv itself, so these can't drift from what the bot reads.
