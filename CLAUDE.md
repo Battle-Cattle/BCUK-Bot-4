@@ -206,12 +206,16 @@ The two can differ (e.g. a low-impact fix that's wanted soon, or a high-impact f
 
 ## PR Reviews (Qlty)
 
-Qlty's PR comments (code smells such as file/function complexity, too many returns, duplication, plus diff-coverage gaps) are this repo's standards, not optional suggestions. **Never dismiss, defer or resolve a Qlty finding without fixing it**, and never reply that it "stays as is" or belongs in a follow-up. Fix every finding in the same PR, whether it's an inline review comment or a row in the "new issues" or coverage summary. The one exception is a file-complexity finding whose fix is outside the PR's scope (see below):
-- **Complexity, returns or structure:** refactor (extract helpers or a module) until the metric is under the threshold, keeping behaviour unchanged and tests green.
-- **File complexity ("High total complexity"):** the summary row doesn't name the file and Qlty's issue page needs a login, so ask the user which file it is instead of guessing. Then read the whole file and decide the best fix before changing anything. Prefer a split that follows the code's own seams over moving out whatever lifts out most easily: parsing or validation into the module that already owns it, repeated branching folded into a shared helper, or routes split by domain. Say which option you chose and why, and leave headroom under the threshold so the next small change doesn't trip it again. If the fix means restructuring a file the PR only touches in passing, leave the finding on the PR and fix it in a follow-up PR, linked from this one. If you're unsure whether it's in scope, ask the user.
-- **Uncovered new lines:** add tests that cover them.
+Qlty's PR comments (code smells such as file/function complexity, too many returns, duplication, plus diff-coverage gaps) are this repo's standards, not optional suggestions. **Never dismiss or resolve a Qlty finding without fixing it**, and never reply that it "stays as is". This applies to inline review comments and to rows in the "new issues" or coverage summary alike. Where the fix goes depends on its scope:
+- **In the same PR** when the fix stays within what the PR changes: code it adds (a new file, function or test) or the code it rewrites.
+- **In a follow-up PR** when the fix means restructuring existing code beyond the PR's change, typically a file-complexity finding on a file that already existed. Leave the finding on the PR, say in the PR description which follow-up fixes it, and open that follow-up (based on this PR's branch if it needs its changes). If you're unsure which applies, ask the user.
 
-After pushing, check that Qlty's next analysis no longer lists the finding.
+How to fix each kind:
+- **Complexity, returns or structure:** refactor (extract helpers or a module) until the metric is under the threshold, keeping behaviour unchanged and tests green.
+- **File complexity ("High total complexity"):** the summary row doesn't name the file and Qlty's issue page needs a login, so ask the user which file it is instead of guessing. A file the PR creates is fixed in the PR; an existing file is a follow-up, as above. Either way, read the whole file and choose the split that follows the code's own seams over moving out whatever lifts out most easily: parsing or validation into the module that already owns it, repeated branching folded into a shared helper, or routes split by domain. Say which option you chose and why, and leave headroom under the threshold so the next small change doesn't trip it again.
+- **Uncovered new lines:** add tests that cover them, in the same PR.
+
+After pushing a fix, check that Qlty's next analysis of that PR no longer lists the finding.
 
 ## PR Reviews (CodeRabbit)
 
