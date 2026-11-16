@@ -105,3 +105,47 @@ export function parseTwitchNameInput(
   }
   return { error: null, normalizedTwitchName, shouldClearTwitchName };
 }
+
+/** The validated fields of a `POST /admin/users/add` form. */
+export interface AddUserForm {
+  discordId: string;
+  discordName: string;
+  level: AccessLevelValue;
+  normalizedTwitchName: string | null;
+  shouldClearTwitchName: boolean;
+}
+
+/**
+ * Validates a `POST /admin/users/add` form body, or redirects and returns null: to `/admin/users`
+ * when `discord_id` or `access_level` is absent, or to `?error=<code>` for a malformed Discord ID
+ * (`invalid_discord_id`), an unknown level (`invalid_access_level`) or an invalid Twitch name
+ * (`invalid_twitch_name`). Checked in that order.
+ * @param res - Express response, used to redirect on absent or invalid input.
+ * @param body - The parsed request body.
+ * @returns The validated fields, or null once a redirect has been sent.
+ */
+export function parseAddUserForm(res: Response, body: Record<string, string | undefined>): AddUserForm | null {
+  const discordId = resolveValidDiscordId(res, body.discord_id);
+  if (!discordId) return null;
+  if (!body.access_level) {
+    res.redirect('/admin/users');
+    return null;
+  }
+  const level = parseAccessLevel(body.access_level);
+  if (level === null) {
+    res.redirect('/admin/users?error=invalid_access_level');
+    return null;
+  }
+  const twitch = parseTwitchNameInput(body.twitch_name, body.clear_twitch_name);
+  if (twitch.error) {
+    res.redirect(`/admin/users?error=${twitch.error}`);
+    return null;
+  }
+  return {
+    discordId,
+    discordName: trimField(body.discord_name),
+    level,
+    normalizedTwitchName: twitch.normalizedTwitchName,
+    shouldClearTwitchName: twitch.shouldClearTwitchName,
+  };
+}
