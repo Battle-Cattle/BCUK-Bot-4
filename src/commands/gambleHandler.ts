@@ -5,6 +5,7 @@ import { createRuntimeRegistry } from '../shared/runtimeRegistry';
 import type { TwitchSendRuntime } from './twitchRuntime';
 import { parseGambleAmount } from './gambleAmount';
 import { createPerViewerCooldown } from './perViewerCooldown';
+import { createNoticeThrottle } from './advancedCommands/advancedCommandGates';
 
 const log = createLogger('Gamble');
 
@@ -34,9 +35,18 @@ export function registerGambleTwitchRuntime(runtime: TwitchSendRuntime): void {
 // must never put `!gamble` on cooldown, so only a previous bet can.
 const gambleCooldown = createPerViewerCooldown();
 
-/** Test-only: clears every recorded `!gamble` cooldown claim, so tests don't bleed state. */
+/**
+ * At most one usage or "still on cooldown" reply per viewer per channel in this window. Only a
+ * successful bet claims the cooldown above, so without this every invalid or early `!gamble`
+ * got a reply, and one viewer could use up the send budget every channel shares (#1009).
+ */
+const GAMBLE_NOTICE_WINDOW_MS = 30_000;
+const gambleNotices = createNoticeThrottle(GAMBLE_NOTICE_WINDOW_MS);
+
+/** Test-only: clears every recorded `!gamble` cooldown claim and notice, so tests don't bleed state. */
 export function clearGambleCooldowns(): void {
   gambleCooldown.clear();
+  gambleNotices.clear();
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -108,13 +118,28 @@ async function sendGambleMessage(channel: string, message: string): Promise<void
 }
 
 /**
+ * Sends a usage or "still on cooldown" notice, unless this viewer already got one in this
+ * channel within {@link GAMBLE_NOTICE_WINDOW_MS}.
+ * @param channel - Twitch channel login the `!gamble` was sent in.
+ * @param streamerId - The channel's `streamer.id`, part of the throttle key.
+ * @param username - Twitch login of the viewer, part of the throttle key.
+ * @param message - Chat notice to send.
+ * @returns Resolves once the notice is sent or skipped.
+ */
+async function sendGambleNotice(channel: string, streamerId: number, username: string, message: string): Promise<void> {
+  if (!gambleNotices.tryClaim(`${streamerId}:${username.toLowerCase()}`)) return;
+  await sendGambleMessage(channel, message);
+}
+
+/**
  * Handles a Twitch chat message that may be a `!gamble` command: parses the bet amount (a plain
  * number, `1,000`, `5k`, `40%`, or `all`), enforces `!gamble`'s own cooldown (claimed only by a
  * previous bet — chat messages and other commands never touch it), and sends the result via the registered Twitch runtime. No-ops silently if the
  * streamer hasn't opted into Loyalty Points, or if the sender is on the streamer's "Exclude bot"
  * list (an excluded bot keeps whatever balance it had, but can't gamble it). An invalid amount gets a usage reply without
  * consuming the cooldown — only an actual gamble does that. A bet still on cooldown gets a
- * "try again in Ns" reply rather than silence.
+ * "try again in Ns" reply rather than silence. Those two notices are throttled to one per viewer
+ * per {@link GAMBLE_NOTICE_WINDOW_MS} (see {@link sendGambleNotice}); bet results never are.
  *
  * @param channel - Twitch channel the message was sent in (also the send target).
  * @param streamerId - The channel's linked `streamer.id`, resolved by the caller — no-ops
@@ -141,13 +166,13 @@ export async function executeGambleCommandForTwitch(
 
   const bet = await resolveBet(streamerId, username, extractArgs(rawMessage));
   if (bet === null) {
-    await sendGambleMessage(channel, USAGE_MESSAGE);
+    await sendGambleNotice(channel, streamerId, username, USAGE_MESSAGE);
     return;
   }
 
   if (!gambleCooldown.tryClaim(streamerId, username, config.cooldownSeconds)) {
     const remaining = gambleCooldown.getRemainingSeconds(streamerId, username, config.cooldownSeconds);
-    await sendGambleMessage(channel, `@${username} still on cooldown — try again in ${remaining}s.`);
+    await sendGambleNotice(channel, streamerId, username, `@${username} still on cooldown — try again in ${remaining}s.`);
     return;
   }
 

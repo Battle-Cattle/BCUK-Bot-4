@@ -75,6 +75,9 @@ export {
   getStreamGroupsForGuild, addStreamGroup, updateStreamGroup,
   getStreamersForGuild, getAllStreamersWithGroups,
   setStreamerLive, clearStreamerLive,
+  // Not wrapped in streamMonitorWrites: a move keeps the streamer's id and discord_id, the only
+  // things the streamer-ID cache holds.
+  moveStreamerToGroup,
 } from './db/streamMonitor';
 export { addStreamer, removeStreamer, removeStreamGroupAndStreamers } from './db/streamMonitorWrites';
 export { findStreamerIdByDiscordId } from './db/streamerIdCache';
@@ -86,7 +89,7 @@ export type {
 // ─── EventSub ────────────────────────────────────────────────────────────────
 
 export {
-  getAllEventSubStreamers, getStreamerByDiscordId, getStreamerById, getStreamerByTwitchUserId,
+  getAllEventSubStreamers, getEventSubConnectionStatusForGuild, getStreamerByDiscordId, getStreamerById, getStreamerByTwitchUserId,
   saveStreamerToken, clearStreamerToken, initEventConfig, saveEventConfig,
   DEFAULT_EVENT_CONFIG,
 } from './db/eventSub';
@@ -112,6 +115,7 @@ export { initAlertConfigs, saveAlertConfig, setAlertImage, setAlertSound } from 
 
 export type { StreamerEventType, StreamerEvent } from './db/eventLog';
 export { recordStreamerEvent, getRecentStreamerEvents } from './db/eventLog';
+export { fitStreamerEventText } from './db/eventLogText';
 export type { RedemptionProgress, RedemptionEffect } from './db/redemptionLedger';
 export { getRedemptionProgress, markRedemptionEffect, pruneRedemptionLedger } from './db/redemptionLedger';
 export type {
@@ -141,14 +145,19 @@ export {
 // ─── Overlay videos ─────────────────────────────────────────────────────────
 
 export {
-  getVideosForStreamer, addVideo, deleteVideo,
+  getVideosForStreamer, getRecordedVideoFilenames, addVideo, deleteVideo,
   getRewardsForStreamer, saveRewardWithVideos, deleteReward,
   getVideosForReward,
 } from './db/overlayVideos';
 export type { OverlayLibraryVideo, AddVideoToLibraryResult } from './db/overlayVideoLibrary';
+export type { SharedOverlayVideo, SharedOverlayVideoWithUploader } from './db/sharedOverlayVideos';
+export {
+  listSharedVideos, listEnabledSharedVideos, getSharedVideo, getRecordedSharedVideoFilenames, addSharedVideo,
+  renameSharedVideo, setSharedVideoEnabled, removeSharedVideo,
+} from './db/sharedOverlayVideos';
 export {
   addVideoToLibrary, getLibraryVideos, getLibraryVideoFilename, getImportedLibraryEntryIds,
-  importLibraryVideo, removeLibraryVideo,
+  getRecordedLibraryFilenames, importLibraryVideo, removeLibraryVideo,
 } from './db/overlayVideoLibrary';
 
 // ─── Channel point pricing ───────────────────────────────────────────────────
@@ -193,11 +202,10 @@ export type {
 export {
   ADVANCED_COMMAND_ROLES, MAX_ADVANCED_COMMAND_PARAMS, AdvancedCommandValidationError,
 } from './db/advancedCommandValidation';
-export type { DbAdvancedCommand, AdvancedCommandVideo, AdvancedCommandChatRoute } from './db/advancedCommands';
-export {
-  AdvancedCommandConflictError, listAdvancedCommands, getAdvancedCommand,
-  saveAdvancedCommandEffects, setAdvancedCommandAlertAsset,
-} from './db/advancedCommands';
+export type { DbAdvancedCommand, AdvancedCommandChatRoute } from './db/advancedCommands';
+export { AdvancedCommandConflictError, listAdvancedCommands, getAdvancedCommand } from './db/advancedCommands';
+export type { AdvancedCommandVideo } from './db/advancedCommandEffects';
+export { saveAdvancedCommandEffects, setAdvancedCommandAlertAsset } from './db/advancedCommandEffects';
 export { getAdvancedCommandForTwitchChannel } from './db/advancedCommandCache';
 export {
   addAdvancedCommand, updateAdvancedCommand, setAdvancedCommandEnabled, removeAdvancedCommand,

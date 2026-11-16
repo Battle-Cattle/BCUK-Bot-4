@@ -8,7 +8,7 @@
  * channel-points live pricing) so the reconnect plumbing only needs to be gotten right once.
  * @param {string} path - SSE endpoint path, e.g. '/overlay/channel/events'.
  * @param {function(any): void} onMessage - Called with each message's parsed JSON payload.
- * @param {{ baseMs?: number, maxMs?: number }} [options] - First reconnect delay and its cap.
+ * @param {{ baseMs?: number, maxMs?: number, onError?: function(): void }} [options] - First reconnect delay, its cap, and an optional callback called each time the connection errors (before the reconnect is scheduled).
  * @returns {void}
  */
 function connectSse(path, onMessage, options) {
@@ -32,6 +32,7 @@ function connectSse(path, onMessage, options) {
 
     es.onerror = function () {
       es.close();
+      if (options && options.onError) options.onError();
       setTimeout(connect, delayMs);
       delayMs = Math.min(maxMs, delayMs * 2);
     };

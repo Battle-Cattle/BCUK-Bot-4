@@ -6,11 +6,11 @@ import { getTextChannel, tryDeleteDiscordMessage, tryEditDiscordMessage } from '
 import { setStreamerLive, clearStreamerLive, DbStreamerFull } from '../../db';
 import { getStreams, TwitchStream } from '../twitchApi';
 import { LiveState, makeLiveState } from './twitchMonitorTypes';
-import { buildEmbed, templateVars } from './twitchMonitorEmbed';
+import { buildEmbed, renderAnnouncementContent, templateVars } from './twitchMonitorEmbed';
 import { updateMultitwitch } from './twitchMonitorMultitwitch';
 import { postAnnouncement } from './twitchMonitorAnnouncements';
 import { withLoginLock } from './twitchMonitorLoginLock';
-import { fillTemplate } from '../../shared/textTemplate';
+import { setTwitchChannelLive } from '../../shared/statusStore';
 
 /**
  * Tries to edit the streamer's existing startup-time "now live" message in place
@@ -42,9 +42,9 @@ export async function tryEditStartupMessage(
     const channel = await getTextChannel(discordClient, streamer.discord_channel_id);
     if (!channel || !isCurrent()) return false;
     const vars = templateVars(liveStream.user_login, liveStream);
-    const content = fillTemplate(streamer.group.live_message, vars, 'keep');
+    const message = renderAnnouncementContent(streamer.group.live_message, vars);
     const embed = buildEmbed(liveStream);
-    const edited = await tryEditDiscordMessage(discordClient, streamer.discord_channel_id, streamer.discord_message_id, { content, embeds: [embed] });
+    const edited = await tryEditDiscordMessage(discordClient, streamer.discord_channel_id, streamer.discord_message_id, { ...message, embeds: [embed] });
     if (!edited || !isCurrent()) return false;
     liveStates.set(String(streamer.id), makeLiveState(streamer, liveStream, streamer.discord_message_id, streamer.discord_channel_id));
     await setStreamerLive(streamer.id, streamer.discord_message_id, streamer.discord_channel_id, liveStream.game_name);
@@ -179,6 +179,10 @@ export async function performStartupLiveCheck(
       if (!loginKey || !userId) return;
 
       const liveStream = liveByUserId.get(userId);
+      // The dashboard's and shared overlay's live flag follows this check straight away, rather
+      // than waiting up to a poll interval to be set, or, for a stream that ended while the bot
+      // was down or the monitor was restarting, never being cleared (#1013).
+      setTwitchChannelLive(loginKey, liveStream !== undefined);
 
       if (liveStream) {
         await withLoginLock(loginKey, (isCurrent) => handleLiveStreamerOnStartup(liveStates, streamer, liveStream, groupsWithChanges, isCurrent));

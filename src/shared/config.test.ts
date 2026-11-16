@@ -145,6 +145,24 @@ describe('config — parsePositiveIntEnv-backed values', () => {
     expect(config.OVERLAY_MAX_FILE_MB).toBe(500);
   });
 
+  it('defaults the overlay storage caps to 1024 MB per streamer and 10240 MB for the library when unset', async () => {
+    const config = await loadConfig({ OVERLAY_MAX_TOTAL_MB_PER_STREAMER: undefined, OVERLAY_LIBRARY_MAX_TOTAL_MB: undefined });
+    expect(config.OVERLAY_MAX_TOTAL_MB_PER_STREAMER).toBe(1024);
+    expect(config.OVERLAY_LIBRARY_MAX_TOTAL_MB).toBe(10240);
+  });
+
+  it('reads the overlay storage caps from their own environment variables', async () => {
+    const config = await loadConfig({ OVERLAY_MAX_TOTAL_MB_PER_STREAMER: '2048', OVERLAY_LIBRARY_MAX_TOTAL_MB: '4096' });
+    expect(config.OVERLAY_MAX_TOTAL_MB_PER_STREAMER).toBe(2048);
+    expect(config.OVERLAY_LIBRARY_MAX_TOTAL_MB).toBe(4096);
+  });
+
+  it('falls back to the default overlay storage caps for values that aren\'t positive integers', async () => {
+    const config = await loadConfig({ OVERLAY_MAX_TOTAL_MB_PER_STREAMER: '0', OVERLAY_LIBRARY_MAX_TOTAL_MB: '10GB' });
+    expect(config.OVERLAY_MAX_TOTAL_MB_PER_STREAMER).toBe(1024);
+    expect(config.OVERLAY_LIBRARY_MAX_TOTAL_MB).toBe(10240);
+  });
+
   it('defaults COMPANION_MAX_SSE_PER_TOKEN to 3 when unset', async () => {
     const config = await loadConfig({ COMPANION_MAX_SSE_PER_TOKEN: undefined });
     expect(config.COMPANION_MAX_SSE_PER_TOKEN).toBe(3);
@@ -384,5 +402,23 @@ describe('config — SFX/OVERLAY folder defaults', () => {
   it('passes through ALERT_ASSETS_FOLDER when set', async () => {
     const config = await loadConfig({ ALERT_ASSETS_FOLDER: '/custom/alerts' });
     expect(config.ALERT_ASSETS_FOLDER).toBe('/custom/alerts');
+  });
+});
+
+describe('config — DISCORD_AUTO_PROVISION_GUILD_IDS', () => {
+  it('is empty when unset, so no guild is auto-provisioned', async () => {
+    const config = await loadConfig({ DISCORD_AUTO_PROVISION_GUILD_IDS: undefined });
+    expect(config.DISCORD_AUTO_PROVISION_GUILD_IDS.size).toBe(0);
+  });
+
+  it('parses a comma-separated list, trimming spaces and ignoring blank entries', async () => {
+    const config = await loadConfig({ DISCORD_AUTO_PROVISION_GUILD_IDS: ' 123456789012345678 ,, 98765432109876543210 ' });
+    expect([...config.DISCORD_AUTO_PROVISION_GUILD_IDS]).toEqual(['123456789012345678', '98765432109876543210']);
+  });
+
+  it.each(['my-server', '1234', '123456789012345678x'])('throws for an entry that is not a Discord server ID (%s)', async (value) => {
+    await expect(loadConfig({ DISCORD_AUTO_PROVISION_GUILD_IDS: `123456789012345678,${value}` })).rejects.toThrow(
+      `Invalid DISCORD_AUTO_PROVISION_GUILD_IDS: '${value}' is not a Discord server ID`,
+    );
   });
 });

@@ -12,6 +12,8 @@ vi.mock('../../shared/config', () => ({
   OVERLAY_MAX_SSE_PER_CHANNEL: 10,
   SSE_MAX_TOTAL_CONNECTIONS: 1000,
   OVERLAY_FOLDER: '/app/overlay-videos',
+  OVERLAY_MAX_TOTAL_MB_PER_STREAMER: 1024,
+  OVERLAY_LIBRARY_MAX_TOTAL_MB: 10240,
 }));
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 vi.mock('../../shared/pathUtils', async (importOriginal) => {
@@ -28,7 +30,13 @@ vi.mock('../../db', () => ({
   findDiscordIdByTokenHash: vi.fn(),
   findUser: vi.fn(),
 }));
-vi.mock('../guildAccess', () => ({ fetchLiveGuildsForUser: vi.fn(), resolveAccessLevelForGuild: vi.fn() }));
+vi.mock('../guildAccess', () => ({
+  fetchLiveGuildsForUser: vi.fn(),
+  resolveAccessLevelForGuild: vi.fn(),
+  // The signed-in user still has panel access (requireAuth's live check is covered in middleware.test.ts).
+  getLiveAccessForRequest: vi.fn().mockResolvedValue({ dbUser: { is_owner: false }, live: { guilds: [{}] } }),
+  hasPanelAccess: vi.fn().mockReturnValue(true),
+}));
 vi.mock('./overlayAdminMutations', async () => {
   const { Router } = await import('express');
   return { router: Router(), MAX_UPLOAD_MB: 100 };

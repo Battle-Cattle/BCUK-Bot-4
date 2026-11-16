@@ -36,6 +36,7 @@ import {
   getAllStreamerIds,
   addStreamer,
   removeStreamer,
+  moveStreamerToGroup,
   removeStreamGroupAndStreamers,
   setStreamerLive,
   clearStreamerLive,
@@ -391,6 +392,27 @@ describe('addStreamer', () => {
     const pool = { execute: vi.fn().mockResolvedValue([{ affectedRows: 0 }, []]) };
     vi.mocked(getPool).mockReturnValue(pool as any);
     await expect(addStreamer('user1', 3, GUILD_ID)).rejects.toThrow('does not belong to guild');
+  });
+});
+
+describe('moveStreamerToGroup (#1008)', () => {
+  it('updates only group_id, requiring both the current and the target group to be in guildId', async () => {
+    const pool = { execute: vi.fn().mockResolvedValue([{ affectedRows: 1 }, []]) };
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    expect(await moveStreamerToGroup(5, 9, GUILD_ID)).toBe(true);
+    const [sql, params] = pool.execute.mock.calls[0] as [string, unknown[]];
+    expect(sql).toMatch(/^UPDATE streamer s/);
+    expect(sql).toContain('SET s.group_id = dest.id');
+    expect(sql).toContain('cur.guild_id = ?');
+    expect(sql).toContain('dest.guild_id = ?');
+    expect(sql).not.toMatch(/DELETE/);
+    expect(params).toEqual([9, 5, GUILD_ID, GUILD_ID]);
+  });
+
+  it('returns false when the streamer or the target group is outside guildId', async () => {
+    const pool = { execute: vi.fn().mockResolvedValue([{ affectedRows: 0 }, []]) };
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    expect(await moveStreamerToGroup(5, 9, GUILD_ID)).toBe(false);
   });
 });
 

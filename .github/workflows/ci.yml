@@ -22,6 +22,10 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          # Don't leave the job's GITHUB_TOKEN in .git/config for later steps (npm ci runs
+          # third-party install scripts). Nothing in this job needs authenticated git.
+          persist-credentials: false
 
       - name: Set up Node.js
         id: setup-node
@@ -105,16 +109,100 @@ jobs:
           path: coverage/lcov.info
           retention-days: 1
 
+  # The real-MySQL tests (`*.db.test.ts`, `npm run test:db`): what MySQL does with the DB layer's
+  # SQL (foreign-key actions, unique indexes, the migrations themselves), which the mocked-pool
+  # tests above can't show. Ubuntu only: Windows runners can't run Linux containers. It runs
+  # alongside the job above and finishes well before it, so it adds no wall-clock time.
+  db:
+    name: Database tests (MySQL 8.4)
+    runs-on: ubuntu-latest
+    env:
+      TEST_DB_HOST: 127.0.0.1
+      TEST_DB_PORT: '3307'
+      TEST_DB_USER: root
+      TEST_DB_PASSWORD: test
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # The same container as local runs (docker-compose.test-db.yml). Started without waiting,
+      # so MySQL initialises while Node and node_modules are set up; "Wait for MySQL" below
+      # blocks until it's healthy.
+      - name: Start MySQL
+        run: docker compose -f docker-compose.test-db.yml up -d
+
+      # Node setup and node_modules: the same as the job above (same cache key, so either job's
+      # saved tree serves both).
+      - name: Set up Node.js
+        id: setup-node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24.x'
+          check-latest: true
+          cache: 'npm'
+
+      - name: Restore node_modules
+        id: node-modules-cache
+        uses: actions/cache@v6
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-node${{ steps.setup-node.outputs.node-version }}-${{ hashFiles('package.json', 'package-lock.json') }}
+
+      - name: Install dependencies
+        if: steps.node-modules-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          for attempt in 1 2 3 4; do
+            npm ci && break
+            if [ "$attempt" -eq 4 ]; then
+              echo "npm ci failed after 4 attempts" >&2
+              exit 1
+            fi
+            delay=$((2 ** attempt))
+            echo "npm ci failed (attempt $attempt/4). Retrying in ${delay}s..."
+            sleep "$delay"
+          done
+
+      - name: Restore Vitest transform cache
+        uses: actions/cache@v6
+        with:
+          path: .vitest-cache
+          key: vitest-db-${{ runner.os }}-${{ hashFiles('package-lock.json', 'vitest.config.mts', 'vitest.db.config.mts') }}-${{ github.sha }}
+          restore-keys: |
+            vitest-db-${{ runner.os }}-${{ hashFiles('package-lock.json', 'vitest.config.mts', 'vitest.db.config.mts') }}-
+
+      - name: Wait for MySQL
+        run: docker compose -f docker-compose.test-db.yml up -d --wait
+
+      - name: Database tests with coverage
+        run: npm run test:db:coverage
+
+      - name: MySQL logs
+        if: failure()
+        run: docker compose -f docker-compose.test-db.yml logs
+
+      # The coverage job below publishes this to Qlty alongside the main suite's report.
+      - name: Keep lcov coverage for the Qlty upload
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-db-lcov
+          path: coverage-db/lcov.info
+          retention-days: 1
+
   # Publishes coverage in a job of its own, so only this job can mint the OIDC token qlty-action
   # trades for a Qlty upload; the install, build and test steps above never see it. GitHub gives
   # fork and Dependabot pull requests no OIDC token, and qlty-action fails the job when it can't
   # get one, so those runs skip the upload.
-  # It also waits for its test job to pass: a failed one leaves no report to upload.
+  # It also waits for both test jobs to pass: a failed one leaves no report to upload. Qlty merges
+  # the two reports, so code only the real-MySQL tests reach (e.g. their harness) counts as covered.
   coverage:
     name: Publish coverage to Qlty
-    needs: ci
+    needs: [ci, db]
     if: >-
-      needs.ci.result == 'success' &&
+      needs.ci.result == 'success' && needs.db.result == 'success' &&
       (github.event_name != 'pull_request' ||
        (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]'))
     runs-on: ubuntu-latest
@@ -134,8 +222,14 @@ jobs:
           name: coverage-lcov
           path: coverage
 
+      - name: Download database-test lcov coverage
+        uses: actions/download-artifact@v8
+        with:
+          name: coverage-db-lcov
+          path: coverage-db
+
       - name: Publish coverage to Qlty
         uses: qltysh/qlty-action/coverage@ebcd284bf32e36a030afe15f1e136c7be08b9506 # v2.5.0
         with:
           oidc: true
-          files: coverage/lcov.info
+          files: coverage/lcov.info,coverage-db/lcov.info

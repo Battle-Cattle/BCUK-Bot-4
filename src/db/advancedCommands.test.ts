@@ -40,8 +40,7 @@ import { getPool } from './pool';
 import { runSerializedCommandWrite } from './commandWriteGuard';
 import {
   addAdvancedCommand, updateAdvancedCommand, setAdvancedCommandEnabled, removeAdvancedCommand,
-  listAdvancedCommands, getAdvancedCommand, getAllAdvancedCommandChatRoutes,
-  saveAdvancedCommandEffects, setAdvancedCommandAlertAsset, AdvancedCommandConflictError,
+  listAdvancedCommands, getAdvancedCommand, getAllAdvancedCommandChatRoutes, AdvancedCommandConflictError,
 } from './advancedCommands';
 import type { AdvancedCommandSettings } from './advancedCommandValidation';
 
@@ -203,77 +202,5 @@ describe('reads', () => {
       { commandId: 7, streamerId: 3, triggerString: '!hydrate', twitchName: 'Streamer', discordId: '123' },
     ]);
     expect(pool.execute.mock.calls[0]![0]).toContain('u.is_twitch_bot_enabled = 1');
-  });
-});
-
-describe('saveAdvancedCommandEffects', () => {
-  it('replaces params, videos (owned) and alert in one transaction', async () => {
-    pool._conn.execute
-      .mockResolvedValueOnce([[{ id: 7 }], []]) // ownership
-      .mockResolvedValueOnce([{}, []]) // delete params
-      .mockResolvedValueOnce([{}, []]) // insert params
-      .mockResolvedValueOnce([{}, []]) // delete videos
-      .mockResolvedValueOnce([[{ id: 2 }], []]) // owned videos
-      .mockResolvedValueOnce([{}, []]) // insert videos
-      .mockResolvedValueOnce([{}, []]); // upsert alert
-
-    const result = await saveAdvancedCommandEffects(3, 7, {
-      params: [{ key: 'color', value: 'red' }],
-      videos: [{ videoId: 2, weight: 2 }],
-      alert: { messageTemplate: 'Hi', durationMs: 4000, textAnimation: 'none' },
-    });
-    expect(result).toEqual([]);
-    const calls = pool._conn.execute.mock.calls;
-    expect(calls[2]![1]).toEqual([7, 'color', 'red']);
-    expect(calls[5]![1]).toEqual([7, 2, 2]);
-    expect(calls[6]![0]).toContain('INSERT INTO advanced_command_alert');
-    expect(calls[6]![0]).not.toContain('image_filename');
-    expect(pool._conn.commit).toHaveBeenCalled();
-  });
-
-  it('rolls back when a video belongs to another streamer', async () => {
-    pool._conn.execute
-      .mockResolvedValueOnce([[{ id: 7 }], []])
-      .mockResolvedValueOnce([{}, []])
-      .mockResolvedValueOnce([{}, []])
-      .mockResolvedValueOnce([[], []]);
-    await expect(saveAdvancedCommandEffects(3, 7, { params: [], videos: [{ videoId: 9, weight: 1 }], alert: null }))
-      .rejects.toThrow('not owned');
-    expect(pool._conn.rollback).toHaveBeenCalled();
-  });
-
-  it('removes the alert and returns its orphaned asset filenames', async () => {
-    pool._conn.execute
-      .mockResolvedValueOnce([[{ id: 7 }], []])
-      .mockResolvedValueOnce([{}, []]) // delete params
-      .mockResolvedValueOnce([{}, []]) // delete videos
-      .mockResolvedValueOnce([[{ image_filename: 'a.gif', sound_filename: 'b.mp3' }], []])
-      .mockResolvedValueOnce([{}, []]);
-    expect(await saveAdvancedCommandEffects(3, 7, { params: [], videos: [], alert: null })).toEqual(['a.gif', 'b.mp3']);
-  });
-
-  it('returns null for a command that is not the streamer\'s', async () => {
-    pool._conn.execute.mockResolvedValueOnce([[], []]);
-    expect(await saveAdvancedCommandEffects(3, 7, { params: [], videos: [], alert: null })).toBeNull();
-  });
-});
-
-describe('setAdvancedCommandAlertAsset', () => {
-  it('sets the image and returns the previous filename', async () => {
-    pool._conn.execute.mockResolvedValueOnce([[{ filename: 'old.png' }], []]).mockResolvedValueOnce([{}, []]);
-    expect(await setAdvancedCommandAlertAsset(3, 7, 'image', 'new.png')).toEqual({ previous: 'old.png' });
-    expect(pool._conn.execute.mock.calls[1]![0]).toContain('SET image_filename = ?');
-    expect(pool._conn.execute.mock.calls[1]![1]).toEqual(['new.png', 7]);
-  });
-
-  it('clears the sound', async () => {
-    pool._conn.execute.mockResolvedValueOnce([[{ filename: null }], []]).mockResolvedValueOnce([{}, []]);
-    expect(await setAdvancedCommandAlertAsset(3, 7, 'sound', null)).toEqual({ previous: null });
-    expect(pool._conn.execute.mock.calls[1]![0]).toContain('SET sound_filename = ?');
-  });
-
-  it('returns null when the command has no alert or is not the streamer\'s', async () => {
-    pool._conn.execute.mockResolvedValueOnce([[], []]);
-    expect(await setAdvancedCommandAlertAsset(3, 7, 'image', 'x.png')).toBeNull();
   });
 });

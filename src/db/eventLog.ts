@@ -1,6 +1,7 @@
 import mysql from 'mysql2/promise';
 import { getPool } from './pool';
 import { isMysqlDuplicateEntryError } from './utils';
+import { fitStreamerEventText } from './eventLogText';
 import { createLogger } from '../shared/logger';
 
 const log = createLogger('DB');
@@ -81,11 +82,13 @@ export async function recordStreamerEvent(
   detail: string | null,
   redemptionId?: string | null,
 ): Promise<number | null> {
+  // Fitted here too, not only by callers, so no caller can make the insert fail on length.
+  const fitted = fitStreamerEventText(displayName, detail);
   let insertId: number;
   try {
     const [result] = await getPool().execute<mysql.ResultSetHeader>(
       `INSERT INTO streamer_event_log (streamer_id, event_type, display_name, detail, redemption_id) VALUES (?, ?, ?, ?, ?)`,
-      [streamerId, eventType, displayName, detail, redemptionId ?? null],
+      [streamerId, eventType, fitted.displayName, fitted.detail, redemptionId ?? null],
     );
     insertId = result.insertId;
   } catch (err) {

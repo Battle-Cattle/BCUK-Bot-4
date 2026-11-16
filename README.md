@@ -9,7 +9,7 @@ A multi-platform community bot connecting Twitch and Discord. Features custom co
 
 ## Requirements
 
-- **Node.js 24.22.1 or later**, matching `engines` in `package.json` and CI. `.npmrc` sets `engine-strict=true`, so `npm install`/`npm ci` (and so `deploy.sh`) stop on an older Node. Use the npm 11 that Node 24 ships with: npm 10 has failed `npm ci` on this lockfile with a spurious `Missing: <pkg> from lock file` error (it handles the `overrides` entries differently), so check `npm -v` if you installed npm separately.
+- **Node.js 24.22.3 or later**, matching `engines` in `package.json` and CI. `.npmrc` sets `engine-strict=true`, so `npm install`/`npm ci` (and so `deploy.sh`) stop on an older Node. Use the npm 11 that Node 24 ships with: npm 10 has failed `npm ci` on this lockfile with a spurious `Missing: <pkg> from lock file` error (it handles the `overrides` entries differently), so check `npm -v` if you installed npm separately.
 - **MySQL 8.0.19 or later.** Upserts use the `INSERT … VALUES (…) AS new_row` row-alias form, which older versions reject. For a fresh install, create an empty `utf8mb4` database: the bot creates the tables on first start (see [Database migrations](#database-migrations)). `DATABASE-SCHEMA.md` documents each table.
 - A `.env` file with credentials for each platform. Copy `.env.example` and fill it in; it lists every setting the bot reads.
 
@@ -23,6 +23,12 @@ npm run dev      # development
 npm run build    # compile TypeScript
 npm start        # production
 ```
+
+## Adding the bot to a Discord server
+
+In the Discord developer portal, open the application's **Bot** tab and turn **Public Bot** off, so only you can invite the bot. With it on, anyone who has the client ID can add the bot to a server they own.
+
+The bot also doesn't trust the invite on its own. When it joins a server for the first time, it gives that server's owner Admin access to the panel only if the server's ID is in `DISCORD_AUTO_PROVISION_GUILD_IDS` (comma-separated, empty by default). Any other server is recorded but ignored: nobody gets access, the bot doesn't answer commands there, and you (the bot owner) get a DM. To start serving it, pick it in the panel's server switcher and add its first member on the Users page. This matters because some catalogs (custom commands, timers, SFX, the shared video overlay) are shared by every server, so a panel Admin in any server can change what the bot does on every stream.
 
 ## Running the bot
 
@@ -38,6 +44,8 @@ This installs and enables the unit from `deploy/bcuk-bot.service`, filled in wit
 
 The unit is sandboxed (`ProtectSystem=strict`, `ProtectHome=tmpfs`, `NoNewPrivileges` and friends; see `deploy/bcuk-bot.service`). Every home directory is hidden from the bot, so it can't read the account's other files (SSH keys, credentials, other projects). Only the checkout and the `node` binary it runs (just that file, not the folder it's in) are put back, read-only. It can only write to `logs/`, the three upload folders (`OVERLAY_FOLDER`, `ALERT_ASSETS_FOLDER`, `SFX_FOLDER`), `UPLOAD_INCOMING_FOLDER` (where chunked uploads are assembled), and its own private `/tmp` and `/var/tmp` (`PrivateTmp`, emptied when the service stops). The installer reads those folders from `.env` (set them there, not in a systemd drop-in, which the installer can't see), creates them, and writes them into the unit's `BindPaths`. Re-run it after changing any of them, after moving the checkout or switching to a different Node install, or the bot will fail to start or fail its writes there. Anything the bot needs from a home directory must be inside the checkout: a symlink from it to elsewhere in a home directory won't resolve. `systemd-analyze security bcuk-bot` shows what the sandbox covers.
 
+It also drops every Linux capability, allows only the system calls and socket types (IPv4, IPv6, Unix) an ordinary service needs, hides other processes and devices, and creates files private to the bot's user (`UMask=0077`). Each of these is its own line in the unit, so if one breaks something on your host you can turn just that one off with a drop-in, without waiting for a release: `sudo systemctl edit bcuk-bot`, then for example `[Service]` and `UMask=0022` (or `RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK`), then restart. `journalctl -u bcuk-bot | grep -E 'EPERM|EACCES|SIGSYS'` shows what the sandbox refused. Keep `.env` readable only by the bot's user (`chmod 600 .env`): it holds the database password and every credential. The installer and `deploy.sh` warn when it isn't, but don't change it.
+
 `deploy.sh` never rewrites the installed unit, so a change to `deploy/bcuk-bot.service` reaches the server only when the installer runs again. That includes the sandboxing above: an install made before it keeps running unsandboxed until you re-run the installer. After deploying a release that changes the unit, run `bash scripts/install-systemd-service.sh` again as the bot's user, then `sudo systemctl restart bcuk-bot`.
 
 The unit keeps running the `node` it was installed with, so after upgrading Node, re-run `bash scripts/install-systemd-service.sh` (it rewrites the unit with the `node` now on your `PATH`) and then deploy. `deploy.sh` checks that the service's `node` meets `engines` in `package.json` and stops before installing anything if it doesn't.
@@ -49,7 +57,7 @@ The unit keeps running the `node` it was installed with, so after upgrading Node
 3. Swaps the new build in, keeping the previous one (and, if the dependencies changed, the previous `node_modules`) beside it.
 4. Backs up the database (see [Backups](#backups)).
 5. Restarts the service.
-6. Waits up to 90 seconds for `GET /healthz` on the web panel to answer from the service's own process, then 30 more to check it stays up: the same process, no restarts, still answering.
+6. Waits up to 90 seconds for `GET /healthz` on the web panel to answer from the service's own process, then 30 more to check it stays up: the same process, no restarts, still answering. It probes once a second; `DEPLOY_POLL_INTERVAL_SECONDS`, `DEPLOY_HEALTH_TIMEOUT_SECONDS` and `DEPLOY_STABILITY_SECONDS` change the interval and the two waits (whole or decimal seconds, e.g. `0.3`; the tests shorten them; the interval can't be below `0.01`). The deploy needs bash 5 or later, which supplies the clock it times these with.
 
 If any step fails, the deploy rolls back: the previous code, build and dependencies go back in place and, if the service had already restarted, it restarts onto the previous build and checks that comes up. It then prints a report, also saved to `logs/last-deploy-failure.log`: what failed, the command, both commits, the service status and its log since the restart, and whether the rolled-back bot is healthy. A failed rollback says so in capitals: the bot is down.
 
@@ -92,6 +100,18 @@ To change the schema:
 
 MySQL commits each DDL statement on its own, so a migration that fails part-way can't be rolled back, and systemd will keep retrying it on restart. Prefer one change per file, and make statements safe to re-run where you can: `CREATE TABLE IF NOT EXISTS` works, but MySQL has no `ADD COLUMN IF NOT EXISTS`, so check `information_schema` in a prepared statement when it matters. To recover, stop the service, finish or undo the failed file's changes by hand, fix the file (it isn't recorded until it succeeds), and start again.
 
+### Database tests
+
+`npm test` mocks the database. `npm run test:db` runs the `*.db.test.ts` files against a real MySQL instead, for what only MySQL shows: foreign-key `ON DELETE` actions, unique indexes, and every migration applying cleanly to an empty database. CI runs it on every push. To run it locally, start the throwaway server in `docker-compose.test-db.yml` (MySQL 8.4.11, as in production, held in memory on port 3307):
+
+```bash
+docker compose -f docker-compose.test-db.yml up -d --wait
+TEST_DB_HOST=127.0.0.1 TEST_DB_PORT=3307 TEST_DB_USER=root TEST_DB_PASSWORD=test npm run test:db
+docker compose -f docker-compose.test-db.yml down
+```
+
+The suite reads only the `TEST_DB_*` variables, never the bot's `DB_*` ones, and fails straight away if they aren't set. Every database it creates is named `bcuk_test_*`, and each run drops those first, so don't point it at a server whose databases you want to keep under that name. Each Vitest worker migrates its own database once through the bot's migration runner and reuses it for its later files, and every table is emptied after each test. Use `getPool()` from `src/db/pool.ts` in these tests: it is the bot's real pool, with BIGINT columns as strings like production.
+
 ## Deployment
 
 The web panel serves uploaded files straight from disk: overlay videos from `OVERLAY_FOLDER`, alert images and sounds from `ALERT_ASSETS_FOLDER`, and sounds from `SFX_FOLDER`. The bot checks every served path stays inside its folder, following symlinks, but the check can't be atomic with the file read. So:
@@ -101,9 +121,19 @@ The web panel serves uploaded files straight from disk: overlay videos from `OVE
 - Keep them outside the repo checkout and away from `.env` and other secrets.
 - The same applies to `UPLOAD_INCOMING_FOLDER`, where SFX and alert uploads are assembled before they're checked (overlay videos use `OVERLAY_FOLDER/.incoming`).
 
+### Web panel sessions
+
+A web panel login lasts 24 hours from the last time a page of the panel was loaded, and never more than 7 days from login; after that the user logs in again. Only real page loads renew it: the dashboard's background refreshes and live connections don't, so a tab left open still logs out a day after it was last used. A page load renews the session at most once every 5 minutes. Browsers that don't send `Sec-Fetch-Mode` headers never renew, so their sessions end 24 hours after login, as before.
+
 ### Uploads and reverse proxies
 
 Every web panel upload is sent as a chunked, resumable upload: the page sends the file in 8 MB pieces, each its own short request, and re-sends a piece that fails from the last one the server confirmed. A reverse proxy in front of the panel therefore only needs a request body limit above one piece (say 10 MB, e.g. nginx `client_max_body_size 10m;`), whatever the largest file is. Each piece is a short request, but completing a MOV overlay upload waits for its conversion to WebM, which can take up to `OVERLAY_TRANSCODE_TIMEOUT_MINUTES` (30 by default), longer if other conversions are queued, so give the proxy a read timeout comfortably above that for the panel (nginx: e.g. `proxy_read_timeout 3600s;`; its default is 60 seconds). The page sends smaller pieces after a piece fails, so slow connections still get through within Node's default 5-minute request timeout. Each user can have one upload in progress per upload area at a time, and each area holds a limited number of unfinished uploads across all users (3 for overlay videos); an upload with no new piece for an hour is abandoned and its pieces are removed. Starting a different file while one is unfinished asks whether to cancel the unfinished one.
+
+Overlay video files that no database row refers to are removed at startup and then once a day. They're left behind by a restart, or a failed file removal, between a video's file and its database row being written or deleted. A stored video in a streamer's folder with no `overlay_video` row for that streamer, in `library/` with no library entry, or in `shared/` with no shared overlay video, is removed once it's over about 2.5 hours old (an hour plus three MOV conversion timeouts) and no upload, publish or import is still writing it. The rest of `OVERLAY_FOLDER` (`.incoming/`, conversion files in progress, symlinks) is left alone, and if the database can't be reached the run removes nothing. Each removal is logged. The sweep goes by whichever database the bot is connected to, so start the bot only against the database that goes with the folder: see "Restoring" under Backups.
+
+Stored overlay video is capped, so uploads can't fill the disk. Each streamer's own videos may add up to `OVERLAY_MAX_TOTAL_MB_PER_STREAMER` (1024 MB by default): their uploads as stored (a MOV counts as the WebM it was converted to, not the size uploaded) plus videos they added from the public library, each counted in full even though the copy is usually a hard link that takes no extra disk space. The public library's own files may add up to `OVERLAY_LIBRARY_MAX_TOTAL_MB` (10240 MB by default), and adding a video to it doesn't count against the contributor's total. Over a cap, the upload, import or publish is refused until the streamer deletes videos (or, for the library, an Admin removes entries). The totals are added up from the videos listed in the database, not the folder's size on disk, so a streamer's total is always the videos their settings page shows. The number of streamers times the per-streamer cap, plus the library cap, is therefore the most the listed videos can add up to, not the most the overlay volume can hold: leave headroom on top for uploads in progress (up to 3 at `OVERLAY_MAX_FILE_MB` each), MOV conversions (the upload and its WebM side by side until it finishes), and any files left behind with no database row.
+
+The caps only limit what the bot stores. The bot also checks the free space on the volume holding `OVERLAY_FOLDER` every 5 minutes, and DMs the owner a `disk is down` alert when it drops below `DISK_FREE_ALERT_MB` (1024 MB by default), for example because logs, the database or backups on the same volume grew. Like the other owner alerts it's sent once when the space runs low (repeated every 30 minutes while it stays low) and once when it recovers, and the `!health` command and the health page show the latest reading. If the check itself can't run (say `OVERLAY_FOLDER` doesn't exist yet because nothing has been uploaded), it's logged once as a warning and no alert is sent.
 
 ### Backups
 
@@ -126,6 +156,8 @@ sudo systemctl stop bcuk-bot
 bash scripts/restore-db.sh ~/bcuk-bot-backups/<file>.sql.gz
 sudo systemctl start bcuk-bot
 ```
+
+Restore the upload folders from the same point in time as the dump. Once the bot starts, it removes any overlay video file that the restored database has no row for, such as one uploaded after the dump was taken, so copy aside anything you want to keep before starting it.
 
 **Test a backup** now and then by restoring it into a scratch database, which leaves the live one alone: `bash scripts/restore-db.sh <file> bcuk_restore_test`. If that database already has tables (a name reused or mistyped), it asks you to type the name first, since restoring drops them all. Then check it looks right, logging in as the bot's database user (`DB_HOST`, `DB_PORT` and `DB_USER` in `.env`, with 3306 for an unset port; `-p` asks for `DB_PASSWORD`): `mysql -h <DB_HOST> -P <DB_PORT> -u <DB_USER> -p bcuk_restore_test -e 'SELECT COUNT(*) FROM user; SELECT version FROM schema_migrations'`. Drop it afterwards the same way: `mysql -h <DB_HOST> -P <DB_PORT> -u <DB_USER> -p -e 'DROP DATABASE bcuk_restore_test'`. The bot's MySQL user needs the `CREATE` and `DROP` privileges on that database. On a server that ignores the case of database names (`lower_case_table_names` set), a name differing from `DB_NAME` only in case is the live database, and gets the live checks.
 

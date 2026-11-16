@@ -3,6 +3,7 @@ import { getLoyaltyPointsBalance, getLoyaltyPointsLeaderboard, getLoyaltyPointsC
 import { resolveCommand, extractArgs } from './commandUtils';
 import { createRuntimeRegistry } from '../shared/runtimeRegistry';
 import type { TwitchSendRuntime } from './twitchRuntime';
+import { createNoticeThrottle } from './advancedCommands/advancedCommandGates';
 
 const log = createLogger('Points');
 
@@ -10,6 +11,22 @@ const log = createLogger('Points');
 const POINTS_COMMAND = '!points';
 const LEADERBOARD_SIZE = 5;
 const LEADERBOARD_SUBCOMMANDS = new Set(['leaderboard', 'top']);
+
+/**
+ * How often `!points` answers: each viewer's own balance once per window per channel, and the
+ * leaderboard (the same answer for everyone) once per window per channel. Every bot message in
+ * every channel shares one send budget (`twitchSendQueue.ts`), so without these one viewer
+ * spamming `!points` could use it all up and delay every other channel's messages (#1009).
+ */
+const POINTS_REPLY_WINDOW_MS = 30_000;
+const balanceReplies = createNoticeThrottle(POINTS_REPLY_WINDOW_MS);
+const leaderboardReplies = createNoticeThrottle(POINTS_REPLY_WINDOW_MS);
+
+/** Test-only: forgets every recorded `!points` reply, so tests don't bleed state. */
+export function clearPointsReplyThrottles(): void {
+  balanceReplies.clear();
+  leaderboardReplies.clear();
+}
 
 // ─── Twitch runtime (registered from index.ts before startTwitchBot) ─────────
 //
@@ -41,21 +58,23 @@ function formatLeaderboard(entries: { twitchUsername: string; balance: number }[
 /**
  * Builds the `!points` response for a viewer: either the channel's points leaderboard
  * (`!points leaderboard`/`!points top`) or the caller's own balance (`!points`/`!points
- * balance`, or any other/no subcommand). Intentionally has no cooldown — every viewer can
- * check their balance or the leaderboard at any time, since both are cheap reads with no
- * side effects.
+ * balance`, or any other/no subcommand). Returns null, without reading the DB, when that reply
+ * was already sent inside {@link POINTS_REPLY_WINDOW_MS}: per viewer for a balance, per channel
+ * for the leaderboard.
  *
  * @param streamerId - The streamer's `streamer.id`.
  * @param twitchUsername - The requesting viewer's Twitch login.
  * @param args - The text following `!points`, used to pick the subcommand.
- * @returns The chat message to send.
+ * @returns The chat message to send, or null when it is throttled.
  */
-async function buildPointsResponse(streamerId: number, twitchUsername: string, args: string): Promise<string> {
+async function buildPointsResponse(streamerId: number, twitchUsername: string, args: string): Promise<string | null> {
   const subcommand = args.split(/\s+/)[0]?.toLowerCase() ?? '';
   if (LEADERBOARD_SUBCOMMANDS.has(subcommand)) {
+    if (!leaderboardReplies.tryClaim(String(streamerId))) return null;
     return formatLeaderboard(await getLoyaltyPointsLeaderboard(streamerId, LEADERBOARD_SIZE));
   }
 
+  if (!balanceReplies.tryClaim(`${streamerId}:${twitchUsername.toLowerCase()}`)) return null;
   const balance = await getLoyaltyPointsBalance(streamerId, twitchUsername);
   return `@${twitchUsername} has ${balance} point${balance === 1 ? '' : 's'}.`;
 }
@@ -63,7 +82,8 @@ async function buildPointsResponse(streamerId: number, twitchUsername: string, a
 /**
  * Handles a Twitch chat message that may be a `!points` command: checks the caller's balance
  * or the channel's leaderboard, and sends the result via the registered Twitch runtime. No-ops
- * silently if the streamer hasn't opted into Loyalty Points for their channel.
+ * silently if the streamer hasn't opted into Loyalty Points for their channel, or when the
+ * reply is throttled (see {@link buildPointsResponse}).
  *
  * @param channel - Twitch channel the message was sent in (also the send target).
  * @param streamerId - The channel's linked `streamer.id`, resolved by the caller — no-ops
@@ -89,6 +109,7 @@ export async function executePointsCommandForTwitch(
   if (!config?.enabled) return;
 
   const response = await buildPointsResponse(streamerId, username, extractArgs(rawMessage));
+  if (response === null) return;
 
   const runtime = pointsRuntime.get();
   if (runtime) {

@@ -39,6 +39,7 @@ import {
   getLibraryVideos,
   getImportedLibraryEntryIds,
   getLibraryVideoFilename,
+  getRecordedLibraryFilenames,
   importLibraryVideo,
   removeLibraryVideo,
 } from './overlayVideoLibrary';
@@ -184,6 +185,19 @@ describe('getLibraryVideos', () => {
 });
 
 // ─── getImportedLibraryEntryIds ──────────────────────────────────────────────
+
+describe('getRecordedLibraryFilenames', () => {
+  it('returns which of the filenames have a library entry, in one IN query', async () => {
+    const pool = makeMockPool({ rows: [{ filename: 'b.webm' }] });
+    vi.mocked(getPool).mockReturnValue(pool as any);
+
+    await expect(getRecordedLibraryFilenames(['a.webm', 'b.webm'])).resolves.toEqual(new Set(['b.webm']));
+    expect(pool.execute).toHaveBeenCalledWith(
+      expect.stringContaining('FROM overlay_video_library WHERE filename IN (?, ?)'),
+      ['a.webm', 'b.webm'],
+    );
+  });
+});
 
 describe('getLibraryVideoFilename', () => {
   it('returns the filename of the entry with that id', async () => {

@@ -25,7 +25,7 @@ export const WEBM_TRANSCODE_TIMEOUT_MS = OVERLAY_TRANSCODE_TIMEOUT_MINUTES * 60_
 export const KILLED_FFMPEG_EXIT_GRACE_MS = 5_000;
 
 /**
- * Most conversions queued or running at once. Each one holds its upload's buffer and a
+ * Most conversions queued or running at once. Each one holds its upload's file and a
  * temporary copy on disk until it finishes, so a burst of uploads is turned away rather than
  * left waiting (and holding both) behind several long conversions.
  */
@@ -53,9 +53,12 @@ let activeProcess: ChildProcess | undefined;
 let stopped = false;
 
 /**
- * True when a new conversion would be turned away as `transcode_busy`. The upload route checks
- * this before buffering a file the client says is a MOV, so a busy server doesn't first take in
- * the whole upload only to refuse it.
+ * True when a new conversion would be turned away as `transcode_busy`. The upload routes check
+ * this before a file the client says is a MOV is sent, as a hint so a busy server doesn't first
+ * take in the whole upload only to refuse it. Nothing is reserved: every conversion runs inside
+ * an upload slot (`uploadSlots.ts`) held until it ends, so with no more slots than
+ * {@link MAX_PENDING_WEBM_TRANSCODES} the queue can't be full at completion; `transcodeToWebm`
+ * still checks, as a guard.
  * @returns True when {@link MAX_PENDING_WEBM_TRANSCODES} conversions are queued or running.
  */
 export function isWebmTranscodeQueueFull(): boolean {

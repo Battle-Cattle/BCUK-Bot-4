@@ -43,6 +43,9 @@ vi.mock('../../db', () => ({
 vi.mock('./twitchMonitorEmbed', () => ({
   buildEmbed: vi.fn().mockReturnValue({ title: 'embed' }),
   templateVars: vi.fn().mockReturnValue({}),
+  // Mentions limited to the template's own (see twitchMonitorEmbed.test.ts); a marker object here
+  // so the tests can check every send/edit passes it through.
+  renderAnnouncementContent: vi.fn(() => ({ content: 'Live message', allowedMentions: { parse: ['everyone'], roles: [], users: [] } })),
 }));
 vi.mock('../../shared/textTemplate', () => ({
   fillTemplate: vi.fn().mockReturnValue('Live message'),
@@ -56,6 +59,7 @@ import { getDiscordClient } from '../../discord/discordClientStore';
 import { isDiscordNotFoundError, tryDeleteDiscordMessage } from '../../discord/discordUtils';
 import { setStreamerLive, clearStreamerLive } from '../../db';
 import { updateMultitwitch } from './twitchMonitorMultitwitch';
+import { renderAnnouncementContent } from './twitchMonitorEmbed';
 import type { DbStreamGroup, DbStreamerFull } from '../../db';
 import type { TwitchStream } from '../twitchApi';
 import type { LiveState } from './twitchMonitorTypes';
@@ -128,7 +132,9 @@ describe('postAnnouncement', () => {
     vi.mocked(getDiscordClient).mockReturnValue(makeDiscordClient(channel) as any);
     const liveStates = new Map<string, LiveState>();
     await postAnnouncement(liveStates, makeStreamer(), makeStream());
-    expect(channel.send).toHaveBeenCalled();
+    // Sent with only the template's own mentions allowed (#1010).
+    expect(channel.send).toHaveBeenCalledWith({ content: 'Live message', allowedMentions: { parse: ['everyone'], roles: [], users: [] }, embeds: [{ title: 'embed' }] });
+    expect(renderAnnouncementContent).toHaveBeenCalledWith('Live!', {});
     expect(liveStates.get('10')?.messageId).toBe('msg1');
     expect(setStreamerLive).toHaveBeenCalledWith(10, 'msg1', 'ch1', 'Chess');
   });
@@ -263,7 +269,7 @@ describe('editAnnouncement', () => {
     vi.mocked(getDiscordClient).mockReturnValue(makeDiscordClient(channel) as any);
     const state = makeLiveState({ group: makeGroup({ delete_old_posts: false }) });
     await editAnnouncement(new Map(), state, makeStream(), 'live_message');
-    expect(channel._message.edit).toHaveBeenCalled();
+    expect(channel._message.edit).toHaveBeenCalledWith({ content: 'Live message', allowedMentions: { parse: ['everyone'], roles: [], users: [] }, embeds: [{ title: 'embed' }] });
     expect(channel.send).not.toHaveBeenCalled();
     expect(setStreamerLive).toHaveBeenCalled();
   });
@@ -274,7 +280,7 @@ describe('editAnnouncement', () => {
     const state = makeLiveState({ group: makeGroup({ delete_old_posts: true }) });
     await editAnnouncement(new Map(), state, makeStream(), 'new_game_message');
     expect(tryDeleteDiscordMessage).toHaveBeenCalledWith('ch1', 'msg1');
-    expect(channel.send).toHaveBeenCalled();
+    expect(channel.send).toHaveBeenCalledWith({ content: 'Live message', allowedMentions: { parse: ['everyone'], roles: [], users: [] }, embeds: [{ title: 'embed' }] });
     expect(setStreamerLive).toHaveBeenCalled();
   });
 

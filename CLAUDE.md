@@ -2,7 +2,7 @@
 
 ## Node/npm version
 
-`package.json` pins `"engines": { "node": ">=24.22.1" }`, and CI (`.github/workflows/ci.yml`) installs Node `24.x` via `actions/setup-node@v4`, which brings npm 11+. **Always match that before running any `npm` command** — a sandbox's default Node (e.g. the `/opt/node22` on PATH in some environments) ships an older npm whose `npm ci` is stricter about `overrides` bookkeeping than npm 11's and can fail with a spurious `Missing: <pkg>@<version> from lock file` even against a perfectly valid, CI-green lockfile (see the `filing-cabinet`/`typescript` override in `overrides` — this bit us once). If Node 24 isn't already active:
+`package.json` pins `"engines": { "node": ">=24.22.3" }`, and CI (`.github/workflows/ci.yml`) installs Node `24.x` via `actions/setup-node@v7`, which brings npm 11+. **Always match that before running any `npm` command** — a sandbox's default Node (e.g. the `/opt/node22` on PATH in some environments) ships an older npm whose `npm ci` is stricter about `overrides` bookkeeping than npm 11's and can fail with a spurious `Missing: <pkg>@<version> from lock file` even against a perfectly valid, CI-green lockfile (see the `filing-cabinet`/`typescript` override in `overrides` — this bit us once). If Node 24 isn't already active:
 
 ```bash
 export NVM_DIR="${NVM_DIR:-/opt/nvm}" && source "$NVM_DIR/nvm.sh"
@@ -11,17 +11,29 @@ node -v   # expect 24.x
 npm -v    # expect 11.x
 ```
 
-(If `$NVM_DIR/nvm.sh` doesn't exist in a given sandbox, find whatever installs/switches Node there instead — the point is Node 24.22.1+ / npm 11+, not this exact path.) `.npmrc` sets `engine-strict=true`, so npm refuses to install on an older Node.
+(If `$NVM_DIR/nvm.sh` doesn't exist in a given sandbox, find whatever installs/switches Node there instead — the point is Node 24.22.3+ / npm 11+, not this exact path.) `.npmrc` sets `engine-strict=true`, so npm refuses to install on an older Node.
+
+`@types/node` stays on the same major as `engines` (Dependabot ignores its major updates), so type-checking rejects APIs newer than the Node the bot runs on. Bump it in the same change that moves `engines` and CI to a new Node major.
+
+In cloud sessions, the "Cloud with Network" environment's setup script has already run `npm ci` under Node 24 (in this repo and in `BCUK-StreamDeck-Plugin`), so `node_modules` is in place. Your shell still starts on the default Node, so switch as above, but skip the install. The repo's own SessionStart hook (`.claude/hooks/session-start.sh`) only runs when the session opens inside this repo, not when several repos are attached.
 
 Do this once per session before `npm install`/`npm ci`/`npm test`/etc. — don't debug an `npm ci` failure by fighting the lockfile before first checking `node -v`/`npm -v`.
 
 ## ALWAYS: Before Committing
 
+Run the fast checks on what you changed. CI (`.github/workflows/ci.yml`) runs everything else on every push, so don't repeat its full run locally:
+
 ```bash
-npm run typecheck && npm test
+npm run typecheck
+npx vitest run --changed origin/main   # only the tests that import a changed file
+npx eslint $(git diff --name-only --diff-filter=d origin/main -- '*.ts' '*.js' '*.mjs' '*.mts')
 ```
 
-Not `npx tsc` — see "TypeScript 6 + 7" below for why the bare `tsc` command is ambiguous here.
+Not `npx tsc`. See "TypeScript 6 + 7" below for why the bare `tsc` command is ambiguous here.
+
+`--changed` follows imports from the changed files, so it misses tests that depend on something indirectly. **Run the full `npm test` instead** when the change touches shared infrastructure: `src/db.ts`, `migrations/` or `DATABASE-SCHEMA.md` (a test replays one against the other), `src/shared/`, `src/test-utils/`, `package.json`/`package-lock.json`, or a `tsconfig*`/`vitest*`/`eslint` config. Leave coverage, `build`, `check:circular`, `check:unused` and `test:toolchain` to CI unless you're changing what they check.
+
+**CI is the gate, not the local run.** A PR isn't done until CI is green. If it fails, reproduce the failing check locally, fix it, and show it passing before pushing again.
 
 ## TypeScript 6 + 7
 
@@ -42,7 +54,10 @@ Both packages ship a `tsc` bin and which one npm links depends on how it install
 npm run dev             # ts-node src/index.ts
 npm test                # Vitest (everything except the ts-node toolchain smoke test)
 npm run test:toolchain  # ts-node smoke test only — slow (type-checks the project); CI runs it
+npm run test:db         # *.db.test.ts against a real MySQL (needs TEST_DB_*; see the README's "Database tests"); CI runs it
 ```
+
+`npm run test:db` covers what the mocked-pool tests can't: foreign-key actions, unique-index errors and the migrations themselves, against MySQL 8.4.11 started from `docker-compose.test-db.yml`. Behaviour that only a real database shows goes in a `*.db.test.ts` next to the module. Run it locally if you change a migration or a DB module's SQL and Docker is available; otherwise leave it to CI.
 
 Vitest keeps an on-disk transform cache in `.vitest-cache/` (gitignored, outside `node_modules` so it survives `npm ci`); `deploy.sh` and CI drop/re-key it when `package-lock.json` changes. If a run ever looks stale, `rm -rf .vitest-cache`. In tests, prefer `waitFor` from `src/test-utils/waitFor.ts` over `vi.waitFor` (1ms poll instead of 50ms).
 Tests run in Vitest's `vmThreads` pool (each file gets a fresh VM context on a reused worker thread; ~2x faster than `forks`). Module isolation between files is unchanged, but objects created by Node built-ins come from a different realm, so assert on `.name`/`.code` rather than `instanceof` against a Node built-in class.
@@ -67,7 +82,7 @@ Tests run in Vitest's `vmThreads` pool (each file gets a fresh VM context on a r
 ## Tech Stack
 
 - **Runtime:** discord.js v15 (pre-release dev build, pinned exactly, with the `@discordjs/*` packages below on the same dev build), `@twurple/chat` + `@twurple/auth` (Twitch chat), `mediaplex` (Opus), express v5 + `express-session`/`express-mysql-session`, `mysql2`, `helmet`, `winston`.
-- **TypeScript:** `strict: true` plus `noUncheckedIndexedAccess` (so `rows[0]` is `T | undefined` — guard it, or use `!` only where a nearby check guarantees it, with a comment saying which), target ES2024, `moduleResolution: NodeNext`. `package.json` pins `"engines": { "node": ">=24.22.1" }` — see Node/npm version above.
+- **TypeScript:** `strict: true` plus `noUncheckedIndexedAccess` (so `rows[0]` is `T | undefined` — guard it, or use `!` only where a nearby check guarantees it, with a comment saying which), target ES2024, `moduleResolution: NodeNext`. `package.json` pins `"engines": { "node": ">=24.22.3" }` — see Node/npm version above.
 - **ESLint** (flat config, type-aware): `no-floating-promises`, `no-misused-promises`, and `no-console` are all **errors**, not warnings — these affect how code must be written (await/void everything, use `logger` not `console.*`). `no-explicit-any` is a warning; relaxed for `*.test.ts`. `eslint-plugin-jsdoc` enforces the Docstrings rule below (`require-jsdoc` on function declarations, methods and module-level arrow functions, in `src/` and the `public/` browser scripts alike; `require-param`/`require-returns`, with descriptions, for what each documented function takes and returns; `check-param-names` catches stale `@param`s), `eslint-plugin-sonarjs` adds complexity checks on source files (`sonarjs/cognitive-complexity` ≤ 15, the same metric as Qlty's function-complexity smell, plus cyclomatic `complexity` ≤ 12, `max-params` 5, `max-depth` 3, `max-nested-callbacks` 3, all errors), and `@vitest/eslint-plugin` guards tests (no `.only`/`.skip`, no assertion-free tests). The browser scripts in `public/` (classic `<script>`s, no bundler) are linted too, with browser globals: a name a script uses from another script on the same page goes in a `/* global name */` header at its top (`name:writable` if it assigns to it).
 - **Test/build scripts:** `npm run build` (`tsc -p tsconfig.build.json`, on TypeScript 7), `npm run typecheck` (`tsc --noEmit`, the whole project including tests, on TypeScript 7), `npm run lint`, `npm run check:circular` (madge), `npm run check:unused` (knip: unused files, exports and dependencies; `knip.json`). An export used only in its own file is fine; an alias of another export needs an `@alias` JSDoc tag.
 
@@ -86,7 +101,7 @@ Boot order in `main()`: verify DB connectivity (ping, exit 1 on failure) → app
 
 ## Web Server (`src/web/server.ts`)
 
-Middleware order: `helmet` (custom CSP) → `GET /healthz` → EJS views → static → body parsers → `trust proxy: 1` → `preSessionLimiter` (coarse per-IP cap, so a replayed session cookie can't hit the session store unthrottled) → session (`express-mysql-session`, backed by the `sessions` MySQL table, on its own bounded pool from `getSessionPool`; a full queue answers 503) → rate limiters (general/session; `streamdeckLimiter` is applied per-route instead) → `res.locals.user`/csrfToken → feature routes (`mountRoutes` in `src/web/routes/index.ts`, which keeps their mount order) → 404 and error handlers. The general/session rate limiters run after session middleware deliberately — `sessionLimiter`'s key generator needs `req.session` populated.
+Middleware order: `helmet` (custom CSP) → `GET /healthz` → EJS views → static → body parsers → `trust proxy: 1` → `preSessionLimiter` (coarse per-IP cap, so a replayed session cookie can't hit the session store unthrottled) → session (`express-mysql-session`, backed by the `sessions` MySQL table, on its own bounded pool from `getSessionPool`; a full queue answers 503) → `enforceSessionLifetime` (`src/web/sessionLifetime.ts`: a session lasts 24h since its last page load, renewed only by `Sec-Fetch-Mode: navigate` requests, and at most 7 days since login) → rate limiters (general/overlay/session; `streamdeckLimiter` is applied per-route instead. An OBS overlay's own requests (`isOverlayTraffic` in `src/web/overlayTraffic.ts`: event streams, file downloads, the shared overlay's reports) skip the general limiter and get `overlayTrafficLimiter`) → `res.locals.user`/csrfToken → feature routes (`mountRoutes` in `src/web/routes/index.ts`, which keeps their mount order) → 404 and error handlers. The general/session rate limiters run after session middleware deliberately — `sessionLimiter`'s key generator needs `req.session` populated.
 
 Auth middleware (`src/web/middleware.ts`), applied in this order:
 1. **`requireAuth`** — session check.
@@ -144,7 +159,7 @@ Auth middleware (`src/web/middleware.ts`), applied in this order:
 - Every new function or behaviour change **must** include or update a Vitest test in the relevant `*.test.ts` file alongside the source file.
 - Tests live in `src/__tests__/` or co-located `*.test.ts` files — match the convention of the file being tested.
 - When modifying existing behaviour, update affected tests before committing — never leave a passing-but-wrong test.
-- Run `npm test` and confirm all tests pass before committing.
+- Run the tests for what you changed before committing (see "ALWAYS: Before Committing" for when that means the full suite), and make sure CI's full run passes.
 
 ---
 
@@ -187,7 +202,7 @@ The two can differ (e.g. a low-impact fix that's wanted soon, or a high-impact f
 
 ## Related repos
 
-`BCUK-Companion-Core`, `BCUK-Companion-ExpiredMinotaur` and `BCUK-StreamDeck-Plugin` follow the same code standards, adapted to their language: tests with every change, docstrings on every function, Qlty's complexity limits. The plugin's `eslint.config.js` is a port of this repo's; the .NET repos enforce docs with StyleCop's SA1600 rules. Their `CLAUDE.md` files carry the same "PR Reviews (Qlty)" and "PR Reviews (CodeRabbit)" sections, word for word. When you change a shared rule here, make the same change in those three files.
+`BCUK-Companion-Core`, `BCUK-Companion-ExpiredMinotaur` and `BCUK-StreamDeck-Plugin` follow the same code standards, adapted to their language: tests with every change, docstrings on every function, Qlty's complexity limits, and fast checks on what changed before committing, with CI's full run as the gate. The plugin's `eslint.config.js` is a port of this repo's; the .NET repos enforce docs with StyleCop's SA1600 rules. Their `CLAUDE.md` files carry the same "PR Reviews (Qlty)" and "PR Reviews (CodeRabbit)" sections, word for word. When you change a shared rule here, make the same change in those three files.
 
 ## PR Reviews (Qlty)
 
@@ -199,26 +214,8 @@ After pushing, check that Qlty's next analysis no longer lists the finding.
 
 ## PR Reviews (CodeRabbit)
 
-CodeRabbit auto-reviews pushes but is rate-limited per developer; a rate-limited push gets a "Review limit reached" comment with a wait time and no actual diff review. **It never auto-retries** once the cooldown passes — a manual trigger is required every time, even if you just wait it out. After the wait time shown in the rate-limit comment has elapsed, post a PR comment:
+CodeRabbit reviews each push to a non-draft PR (marking a draft ready triggers one by itself). It's rate-limited per developer and **never retries on its own**. Only when a comment says "Review limit reached" with a wait time: wait that long, then post exactly one `@coderabbitai review` (only what changed since the last review), or `@coderabbitai full review` when the last Merge Risk was 🟡 Moderate or higher or the changes since are large. Any other "skipped" reason (draft, no new commits) needs no action.
 
-- **`@coderabbitai review`** — reviews only what changed since the last review. Default choice.
-- **`@coderabbitai full review`** — re-reviews the entire PR from scratch. Use this instead when the last review's **Merge Risk** (see below) was 🟡 Moderate or higher, when it surfaced a lot of issues, or when the intervening changes are large.
+**Merge Risk:** after every review, read the **Merge Risk** line in CodeRabbit's "📝 Walkthrough" comment, which is rewritten in place each time, not just the inline comments. A caveat under it is a real concern even at 🔵 Low: fix it, or post one PR comment saying why it's acceptable, before treating the PR as mergeable. After pushing a fix, say what the risk was and which commit fixes it in a comment tagging `@coderabbitai`; if the risk was 🟡 Moderate or higher, the re-review must be a `@coderabbitai full review`. Repeat until a review comes back with the risk resolved or explicitly accepted. [BCUK-Bot-4 PR #612](https://github.com/Battle-Cattle/BCUK-Bot-4/pull/612) shows the full pattern. This applies to any PR you're driving to green.
 
-**The manual comment is ONLY for the rate-limit case above.** Do not post it reactively for other "review skipped" reasons:
-- **"Review skipped: Draft detected"** — expected while the PR is a draft. Marking the PR ready for review (`draft: false`) auto-triggers a review on its own; no comment needed. Only manually trigger if, after going ready, no review shows up within a few minutes.
-- **"No new commits to review since the last review"** — CodeRabbit is up to date; nothing to do.
-
-If unsure which case a "skipped"/"no review" comment falls into, check whether it names a wait time (rate-limit → wait then trigger) or a different reason (draft/no-new-commits → no action).
-
-**Merge Risk field:** CodeRabbit's main "📝 Walkthrough" comment is a living comment — every review (including the automatic first one) rewrites it in place, and it carries a **Merge Risk** line (e.g. `**Merge Risk:** _🔵 Low_ · up to \`a5ac9\``). Treat this as a required read, not decoration:
-- After every review finishes, re-read the walkthrough comment for the current Merge Risk line and any caveat attached to it — don't stop at the inline/actionable comments.
-- A caveat under the Merge Risk line is a real concern even when the badge is "Low" — CodeRabbit is flagging it, not blocking on it. Either fix it and push, or post one PR comment explaining why it's acceptable/out of scope, before treating the PR as mergeable.
-- When you push a fix for a Merge Risk caveat, say so in a PR comment (what the risk was, which commit fixes it) tagging `@coderabbitai` so it lands in CodeRabbit's own thread and context — e.g. "@coderabbitai — fixed the race described above in `<commit>`...". This gives the next re-review and human reviewers the context, and lets CodeRabbit re-assess the same concern.
-- When the Merge Risk was 🟡 Moderate or higher, the re-review after your fix must be a **`@coderabbitai full review`**, not an incremental `@coderabbitai review` — CodeRabbit acknowledging the fix in its thread (or marking the inline comments "Addressed") is not a re-review. If the push was rate-limited, wait out the cooldown and trigger the full review then.
-- This can take more than one round: a fix can surface a narrower version of the same risk on re-review. Keep fixing and re-commenting (tagging `@coderabbitai` each time) until a review comes back with the risk resolved or explicitly accepted, not just re-labeled "Low" without comment.
-- See PR #612 ("Forward all streamer events to the companion app") for the full pattern: an initial Low-risk walkthrough flagged a token-revocation race → fixed and commented → re-review found a narrower race in the same area → fixed and commented again → final re-review confirmed Low risk with the residual tradeoff explicitly accepted → only then marked ready for merge.
-- This applies to any PR you're driving to green, not just ones you opened — a rising or unresolved Merge Risk is a signal to keep working the PR, not to wait on reviewers.
-
-**Avoid re-triggering thrash:**
-- **Never push a new commit while a review is in progress** — the in-flight review fails outright ("head commit changed during the review") and wastes the attempt. Wait for the review to finish (or fail/rate-limit) before pushing again.
-- **Never re-trigger `@coderabbitai review` while already rate-limited or still in progress.** Each rate-limit reply just reports the currently remaining cooldown (it doesn't reset or extend it) — retrying early is simply wasted, not counterproductive. Wait out the countdown, trigger exactly once, then leave it alone until it either posts real findings or rate-limits again.
+**Don't thrash:** never push while a review is in progress (it fails with "head commit changed"), and never re-trigger while rate-limited or in progress. A rate-limit reply only reports the remaining cooldown.

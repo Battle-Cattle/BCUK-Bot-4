@@ -20,6 +20,8 @@ function render(locals: Record<string, unknown> = {}): Promise<string> {
     isAdmin: false,
     baseUrl: 'https://bot.example',
     maxFileMb: 100,
+    maxTotalMb: 1024,
+    libraryMaxTotalMb: 10240,
     // A non-default limit, so a template that hardcoded 100 would fail these tests.
     maxVideoWeight: 42,
     error: null,
@@ -37,6 +39,26 @@ describe('views/overlayAdmin.ejs', () => {
   it('names the maxVideoWeight range in the invalid_weight message', async () => {
     const html = await render({ error: 'invalid_weight' });
     expect(html).toContain('Each video weight must be a whole number from 1 to 42.');
+  });
+});
+
+describe('views/overlayAdmin.ejs browser sources', () => {
+  it('gives the streamer both their video overlay link and their shared overlay link', async () => {
+    const html = await render();
+    expect(html).toContain('https://bot.example/overlay/streamer</code>');
+    expect(html).toContain('https://bot.example/overlay/shared/streamer</code>');
+    expect(html).toContain('Shared Video Overlay — OBS Browser Source');
+  });
+
+  it('keeps the connection status for the video overlay only', async () => {
+    const html = await render();
+    expect(html).toContain('data-events-url="/overlay/settings/events"');
+    expect(html.match(/id="overlay-status-dot"/g)).toHaveLength(1);
+  });
+
+  it('shows neither link, and no browser sources, to a user who is not a streamer', async () => {
+    const html = await render({ streamer: null });
+    expect(html).not.toContain('/overlay/shared/');
   });
 });
 
@@ -191,5 +213,16 @@ describe('views/overlayAdmin.ejs importing', () => {
   it('explains the import outcomes', async () => {
     expect(await render({ success: 'video_imported' })).toContain('Library video added to your videos. You can now assign it to rewards and advanced commands.');
     expect(await render({ error: 'import_failed' })).toContain('Adding the library video to your videos failed — please try again.');
+  });
+
+  it('explains the storage cap errors, naming the configured limits', async () => {
+    expect(await render({ error: 'storage_limit', maxTotalMb: 2048 }))
+      .toContain('That would take your videos over your 2048 MB storage limit. Delete some videos to make room.');
+    expect(await render({ error: 'library_full', libraryMaxTotalMb: 4096 }))
+      .toContain('The public library is full (4096 MB). An Admin needs to remove some videos before more can be added.');
+  });
+
+  it('tells the streamer their total storage limit next to the upload form', async () => {
+    expect(await render({ maxTotalMb: 2048 })).toContain('2048 MB for all your videos together');
   });
 });

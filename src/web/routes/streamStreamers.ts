@@ -1,12 +1,12 @@
 import { createLogger } from '../../shared/logger';
 import { Router } from 'express';
-import { addStreamer, removeStreamer, findUser, getMemberAccessLevel } from '../../db';
+import { addStreamer, removeStreamer, moveStreamerToGroup, findUser, getMemberAccessLevel } from '../../db';
 import { csrfProtection } from '../csrf';
 import { requireManager } from '../middleware';
 import { getCurrentGuildId } from '../session';
 import { parsePositiveIntId, normalizeDiscordId } from './validation';
 import { redirectStreamsInvalid, redirectStreamsFailure, type StreamsErrorCode } from './streamsErrors';
-import { triggerRestart } from './streamRestart';
+import { afterStreamersRemoved, triggerRestart } from './streamRestart';
 
 const log = createLogger('Web');
 const router = Router();
@@ -91,9 +91,35 @@ router.post('/streams/streamers/remove', requireManager, csrfProtection, async (
   try {
     const removed = await removeStreamer(parsedStreamerId, getCurrentGuildId(req));
     if (!removed) return redirectStreamsInvalid(res, 'remove_streamer_failed');
-    triggerRestart();
+    afterStreamersRemoved();
   } catch (err) {
     return redirectStreamsFailure(res, log, 'Remove streamer error:', err, 'remove_streamer_failed');
+  }
+  res.redirect('/admin/streams');
+});
+
+/**
+ * POST /admin/streams/streamers/move — moves a streamer to another stream group of the current
+ * guild, keeping the streamer and everything tied to them (#1008); restarts the monitor so the
+ * announcement follows the new group's channel and templates.
+ * @param req - Express request; reads `streamer_id` and `group_id` from the body.
+ * @param res - Express response; redirects to `/admin/streams`, or with `?error=` for missing or
+ *   invalid ids (`missing_fields`, `invalid_id`), a streamer or group outside this guild
+ *   (`move_streamer_failed`), or a DB failure (`move_streamer_failed`).
+ */
+router.post('/streams/streamers/move', requireManager, csrfProtection, async (req, res) => {
+  const { streamer_id, group_id } = req.body as { streamer_id?: string; group_id?: string };
+  if (!streamer_id || !group_id) return redirectStreamsInvalid(res, 'missing_fields');
+  const streamerId = parsePositiveIntId(streamer_id);
+  const groupId = parsePositiveIntId(group_id);
+  if (streamerId === null || groupId === null) return redirectStreamsInvalid(res, 'invalid_id');
+
+  try {
+    const moved = await moveStreamerToGroup(streamerId, groupId, getCurrentGuildId(req));
+    if (!moved) return redirectStreamsInvalid(res, 'move_streamer_failed');
+    triggerRestart();
+  } catch (err) {
+    return redirectStreamsFailure(res, log, 'Move streamer error:', err, 'move_streamer_failed');
   }
   res.redirect('/admin/streams');
 });

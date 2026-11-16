@@ -96,3 +96,49 @@ describe.skipIf(onWindows)('deploy.sh health URL', () => {
     expect(run(`${env}\n`, blocks(), 'printf %s "$HEALTH_URL"')).toBe(expected);
   });
 });
+
+describe.skipIf(onWindows)('warn_if_env_readable_by_others in scripts/lib/dotenv.sh', () => {
+  const warnBlock = () => scriptBlock('scripts/lib/dotenv.sh', 'warn_if_env_readable_by_others() {', /^}$/);
+
+  /** Runs the check against `envFile` (relative to the test directory), returning what it printed to stderr. */
+  function warn(envFile: string): string {
+    const result = spawnSync('bash', ['-c', `set -euo pipefail\nENV_FILE="$1"\n${warnBlock()}\nwarn_if_env_readable_by_others`, 'bash', envFile], {
+      cwd: dir,
+      encoding: 'utf8',
+    });
+    if (result.status !== 0) throw new Error(result.stderr);
+    return result.stderr;
+  }
+
+  it('checks the file a symlinked .env points to, not the link itself', () => {
+    fs.writeFileSync(path.join(dir, 'real.env'), 'A=1\n', { mode: 0o600 });
+    fs.chmodSync(path.join(dir, 'real.env'), 0o600);
+    fs.symlinkSync('real.env', path.join(dir, '.env'));
+    expect(warn('.env')).toBe('');
+
+    fs.chmodSync(path.join(dir, 'real.env'), 0o644);
+    expect(warn('.env')).toContain('(mode 644)');
+  });
+
+  it('prints a chmod command that can be pasted as is for a path with spaces', () => {
+    fs.mkdirSync(path.join(dir, 'my bot'));
+    fs.writeFileSync(path.join(dir, 'my bot', '.env'), 'A=1\n');
+    fs.chmodSync(path.join(dir, 'my bot', '.env'), 0o664);
+    const printed = warn('my bot/.env');
+    const command = /chmod 600 (.+)$/m.exec(printed)?.[1];
+    expect(command).toBe('my\\ bot/.env');
+
+    // Running the printed command makes the file private.
+    const chmod = spawnSync('bash', ['-c', `chmod 600 ${command!}`], { cwd: dir });
+    expect(chmod.status).toBe(0);
+    expect(fs.statSync(path.join(dir, 'my bot', '.env')).mode & 0o777).toBe(0o600);
+    expect(warn('my bot/.env')).toBe('');
+  });
+
+  it('says nothing for a missing file or a dangling symlink', () => {
+    expect(warn('missing.env')).toBe('');
+    fs.symlinkSync('nowhere.env', path.join(dir, '.env'));
+    expect(warn('.env')).toBe('');
+  });
+});
+

@@ -81,3 +81,22 @@ describe('clear', () => {
     expect(cooldown.tryClaim(1, 'viewer', 60)).toBe(true);
   });
 });
+
+describe('pruning stale claims (#1005)', () => {
+  it('keeps working past the sweep threshold: old claims are swept, a claim still on cooldown still blocks', () => {
+    const start = Date.UTC(2026, 10, 13);
+    vi.setSystemTime(start);
+    expect(cooldown.tryClaim(1, 'still-cooling', 3600)).toBe(true);
+    vi.setSystemTime(start + 10 * 60_000);
+    // A thousand-odd viewers chat with a 60s cooldown; their claims expire long before the next sweep.
+    for (let i = 0; i < 1100; i++) expect(cooldown.tryClaim(1, `viewer${i}`, 60)).toBe(true);
+    vi.setSystemTime(start + 20 * 60_000);
+    expect(cooldown.tryClaim(1, 'sweeper', 60)).toBe(true);
+
+    // The one-hour claim is still within the longest cooldown seen, so it survived and still blocks.
+    expect(cooldown.tryClaim(1, 'still-cooling', 3600)).toBe(false);
+    expect(cooldown.getRemainingSeconds(1, 'still-cooling', 3600)).toBe(40 * 60);
+    // A swept viewer can claim again.
+    expect(cooldown.tryClaim(1, 'viewer0', 60)).toBe(true);
+  });
+});

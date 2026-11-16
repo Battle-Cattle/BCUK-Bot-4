@@ -14,6 +14,8 @@ vi.mock('../../db', () => ({
   addVideo: vi.fn(),
   deleteVideo: vi.fn(),
   deleteReward: vi.fn(),
+  getVideosForStreamer: vi.fn(),
+  getLibraryVideos: vi.fn(),
   AccessLevel: ACCESS_LEVEL_MOCK,
 }));
 
@@ -32,6 +34,9 @@ vi.mock('../../shared/config', () => ({
   OVERLAY_FOLDER: '/app/overlay-videos',
   // Use 1 MB so the oversized-upload test can exceed the limit with a small buffer.
   OVERLAY_MAX_FILE_MB: 1,
+  // 1000 bytes per streamer, so the tests' byte-sized "videos" can reach the cap.
+  OVERLAY_MAX_TOTAL_MB_PER_STREAMER: 1000 / (1024 * 1024),
+  OVERLAY_LIBRARY_MAX_TOTAL_MB: 10,
 }));
 
 vi.mock('fs', () => ({
@@ -58,14 +63,25 @@ vi.mock('./overlayUploadStorage', async () => {
   };
 });
 
+// The storage cap sums the sizes of the streamer's rows (the real overlayStorageQuota), with each
+// file's size faked here since there's no disk; overlayStorageQuota.test.ts measures real files.
+vi.mock('./overlayVideoLibraryFiles', () => ({
+  LIBRARY_FOLDER: 'library',
+  streamerFolder: (id: number) => String(id),
+  videoFileSize: vi.fn(),
+}));
+
 vi.mock('./overlayMovConversion', () => ({ storeMovAsWebm: vi.fn() }));
 vi.mock('./overlayVideoTranscode', () => ({ isWebmTranscodeQueueFull: vi.fn() }));
 
 import { uploadRequest } from '../../test-utils/chunkedUploadTest';
 import type { UploadedFile } from '../uploadedFile';
 import supertest from 'supertest';
-import { router, limitConcurrentUploads, MAX_CONCURRENT_OVERLAY_UPLOADS } from './overlayAdminMutations';
-import { getStreamerByDiscordId, addVideo, deleteVideo } from '../../db';
+import { router, overlayUploadSlots, MAX_CONCURRENT_OVERLAY_UPLOADS } from './overlayAdminMutations';
+import { waitFor } from '../../test-utils/waitFor';
+import { getStreamerByDiscordId, addVideo, deleteVideo, getVideosForStreamer } from '../../db';
+import { isVideoFileInFlight } from './overlayInFlightFiles';
+import { videoFileSize } from './overlayVideoLibraryFiles';
 import { AccessLevel } from '../../db';
 import fs from 'fs';
 import { csrfProtection } from '../csrf';
@@ -96,11 +112,38 @@ function buildApp(sessionUser: SessionUser = USER, before: RequestHandler[] = []
   return buildTestApp({ router: [...before, router], bodyParser: 'urlencoded', sessionUser });
 }
 
+/**
+ * Sets what the streamer has stored: one DB row per entry, sized as given. Any other file (a
+ * newly stored upload) measures `newFileBytes`.
+ */
+function storedVideos(sizes: Record<string, number>, newFileBytes = 8) {
+  vi.mocked(getVideosForStreamer).mockResolvedValue(Object.keys(sizes).map((filename) => ({ filename })) as any);
+  vi.mocked(videoFileSize).mockImplementation(async ({ filename }) => sizes[filename] ?? newFileBytes);
+}
+
+/**
+ * Takes `count` upload slots with handlers that stay pending, as if that many uploads were being
+ * processed. `release` lets them finish.
+ */
+function holdUploadSlots(count: number) {
+  const finishers: Array<() => void> = [];
+  const runs = Array.from({ length: count }, () => overlayUploadSlots.admit(
+    () => new Promise<void>((resolve) => { finishers.push(resolve); }),
+  )({} as any, { redirect: vi.fn() } as any));
+  return {
+    release: async () => {
+      finishers.forEach((finish) => finish());
+      await Promise.all(runs);
+    },
+  };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getStreamerByDiscordId).mockResolvedValue(null);
   vi.mocked(addVideo).mockResolvedValue(1);
   vi.mocked(deleteVideo).mockResolvedValue(null);
+  storedVideos({});
   vi.mocked(fs.promises.mkdir).mockResolvedValue(undefined);
   vi.mocked(placeUpload).mockResolvedValue(undefined);
   vi.mocked(discardUpload).mockResolvedValue(undefined);
@@ -175,6 +218,41 @@ describe('POST /settings/videos/upload', () => {
     expect(file.originalname).toBe('test.mp4');
     expect(storedPath).toMatch(/[\\/]123[\\/][0-9a-f-]{36}\.mp4$/);
     expect(vi.mocked(addVideo)).toHaveBeenCalledWith(MOCK_STREAMER.id, 'Test Video', storedPath.split(/[\\/]/).at(-1));
+  });
+
+  it('marks the stored file in flight from before it is placed until its row is written, and on failure too', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    const seen: boolean[] = [];
+    const inFlight = (storedPath: string) => isVideoFileInFlight({ folder: '123', filename: storedPath.split(/[\\/]/).at(-1)! });
+    vi.mocked(placeUpload).mockImplementation(async (_file, storedPath) => { seen.push(inFlight(storedPath)); });
+    vi.mocked(addVideo).mockImplementation(async (_streamerId, _name, filename) => {
+      seen.push(isVideoFileInFlight({ folder: '123', filename }));
+      return 1;
+    });
+    await uploadRequest(buildApp()).post('/settings/videos/upload').attach('video', MP4_BUF, { filename: 'a.mp4', contentType: 'video/mp4' });
+    expect(placeUpload).toHaveBeenCalledTimes(1);
+    const stored = vi.mocked(placeUpload).mock.calls[0]![1]; // called once, checked above
+
+    vi.mocked(addVideo).mockRejectedValue(new Error('DB error'));
+    await uploadRequest(buildApp()).post('/settings/videos/upload').attach('video', MP4_BUF, { filename: 'b.mp4', contentType: 'video/mp4' });
+    expect(placeUpload).toHaveBeenCalledTimes(2);
+    const failed = vi.mocked(placeUpload).mock.calls[1]![1]; // called twice, checked above
+
+    expect(seen).toEqual([true, true, true]);
+    expect(inFlight(stored)).toBe(false);
+    expect(inFlight(failed)).toBe(false);
+  });
+
+  it('marks a MOV upload in flight under its converted WebM name while it converts', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    let during = false;
+    vi.mocked(storeMovAsWebm).mockImplementation(async (_dir, baseName) => {
+      during = isVideoFileInFlight({ folder: '123', filename: `${baseName}.webm` });
+      return `${baseName}.webm`;
+    });
+    const res = await uploadRequest(buildApp()).post('/settings/videos/upload').attach('video', MOV_BUF, { filename: 'c.mov', contentType: 'video/quicktime' });
+    expect(res.headers.location).toBe('/overlay/settings?success=video_uploaded');
+    expect(during).toBe(true);
   });
 
   it('names the video after the uploaded file when no name field is sent', async () => {
@@ -330,19 +408,48 @@ describe('POST /settings/videos/upload', () => {
 
   it('refuses to start any upload with upload_busy while the most uploads are already being processed', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
-    const held = Array.from({ length: MAX_CONCURRENT_OVERLAY_UPLOADS }, () => {
-      const listeners: Record<string, () => void> = {};
-      const res = { redirect: vi.fn(), once: (event: string, cb: () => void) => { listeners[event] = cb; } };
-      void limitConcurrentUploads({} as any, res as any, vi.fn());
-      return listeners;
-    });
+    const held = holdUploadSlots(MAX_CONCURRENT_OVERLAY_UPLOADS);
     const res = await uploadRequest(buildApp())
       .post('/settings/videos/upload')
       .attach('video', WEBM_BUF, { filename: 'clip.webm', contentType: 'video/webm' });
-    for (const listeners of held) listeners.close?.();
+    await held.release();
     expect(res.status).toBe(409);
     expect(res.body).toEqual({ error: 'upload_busy' });
     expect(vi.mocked(addVideo)).not.toHaveBeenCalled();
+  });
+
+  it('holds its upload slot for the whole conversion and frees it once the upload is processed', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    let finishConversion!: () => void;
+    vi.mocked(storeMovAsWebm).mockImplementation((_dir, baseName) =>
+      new Promise((resolve) => { finishConversion = () => resolve(`${baseName}.webm`); }));
+    const held = holdUploadSlots(MAX_CONCURRENT_OVERLAY_UPLOADS - 1);
+    const upload = uploadRequest(buildApp())
+      .post('/settings/videos/upload')
+      .attach('video', MOV_BUF, { filename: 'clip.mov', contentType: 'video/quicktime' })
+      .then((r) => r);
+    await waitFor(() => expect(vi.mocked(storeMovAsWebm)).toHaveBeenCalled());
+    expect(overlayUploadSlots.isFull()).toBe(true);
+    finishConversion();
+    expect((await upload).headers.location).toBe('/overlay/settings?success=video_uploaded');
+    expect(overlayUploadSlots.isFull()).toBe(false);
+    await held.release();
+  });
+
+  it.each([
+    ['an invalid file', MP4_BUF.subarray(0, 2), undefined],
+    ['a DB failure', MP4_BUF, () => vi.mocked(addVideo).mockRejectedValue(new Error('DB error'))],
+  ])('frees its upload slot after %s', async (_label, buffer, arrange) => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    arrange?.();
+    // More uploads in a row than there are slots: each one only gets in if the last freed its slot.
+    for (let i = 0; i <= MAX_CONCURRENT_OVERLAY_UPLOADS; i++) {
+      const res = await uploadRequest(buildApp())
+        .post('/settings/videos/upload')
+        .attach('video', buffer, { filename: 'clip.mp4', contentType: 'video/mp4' });
+      expect(res.headers.location).toMatch(/\?error=(invalid_file|upload_failed)$/);
+    }
+    expect(overlayUploadSlots.isFull()).toBe(false);
   });
 
   it.each([
@@ -358,6 +465,103 @@ describe('POST /settings/videos/upload', () => {
     expect(res.body).toEqual({ error: 'transcode_busy' });
     expect(vi.mocked(storeMovAsWebm)).not.toHaveBeenCalled();
     expect(vi.mocked(addVideo)).not.toHaveBeenCalled();
+  });
+
+  it.each([['at', 1000], ['over', 1200]])('refuses to start an upload with storage_limit when the streamer is %s their cap', async (_label, used) => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    storedVideos({ 'old.webm': used });
+    const res = await uploadRequest(buildApp())
+      .post('/settings/videos/upload')
+      .attach('video', WEBM_BUF, { filename: 'clip.webm', contentType: 'video/webm' });
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({ error: 'storage_limit' });
+    expect(vi.mocked(getVideosForStreamer)).toHaveBeenCalledWith(MOCK_STREAMER.id);
+    expect(vi.mocked(placeUpload)).not.toHaveBeenCalled();
+    expect(vi.mocked(addVideo)).not.toHaveBeenCalled();
+  });
+
+  it('refuses a finished upload with storage_limit, removing the stored file, when it would take the streamer over their cap', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    // Under the cap at start (so the upload begins), but the 8-byte file makes 1001 of 1000.
+    storedVideos({ 'old.webm': 993 });
+    const res = await uploadRequest(buildApp())
+      .post('/settings/videos/upload')
+      .attach('video', WEBM_BUF, { filename: 'clip.webm', contentType: 'video/webm' });
+    expect(res.headers.location).toBe('/overlay/settings?error=storage_limit');
+    expect(vi.mocked(addVideo)).not.toHaveBeenCalled();
+    const [, storedPath] = vi.mocked(placeUpload).mock.calls[0]!;
+    expect(vi.mocked(fs.promises.rm)).toHaveBeenCalledWith(storedPath, { force: true });
+  });
+
+  it('accepts an upload that fills the cap exactly, measuring the stored file in the streamer\'s folder', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    storedVideos({ 'old.webm': 992 });
+    const res = await uploadRequest(buildApp())
+      .post('/settings/videos/upload')
+      .attach('video', WEBM_BUF, { filename: 'clip.webm', contentType: 'video/webm' });
+    expect(res.headers.location).toBe('/overlay/settings?success=video_uploaded');
+    const [, , filename] = vi.mocked(addVideo).mock.calls[0]!;
+    expect(vi.mocked(videoFileSize)).toHaveBeenCalledWith({ folder: String(MOCK_STREAMER.id), filename });
+    expect(vi.mocked(fs.promises.rm)).not.toHaveBeenCalled();
+  });
+
+  it('accepts a MOV whose declared size is over the remaining quota when its converted WebM fits', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    // 100 bytes left. The MOV is 400 bytes as uploaded, but its converted WebM is 15.
+    storedVideos({ 'old.webm': 900 }, 15);
+    const mov = Buffer.concat([MOV_BUF, Buffer.alloc(400 - MOV_BUF.length)]);
+    const res = await uploadRequest(buildApp())
+      .post('/settings/videos/upload')
+      .attach('video', mov, { filename: 'clip.mov', contentType: 'video/quicktime' });
+    expect(res.headers.location).toBe('/overlay/settings?success=video_uploaded');
+    expect(vi.mocked(addVideo)).toHaveBeenCalledWith(MOCK_STREAMER.id, 'clip.mov', expect.stringMatching(/\.webm$/));
+  });
+
+  it('refuses a MOV whose converted WebM still takes the streamer over their cap, removing it', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    storedVideos({ 'old.webm': 900 }, 101);
+    const res = await uploadRequest(buildApp())
+      .post('/settings/videos/upload')
+      .attach('video', MOV_BUF, { filename: 'clip.mov', contentType: 'video/quicktime' });
+    expect(res.headers.location).toBe('/overlay/settings?error=storage_limit');
+    expect(vi.mocked(addVideo)).not.toHaveBeenCalled();
+    const [, baseName] = vi.mocked(storeMovAsWebm).mock.calls[0]!;
+    expect(vi.mocked(fs.promises.rm)).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`${baseName}\\.webm$`)), { force: true });
+  });
+
+  it('accepts an upload again once the streamer has deleted a video', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    storedVideos({ 'old.webm': 600, 'older.webm': 400 });
+    const attach = () => uploadRequest(buildApp())
+      .post('/settings/videos/upload')
+      .attach('video', WEBM_BUF, { filename: 'clip.webm', contentType: 'video/webm' });
+    expect((await attach()).body).toEqual({ error: 'storage_limit' });
+    // Deleting a video removes its row, which is what the total is summed from.
+    storedVideos({ 'old.webm': 600 });
+    expect((await attach()).headers.location).toBe('/overlay/settings?success=video_uploaded');
+  });
+
+  it('removes the stored file and reports upload_failed when it can\'t be measured', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    vi.mocked(videoFileSize).mockRejectedValue(Object.assign(new Error('denied'), { code: 'EACCES' }));
+    const res = await uploadRequest(buildApp())
+      .post('/settings/videos/upload')
+      .attach('video', WEBM_BUF, { filename: 'clip.webm', contentType: 'video/webm' });
+    expect(res.headers.location).toBe('/overlay/settings?error=upload_failed');
+    expect(vi.mocked(addVideo)).not.toHaveBeenCalled();
+    expect(vi.mocked(fs.promises.rm)).toHaveBeenCalled();
+  });
+
+  it('records nothing and reports upload_failed when the stored file is no longer there to measure', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(MOCK_STREAMER as any);
+    vi.mocked(videoFileSize).mockResolvedValue(null);
+    const res = await uploadRequest(buildApp())
+      .post('/settings/videos/upload')
+      .attach('video', WEBM_BUF, { filename: 'clip.webm', contentType: 'video/webm' });
+    expect(res.headers.location).toBe('/overlay/settings?error=upload_failed');
+    expect(vi.mocked(addVideo)).not.toHaveBeenCalled();
+    const [, storedPath] = vi.mocked(placeUpload).mock.calls[0]!;
+    expect(vi.mocked(fs.promises.rm)).toHaveBeenCalledWith(storedPath, { force: true });
   });
 
   it('still accepts WebM and MP4 uploads while the conversion queue is full', async () => {
@@ -524,50 +728,4 @@ describe('POST /settings/videos/:id/delete', () => {
   });
 });
 
-describe('limitConcurrentUploads', () => {
-  /** A response stub whose `finish`/`close` listeners can be fired. */
-  function makeTrackedRes() {
-    const listeners: Record<string, () => void> = {};
-    return {
-      redirect: vi.fn(),
-      once: vi.fn((event: string, cb: () => void) => { listeners[event] = cb; }),
-      fire: (event: string) => listeners[event]?.(),
-    };
-  }
-
-  it('turns away an upload once the limit is reached, until one of them finishes', () => {
-    const admitted = Array.from({ length: MAX_CONCURRENT_OVERLAY_UPLOADS }, () => makeTrackedRes());
-    const next = vi.fn();
-    for (const res of admitted) void limitConcurrentUploads({} as any, res as any, next);
-    expect(next).toHaveBeenCalledTimes(MAX_CONCURRENT_OVERLAY_UPLOADS);
-
-    const refused = makeTrackedRes();
-    void limitConcurrentUploads({} as any, refused as any, next);
-    expect(refused.redirect).toHaveBeenCalledWith('/overlay/settings?error=upload_busy');
-    expect(next).toHaveBeenCalledTimes(MAX_CONCURRENT_OVERLAY_UPLOADS);
-
-    // Both events firing for one response frees only its own slot.
-    admitted[0]!.fire('finish');
-    admitted[0]!.fire('close');
-    const nextOne = makeTrackedRes();
-    void limitConcurrentUploads({} as any, nextOne as any, next);
-    expect(nextOne.redirect).not.toHaveBeenCalled();
-    const overLimit = makeTrackedRes();
-    void limitConcurrentUploads({} as any, overLimit as any, next);
-    expect(overLimit.redirect).toHaveBeenCalledWith('/overlay/settings?error=upload_busy');
-
-    for (const res of [...admitted.slice(1), nextOne]) res.fire('close');
-  });
-
-  it('removes a turned-away upload\'s file', async () => {
-    const admitted = Array.from({ length: MAX_CONCURRENT_OVERLAY_UPLOADS }, () => makeTrackedRes());
-    for (const res of admitted) void limitConcurrentUploads({} as any, res as any, vi.fn());
-    const file = { filename: 'x.incoming' };
-    const refused = makeTrackedRes();
-    await limitConcurrentUploads({ file } as any, refused as any, vi.fn());
-    expect(vi.mocked(discardUpload)).toHaveBeenCalledWith(file);
-    expect(refused.redirect).toHaveBeenCalledWith('/overlay/settings?error=upload_busy');
-    for (const res of admitted) res.fire('close');
-  });
-});
 

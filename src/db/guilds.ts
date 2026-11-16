@@ -52,7 +52,9 @@ export async function getAllGuilds(): Promise<DbGuild[]> {
  * This is the "registered guild" set the in-memory registry loads. The
  * member-presence gate is what makes (un)registration durable: a guild
  * discovered via `guildCreate` (or re-inserted on reconnect) is inert until the
- * Owner provisions its first member, and removing every member durably stops the
+ * Owner provisions its first member (or, for a guild on
+ * `DISCORD_AUTO_PROVISION_GUILD_IDS`, until its Discord owner is granted Admin on
+ * the first join), and removing every member durably stops the
  * bot serving it even though reconnects keep re-inserting the bare guild row.
  *
  * @returns Servable guilds ordered by name.

@@ -23,6 +23,7 @@ export const STREAMS_ERROR_CODES = [
   'add_streamer_failed',
   'streamer_not_member',
   'remove_streamer_failed',
+  'move_streamer_failed',
   'eventsub_disconnect_failed',
 ] as const;
 
@@ -41,6 +42,7 @@ export const STREAMS_ERROR_MESSAGES: Record<StreamsErrorCode, string> = {
   add_streamer_failed:        'Failed to add streamer. Please try again.',
   streamer_not_member:        'That user is not a member of this server.',
   remove_streamer_failed:     'Failed to remove streamer. Please try again.',
+  move_streamer_failed:       'Failed to move streamer. Please try again.',
   eventsub_disconnect_failed: 'Failed to disconnect Twitch account. Please try again.',
 };
 

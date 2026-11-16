@@ -79,12 +79,35 @@ export const SFX_MAX_FILE_MB = parsePositiveIntEnv(process.env.SFX_MAX_FILE_MB, 
 export const OVERLAY_FOLDER = process.env.OVERLAY_FOLDER?.trim() || './overlay-videos';
 export const OVERLAY_MAX_FILE_MB = parsePositiveIntEnv(process.env.OVERLAY_MAX_FILE_MB, 500);
 /**
+ * Most megabytes of overlay video one streamer may store: their uploads (as stored, so after a
+ * MOV's conversion) plus the videos they imported from the public library, each counted in full.
+ */
+export const OVERLAY_MAX_TOTAL_MB_PER_STREAMER = parsePositiveIntEnv(process.env.OVERLAY_MAX_TOTAL_MB_PER_STREAMER, 1024);
+/** Most megabytes the public overlay video library's own files may add up to. */
+export const OVERLAY_LIBRARY_MAX_TOTAL_MB = parsePositiveIntEnv(process.env.OVERLAY_LIBRARY_MAX_TOTAL_MB, 10240);
+/**
+ * Free space (MB) on the volume holding OVERLAY_FOLDER below which the owner gets a `disk` alert DM
+ * (see `diskSpaceMonitor.ts`). 1024 leaves room for a few uploads in progress at the default
+ * OVERLAY_MAX_FILE_MB plus their MOV conversions, with time to act before writes start failing.
+ */
+export const DISK_FREE_ALERT_MB = parsePositiveIntEnv(process.env.DISK_FREE_ALERT_MB, 1024);
+/**
  * Longest one MOV → WebM overlay conversion may run before ffmpeg is killed. Encoding transparent
  * VP9 from a few hundred MB of ProRes 4444 can take well over five minutes on a small server.
  */
 export const OVERLAY_TRANSCODE_TIMEOUT_MINUTES = parsePositiveIntEnv(process.env.OVERLAY_TRANSCODE_TIMEOUT_MINUTES, 30);
 export const COMPANION_MAX_SSE_PER_TOKEN = parsePositiveIntEnv(process.env.COMPANION_MAX_SSE_PER_TOKEN, 3);
 export const OVERLAY_MAX_SSE_PER_CHANNEL = parsePositiveIntEnv(process.env.OVERLAY_MAX_SSE_PER_CHANNEL, 10);
+/** Longest a shared overlay video may start late before it is skipped, in seconds (#917). */
+export const SHARED_OVERLAY_MAX_LATE_SECONDS = parsePositiveIntEnv(process.env.SHARED_OVERLAY_MAX_LATE_SECONDS, 3);
+/** Milliseconds between a shared video trigger and its start, so every overlay can load it first (#917). */
+export const SHARED_OVERLAY_LEAD_MS = parsePositiveIntEnv(process.env.SHARED_OVERLAY_LEAD_MS, 4000);
+/** Milliseconds after a shared video trigger during which further triggers are ignored. */
+export const SHARED_OVERLAY_TRIGGER_COOLDOWN_MS = parsePositiveIntEnv(process.env.SHARED_OVERLAY_TRIGGER_COOLDOWN_MS, 3000);
+/** Milliseconds before the same shared video may be pushed to the overlays again (#917). */
+export const SHARED_OVERLAY_PUSH_COOLDOWN_MS = parsePositiveIntEnv(process.env.SHARED_OVERLAY_PUSH_COOLDOWN_MS, 60000);
+/** Kilobytes per second all background shared-video preloads may use together, across every overlay (#917). */
+export const SHARED_OVERLAY_PRELOAD_KB_PER_SECOND = parsePositiveIntEnv(process.env.SHARED_OVERLAY_PRELOAD_KB_PER_SECOND, 2048);
 export const ALERT_ASSETS_FOLDER = process.env.ALERT_ASSETS_FOLDER?.trim() || './alert-assets';
 export const ALERT_MAX_IMAGE_MB = parsePositiveIntEnv(process.env.ALERT_MAX_IMAGE_MB, 10);
 export const ALERT_MAX_SOUND_MB = parsePositiveIntEnv(process.env.ALERT_MAX_SOUND_MB, 5);
@@ -115,6 +138,31 @@ export const DISCORD_CLIENT_ID = require_env('DISCORD_CLIENT_ID');
 export const DISCORD_CLIENT_SECRET = require_env('DISCORD_CLIENT_SECRET');
 export const DISCORD_CALLBACK_URL = require_env('DISCORD_CALLBACK_URL');
 export const PUBLIC_URL = new URL(DISCORD_CALLBACK_URL).origin;
+
+const DISCORD_SNOWFLAKE_RE = /^\d{17,20}$/;
+
+/**
+ * Parses a comma-separated list of Discord snowflakes. Blank entries are ignored; anything
+ * that isn't a snowflake is a startup error, so a typo can't silently leave a guild off a
+ * security allowlist.
+ * @param name - Environment variable name.
+ * @returns The set of snowflakes (empty when the variable is unset or blank).
+ * @throws If any entry isn't a 17–20 digit Discord snowflake.
+ */
+function parseSnowflakeListEnv(name: string): ReadonlySet<string> {
+  const ids = (process.env[name] ?? '').split(',').map((entry) => entry.trim()).filter(Boolean);
+  const invalid = ids.find((id) => !DISCORD_SNOWFLAKE_RE.test(id));
+  if (invalid !== undefined) {
+    throw new Error(`Invalid ${name}: '${invalid}' is not a Discord server ID`);
+  }
+  return new Set(ids);
+}
+
+// Discord servers whose owner is made a panel Admin automatically the first time the bot joins
+// them. Any other server the bot is added to is recorded but stays inert (no member, not served)
+// until the bot owner adds its first member on the panel's Users page. Empty by default, so
+// adding the bot to a server never grants anyone panel access on its own.
+export const DISCORD_AUTO_PROVISION_GUILD_IDS = parseSnowflakeListEnv('DISCORD_AUTO_PROVISION_GUILD_IDS');
 
 // Twitch EventSub OAuth callback URL — required when any channel enables follow/sub notifications.
 // Must be registered in the Twitch developer console for the same app as TWITCH_CLIENT_ID.

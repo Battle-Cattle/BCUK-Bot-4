@@ -7,10 +7,16 @@ import { configDefaults, defineConfig } from 'vitest/config';
  */
 export const TOOLCHAIN_TEST = 'src/shared/tsNodeDevToolchain.test.ts';
 
+/**
+ * Tests that run against a real MySQL server, via `npm run test:db` (see vitest.db.config.mts),
+ * so `npm test` stays fast and needs no database.
+ */
+export const DB_TESTS = 'src/**/*.db.test.ts';
+
 export default defineConfig({
   test: {
     include: ['src/**/*.test.ts'],
-    exclude: [...configDefaults.exclude, TOOLCHAIN_TEST],
+    exclude: [...configDefaults.exclude, TOOLCHAIN_TEST, DB_TESTS],
     // Run each test file in a fresh VM context on a reused worker thread instead of a fresh
     // child process per file (the default `forks` pool). Module isolation between files is the
     // same, but skipping the per-file process spawn and Node bootstrap roughly halves `npm test`
@@ -22,6 +28,11 @@ export default defineConfig({
     // assertion (e.g. check `.name`/`.code`); a separate `projects` entry with `pool: 'forks'` is the fallback.
     pool: 'vmThreads',
     vmMemoryLimit: '300MB',
+    // One worker per core, not Vitest's default of one fewer. The shell-script tests (deploy.sh,
+    // backup/restore, systemd installer) leave their worker blocked on a child process, so the spare
+    // core otherwise sits mostly idle: on 4 cores this takes `npm test` from ~25s to ~23s. On the
+    // 6-vCPU deploy server it adds one worker (5 -> 6), up to one more vmMemoryLimit of memory.
+    maxWorkers: '100%',
     coverage: {
       provider: 'v8',
       reporter: [['text', { file: 'coverage-report.txt' }], 'lcov'],

@@ -59,6 +59,35 @@ RestrictNamespaces=true
 RestrictRealtime=true
 LockPersonality=true
 # Not MemoryDenyWriteExecute=true: V8's JIT needs writable+executable memory, and node would crash.
+#
+# Second round (#921). Each setting is its own line, so one that breaks something on a host can be
+# turned off with a drop-in (`sudo systemctl edit bcuk-bot`, e.g. `[Service]` then `UMask=0022`)
+# without waiting for a release. `journalctl -u bcuk-bot | grep -E 'EPERM|EACCES|SIGSYS'` shows
+# what the sandbox refused.
+# No Linux capabilities at all: the bot runs as a normal user on a port above 1024.
+CapabilityBoundingSet=
+AmbientCapabilities=
+# Only system calls for the machine's own architecture (no 32-bit compatibility calls).
+SystemCallArchitectures=native
+# Only the system calls ordinary services need (V8's mmap/mprotect are in the set). A call outside
+# it fails with EPERM instead of killing the process.
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+# IPv4/IPv6 (Discord, Twitch, Discord voice over UDP, MySQL over TCP) and Unix sockets (a local
+# MySQL socket). Add AF_NETLINK here if something turns out to list network interfaces.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+# A minimal /dev (null, zero, urandom and the like): ffmpeg only works on files and pipes.
+PrivateDevices=true
+ProtectClock=true
+# Other processes, and the system-wide parts of /proc, are hidden; the bot's own /proc/self stays.
+ProtectProc=invisible
+ProcSubset=pid
+# Files the bot creates (uploads, logs) are readable only by its own user. The panel and overlays
+# get uploads through the bot, and deploys and backups run as the same user; if a reverse proxy
+# serves the upload folders straight from disk instead, override this with a drop-in.
+UMask=0077
+# Shared memory and semaphores the bot's user left behind are removed when the service stops.
+RemoveIPC=true
 
 [Install]
 WantedBy=multi-user.target

@@ -100,7 +100,8 @@ export async function getConfig(streamerId: number): Promise<LoyaltyPointsConfig
  * below 0, never above {@link MAX_BALANCE} (mirrors the clamp {@link resolveGambleOutcome} does
  * for a winning payout — without it here too, a large configured per-message/sub/gift-sub rate
  * could push `balance` past the signed `INT` range on an ordinary award). Safe under concurrent
- * calls for the same viewer — the clamp and the read-back both happen inside the same upsert.
+ * calls for the same viewer: the clamp happens inside the upsert, and its row lock holds until
+ * commit, so the read-back in the same transaction sees exactly this adjustment.
  * @param streamerId - The streamer's `streamer.id`.
  * @param twitchUsername - The viewer's Twitch login.
  * @param delta - Amount to add (positive) or subtract (negative).
@@ -128,19 +129,20 @@ export async function adjustBalanceOnConn(
 ): Promise<number> {
   await conn.execute<mysql.ResultSetHeader>(
     `INSERT INTO loyalty_points (streamer_id, twitch_username, balance)
-     VALUES (?, ?, LAST_INSERT_ID(LEAST(GREATEST(?, 0), ?)))
+     VALUES (?, ?, LEAST(GREATEST(?, 0), ?))
      AS new_row
-     ON DUPLICATE KEY UPDATE balance = LAST_INSERT_ID(LEAST(GREATEST(loyalty_points.balance + ?, 0), ?))`,
+     ON DUPLICATE KEY UPDATE balance = LEAST(GREATEST(loyalty_points.balance + ?, 0), ?)`,
     [streamerId, twitchUsername, delta, MAX_BALANCE, delta, MAX_BALANCE],
   );
-  const [rows] = await conn.execute<mysql.RowDataPacket[]>('SELECT LAST_INSERT_ID() AS balance');
-  // LAST_INSERT_ID() is a BIGINT expression, so the pool's bigNumberStrings setting can return
-  // it as a string even though `balance` itself is a plain INT column — parse it back with
-  // Number() rather than trusting the driver's JS type. Safe here: this is a points balance
-  // adjusted by small per-message/per-gamble amounts, nowhere near Number.MAX_SAFE_INTEGER
-  // (unlike a Discord snowflake, which is why that case is never parsed back this way
-  // elsewhere in this codebase). Mirrors incrementCounter's identical comment in counters.ts.
-  return Number(rows[0]!.balance); // SELECT LAST_INSERT_ID() always returns one row
+  // Read back by key, not with the LAST_INSERT_ID(expr) trick the other balance writes use: when
+  // this upsert inserts a viewer's first row, MySQL sets LAST_INSERT_ID() to the new row's
+  // AUTO_INCREMENT id, overriding any LAST_INSERT_ID(expr) in VALUES (a real-MySQL test caught it
+  // returning the row id). `balance` is a plain INT, so it comes back as a number.
+  const [rows] = await conn.execute<mysql.RowDataPacket[]>(
+    'SELECT balance FROM loyalty_points WHERE streamer_id = ? AND twitch_username = ?',
+    [streamerId, twitchUsername],
+  );
+  return rows[0]!.balance as number; // the upsert above guarantees the row exists
 }
 
 /**

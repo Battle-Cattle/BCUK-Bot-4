@@ -50,6 +50,32 @@ describe('partials/obsBrowserSource', () => {
   });
 });
 
+describe('partials/obsBrowserSource options', () => {
+  const streamer = { twitch_name: 'StreamerOne' };
+
+  it('titles the card "OBS Browser Source" unless given a heading', async () => {
+    const plain = await render('obsBrowserSource', { streamer, baseUrl: 'https://bot.example', overlayPath: 'overlay' });
+    expect(plain).toContain('<h2 class="section-title">OBS Browser Source</h2>');
+    const titled = await render('obsBrowserSource', { streamer, baseUrl: 'https://bot.example', overlayPath: 'overlay/shared', heading: 'Shared <Video> Overlay' });
+    expect(titled).toContain('<h2 class="section-title">Shared &lt;Video&gt; Overlay</h2>');
+  });
+
+  it('shows the shared overlay URL for the lowercased login, without the status dot or its scripts, when showStatus is false', async () => {
+    const html = await render('obsBrowserSource', { streamer, baseUrl: 'https://bot.example', overlayPath: 'overlay/shared', showStatus: false });
+    expect(html).toContain('https://bot.example/overlay/shared/streamerone</code>');
+    expect(html).not.toContain('overlay-status');
+    expect(html).not.toContain('Checking…');
+    expect(html).not.toContain('overlayConnectionStatus.js');
+    expect(html).not.toContain('sseClient.js');
+  });
+
+  it('still shows the status dot by default', async () => {
+    const html = await render('obsBrowserSource', { streamer, baseUrl: 'https://bot.example', overlayPath: 'overlay' });
+    expect(html).toContain('id="overlay-status-dot"');
+    expect(html).toContain('overlayConnectionStatus.js');
+  });
+});
+
 describe('partials/assignedUserBadges', () => {
   const users = [
     { discord_id: '1', discord_name: 'Me', twitch_name: 'me_tv' },

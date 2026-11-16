@@ -1,6 +1,7 @@
 import mysql, { type PoolConnection } from 'mysql2/promise';
 import { getPool, withTransaction, withTransactionOrNotFound } from './pool';
 import { getOrCreate } from '../shared/mapUtils';
+import { buildInClausePlaceholders } from './utils';
 
 export interface OverlayVideo {
   id: number;
@@ -54,6 +55,21 @@ export async function getVideosForStreamer(streamerId: number): Promise<OverlayV
     [streamerId],
   );
   return rows.map(mapVideo);
+}
+
+/**
+ * Picks out which of the given filenames have an `overlay_video` row for the streamer, for the
+ * sweep of files no row refers to (`overlayOrphanSweep.ts`).
+ * @param streamerId - DB row ID of the streamer whose folder holds the files.
+ * @param filenames - Stored filenames found in the streamer's folder; must not be empty.
+ * @returns The filenames, as stored in the rows, that have a row.
+ */
+export async function getRecordedVideoFilenames(streamerId: number, filenames: string[]): Promise<Set<string>> {
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+    `SELECT filename FROM overlay_video WHERE streamer_id = ? AND filename IN (${buildInClausePlaceholders(filenames.length)})`,
+    [streamerId, ...filenames],
+  );
+  return new Set(rows.map((r) => r.filename as string));
 }
 
 /**

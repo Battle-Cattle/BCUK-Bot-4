@@ -40,6 +40,11 @@ export interface SseEventsHandlerOptions {
   isKnownLogin?: (login: string) => Promise<boolean>;
   /** Unauthenticated sub-pool these connections count against. Defaults to {@link unauthenticatedOverlayPool}. */
   pool?: SseConnectionPool;
+  /**
+   * Called once a connection is attached, to send it initial state (e.g. server time and a list).
+   * Not called when the connection was refused. The callback handles its own errors.
+   */
+  onConnected?: (res: Response, key: string) => void | Promise<void>;
 }
 
 /**
@@ -62,6 +67,7 @@ export function createSseEventsHandler(
     connections, isValidLogin, maxPerChannel,
     isKnownLogin = isKnownStreamerLogin,
     pool = unauthenticatedOverlayPool,
+    onConnected,
   } = options;
 
   return async (req, res, next) => {
@@ -80,7 +86,7 @@ export function createSseEventsHandler(
     }
     // attachSseConnection skips a client that went away while the lookup above was awaited (a
     // cold cache load hits the DB).
-    attachSseConnection(req, res, { connections, key, maxPerChannel, pool });
+    if (attachSseConnection(req, res, { connections, key, maxPerChannel, pool })) await onConnected?.(res, key);
   };
 }
 

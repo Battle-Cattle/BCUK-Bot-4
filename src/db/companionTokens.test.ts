@@ -75,6 +75,17 @@ describe('findDiscordIdByTokenHash', () => {
     const [sql] = pool.execute.mock.calls[0] as [string, unknown[]];
     expect(sql).toContain('revoked_at IS NULL');
   });
+
+  it('only matches a token whose owner still belongs to a guild or is the bot owner (#1004)', async () => {
+    const hash = sha256hex('mysecrettoken');
+    const pool = makePool([]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    await expect(findDiscordIdByTokenHash(hash)).resolves.toBeNull();
+    const [sql, params] = pool.execute.mock.calls[0] as [string, unknown[]];
+    expect(sql).toMatch(/EXISTS \(SELECT 1 FROM guild_member gm WHERE gm\.discord_id = t\.discord_id\)/);
+    expect(sql).toMatch(/u\.is_owner = 1/);
+    expect(params).toEqual([hash]);
+  });
 });
 
 // ─── getTokenStatus ───────────────────────────────────────────────────────────

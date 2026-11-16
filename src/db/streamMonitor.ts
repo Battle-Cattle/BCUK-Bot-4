@@ -280,6 +280,30 @@ export async function addStreamer(discordId: string, groupId: number, guildId: s
 }
 
 /**
+ * Moves a streamer to another stream group of the same guild, keeping the `streamer` row (its id,
+ * and with it everything keyed on it: loyalty points, overlay videos, alerts, advanced commands,
+ * pricing, the stored Twitch token). Removing and re-adding the streamer, the only way to change
+ * groups before, deleted all of that (#1008). A no-op unless both the streamer's current group and
+ * `groupId` belong to `guildId`.
+ *
+ * @param id - Primary key of the streamer row to move.
+ * @param groupId - The stream group to move it to.
+ * @param guildId - Guild the caller is acting in; both groups must belong to it.
+ * @returns True if the streamer was found and moved (or was already in `groupId`); false otherwise.
+ */
+export async function moveStreamerToGroup(id: number, groupId: number, guildId: string): Promise<boolean> {
+  const [result] = await getPool().execute<mysql.ResultSetHeader>(
+    `UPDATE streamer s
+     JOIN stream_group cur ON cur.id = s.group_id
+     JOIN stream_group dest ON dest.id = ?
+     SET s.group_id = dest.id
+     WHERE s.id = ? AND cur.guild_id = ? AND dest.guild_id = ?`,
+    [groupId, id, guildId, guildId],
+  );
+  return result.affectedRows > 0;
+}
+
+/**
  * Remove a streamer row by its DB ID. A no-op if the streamer's group doesn't
  * belong to `guildId`, preventing one guild from removing another's streamer.
  *

@@ -11,13 +11,15 @@ const { logErrorSpy } = vi.hoisted(() => ({ logErrorSpy: vi.fn() }));
 vi.mock('../shared/logger', () => ({ createLogger: () => ({ info: vi.fn(), error: logErrorSpy }) }));
 
 import { getLoyaltyPointsBalance, getLoyaltyPointsLeaderboard, getLoyaltyPointsConfig } from '../db';
-import { executePointsCommandForTwitch, registerPointsTwitchRuntime } from './pointsHandler';
+import { executePointsCommandForTwitch, registerPointsTwitchRuntime, clearPointsReplyThrottles } from './pointsHandler';
 
 const SEND = vi.fn();
 const ENABLED_CONFIG = { enabled: true, pointsPerMessage: 1, cooldownSeconds: 60, pointsPerSub: 100, pointsPerGiftSub: 100 };
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.useRealTimers();
+  clearPointsReplyThrottles();
   SEND.mockResolvedValue(undefined);
   registerPointsTwitchRuntime({ send: SEND });
   vi.mocked(getLoyaltyPointsBalance).mockResolvedValue(0);
@@ -112,5 +114,44 @@ describe('executePointsCommandForTwitch', () => {
     await expect(executePointsCommandForTwitch('channel', 1, '!points', 'alice', '!points')).resolves.toBeUndefined();
 
     expect(logErrorSpy).toHaveBeenCalledWith(expect.stringContaining('Failed to send points response'), sendError);
+  });
+});
+
+describe('executePointsCommandForTwitch — reply throttling (#1009)', () => {
+  it('answers a viewer\'s balance once per 30s, without reading the DB for a throttled repeat', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(1_000_000);
+    await executePointsCommandForTwitch('channel', 1, '!points', 'alice', '!points');
+    await executePointsCommandForTwitch('channel', 1, '!points', 'Alice', '!points');
+    expect(SEND).toHaveBeenCalledOnce();
+    expect(getLoyaltyPointsBalance).toHaveBeenCalledOnce();
+
+    vi.setSystemTime(1_030_000);
+    await executePointsCommandForTwitch('channel', 1, '!points', 'alice', '!points');
+    expect(SEND).toHaveBeenCalledTimes(2);
+  });
+
+  it('answers two viewers asking for their balance at once, and the same viewer in another channel', async () => {
+    await executePointsCommandForTwitch('channel', 1, '!points', 'alice', '!points');
+    await executePointsCommandForTwitch('channel', 1, '!points', 'bob', '!points');
+    await executePointsCommandForTwitch('other', 2, '!points', 'alice', '!points');
+    expect(SEND).toHaveBeenCalledTimes(3);
+  });
+
+  it('answers the leaderboard once per 30s per channel, whoever asks', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(1_000_000);
+    await executePointsCommandForTwitch('channel', 1, '!points top', 'alice', '!points');
+    await executePointsCommandForTwitch('channel', 1, '!points leaderboard', 'bob', '!points');
+    expect(SEND).toHaveBeenCalledOnce();
+    expect(getLoyaltyPointsLeaderboard).toHaveBeenCalledOnce();
+
+    // A balance check isn't held up by the leaderboard's throttle.
+    await executePointsCommandForTwitch('channel', 1, '!points', 'bob', '!points');
+    expect(SEND).toHaveBeenCalledTimes(2);
+
+    vi.setSystemTime(1_030_000);
+    await executePointsCommandForTwitch('channel', 1, '!points top', 'bob', '!points');
+    expect(SEND).toHaveBeenCalledTimes(3);
   });
 });

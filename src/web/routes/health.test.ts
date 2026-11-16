@@ -60,6 +60,7 @@ const SNAPSHOT = {
   eventsub: {},
   monitor: { lastPollOk: true, lastPollAt: null, lastError: null },
   schedulers: {},
+  disk: null,
   errors: [],
 };
 

@@ -187,3 +187,36 @@ describe('executeGambleCommandForTwitch', () => {
     expect(logErrorSpy).toHaveBeenCalledWith(expect.stringContaining('Failed to send gamble result'), sendError);
   });
 });
+
+describe('executeGambleCommandForTwitch — notice throttling (#1009)', () => {
+  it('sends one usage reply per viewer per 30s for repeated invalid amounts', async () => {
+    for (let i = 0; i < 5; i++) {
+      await executeGambleCommandForTwitch('channel', 1, '!gamble abc', 'alice', '!gamble');
+    }
+    expect(SEND).toHaveBeenCalledOnce();
+
+    await executeGambleCommandForTwitch('channel', 1, '!gamble abc', 'bob', '!gamble');
+    expect(SEND).toHaveBeenCalledTimes(2);
+
+    now += 30_000;
+    await executeGambleCommandForTwitch('channel', 1, '!gamble abc', 'alice', '!gamble');
+    expect(SEND).toHaveBeenCalledTimes(3);
+  });
+
+  it('sends one "still on cooldown" reply per viewer per 30s for repeated early bets, but always the bet result', async () => {
+    await executeGambleCommandForTwitch('channel', 1, '!gamble 100', 'alice', '!gamble');
+    expect(SEND).toHaveBeenCalledOnce();
+    for (let i = 0; i < 5; i++) {
+      now += 1_000;
+      await executeGambleCommandForTwitch('channel', 1, '!gamble 100', 'alice', '!gamble');
+    }
+    expect(SEND).toHaveBeenCalledTimes(2);
+    expect(SEND).toHaveBeenLastCalledWith('channel', expect.stringContaining('still on cooldown'));
+
+    now += 60_000;
+    await executeGambleCommandForTwitch('channel', 1, '!gamble 100', 'alice', '!gamble');
+    expect(resolveLoyaltyPointsGambleOutcome).toHaveBeenCalledTimes(2);
+    expect(SEND).toHaveBeenCalledTimes(3);
+  });
+});
+

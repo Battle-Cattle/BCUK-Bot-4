@@ -8,9 +8,8 @@ import { getTextChannel, tryDeleteDiscordMessage, tryEditDiscordMessage } from '
 import { setStreamerLive, clearStreamerLive, DbStreamerFull } from '../../db';
 import { TwitchStream } from '../twitchApi';
 import { LiveState, makeLiveState } from './twitchMonitorTypes';
-import { buildEmbed, templateVars } from './twitchMonitorEmbed';
+import { buildEmbed, renderAnnouncementContent, templateVars, type AnnouncementContent } from './twitchMonitorEmbed';
 import { updateMultitwitch } from './twitchMonitorMultitwitch';
-import { fillTemplate } from '../../shared/textTemplate';
 import { createMutationQueue } from '../../shared/mutationQueue';
 import { withTimeout } from '../twitchSendQueue';
 
@@ -94,7 +93,7 @@ export async function postAnnouncement(
   }
 
   const vars = templateVars(stream.user_login, stream);
-  const content = fillTemplate(group.live_message, vars, 'keep');
+  const message = renderAnnouncementContent(group.live_message, vars);
   const embed = buildEmbed(stream);
 
   try {
@@ -105,7 +104,7 @@ export async function postAnnouncement(
       return;
     }
     const textChannel = channel as TextChannel;
-    const msg = await textChannel.send({ content, embeds: [embed] });
+    const msg = await textChannel.send({ ...message, embeds: [embed] });
     if (!isCurrent()) { // superseded while sending — don't record this message, and don't leave it as a duplicate
       await discardSupersededMessage(msg, stream.user_login);
       return;
@@ -125,7 +124,7 @@ export async function postAnnouncement(
  * Sends a fresh announcement message and records its location on `state`. Shared by
  * `editAnnouncement`'s delete-and-repost and edit-fallback-repost branches.
  * @param textChannel - Discord channel to post into.
- * @param content - Rendered message content.
+ * @param message - Rendered message content and the mentions it may ping.
  * @param embed - Rendered stream embed.
  * @param state - Live state to update with the new message's id/channel.
  * @param isCurrent - See {@link editAnnouncement}; checked after sending so a superseded caller
@@ -134,8 +133,8 @@ export async function postAnnouncement(
  * @returns Resolves once the message is sent and `state` is updated (or updating is skipped
  *   because the caller has since been superseded).
  */
-async function repost(textChannel: TextChannel, content: string, embed: EmbedBuilder, state: LiveState, isCurrent: () => boolean): Promise<void> {
-  const msg = await textChannel.send({ content, embeds: [embed] });
+async function repost(textChannel: TextChannel, message: AnnouncementContent, embed: EmbedBuilder, state: LiveState, isCurrent: () => boolean): Promise<void> {
+  const msg = await textChannel.send({ ...message, embeds: [embed] });
   if (!isCurrent()) {
     await discardSupersededMessage(msg, state.login);
     return;
@@ -147,7 +146,7 @@ async function repost(textChannel: TextChannel, content: string, embed: EmbedBui
 /** Shared context for {@link publishByDeleteAndRepost}/{@link publishByEditWithFallback}. */
 interface PublishContext {
   textChannel: TextChannel;
-  content: string;
+  message: AnnouncementContent;
   embed: EmbedBuilder;
   state: LiveState;
   isCurrent: () => boolean;
@@ -161,10 +160,10 @@ interface PublishContext {
  *   {@link editAnnouncement}'s doc). `false` if superseded before the repost could be recorded.
  */
 async function publishByDeleteAndRepost(ctx: PublishContext): Promise<boolean> {
-  const { textChannel, content, embed, state, isCurrent } = ctx;
+  const { textChannel, message, embed, state, isCurrent } = ctx;
   const staleMessageId = state.messageId!;
   const staleChannelId = state.channelId!;
-  await repost(textChannel, content, embed, state, isCurrent);
+  await repost(textChannel, message, embed, state, isCurrent);
   if (!isCurrent()) return false;
   try {
     await tryDeleteDiscordMessage(staleChannelId, staleMessageId);
@@ -182,11 +181,11 @@ async function publishByDeleteAndRepost(ctx: PublishContext): Promise<boolean> {
  *   partway through. `false` otherwise.
  */
 async function publishByEditWithFallback(ctx: PublishContext & { discordClient: NonNullable<ReturnType<typeof getDiscordClient>> }): Promise<boolean> {
-  const { discordClient, textChannel, content, embed, state, isCurrent } = ctx;
-  const edited = await tryEditDiscordMessage(discordClient, state.channelId!, state.messageId!, { content, embeds: [embed] });
+  const { discordClient, textChannel, message, embed, state, isCurrent } = ctx;
+  const edited = await tryEditDiscordMessage(discordClient, state.channelId!, state.messageId!, { ...message, embeds: [embed] });
   if (!isCurrent()) return false;
   if (edited) return true;
-  await repost(textChannel, content, embed, state, isCurrent);
+  await repost(textChannel, message, embed, state, isCurrent);
   return isCurrent();
 }
 
@@ -204,15 +203,15 @@ async function publishByEditWithFallback(ctx: PublishContext & { discordClient: 
 async function publishEditedAnnouncement(params: {
   discordClient: NonNullable<ReturnType<typeof getDiscordClient>>;
   state: LiveState;
-  content: string;
+  message: AnnouncementContent;
   embed: EmbedBuilder;
   templateKey: 'live_message' | 'new_game_message';
   isCurrent: () => boolean;
 }): Promise<boolean> {
-  const { discordClient, state, content, embed, templateKey, isCurrent } = params;
+  const { discordClient, state, message, embed, templateKey, isCurrent } = params;
   const channel = await getTextChannel(discordClient, state.channelId!);
   if (!isCurrent() || !channel) return false;
-  const ctx: PublishContext = { textChannel: channel as TextChannel, content, embed, state, isCurrent };
+  const ctx: PublishContext = { textChannel: channel as TextChannel, message, embed, state, isCurrent };
 
   if (state.group.delete_old_posts && templateKey === 'new_game_message') {
     return publishByDeleteAndRepost(ctx);
@@ -253,15 +252,14 @@ export async function editAnnouncement(
 
   const group = state.group;
   const vars = templateVars(state.login, stream);
-  const content = fillTemplate(
+  const message = renderAnnouncementContent(
     templateKey === 'new_game_message' ? group.new_game_message : group.live_message,
     vars,
-    'keep',
   );
   const embed = buildEmbed(stream);
 
   try {
-    const published = await publishEditedAnnouncement({ discordClient, state, content, embed, templateKey, isCurrent });
+    const published = await publishEditedAnnouncement({ discordClient, state, message, embed, templateKey, isCurrent });
     if (!published) return;
 
     await persistStreamerLive(state.streamerId, state.messageId, state.channelId, stream.game_name, isCurrent);

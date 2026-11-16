@@ -1,11 +1,11 @@
 import { createLogger } from '../../shared/logger';
 import { Router, type Request, type Response, type NextFunction } from 'express';
-import { findCachedSfxTrigger, getAllSfxTriggers, getApprovedGuildIdsForKey } from '../../db';
+import { findCachedSfxTrigger, getAllSfxTriggers } from '../../db';
 import { pickWeightedRandom } from '../../audio/soundSelector';
 import { playFile, VoiceNotConnectedError } from '../../audio/sfxPlayer';
 import { setVoicePlaying } from '../../shared/statusStore';
 import { requireApiKey } from '../middleware';
-import { resolvePresenceGuildOrRespond, getReadyDiscordClientOrRespond } from './streamdeckGuildResolution';
+import { resolvePresenceGuildOrRespond, getReadyDiscordClientOrRespond, ensureKeyApprovedAnywhere } from './streamdeckGuildResolution';
 
 const log = createLogger('Streamdeck');
 const router = Router();
@@ -73,11 +73,7 @@ function toPlayableTriggers(triggers: SfxTriggerListing[]): SfxTriggerListing[] 
  */
 router.get('/sfx', requireApiKey, async (req, res) => {
   try {
-    const approvedGuildIds = await getApprovedGuildIdsForKey(req.apiKeyOwner!);
-    if (approvedGuildIds.length === 0) {
-      res.status(403).json({ ok: false, error: 'Key not approved for any guild' });
-      return;
-    }
+    if (!(await ensureKeyApprovedAnywhere(req, res))) return;
     const triggers = toPlayableTriggers(await getAllSfxTriggers()).map(({ triggerCommand, categoryName, description }) => ({
       triggerCommand,
       categoryName,

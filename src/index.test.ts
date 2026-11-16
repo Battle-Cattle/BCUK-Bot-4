@@ -22,11 +22,13 @@ vi.mock('./shared/healthStore', () => ({
 }));
 vi.mock('./discord/ownerAlerts', () => ({
   registerOwnerAlertRuntime: vi.fn(),
+  announceShutdown: vi.fn().mockResolvedValue(undefined),
+  announceStartup: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock('./discord/ownerAlertWatcher', () => ({
   primeOwnerAlertBaseline: vi.fn(),
   startOwnerAlertWatcher: vi.fn(),
   stopOwnerAlertWatcher: vi.fn(),
-  announceShutdown: vi.fn().mockResolvedValue(undefined),
-  announceStartup: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock('./discord/discordBot', () => ({
   startDiscordBot: vi.fn(),
@@ -70,6 +72,7 @@ vi.mock('./twitch/eventsub/twitchEventSubReconciliation', () => ({
 }));
 vi.mock('./web/server', () => ({ startWebPanel: vi.fn(), stopWebPanel: vi.fn() }));
 vi.mock('./web/routes/overlayVideoTranscode', () => ({ stopWebmTranscodes: vi.fn() }));
+vi.mock('./web/routes/overlayOrphanSweep', () => ({ startOverlayOrphanSweep: vi.fn(), stopOverlayOrphanSweep: vi.fn() }));
 vi.mock('./audio/audioPlayer', () => ({ disconnect: vi.fn() }));
 vi.mock('./commands/customCommandHandler', () => ({ registerTwitchChatRuntime: vi.fn() }));
 vi.mock('./commands/counterHandler', () => ({ registerCounterTwitchRuntime: vi.fn() }));
@@ -116,6 +119,10 @@ vi.mock('./shared/debugLogging', () => ({
 vi.mock('./shared/eventLoopMonitor', () => ({
   startEventLoopMonitor: vi.fn(),
   stopEventLoopMonitor: vi.fn(),
+}));
+vi.mock('./shared/diskSpaceMonitor', () => ({
+  startDiskSpaceMonitor: vi.fn(),
+  stopDiskSpaceMonitor: vi.fn(),
 }));
 vi.mock('./twitch/pricing/rewardPricingService', () => ({
   registerRewardPricingRuntime: vi.fn(),
@@ -247,7 +254,8 @@ describe('startup — guild registry preload', () => {
 
   it('records the startup DB ping and registers/primes/starts the owner-alert runtime, in order, on a clean startup', async () => {
     const { recordDbPing } = await import('./shared/healthStore.js');
-    const { registerOwnerAlertRuntime, primeOwnerAlertBaseline, startOwnerAlertWatcher } = await import('./discord/ownerAlerts.js');
+    const { registerOwnerAlertRuntime } = await import('./discord/ownerAlerts.js');
+    const { primeOwnerAlertBaseline, startOwnerAlertWatcher } = await import('./discord/ownerAlertWatcher.js');
 
     await runMain();
 
@@ -257,7 +265,7 @@ describe('startup — guild registry preload', () => {
     expect(vi.mocked(startOwnerAlertWatcher)).toHaveBeenCalledOnce();
     // primeOwnerAlertBaseline must run before the watcher starts listening — otherwise its
     // first health-changed notification compares against an empty baseline (see
-    // ownerAlerts.ts's primeOwnerAlertBaseline JSDoc for why that causes false "down" alerts).
+    // ownerAlertWatcher.ts's primeOwnerAlertBaseline JSDoc for why that causes false "down" alerts).
     expect(vi.mocked(primeOwnerAlertBaseline).mock.invocationCallOrder[0])
       .toBeLessThan(vi.mocked(startOwnerAlertWatcher).mock.invocationCallOrder[0]!);
   });
@@ -380,19 +388,23 @@ describe('startup — guild registry preload', () => {
 
 describe('startup — reward pricing scheduler', () => {
   it('starts the scheduler and continues startup through to startEventSub on a clean run', async () => {
+    const { startOverlayOrphanSweep } = await import('./web/routes/overlayOrphanSweep.js');
     const { startRewardPricingScheduler } = await import('./twitch/pricing/rewardPricingScheduler.js');
     const { startEventSub } = await import('./twitch/eventsub/twitchEventSub.js');
     const { startEventSubReconciliation } = await import('./twitch/eventsub/twitchEventSubReconciliation.js');
     const { startChannelReconciliationPoll } = await import('./twitch/twitchChannelReconciliationPoll.js');
     const { startEventLoopMonitor } = await import('./shared/eventLoopMonitor.js');
+    const { startDiskSpaceMonitor } = await import('./shared/diskSpaceMonitor.js');
     const { restoreDebugLogging, startDebugLogPruning } = await import('./shared/debugLogging.js');
 
     await runMain();
 
     expect(vi.mocked(restoreDebugLogging)).toHaveBeenCalledOnce();
     expect(vi.mocked(startDebugLogPruning)).toHaveBeenCalledOnce();
+    expect(vi.mocked(startOverlayOrphanSweep)).toHaveBeenCalledOnce();
     expect(vi.mocked(startRewardPricingScheduler)).toHaveBeenCalledOnce();
     expect(vi.mocked(startEventLoopMonitor)).toHaveBeenCalledOnce();
+    expect(vi.mocked(startDiskSpaceMonitor)).toHaveBeenCalledOnce();
     expect(vi.mocked(startEventSub)).toHaveBeenCalledOnce();
     expect(vi.mocked(startEventSubReconciliation)).toHaveBeenCalledOnce();
     expect(vi.mocked(startChannelReconciliationPoll)).toHaveBeenCalledOnce();
@@ -577,10 +589,12 @@ describe('owner-alert runtime', () => {
 
 describe('shutdown', () => {
   it('stops the reward pricing scheduler on SIGINT', async () => {
+    const { stopOverlayOrphanSweep } = await import('./web/routes/overlayOrphanSweep.js');
     const { stopRewardPricingScheduler } = await import('./twitch/pricing/rewardPricingScheduler.js');
     const { stopEventSubReconciliation } = await import('./twitch/eventsub/twitchEventSubReconciliation.js');
     const { stopChannelReconciliationPoll } = await import('./twitch/twitchChannelReconciliationPoll.js');
     const { stopEventLoopMonitor } = await import('./shared/eventLoopMonitor.js');
+    const { stopDiskSpaceMonitor } = await import('./shared/diskSpaceMonitor.js');
     const { stopDebugLogPruning } = await import('./shared/debugLogging.js');
 
     await runMain();
@@ -588,14 +602,17 @@ describe('shutdown', () => {
     await new Promise<void>((resolve) => setImmediate(resolve));
 
     expect(vi.mocked(stopDebugLogPruning)).toHaveBeenCalledOnce();
+    expect(vi.mocked(stopOverlayOrphanSweep)).toHaveBeenCalledOnce();
     expect(vi.mocked(stopRewardPricingScheduler)).toHaveBeenCalledOnce();
     expect(vi.mocked(stopEventLoopMonitor)).toHaveBeenCalledOnce();
+    expect(vi.mocked(stopDiskSpaceMonitor)).toHaveBeenCalledOnce();
     expect(vi.mocked(stopEventSubReconciliation)).toHaveBeenCalledOnce();
     expect(vi.mocked(stopChannelReconciliationPoll)).toHaveBeenCalledOnce();
   });
 
   it('turns off owner-alert reporting and announces the shutdown before any component disconnects', async () => {
-    const { stopOwnerAlertWatcher, announceShutdown } = await import('./discord/ownerAlerts.js');
+    const { announceShutdown } = await import('./discord/ownerAlerts.js');
+    const { stopOwnerAlertWatcher } = await import('./discord/ownerAlertWatcher.js');
     const { stopDiscordBot } = await import('./discord/discordBot.js');
     const { stopTwitchBot } = await import('./twitch/twitchBot.js');
 

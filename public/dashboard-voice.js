@@ -3,6 +3,23 @@
 
 let voiceChannelPollTimer = null;
 
+/** First retry delay after a failed channel-list load; doubles per failure in a row. */
+const VOICE_RETRY_BASE_MS = 5000;
+/** Longest retry delay, so a tab left open on a failing server polls at most once a minute. */
+const VOICE_RETRY_MAX_MS = 60000;
+/** Channel-list loads that have failed in a row (reset by a successful load). */
+let voiceChannelFailures = 0;
+
+/**
+ * Returns how long to wait before the next channel-list load after one more failure in a row:
+ * 5s, 10s, 20s, 40s, then 60s.
+ * @returns {number} Milliseconds until the next retry.
+ */
+function nextVoiceRetryDelay() {
+  voiceChannelFailures++;
+  return Math.min(VOICE_RETRY_BASE_MS * 2 ** (voiceChannelFailures - 1), VOICE_RETRY_MAX_MS);
+}
+
 /**
  * Shows "Failed" on the join/leave button for a few seconds, then restores its prior label.
  * @param {HTMLButtonElement} button - The join/leave voice button.
@@ -19,6 +36,15 @@ function showVoiceButtonFailure(button, leaving) {
  */
 function setSelectError(select) {
   select.innerHTML = '<option value="">Failed to load channels</option>';
+  select.disabled = true;
+}
+
+/**
+ * Replaces the voice channel dropdown with a disabled "session expired" option.
+ * @param {HTMLSelectElement} select - The voice channel dropdown.
+ */
+function setSelectSessionExpired(select) {
+  select.innerHTML = '<option value="">Session expired \u2014 reload to log in</option>';
   select.disabled = true;
 }
 
@@ -42,13 +68,14 @@ function restoreVoiceSelection(select, previousValue, data) {
  * Rebuilds the voice channel dropdown from a channel list response.
  * @param {HTMLSelectElement} select - The voice channel dropdown.
  * @param {{ ok: boolean, channels?: Array<{id: string, name: string}> }} data - Response body.
- * @returns {number} Milliseconds until the next poll (sooner after an error or empty list).
+ * @returns {number} Milliseconds until the next poll (sooner after an empty list; backing off after an error).
  */
 function applyVoiceChannelData(select, data) {
   if (!data.ok || !Array.isArray(data.channels)) {
     setSelectError(select);
-    return 5000;
+    return nextVoiceRetryDelay();
   }
+  voiceChannelFailures = 0;
   const previousValue = select.value;
   select.innerHTML = '';
 
@@ -73,7 +100,11 @@ function applyVoiceChannelData(select, data) {
   return 30000;
 }
 
-/** Fetches the voice channel list into the dropdown and schedules the next refresh. */
+/**
+ * Fetches the voice channel list into the dropdown and schedules the next refresh. Stops polling
+ * once the session has expired (401): every later poll would fail the same way, and a tab left
+ * open overnight would otherwise keep its IP pinned against the panel's rate limits.
+ */
 async function loadVoiceChannels() {
   clearTimeout(voiceChannelPollTimer);
   const select = document.getElementById('voice-channel-select');
@@ -81,15 +112,19 @@ async function loadVoiceChannels() {
   let nextPollMs;
   try {
     const res = await fetch('/api/voice/channels');
-    if (!res.ok) {
-      setSelectError(select);
-      nextPollMs = 5000;
-    } else {
+    if (res.status === 401) {
+      setSelectSessionExpired(select);
+      return;
+    }
+    if (res.ok) {
       nextPollMs = applyVoiceChannelData(select, await res.json());
+    } else {
+      setSelectError(select);
+      nextPollMs = nextVoiceRetryDelay();
     }
   } catch (_) {
     setSelectError(select);
-    nextPollMs = 5000;
+    nextPollMs = nextVoiceRetryDelay();
   }
   voiceChannelPollTimer = setTimeout(loadVoiceChannels, nextPollMs);
 }

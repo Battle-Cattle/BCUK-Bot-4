@@ -58,6 +58,39 @@ function redirectTo(url: string) {
   return response(200, null, { redirected: true, url });
 }
 
+/**
+ * Builds the page's `XMLHttpRequest` (used for pieces), answering through the test's `fetch` mock
+ * so a test routes pieces like any other request. `sent` holds each request, and its `upload`
+ * target lets a test fire `progress` events while the piece is in flight.
+ */
+function makeFakeXhr(fetch: (url: string, init: unknown) => unknown, origin: string) {
+  const sent: FakeXhr[] = [];
+  class FakeXhr extends FakeTarget {
+    upload = new FakeTarget();
+    status = 0;
+    responseText = '';
+    responseURL = '';
+    method = '';
+    url = '';
+    headers: Record<string, string> = {};
+    responseHeaders: { get?: (name: string) => string | null } = {};
+    open(method: string, url: string) { this.method = method; this.url = url; }
+    setRequestHeader(name: string, value: string) { this.headers[name] = value; }
+    getResponseHeader(name: string) { return this.responseHeaders.get?.(name) ?? null; }
+    send(body: unknown) {
+      sent.push(this);
+      Promise.resolve(fetch(this.url, { method: this.method, headers: this.headers, body })).then(async (res: any) => {
+        this.status = res.status;
+        this.responseURL = res.redirected ? res.url : new URL(this.url, origin).href;
+        this.responseHeaders = res.headers ?? {};
+        this.responseText = await res.json().then((b: unknown) => JSON.stringify(b), () => 'not json');
+        this.fire('load');
+      }, () => this.fire('error'));
+    }
+  }
+  return { FakeXhr, sent };
+}
+
 /** The form's progress display: a box, a `<progress>` bar and a label. */
 function makeProgressDisplay() {
   const bar = {
@@ -116,6 +149,7 @@ function setup(options: SetupOptions = {}) {
   document.body = { dataset: { csrfToken: 'tok' } };
   const assign = vi.fn();
   const fetch = vi.fn();
+  const xhr = makeFakeXhr(fetch, 'https://bot.example');
   const storage: Record<string, string> = { ...stored };
   const context = {
     document,
@@ -129,6 +163,7 @@ function setup(options: SetupOptions = {}) {
     URLSearchParams,
     URL,
     fetch,
+    XMLHttpRequest: xhr.FakeXhr,
     AbortController,
     setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms),
     clearTimeout: (id: ReturnType<typeof setTimeout>) => clearTimeout(id),
@@ -152,7 +187,7 @@ function setup(options: SetupOptions = {}) {
     document.fire('submit', event);
     return event;
   };
-  return { form, button, display, assign, fetch, submit, storage, context, confirmFn: context.window.confirm };
+  return { form, button, display, assign, fetch, xhrs: xhr.sent, submit, storage, context, confirmFn: context.window.confirm };
 }
 
 /** What the page remembers for an upload of `file` with ID `id` (as `startChunkedUpload` saves it). */
@@ -265,6 +300,88 @@ describe('registerUploadFormHandler', () => {
     await flush();
     expect(display.bar.ariaLabel).toBe('Processing progress');
     expect(display.label.textContent).toBe('Saving…');
+  });
+
+  it('moves the bar while a piece is in flight and shows 100% once every byte is confirmed', async () => {
+    const file = makeFile(16 * 1024 * 1024);
+    const { display, fetch, xhrs, submit } = setup({ file });
+    const labels: string[] = [];
+    Object.defineProperty(display.label, 'textContent', { get: () => labels.at(-1) ?? '', set: (v: string) => { labels.push(v); } });
+    const firstPiece = deferred();
+    fetch.mockImplementation((url: string) => {
+      if (url === `${BASE}/start`) return response(200, { id: ID });
+      if (url === `${BASE}/${ID}`) return response(200, { received: 0, size: file.size });
+      if (url.includes('/chunk?offset=0')) return firstPiece.promise;
+      if (url.includes('/chunk?offset=')) return response(200, { received: file.size });
+      return pending();
+    });
+    submit();
+    await flush();
+    xhrs[0]!.upload.fire('progress', { loaded: 4 * 1024 * 1024 });
+    expect(display.bar.value).toBe(25);
+    expect(display.label.textContent).toBe('Uploading… 25%');
+    // The same whole percentage again doesn't touch the display.
+    xhrs[0]!.upload.fire('progress', { loaded: 4 * 1024 * 1024 + 1 });
+    expect(labels.filter((l) => l === 'Uploading… 25%')).toHaveLength(1);
+    firstPiece.resolve({ ok: true, status: 200, redirected: false, json: () => Promise.resolve({ received: 8 * 1024 * 1024 }) });
+    await flush();
+    expect(labels).toEqual(expect.arrayContaining(['Uploading… 50%', 'Uploading… 100%']));
+    expect(labels.indexOf('Uploading… 100%')).toBeLessThan(labels.indexOf('Saving…'));
+  });
+
+  it('drops the bar back to the confirmed offset when a piece in flight fails', async () => {
+    const file = makeFile(16 * 1024 * 1024);
+    const { display, fetch, xhrs, submit } = setup({ file });
+    const firstPiece = deferred();
+    fetch.mockImplementation((url: string) => {
+      if (url === `${BASE}/start`) return response(200, { id: ID });
+      if (url === `${BASE}/${ID}`) return response(200, { received: 0, size: file.size });
+      if (url.includes('/chunk?offset=0') && xhrs.length === 1) return firstPiece.promise;
+      return pending();
+    });
+    submit();
+    await flush();
+    xhrs[0]!.upload.fire('progress', { loaded: 6 * 1024 * 1024 });
+    expect(display.label.textContent).toBe('Uploading… 37%');
+    firstPiece.resolve({ ok: false, status: 503, redirected: false, json: () => Promise.resolve({}) });
+    await flush();
+    expect(display.bar.value).toBe(0);
+    expect(display.label.textContent).toBe('Uploading… 0%');
+  });
+
+  it('sends each piece with the CSRF token as a JSON request', async () => {
+    const { fetch, xhrs, submit, assign } = setup();
+    routeFetch(fetch);
+    submit();
+    expect(await navigated(assign)).toBe(DONE_URL);
+    expect(xhrs).toHaveLength(1);
+    expect(xhrs[0]!.method).toBe('PUT');
+    expect(xhrs[0]!.headers).toEqual({ 'X-CSRF-Token': 'tok', Accept: 'application/json', 'Content-Type': 'application/octet-stream' });
+  });
+
+  it('stops with the outcome a redirected piece carries', async () => {
+    const { fetch, submit, assign } = setup();
+    fetch.mockImplementation((url: string) => {
+      if (url === `${BASE}/start`) return response(200, { id: ID });
+      if (url === `${BASE}/${ID}`) return response(200, { received: 0, size: 6 });
+      if (url.includes('/chunk')) return redirectTo('https://bot.example/overlay/settings?error=not_a_streamer');
+      return response(404, {});
+    });
+    submit();
+    expect(await navigated(assign)).toBe('/overlay/settings?error=not_a_streamer');
+    expect(fetch.mock.calls.filter(([u]) => String(u).includes('/chunk'))).toHaveLength(1);
+  });
+
+  it('reports a refused piece whose answer is not JSON as upload_failed', async () => {
+    const { fetch, submit, assign } = setup();
+    fetch.mockImplementation((url: string) => {
+      if (url === `${BASE}/start`) return response(200, { id: ID });
+      if (url === `${BASE}/${ID}`) return response(200, { received: 0, size: 6 });
+      if (url.includes('/chunk')) return response(400, null, { json: () => Promise.reject(new SyntaxError('x')) });
+      return response(404, {});
+    });
+    submit();
+    expect(await navigated(assign)).toBe('/overlay/settings?error=upload_failed');
   });
 
   it('polls the progress endpoint while the upload completes and shows the conversion percentage', async () => {
@@ -584,6 +701,28 @@ describe('registerUploadFormHandler', () => {
     expect(fetch.mock.calls.filter(([u]) => String(u).includes('/chunk'))).toHaveLength(1);
     expect(await navigated(assign)).toBe(DONE_URL);
     expect(fetch.mock.calls.filter(([u]) => String(u).includes('/chunk'))).toHaveLength(2);
+  });
+
+  it('drops the bar back to the confirmed offset while it waits out a 429', async () => {
+    const file = makeFile(16 * 1024 * 1024);
+    const { display, fetch, xhrs, submit } = setup({ file });
+    const firstPiece = deferred();
+    fetch.mockImplementation((url: string) => {
+      if (url === `${BASE}/start`) return response(200, { id: ID });
+      if (url === `${BASE}/${ID}`) return response(200, { received: 0, size: file.size });
+      if (url.includes('/chunk?offset=0') && xhrs.length === 1) return firstPiece.promise;
+      return pending();
+    });
+    submit();
+    await flush();
+    xhrs[0]!.upload.fire('progress', { loaded: 8 * 1024 * 1024 });
+    expect(display.label.textContent).toBe('Uploading… 50%');
+    firstPiece.resolve({ ok: false, status: 429, redirected: false, headers: { get: () => '120' }, json: () => Promise.resolve(null) });
+    await flush();
+    // Still inside the 120-second wait: no retry has been sent yet.
+    expect(xhrs).toHaveLength(1);
+    expect(display.bar.value).toBe(0);
+    expect(display.label.textContent).toBe('Uploading… 0%');
   });
 
   it('gives up with upload_failed when the request limit never lifts', async () => {

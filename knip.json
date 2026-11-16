@@ -10,13 +10,17 @@
   "vitest": {
     "config": [
       "vitest.config.*",
-      "vitest.toolchain.config.*"
+      "vitest.toolchain.config.*",
+      "vitest.db.config.*"
     ],
     "entry": [
       "src/**/*.test.ts",
       "src/test-utils/**/*.ts"
     ]
   },
+  "ignoreBinaries": [
+    "systemd-analyze"
+  ],
   "ignoreDependencies": [
     "@simplewebauthn/browser",
     "express-serve-static-core"

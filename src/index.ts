@@ -1,7 +1,8 @@
 import 'mediaplex'; // Must be imported first to register as Opus provider
 import { getPool, closePool, pingDb, runMigrations, reencryptStoredTokens } from './db';
 import { recordDbPing } from './shared/healthStore';
-import { registerOwnerAlertRuntime, primeOwnerAlertBaseline, startOwnerAlertWatcher, stopOwnerAlertWatcher, announceShutdown, announceStartup } from './discord/ownerAlerts';
+import { registerOwnerAlertRuntime, announceShutdown, announceStartup } from './discord/ownerAlerts';
+import { primeOwnerAlertBaseline, startOwnerAlertWatcher, stopOwnerAlertWatcher } from './discord/ownerAlertWatcher';
 import { startTwitchBot, stopTwitchBot, sayInChannel } from './twitch/twitchBot';
 import { getActiveChannels, getActiveChannelUserIds, setChannelJoinedHook } from './twitch/twitchChannelMembership';
 import { startChannelReconciliationPoll, stopChannelReconciliationPoll } from './twitch/twitchChannelReconciliationPoll';
@@ -15,6 +16,7 @@ import { startEventSub, stopEventSub, reloadEventSubSubscriptions } from './twit
 import { startEventSubReconciliation, stopEventSubReconciliation } from './twitch/eventsub/twitchEventSubReconciliation';
 import { startWebPanel, stopWebPanel } from './web/server';
 import { stopWebmTranscodes } from './web/routes/overlayVideoTranscode';
+import { startOverlayOrphanSweep, stopOverlayOrphanSweep } from './web/routes/overlayOrphanSweep';
 import { disconnect } from './audio/audioPlayer';
 import { registerTwitchChatRuntime } from './commands/customCommandHandler';
 import { registerCounterTwitchRuntime } from './commands/counterHandler';
@@ -44,6 +46,7 @@ import { startTimerCommandScheduler, stopTimerCommandScheduler, registerTimerCom
 import { createLogger } from './shared/logger';
 import { withTimeout } from './shared/withTimeout';
 import { startEventLoopMonitor, stopEventLoopMonitor } from './shared/eventLoopMonitor';
+import { startDiskSpaceMonitor, stopDiskSpaceMonitor } from './shared/diskSpaceMonitor';
 import { restoreDebugLogging, startDebugLogPruning, stopDebugLogPruning } from './shared/debugLogging';
 
 const log = createLogger('Bot');
@@ -128,7 +131,7 @@ async function safeStop(name: string, fn: () => void | Promise<void>): Promise<v
 /**
  * Gracefully stops schedulers and bot connections, closes the DB pool, and exits the process.
  * Turns off owner-alert status reporting first and sends the owner a "shutting down" DM (see
- * `ownerAlerts.ts`'s `stopOwnerAlertWatcher`/`announceShutdown`) before anything actually
+ * `ownerAlertWatcher.ts`'s `stopOwnerAlertWatcher` and `ownerAlerts.ts`'s `announceShutdown`) before anything actually
  * disconnects. Each teardown step is isolated via {@link safeStop} so a failure in one component
  * (e.g. the Twitch monitor) can't skip the rest — `closePool()` and `process.exit(0)` always run.
  * Re-entrant calls (a second signal while teardown is still running) are logged and ignored.
@@ -152,8 +155,10 @@ async function shutdown(signal: string): Promise<void> {
   // With no more uploads coming in, kill any overlay video conversion still running, so an ffmpeg
   // child isn't left encoding after the bot exits.
   stopWebmTranscodes();
+  stopOverlayOrphanSweep();
   stopDbHealthCheck();
   stopEventLoopMonitor();
+  stopDiskSpaceMonitor();
   stopDebugLogPruning();
   stopCounterScheduler();
   stopAllRaffles();
@@ -365,8 +370,10 @@ async function main(): Promise<void> {
   startCounterScheduler();
   startRewardPricingScheduler();
   startTimerCommandScheduler();
+  startOverlayOrphanSweep();
   startDbHealthCheck();
   startEventLoopMonitor();
+  startDiskSpaceMonitor();
 
   startTwitchMonitor().catch((err: unknown) => log.error('TwitchMonitor startup error:', err));
   startEventSub();

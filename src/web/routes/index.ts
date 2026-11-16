@@ -30,6 +30,9 @@ import companionCommandsRouter from './companionCommands';
 import companionKeysRouter from './companionKeys';
 import userSettingsRouter from './userSettings';
 import overlaySourceRouter from './overlaySource';
+import sharedOverlaySourceRouter from './sharedOverlaySource';
+import sharedOverlayAdminRouter from './sharedOverlayAdmin';
+import './sharedOverlayLivePush'; // registers the live-state push for the shared overlays
 import overlayAdminRouter from './overlayAdmin';
 import alertsOverlaySourceRouter from './alertsOverlaySource';
 import alertsAdminRouter from './alertsAdmin';
@@ -39,7 +42,7 @@ import privacyRouter from './privacy';
 import tosRouter from './tos';
 import healthRouter from './health';
 import healthStatusEventsRouter from './healthStatusEvents';
-import { requireAuth, requireGuildContext } from '../middleware';
+import { requireAuth, requireAuthJson, requireGuildContext } from '../middleware';
 import { authLimiter, streamdeckAuthFailureLimiter } from '../rateLimits';
 
 // Every feature route, mounted in one place so server.ts keeps only the app-wide middleware
@@ -77,6 +80,7 @@ export function mountRoutes(app: Express, { streamdeckLimiter }: MountRoutesOpti
   app.use('/', sfxPublicRouter);
   app.use('/', privacyRouter);
   app.use('/', tosRouter);
+  app.use('/overlay/shared', sharedOverlaySourceRouter);
   app.use('/overlay', overlaySourceRouter);
   app.use('/alerts', alertsOverlaySourceRouter);
   // authLimiter is applied per-route inside companionAuthRouter, not here — this
@@ -87,7 +91,8 @@ export function mountRoutes(app: Express, { streamdeckLimiter }: MountRoutesOpti
   app.use('/api/companion', companionRewardsRouter);
   app.use('/api/companion', companionCommandsRouter);
   app.use('/guild', requireAuth, guildRouter);
-  app.use('/api', requireAuth, apiRouter);
+  // JSON 401 rather than requireAuth's login redirect: these are fetch()ed by the panel's scripts.
+  app.use('/api', requireAuthJson, apiRouter);
 
   // Health isn't guild-scoped (unlike the '/admin'-mounted routers below), so it's mounted here,
   // ahead of the '/'-mounted routers' requireGuildContext gate — matching '/guild'/'/api' above —
@@ -139,6 +144,7 @@ export function mountRoutes(app: Express, { streamdeckLimiter }: MountRoutesOpti
   app.use('/admin', adminGuildRouter);
 
   app.use('/user/settings', requireAuth, userSettingsRouter);
+  app.use('/overlay/shared/settings', sharedOverlayAdminRouter);
   app.use('/overlay', requireAuth, overlayAdminRouter);
   app.use('/alerts', requireAuth, alertsAdminRouter);
   app.use('/channel-points', requireAuth, channelPointsAdminRouter);

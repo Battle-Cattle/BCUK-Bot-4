@@ -70,6 +70,7 @@ vi.mock('./csrf', () => ({
 
 vi.mock('./middleware', () => ({
   requireAuth: vi.fn((_req: unknown, _res: unknown, next: () => void) => next()),
+  requireAuthJson: vi.fn((_req: unknown, _res: unknown, next: () => void) => next()),
   requireGuildContext: vi.fn((_req: unknown, _res: unknown, next: () => void) => next()),
   requireMod: vi.fn((_req: unknown, _res: unknown, next: () => void) => next()),
   requireOwner: vi.fn((_req: unknown, _res: unknown, next: () => void) => next()),
@@ -144,6 +145,8 @@ vi.mock('./routes/streamdeck', () => ({ default: emptyRouter() }));
 vi.mock('./routes/streamdeckKeys', () => ({ default: emptyRouter() }));
 vi.mock('./routes/userSettings', () => ({ default: emptyRouter() }));
 vi.mock('./routes/overlaySource', () => ({ default: emptyRouter() }));
+vi.mock('./routes/sharedOverlaySource', () => ({ default: emptyRouter() }));
+vi.mock('./routes/sharedOverlayAdmin', () => ({ default: emptyRouter() }));
 vi.mock('./routes/overlayAdmin', () => ({ default: emptyRouter() }));
 vi.mock('./routes/alertsOverlaySource', () => ({ default: emptyRouter() }));
 vi.mock('./routes/alertsAdmin', () => ({ default: emptyRouter() }));
@@ -162,8 +165,9 @@ vi.mock('./routes/health', () => ({ default: markerRouter('health') }));
 vi.mock('./routes/healthStatusEvents', () => ({ default: emptyRouter() }));
 
 import { app, generalLimiter, preSessionLimiter, sessionLimiter, startWebPanel, stopWebPanel } from './server';
+import { overlayTrafficLimiter } from './rateLimits';
 import { createHmac } from 'crypto';
-import { requireAuth, requireGuildContext } from './middleware';
+import { requireAuth, requireAuthJson, requireGuildContext } from './middleware';
 
 describe('server route wiring', () => {
   beforeEach(() => {
@@ -176,6 +180,11 @@ describe('server route wiring', () => {
     expect(res.body).toEqual({ label: 'guild' });
     expect(requireAuth).toHaveBeenCalled();
     expect(requireGuildContext).not.toHaveBeenCalled();
+  });
+
+  it('mounts /api behind requireAuthJson, so a poll from an expired session gets a 401 instead of the login page', async () => {
+    await request(app).get('/api/__trigger_error');
+    expect(requireAuthJson).toHaveBeenCalled();
   });
 
   it('mounts /admin behind both requireAuth and requireGuildContext', async () => {
@@ -288,6 +297,12 @@ describe('CSP header', () => {
     const csp = res.headers['content-security-policy'];
     expect(csp).toContain("font-src 'self'");
     expect(csp).not.toMatch(/font-src[^;]*https:/);
+  });
+
+  it('allows blob: media, which the shared overlay plays its stored videos from', async () => {
+    const res = await request(app).get('/__marker_dashboard');
+    const csp = res.headers['content-security-policy'];
+    expect(csp).toMatch(/media-src 'self' blob:(;|$)/);
   });
 
   it('restricts style-src to self, without allowing unsafe-inline', async () => {
@@ -459,6 +474,9 @@ async function expectExactThreshold(testApp: express.Express, limit: number): Pr
  * @param headers - Extra headers sent with every probe (e.g. `X-Forwarded-For`).
  * @returns Resolves once `fn` has finished and the server has closed.
  */
+/** How many probe requests {@link expectProbeStatuses} keeps in flight at once (and sockets per probe agent). */
+const PROBE_BATCH_SIZE = 16;
+
 async function withListeningServer(
   testApp: express.Express,
   fn: (probe: () => Promise<number>) => Promise<void>,
@@ -467,9 +485,9 @@ async function withListeningServer(
   const server = http.createServer(testApp);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const { port } = server.address() as AddressInfo;
-  const agent = new http.Agent({ keepAlive: true, maxSockets: 1 });
+  const agent = new http.Agent({ keepAlive: true, maxSockets: PROBE_BATCH_SIZE });
   /**
-   * Sends one GET to the probe route over the shared keep-alive socket, draining the body so the
+   * Sends one GET to the probe route over the shared keep-alive sockets, draining the body so the
    * socket is reused. Rejects on a request/response error or a response cut off before its end,
    * so a broken probe fails the test at once instead of hanging the loop until the timeout.
    */
@@ -492,7 +510,11 @@ async function withListeningServer(
 }
 
 /**
- * Sends `count` sequential probe requests, asserting each returns `status`.
+ * Sends `count` probe requests in parallel batches of {@link PROBE_BATCH_SIZE}, asserting each
+ * returns `status`. Batching keeps the counts exact: every request here expects the same status,
+ * the limiters count each hit as it arrives, and the next call only starts once these have all
+ * finished, so a threshold check right after still sees exactly `count` earlier hits. It just
+ * skips waiting for each round trip in turn, which made the 1800-request tests take seconds.
  *
  * @param probe - Probe sender from {@link withListeningServer}.
  * @param count - Number of requests to send.
@@ -500,8 +522,10 @@ async function withListeningServer(
  * @returns Resolves once all `count` requests have completed and been asserted.
  */
 async function expectProbeStatuses(probe: () => Promise<number>, count: number, status: number): Promise<void> {
-  for (let i = 0; i < count; i++) {
-    expect(await probe()).toBe(status);
+  for (let sent = 0; sent < count; sent += PROBE_BATCH_SIZE) {
+    const batch = Math.min(PROBE_BATCH_SIZE, count - sent);
+    const statuses = await Promise.all(Array.from({ length: batch }, () => probe()));
+    expect(statuses).toEqual(Array.from({ length: batch }, () => status));
   }
 }
 
@@ -522,6 +546,61 @@ describe('generalLimiter wiring (server.ts)', () => {
   it('skips an authenticated caller (per-account throttling is sessionLimiter’s job)', async () => {
     const testApp = buildLimiterTestApp(generalLimiter, { discordId: 'general-limiter-skip-test' });
     await withListeningServer(testApp, (probe) => expectProbeStatuses(probe, 105, 200));
+  });
+});
+
+describe('overlay traffic and the general limiter (#1011)', () => {
+  const LOOPBACK_KEYS = ['::ffff:127.0.0.1', '127.0.0.1', '::1'];
+
+  beforeEach(async () => {
+    for (const key of LOOPBACK_KEYS) {
+      await generalLimiter.resetKey(key);
+      await overlayTrafficLimiter.resetKey(key);
+    }
+  });
+
+  /** The real general and overlay limiters, as server.ts mounts them, in front of 200-returning routes. */
+  function buildOverlayTestApp(): express.Express {
+    const testApp = express();
+    testApp.use((req, _res, next) => {
+      (req as unknown as { session: Record<string, unknown> }).session = {};
+      next();
+    });
+    testApp.use(generalLimiter);
+    testApp.use(overlayTrafficLimiter);
+    testApp.all(/.*/, (_req, res) => res.json({ ok: true }));
+    return testApp;
+  }
+
+  it('lets an OBS shared-overlay sync run without tripping the general limit, which still limits other routes', async () => {
+    const server = http.createServer(buildOverlayTestApp());
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address() as AddressInfo;
+    const agent = new http.Agent({ keepAlive: true, maxSockets: 1 });
+    /** Sends one request over the shared keep-alive socket and resolves with its status. */
+    const send = (method: string, path: string): Promise<number> => new Promise((resolve, reject) => {
+      const req = http.request({ host: '127.0.0.1', port, path, method, agent }, (res) => {
+        res.resume();
+        res.on('end', () => resolve(res.statusCode ?? 0));
+      });
+      req.on('error', reject);
+      req.end();
+    });
+    try {
+      // 150 preload range requests and 60 readiness reports: well past the general limit of 100.
+      for (let i = 0; i < 150; i++) expect(await send('GET', '/overlay/shared/videos/a.webm?preload=1')).toBe(200);
+      for (let i = 0; i < 60; i++) expect(await send('POST', '/overlay/shared/streamer1/report')).toBe(200);
+      // The streamer's other overlay requests from the same IP still go through.
+      expect(await send('GET', '/overlay/videos/5/clip.webm')).toBe(200);
+      expect(await send('GET', '/alerts/streamer1/events')).toBe(200);
+      expect(await send('GET', '/alerts/assets/5/ding.mp3')).toBe(200);
+      // An unrelated unauthenticated route is still limited at 100 per window.
+      for (let i = 0; i < 100; i++) expect(await send('GET', '/auth/login')).toBe(200);
+      expect(await send('GET', '/auth/login')).toBe(429);
+    } finally {
+      agent.destroy();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 });
 
@@ -703,6 +782,10 @@ describe('preSessionLimiter (server.ts)', () => {
     await Promise.all(accounts.map((discordId) => sessionLimiter.resetKey(discordId)));
     storeGet.mockImplementation((sid, cb) =>
       cb(null, { cookie: { originalMaxAge: 60_000, expires: new Date(Date.now() + 60_000).toISOString() }, user: { discordId: sid } }));
+    // Every probe 404s through the error page. Express only caches compiled views in production,
+    // so without this EJS recompiles error.ejs and its partials 1800 times, most of this test's time.
+    const viewCache = app.enabled('view cache');
+    app.enable('view cache');
     try {
       for (const discordId of accounts) {
         await withListeningServer(app, async (probe) => {
@@ -715,6 +798,7 @@ describe('preSessionLimiter (server.ts)', () => {
       const res = await request(app).get('/__limiter_probe').set('X-Forwarded-For', CLIENT_IP);
       expect(res.status).toBe(404);
     } finally {
+      app.set('view cache', viewCache);
       storeGet.mockImplementation((_id, cb) => cb(null, undefined));
       await Promise.all(accounts.map((discordId) => sessionLimiter.resetKey(discordId)));
     }

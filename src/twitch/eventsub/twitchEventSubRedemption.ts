@@ -4,7 +4,7 @@
 // which keeps the simpler follow/sub/resub/giftsub/raid/stream handlers.
 import type { EventSubConfig, StreamerEventType, RedemptionProgress } from '../../db';
 import {
-  getVideosForReward, getStreamerById, recordStreamerEvent, getRedemptionProgress, markRedemptionEffect,
+  getVideosForReward, getStreamerById, recordStreamerEvent, fitStreamerEventText, getRedemptionProgress, markRedemptionEffect,
 } from '../../db';
 import { pickWeightedRandom } from '../../audio/soundSelector';
 import { createLogger } from '../../shared/logger';
@@ -66,14 +66,15 @@ async function recordAndPushDashboardEventOrThrow(
   detail: string | null,
   redemptionId: string,
 ): Promise<void> {
-  const eventId = await recordStreamerEvent(streamerId, eventType, displayName, detail, redemptionId);
+  const fitted = fitStreamerEventText(displayName, detail);
+  const eventId = await recordStreamerEvent(streamerId, eventType, fitted.displayName, fitted.detail, redemptionId);
   // Only push the live SSE update when a new row was actually inserted — if this redemption was
   // already recorded on an earlier attempt (see recordStreamerEvent's doc comment), a retry must
   // not re-deliver a second live dashboard event for the same physical redemption. `insertId` is
   // never 0 (auto-increment starts at 1), so `!eventId` only catches the genuine null-skip case.
   if (!eventId) return;
   dashboardEventRuntimeRegistry.get()?.pushDashboardEvent(streamerId, {
-    eventType, displayName, detail, occurredAt: new Date().toISOString(),
+    eventType, ...fitted, occurredAt: new Date().toISOString(),
   });
 }
 

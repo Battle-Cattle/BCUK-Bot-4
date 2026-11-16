@@ -18,6 +18,7 @@ import {
   type DbAdvancedCommand,
 } from '../../db';
 import { createLogger } from '../../shared/logger';
+import { createMutationQueue } from '../../shared/mutationQueue';
 import { getChannelStreamStart, isChannelLive } from '../../twitch/monitor/twitchMonitor';
 import { extractArgs } from '../commandUtils';
 import {
@@ -41,6 +42,15 @@ const NOTICE_WINDOW_MS = 10_000;
 
 const cooldowns = createAdvancedCommandCooldowns();
 const notices = createNoticeThrottle(NOTICE_WINDOW_MS);
+
+/**
+ * Serialises each command's chat uses (#1003): checking the cooldowns, caps and price, charging,
+ * starting the cooldowns and recording the use run for one viewer at a time per command. Without
+ * it, chat messages arriving together all passed the checks before any of them was recorded, so a
+ * global cooldown or a per-stream cap let several through and they all paid the same escalating
+ * price. Keyed by command id, so one command's slow DB call doesn't hold up another's.
+ */
+const chatUseQueue = createMutationQueue();
 
 /** A Twitch chat message that might be an advanced command. */
 export interface AdvancedCommandChatMessage {
@@ -208,12 +218,13 @@ function checkChatGates(
 }
 
 /**
- * Records a use, fires its effects, and starts (or short-circuits) the companion acknowledgement.
- * If recording fails after points were spent, the points are credited back before rethrowing.
+ * Records a use in the usage ledger, which is what later cap and price checks count. If recording
+ * fails after points were spent, the points are credited back before rethrowing.
  * @param use - The use.
  * @param streamStartedAt - The live stream's start, or null offline.
+ * @returns Resolves once the use is recorded.
  */
-async function fireUse(use: AdvancedCommandUse, streamStartedAt: Date | null): Promise<void> {
+async function recordUse(use: AdvancedCommandUse, streamStartedAt: Date | null): Promise<void> {
   try {
     await recordAdvancedCommandUsage({
       eventId: use.eventId,
@@ -232,7 +243,14 @@ async function fireUse(use: AdvancedCommandUse, streamStartedAt: Date | null): P
     }
     throw err;
   }
+}
 
+/**
+ * Fires a recorded use's effects, and starts (or short-circuits) the companion acknowledgement.
+ * @param use - The use, already recorded by {@link recordUse}.
+ * @returns Resolves once the effects have run.
+ */
+async function runUseEffects(use: AdvancedCommandUse): Promise<void> {
   // Track the acknowledgement the moment the event is pushed, not after the chat reply below it
   // is sent — otherwise a fast failure acknowledgement could arrive before it's being waited for.
   const outcome = await runAdvancedCommandEffects(use, {
@@ -251,6 +269,18 @@ async function fireUse(use: AdvancedCommandUse, streamStartedAt: Date | null): P
 }
 
 /**
+ * Records a use, fires its effects, and starts (or short-circuits) the companion acknowledgement.
+ * If recording fails after points were spent, the points are credited back before rethrowing.
+ * @param use - The use.
+ * @param streamStartedAt - The live stream's start, or null offline.
+ * @returns Resolves once the use is recorded and its effects have run.
+ */
+async function fireUse(use: AdvancedCommandUse, streamStartedAt: Date | null): Promise<void> {
+  await recordUse(use, streamStartedAt);
+  await runUseEffects(use);
+}
+
+/**
  * Looks up the channel's advanced command a chat message names.
  * @param msg - The chat message.
  * @returns The route and the command (null if it's gone), or null when the message isn't one.
@@ -263,60 +293,42 @@ async function resolveChatCommand(
   return route ? { route, command: await getAdvancedCommand(route.streamerId, route.commandId) } : null;
 }
 
+/** A chat notice: the text, or a function that builds it (only called if the notice is sent). */
+type ChatNotice = string | (() => Promise<string>);
+
+/** What {@link claimChatUse} decided: a recorded use to fire, or a notice to send (null for none). */
+type ChatUseDecision = { use: AdvancedCommandUse } | { notice: ChatNotice | null };
+
 /**
- * Checks the caps, prices the use and charges the viewer, sending the notice for any refusal.
+ * Decides one chat use, run inside {@link chatUseQueue} for the command so it sees every earlier
+ * use: checks the gates (role, live-only, cooldowns), the caps and the price, charges the viewer,
+ * starts the cooldowns and records the use. Sends nothing, so a slow chat send never holds the
+ * queue; the caller sends the notice or fires the effects.
  * @param command - The command.
+ * @param route - The chat route the message matched.
  * @param msg - The chat message.
- * @param window - The stream (or offline window) to count and price in.
- * @param noticeKey - The notice throttle key.
- * @returns The cost and balance after paying, or null when the use is refused.
+ * @param now - When the message arrived.
+ * @returns The recorded use, or the notice for a refusal.
  */
-async function priceAndCharge(
+async function claimChatUse(
   command: DbAdvancedCommand,
+  route: AdvancedCommandChatRoute,
   msg: AdvancedCommandChatMessage,
-  window: AdvancedCommandUsageWindow,
-  noticeKey: string,
-): Promise<{ cost: number; balance: number | null } | null> {
-  const priced = await capsAndCost(command, msg, window);
-  if ('notice' in priced) {
-    await sendNotice(msg.channel, noticeKey, priced.notice);
-    return null;
-  }
-  const paid = await charge(command, msg.userLogin, priced.cost);
-  if ('notice' in paid) {
-    if (paid.notice) await sendNotice(msg.channel, noticeKey, paid.notice);
-    return null;
-  }
-  return { cost: priced.cost, balance: paid.balance };
-}
-
-/**
- * Handles a Twitch chat message that may trigger one of the channel's advanced commands.
- * @param msg - The chat message.
- * @returns Resolves once the use is handled (or ignored).
- */
-export async function executeAdvancedCommandForTwitch(msg: AdvancedCommandChatMessage): Promise<void> {
-  const resolved = await resolveChatCommand(msg);
-  if (!resolved?.command) return;
-  const { route, command } = resolved;
-  const noticeKey = `${route.commandId}:${msg.userLogin}`;
-  const now = new Date();
+  now: Date,
+): Promise<ChatUseDecision> {
   const { window, streamStartedAt } = usageWindow(msg.channel, now);
-
   const gate = checkChatGates(command, msg);
   if (gate !== null) {
-    if (gate) {
-      await sendNotice(msg.channel, noticeKey, 'notice' in gate
-        ? gate.notice
-        : () => cooldownNotice(command, gate.cooldowns, window, msg));
-    }
-    return;
+    if (!gate) return { notice: null };
+    return { notice: 'notice' in gate ? gate.notice : () => cooldownNotice(command, gate.cooldowns, window, msg) };
   }
-  const paid = await priceAndCharge(command, msg, window, noticeKey);
-  if (!paid) return;
+  const priced = await capsAndCost(command, msg, window);
+  if ('notice' in priced) return { notice: priced.notice };
+  const paid = await charge(command, msg.userLogin, priced.cost);
+  if ('notice' in paid) return { notice: paid.notice };
 
   cooldowns.claim(command, msg.userLogin);
-  await fireUse({
+  const use: AdvancedCommandUse = {
     command,
     eventId: randomUUID(),
     channel: msg.channel,
@@ -325,10 +337,32 @@ export async function executeAdvancedCommandForTwitch(msg: AdvancedCommandChatMe
     userLogin: msg.userLogin,
     userName: msg.userName,
     args: extractArgs(msg.message),
-    pointsSpent: paid.cost,
+    pointsSpent: priced.cost,
     balance: paid.balance,
     triggeredAt: now,
-  }, streamStartedAt);
+  };
+  await recordUse(use, streamStartedAt);
+  return { use };
+}
+
+/**
+ * Handles a Twitch chat message that may trigger one of the channel's advanced commands. The
+ * checks, charge and record run one use at a time per command ({@link chatUseQueue}); the notice
+ * or the effects follow outside the queue.
+ * @param msg - The chat message.
+ * @returns Resolves once the use is handled (or ignored).
+ */
+export async function executeAdvancedCommandForTwitch(msg: AdvancedCommandChatMessage): Promise<void> {
+  const resolved = await resolveChatCommand(msg);
+  if (!resolved?.command) return;
+  const { route, command } = resolved;
+  const now = new Date();
+  const decision = await chatUseQueue.run(String(route.commandId), () => claimChatUse(command, route, msg, now));
+  if ('use' in decision) {
+    await runUseEffects(decision.use);
+  } else if (decision.notice) {
+    await sendNotice(msg.channel, `${route.commandId}:${msg.userLogin}`, decision.notice);
+  }
 }
 
 /**

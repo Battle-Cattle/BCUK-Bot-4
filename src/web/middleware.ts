@@ -5,23 +5,60 @@ import {
   AccessLevel,
   findKeyByHash,
   findDiscordIdByTokenHash,
-  findUser,
 } from '../db';
 import { renderView } from './routes/viewHelpers';
-import { fetchLiveGuildsForUser, resolveAccessLevelForGuild } from './guildAccess';
+import { parseBearerToken } from './bearerToken';
+import { getLiveAccessForRequest, hasPanelAccess, resolveAccessLevelForGuild } from './guildAccess';
 
 /**
- * Ensures the request has a logged-in session user, redirecting to login otherwise.
- * @param req - Express request; checked for `req.session.user`.
- * @param res - Express response; used to redirect when no session user is present.
- * @param next - Called when a session user is present.
- * @returns Nothing; either calls `next()` or issues a redirect.
+ * Whether the request's session belongs to a user who may still use the panel. A session whose
+ * user has been deleted, or removed from their last guild (and isn't the bot owner), is destroyed
+ * here, so removing a member ends their access at once instead of when the session expires.
+ * The DB lookup is shared with any later middleware on the same request
+ * ({@link getLiveAccessForRequest}).
+ * @param req - Express request; reads `req.session.user`, and destroys the session when access has ended.
+ * @returns True when the session user exists and still has panel access.
  */
-export function requireAuth(req: Request, res: Response, next: NextFunction): void {
-  if (req.session.user) {
+async function hasLiveSession(req: Request): Promise<boolean> {
+  const user = req.session.user;
+  if (!user) return false;
+  if (hasPanelAccess(await getLiveAccessForRequest(req, user.discordId))) return true;
+  await new Promise<void>((resolve) => { req.session.destroy(() => { resolve(); }); });
+  return false;
+}
+
+/**
+ * Ensures the request has a logged-in session user who still has panel access (see
+ * {@link hasLiveSession}), redirecting to login otherwise.
+ * @param req - Express request; checked for `req.session.user`.
+ * @param res - Express response; used to redirect when no live session user is present.
+ * @param next - Called when a live session user is present.
+ * @returns A promise that resolves once `next()` or a redirect has been issued.
+ */
+export async function requireAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
+  if (await hasLiveSession(req)) {
     next();
   } else {
     res.redirect('/auth/login');
+  }
+}
+
+/**
+ * JSON counterpart to {@link requireAuth}, for the `/api` routes the panel's scripts poll with
+ * `fetch`: answers `401 { ok: false, error: 'unauthenticated' }` instead of redirecting. A
+ * redirect sent a dashboard tab left open past its session's expiry to the HTML login page on
+ * every poll, which the script took for a failed load and retried every few seconds, until the
+ * tab's IP hit the auth and general rate limiters.
+ * @param req - Express request; checked for `req.session.user`.
+ * @param res - Express response; used to send the 401 when no live session user is present.
+ * @param next - Called when a live session user is present.
+ * @returns A promise that resolves once `next()` or the 401 has been issued.
+ */
+export async function requireAuthJson(req: Request, res: Response, next: NextFunction): Promise<void> {
+  if (await hasLiveSession(req)) {
+    next();
+  } else {
+    res.status(401).json({ ok: false, error: 'unauthenticated' });
   }
 }
 
@@ -38,7 +75,9 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
  *
  * Guild fetching and access-level resolution are shared with `POST /guild/select` via
  * `fetchLiveGuildsForUser`/`resolveAccessLevelForGuild` (`./guildAccess`) — see those for
- * why a non-owner's access level never needs a second `guild_member` query.
+ * why a non-owner's access level never needs a second `guild_member` query. The lookup goes
+ * through `getLiveAccessForRequest`, so it reuses the one `requireAuth` already made for this
+ * request.
  *
  * @param req - Express request; reads and mutates `req.session.user`.
  * @param res - Express response; used to redirect when no guild context can be resolved.
@@ -52,13 +91,13 @@ export async function requireGuildContext(req: Request, res: Response, next: Nex
     return;
   }
 
-  const dbUser = await findUser(user.discordId);
-  if (!dbUser) {
+  const access = await getLiveAccessForRequest(req, user.discordId);
+  if (!access) {
     res.redirect('/auth/login');
     return;
   }
 
-  const { guilds: liveGuilds, accessLevelByGuildId } = await fetchLiveGuildsForUser(dbUser);
+  const { dbUser, live: { guilds: liveGuilds, accessLevelByGuildId } } = access;
   user.isOwner = dbUser.is_owner;
   user.guilds = liveGuilds.map((g) => ({ guildId: g.guild_id, name: g.name }));
 
@@ -142,7 +181,8 @@ export const requireModJson = requireAccessLevelJson(AccessLevel.MOD);
 export const requireManagerJson = requireAccessLevelJson(AccessLevel.MANAGER);
 
 /**
- * Creates a middleware that authenticates a request via a `Bearer` token: hashes it with
+ * Creates a middleware that authenticates a request via a `Bearer` token (scheme matched
+ * case-insensitively, see `parseBearerToken`): hashes it with
  * SHA-256, resolves the hash to an identity via `lookup`, and stores it on `req` via `assign`
  * on success. Responds 401 when the header is missing/empty or `lookup` finds no match, and
  * 500 on any other lookup failure. Shared factory behind `requireApiKey`/`requireCompanionKey`.
@@ -156,8 +196,7 @@ function authenticateBearerToken<T>(
   assign: (req: Request, value: T, hash: string) => void,
 ): (req: Request, res: Response, next: NextFunction) => Promise<void> {
   return async (req, res, next) => {
-    const authHeader = req.headers['authorization'];
-    const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : '';
+    const token = parseBearerToken(req.headers['authorization']);
     if (!token) {
       res.status(401).json({ ok: false, error: 'Unauthorized' });
       return;
@@ -216,6 +255,7 @@ export const requireAdminJson = requireAccessLevelJson(AccessLevel.ADMIN);
  * revoked `user.is_owner` takes effect on the very next request instead of only at next
  * login — the same freshness `requireGuildContext` gives guild access. Needed because the
  * owner-gated routes (`/admin/health`, `/admin/bot-auth`) aren't behind `requireGuildContext`.
+ * Reuses the lookup `requireAuth` made for this request ({@link getLiveAccessForRequest}).
  * @param req - Express request; reads and mutates `req.session.user.isOwner`.
  * @returns True only when a session user exists and their DB row still has `is_owner` set;
  *   false when there's no session user or the user row no longer exists.
@@ -223,8 +263,8 @@ export const requireAdminJson = requireAccessLevelJson(AccessLevel.ADMIN);
 async function isLiveOwner(req: Request): Promise<boolean> {
   const user = req.session.user;
   if (!user) return false;
-  const dbUser = await findUser(user.discordId);
-  user.isOwner = dbUser?.is_owner ?? false;
+  const access = await getLiveAccessForRequest(req, user.discordId);
+  user.isOwner = access?.dbUser.is_owner ?? false;
   return user.isOwner;
 }
 

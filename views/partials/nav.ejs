@@ -23,6 +23,9 @@
         <button class="nav-group-label" aria-haspopup="true" aria-expanded="false">Overlays <span class="nav-caret">▾</span></button>
         <div class="nav-group-items">
           <a href="/overlay/settings" class="nav-item">Video</a>
+          <% if (user.accessLevel >= 2) { %>
+          <a href="/overlay/shared/settings" class="nav-item">Shared Video</a>
+          <% } %>
           <a href="/alerts/settings" class="nav-item">Alerts</a>
           <a href="/overlay/controller/settings" class="nav-item">Controller</a>
         </div>

@@ -1,5 +1,7 @@
+import type { Request } from 'express';
 import {
   AccessLevel,
+  findUser,
   getAllGuilds,
   getEffectiveAccessLevelForUser,
   getGuildsForMember,
@@ -63,4 +65,49 @@ export async function resolveAccessLevelForGuild(
       ? accessLevelByGuildId.get(guildId) ?? AccessLevel.USER
       : await getEffectiveAccessLevelForUser(guildId, dbUser)
   ) as AccessLevelValue;
+}
+
+/** A signed-in user's live user row and guilds, read by {@link getLiveAccessForRequest}. */
+export interface LiveAccess {
+  /** The user's current `user` row. */
+  dbUser: DbUser;
+  /** The user's current guilds and per-guild access levels. */
+  live: LiveGuildsResult;
+}
+
+/**
+ * One lookup per request. Several routers share a mount prefix and each runs `requireAuth` (and
+ * `requireGuildContext` reuses the result), so without this one request could read the same
+ * rows several times.
+ */
+const liveAccessByRequest = new WeakMap<Request, Promise<LiveAccess | null>>();
+
+/**
+ * Reads the signed-in user's `user` row and live guilds from the database, once per request:
+ * later calls for the same request get the same promise.
+ * @param req - The request, used as the memo key.
+ * @param discordId - Discord snowflake of the session's user.
+ * @returns The live user row and guilds, or null when the user row no longer exists.
+ */
+export function getLiveAccessForRequest(req: Request, discordId: string): Promise<LiveAccess | null> {
+  let pending = liveAccessByRequest.get(req);
+  if (!pending) {
+    pending = (async () => {
+      const dbUser = await findUser(discordId);
+      if (!dbUser) return null;
+      return { dbUser, live: await fetchLiveGuildsForUser(dbUser) };
+    })();
+    liveAccessByRequest.set(req, pending);
+  }
+  return pending;
+}
+
+/**
+ * Whether a live lookup still lets the user use the panel: the user row exists, and they are the
+ * bot owner or still belong to at least one guild. The same rule sign-in applies.
+ * @param access - The result of {@link getLiveAccessForRequest}.
+ * @returns True when the session may continue.
+ */
+export function hasPanelAccess(access: LiveAccess | null): access is LiveAccess {
+  return access !== null && (access.dbUser.is_owner || access.live.guilds.length > 0);
 }

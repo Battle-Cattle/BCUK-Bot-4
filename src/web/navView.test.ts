@@ -50,6 +50,32 @@ describe('views/partials/nav.ejs ordering', () => {
     expect(withoutDropdownItems(menu)).not.toContain('href="/loyalty-points"');
   });
 
+  /** The links inside the Overlays dropdown. */
+  const overlaysDropdown = (html: string): string => {
+    const menu = menuOf(html);
+    const itemsStart = menu.indexOf('<div class="nav-group-items">', menu.indexOf('Overlays'));
+    return menu.slice(itemsStart, menu.indexOf('</div>', itemsStart));
+  };
+
+  it('lists Shared Video in the Overlays dropdown for a Manager, after Video', async () => {
+    const dropdown = overlaysDropdown(await renderNav(makeUser(2)));
+    expect(dropdown).toContain('<a href="/overlay/shared/settings" class="nav-item">Shared Video</a>');
+    expect(dropdown.indexOf('href="/overlay/shared/settings"')).toBeGreaterThan(dropdown.indexOf('href="/overlay/settings"'));
+    expect(dropdown.indexOf('href="/overlay/shared/settings"')).toBeLessThan(dropdown.indexOf('href="/alerts/settings"'));
+  });
+
+  it('does not list Shared Video below Manager, as the page is closed to them', async () => {
+    for (const level of [0, 1]) {
+      const html = await renderNav(makeUser(level));
+      expect(overlaysDropdown(html)).not.toContain('/overlay/shared/settings');
+      expect(overlaysDropdown(html)).toContain('href="/overlay/settings"');
+    }
+  });
+
+  it('shows no Overlays menu, so no Shared Video link, when signed out', async () => {
+    expect(await renderNav(null)).not.toContain('/overlay/shared/settings');
+  });
+
   it('ends with Settings and shows no Admin menu for a plain user', async () => {
     const html = await renderNav(makeUser(0));
     expect(topLevelLabels(html)).toEqual([
