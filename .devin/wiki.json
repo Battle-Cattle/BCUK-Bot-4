@@ -74,7 +74,7 @@
     },
     {
       "title": "Discord Bot, Voice Audio, and Multi-Guild Registry",
-      "purpose": "Covers the Discord.js client setup, gateway intents, message/command dispatch, and first-join provisioning (guild owner granted Admin only on brand-new join). Explains voice channel connection lifecycle, playback via ffmpeg/mediaplex, the custom voice adapter (voiceAdapter.ts, since guild.voiceAdapterCreator is unused for a discord.js v14 incompatibility), and voicePresence.ts resolving which registered guild a Discord user's live voice connection belongs to (used to route Twitch-chat-triggered SFX into the right guild). Also documents guildRegistry.ts: the in-memory map of provisioned guilds (\u22651 guild_member row), reloaded via reloadGuildRegistry() at startup, on guildCreate, and after admin provisioning changes, fail-safe on DB error.",
+      "purpose": "Covers the Discord.js client setup, gateway intents, message/command dispatch, and first-join provisioning (guild owner granted Admin only on brand-new join). Explains voice channel connection lifecycle, playback via ffmpeg/mediaplex, the custom voice adapter (voiceAdapter.ts, listening on client.ws gateway dispatches; guild.voiceAdapterCreator is unused, originally for a discord.js v14 incompatibility), and voicePresence.ts resolving which registered guild a Discord user's live voice connection belongs to (used to route Twitch-chat-triggered SFX into the right guild). Also documents guildRegistry.ts: the in-memory map of provisioned guilds (\u22651 guild_member row), reloaded via reloadGuildRegistry() at startup, on guildCreate, and after admin provisioning changes, fail-safe on DB error.",
       "parent": "Core Bot Architecture",
       "page_notes": [
         {
