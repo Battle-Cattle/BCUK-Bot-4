@@ -34,9 +34,10 @@ The bot also doesn't trust the invite on its own. When it joins a server for the
 
 In production the bot runs as a systemd service, `bcuk-bot`. systemd restarts it 10 seconds after a crash and starts it on boot. It never stops retrying, so the bot comes back by itself after a database or network outage. Repeated failures back off to one attempt every 5 minutes (on systemd 254+), so a long outage doesn't hammer the Discord and Twitch logins.
 
-One-time setup, run on the server as the user the bot should run as (not root):
+One-time setup, run on the server as the user the bot should run as (not root), in the checkout after `npm ci` (the installer reads `.env` with the checkout's own dotenv):
 
 ```bash
+npm ci
 bash scripts/install-systemd-service.sh
 ```
 
@@ -149,7 +150,7 @@ Treat dumps as secrets: they hold every stored OAuth token, encrypted with `EVEN
 - **The upload folders** (`OVERLAY_FOLDER`, `ALERT_ASSETS_FOLDER`, `SFX_FOLDER`), which the database rows point at, e.g. `tar czf uploads-$(date +%F).tar.gz <folders>`.
 - **The dumps themselves**: a copy on the same disk doesn't survive losing the disk.
 
-**Restoring.** `bash scripts/restore-db.sh <dump.sql.gz>` replaces the live database. It refuses while the service is running and asks you to type the database name to confirm. Before it changes anything it saves the current data as a `pre-restore` dump (and stops if that fails; a database that is empty or doesn't exist yet, as on a rebuilt server, has nothing to save and skips this); it prints the file's path, which you can restore the same way to undo it:
+**Restoring.** `bash scripts/restore-db.sh <dump.sql.gz>` replaces the live database. On a rebuilt server, run `npm ci` in the checkout first: the script reads `.env` with the checkout's own dotenv. It refuses while the service is running and asks you to type the database name to confirm. Before it changes anything it saves the current data as a `pre-restore` dump (and stops if that fails; a database that is empty or doesn't exist yet, as on a rebuilt server, has nothing to save and skips this); it prints the file's path, which you can restore the same way to undo it:
 
 ```bash
 sudo systemctl stop bcuk-bot
@@ -161,7 +162,7 @@ Restore the upload folders from the same point in time as the dump. Once the bot
 
 **Test a backup** now and then by restoring it into a scratch database, which leaves the live one alone: `bash scripts/restore-db.sh <file> bcuk_restore_test`. If that database already has tables (a name reused or mistyped), it asks you to type the name first, since restoring drops them all. Then check it looks right, logging in as the bot's database user (`DB_HOST`, `DB_PORT` and `DB_USER` in `.env`, with 3306 for an unset port; `-p` asks for `DB_PASSWORD`): `mysql -h <DB_HOST> -P <DB_PORT> -u <DB_USER> -p bcuk_restore_test -e 'SELECT COUNT(*) FROM user; SELECT version FROM schema_migrations'`. Drop it afterwards the same way: `mysql -h <DB_HOST> -P <DB_PORT> -u <DB_USER> -p -e 'DROP DATABASE bcuk_restore_test'`. The bot's MySQL user needs the `CREATE` and `DROP` privileges on that database. On a server that ignores the case of database names (`lower_case_table_names` set), a name differing from `DB_NAME` only in case is the live database, and gets the live checks.
 
-The backup and restore scripts, and `deploy.sh`'s migration check, read the database settings from `.env`. If a `DB_` setting is also exported in your shell with a different value, they stop: a bot started from that shell would use the exported value, since dotenv doesn't override exported variables.
+The backup and restore scripts, `deploy.sh` and the systemd installer read `.env` with the bot's own dotenv (`scripts/envSetting.js`, called from `scripts/lib/dotenv.sh`), so they always read a setting exactly as the bot does. That needs `node` and the checkout's `node_modules` (or, mid-deploy, `node_modules.old`): run `npm ci` before them on a rebuilt server, or they stop and say so. They use `$NODE_BIN` if set, else the `node` on `PATH`, else the one the `bcuk-bot` service runs, which covers the nightly cron job above, whose `PATH` usually lacks a `node` installed with nvm. The backup and restore scripts, and `deploy.sh`'s migration check, read the database settings from `.env`. If a `DB_` setting is also exported in your shell with a different value, they stop: a bot started from that shell would use the exported value, since dotenv doesn't override exported variables.
 
 The web panel must only be reachable through the reverse proxy. It trusts exactly one `X-Forwarded-For` hop (`trust proxy: 1`, for Caddy), so a client that can reach `WEB_PORT` directly can set that header itself, pick its own `req.ip` and get round the IP-keyed rate limiters. The panel binds to `WEB_HOST`, which defaults to `127.0.0.1`; if Caddy runs on another host or in a container, set `WEB_HOST` to the private interface it connects through, and keep `WEB_PORT` firewalled from the internet either way.
 
