@@ -2,7 +2,7 @@ import { describe, it, expect, afterAll, vi } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 import { spawn } from 'child_process';
-import { SCRIPT_TEST_TIMEOUT_MS, commitVersion, createSandbox, isRunning, notLinux, read, removeTemplate, run, write } from './deploySandbox';
+import { SCRIPT_TEST_TIMEOUT_MS, commitVersion, createSandbox, isRunning, notLinux, read, removeTemplate, run, shellQuote, write } from './deploySandbox';
 
 describe.skipIf(notLinux)('deploySandbox', { timeout: SCRIPT_TEST_TIMEOUT_MS }, () => {
   const roots: string[] = [];
@@ -18,6 +18,13 @@ describe.skipIf(notLinux)('deploySandbox', { timeout: SCRIPT_TEST_TIMEOUT_MS }, 
     roots.push(made.root);
     return made;
   }
+
+  it('quotes a value as one bash argument, spaces and single quotes included', () => {
+    for (const value of ['/tmp/plain', '/tmp/with space/dotenv', "/tmp/it's here", '']) {
+      const printed = run('bash', ['-c', `printf '%s|' ${shellQuote(value)}`], process.cwd(), process.env);
+      expect(printed).toBe(`${value}|`);
+    }
+  });
 
   it('gives each copy remotes and a backup folder inside its own directory', () => {
     const a = make();

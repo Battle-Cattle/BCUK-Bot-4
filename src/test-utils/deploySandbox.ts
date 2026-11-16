@@ -154,6 +154,16 @@ cat >> "$STATE/mysql-input"
 `,
 };
 
+/**
+ * Quotes a value as one bash word, for splicing into a stub script: wrapped in single quotes, with
+ * each single quote inside closed, escaped and reopened. Keeps a path with spaces as one argument.
+ * @param value - Text to quote.
+ * @returns The quoted word.
+ */
+export function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", `'\\''`)}'`;
+}
+
 /** A throwaway checkout plus everything the scripts need around it. */
 export interface Sandbox {
   root: string;
@@ -276,7 +286,7 @@ function buildSandbox(): Sandbox {
   const { state } = sandbox;
   fs.mkdirSync(state);
   write(path.join(root, 'gitconfig'), '[user]\n\tname = Test\n\temail = test@example.com\n[init]\n\tdefaultBranch = main\n[commit]\n\tgpgsign = false\n');
-  for (const [name, body] of Object.entries(STUBS)) write(path.join(root, 'stubs', name), body.replaceAll("__NODE_BIN__", NODE_BIN).replaceAll('__DOTENV_DIR__', DOTENV_DIR), 0o755);
+  for (const [name, body] of Object.entries(STUBS)) write(path.join(root, 'stubs', name), body.replaceAll("__NODE_BIN__", NODE_BIN).replaceAll('__DOTENV_DIR__', shellQuote(DOTENV_DIR)), 0o755);
   run('git', ['init', '-q', '--bare', sandbox.origin], root);
   run('git', ['clone', '-q', sandbox.origin, sandbox.dev], root);
   for (const script of ['deploy.sh', 'scripts/backup-db.sh', 'scripts/restore-db.sh', 'scripts/lib/dotenv.sh', 'scripts/envSetting.js']) copyScript(script);
