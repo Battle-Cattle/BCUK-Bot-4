@@ -616,22 +616,68 @@ describe('sessionLimiter wiring (server.ts)', () => {
   });
 });
 
+/**
+ * Runs `fn` with a port already taken on 127.0.0.1 — the address the panel binds by default.
+ * Windows lets a specific-address bind share a port with a wildcard listener, so a wildcard
+ * blocker wouldn't make the panel's listen fail there.
+ */
+async function withOccupiedPort(fn: (port: number) => Promise<void>): Promise<void> {
+  const blocker = http.createServer();
+  await new Promise<void>((resolve) => blocker.listen(0, '127.0.0.1', resolve));
+  const { port } = blocker.address() as AddressInfo;
+  try {
+    await fn(port);
+  } finally {
+    await new Promise<void>((resolve) => blocker.close(() => resolve()));
+  }
+}
+
 describe('startWebPanel / stopWebPanel', () => {
   afterEach(async () => {
     await stopWebPanel();
   });
 
+  it('resolves with a server that is listening', async () => {
+    const server = await startWebPanel(0);
+    expect(server.listening).toBe(true);
+    const res = await request(server).get('/healthz');
+    expect(res.status).toBe(200);
+  });
+
   it('rejects with the listen error instead of reporting success when the port is taken', async () => {
-    const blocker = http.createServer();
-    // Same address the panel binds by default: Windows lets a specific-address bind share a port
-    // with a wildcard listener, so a wildcard blocker wouldn't make the panel's listen fail there.
-    await new Promise<void>((resolve) => blocker.listen(0, '127.0.0.1', resolve));
-    const { port } = blocker.address() as AddressInfo;
-    try {
+    mockLog.info.mockClear();
+    await withOccupiedPort(async (port) => {
       await expect(startWebPanel(port)).rejects.toMatchObject({ code: 'EADDRINUSE' });
-    } finally {
-      await new Promise<void>((resolve) => blocker.close(() => resolve()));
-    }
+    });
+    expect(mockLog.info).not.toHaveBeenCalledWith(expect.stringContaining('Panel listening'));
+  });
+
+  it('leaves the panel stopped after a failed start, so stop is a no-op', async () => {
+    await withOccupiedPort(async (port) => {
+      await expect(startWebPanel(port)).rejects.toMatchObject({ code: 'EADDRINUSE' });
+    });
+    storeClose.mockClear();
+    await expect(stopWebPanel()).resolves.toBeUndefined();
+    expect(storeClose).not.toHaveBeenCalled();
+  });
+
+  it('starts normally after an earlier start failed', async () => {
+    await withOccupiedPort(async (port) => {
+      await expect(startWebPanel(port)).rejects.toMatchObject({ code: 'EADDRINUSE' });
+    });
+    const server = await startWebPanel(0);
+    expect(server.listening).toBe(true);
+    storeClose.mockClear();
+    await stopWebPanel();
+    expect(server.listening).toBe(false);
+    expect(storeClose).toHaveBeenCalledOnce();
+  });
+
+  it('does not keep a startup error handler that would swallow later server errors', async () => {
+    const server = await startWebPanel(0);
+    // With no listener left, Node throws an emitted 'error' (reaching the process-level
+    // uncaughtException handler) rather than a spent startup handler silently absorbing it.
+    expect(() => server.emit('error', new Error('late server error'))).toThrow('late server error');
   });
 
   it("keeps Node's default request and header deadlines, since uploads arrive in short pieces", async () => {
@@ -716,6 +762,14 @@ describe('expired-session cleanup', () => {
     await startWebPanel(0);
     await vi.advanceTimersByTimeAsync(FIFTEEN_MINUTES);
     expect(mockLog.warn).toHaveBeenCalledWith(expect.stringContaining('Failed to clear expired sessions'), failure);
+  });
+
+  it('does not start after a failed panel start', async () => {
+    await withOccupiedPort(async (port) => {
+      await expect(startWebPanel(port)).rejects.toMatchObject({ code: 'EADDRINUSE' });
+    });
+    await vi.advanceTimersByTimeAsync(FIFTEEN_MINUTES * 2);
+    expect(storeClearExpired).not.toHaveBeenCalled();
   });
 
   it('stops when the panel stops', async () => {
