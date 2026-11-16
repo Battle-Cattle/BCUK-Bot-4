@@ -2,16 +2,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const { mockLog } = vi.hoisted(() => ({ mockLog: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() } }));
 vi.mock('../../shared/logger', () => ({ createLogger: () => mockLog }));
-// adminUserAuth (for ManagerEditAuthError) imports the DB facade; the class itself needs no DB.
-vi.mock('../../db', () => ({}));
 vi.mock('../../discord/guildRegistry', () => ({ reloadGuildRegistry: vi.fn() }));
 vi.mock('../../shared/userMutationQueue', () => ({
-  runUserMutationForActorAndTarget: vi.fn((_actor: string, _target: string, op: () => Promise<void>) => op()),
+  runUserMutationForActorAndTarget: vi.fn((_actor: string, _target: string, op: () => Promise<unknown>) => op()),
 }));
 
 import { reloadGuildRegistry } from '../../discord/guildRegistry';
 import { runUserMutationForActorAndTarget } from '../../shared/userMutationQueue';
-import { ManagerEditAuthError } from './adminUserAuth';
 import { reloadRegistrySafe, runGuardedUserMutation } from './adminUsersMutationRunner';
 
 const mockRes = () => ({ redirect: vi.fn() }) as any;
@@ -33,28 +30,45 @@ describe('reloadRegistrySafe', () => {
 });
 
 describe('runGuardedUserMutation', () => {
-  it('runs the operation in the queue for both ids and redirects to /admin/users', async () => {
+  it('authorizes, then writes, inside one queue slot for both ids, then redirects to /admin/users', async () => {
     const res = mockRes();
-    const op = vi.fn().mockResolvedValue(undefined);
-    await runGuardedUserMutation(res, 'actor', 'target', op, vi.fn());
-    expect(runUserMutationForActorAndTarget).toHaveBeenCalledWith('actor', 'target', op);
+    const order: string[] = [];
+    vi.mocked(runUserMutationForActorAndTarget).mockImplementationOnce(async (_a, _t, op) => {
+      order.push('enter queue');
+      return op();
+    });
+    await runGuardedUserMutation(res, 'actor', 'target', {
+      authorize: async () => { order.push('authorize'); return null; },
+      write: async () => { order.push('write'); },
+      onError: vi.fn(),
+    });
+    expect(runUserMutationForActorAndTarget).toHaveBeenCalledWith('actor', 'target', expect.any(Function));
+    expect(order).toEqual(['enter queue', 'authorize', 'write']);
     expect(res.redirect).toHaveBeenCalledWith('/admin/users');
   });
 
-  it('redirects with the code of a ManagerEditAuthError', async () => {
+  it('skips the write and redirects with the code when authorization fails', async () => {
     const res = mockRes();
-    const onOtherError = vi.fn();
-    await runGuardedUserMutation(res, 'a', 't', () => Promise.reject(new ManagerEditAuthError('not_found')), onOtherError);
-    expect(res.redirect).toHaveBeenCalledWith('/admin/users?error=not_found');
-    expect(onOtherError).not.toHaveBeenCalled();
+    const write = vi.fn();
+    await runGuardedUserMutation(res, 'a', 't', { authorize: async () => 'target_above_level', write, onError: vi.fn() });
+    expect(write).not.toHaveBeenCalled();
+    expect(res.redirect).toHaveBeenCalledWith('/admin/users?error=target_above_level');
   });
 
-  it('hands any other error to onOtherError', async () => {
+  it('redirects with a code the write returns', async () => {
     const res = mockRes();
-    const onOtherError = vi.fn();
-    const err = new Error('db');
-    await runGuardedUserMutation(res, 'a', 't', () => Promise.reject(err), onOtherError);
-    expect(onOtherError).toHaveBeenCalledWith(err);
+    await runGuardedUserMutation(res, 'a', 't', { authorize: async () => null, write: async () => 'not_found', onError: vi.fn() });
+    expect(res.redirect).toHaveBeenCalledWith('/admin/users?error=not_found');
+  });
+
+  it.each([
+    ['authorize', { authorize: () => Promise.reject(new Error('db')), write: async () => null }],
+    ['write', { authorize: async () => null, write: () => Promise.reject(new Error('db')) }],
+  ])('hands an error thrown by %s to onError without redirecting', async (_step, steps) => {
+    const res = mockRes();
+    const onError = vi.fn();
+    await runGuardedUserMutation(res, 'a', 't', { ...steps, onError });
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: 'db' }));
     expect(res.redirect).not.toHaveBeenCalled();
   });
 });

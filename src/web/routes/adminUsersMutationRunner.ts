@@ -2,10 +2,10 @@ import type { Response } from 'express';
 import { createLogger } from '../../shared/logger';
 import { reloadGuildRegistry } from '../../discord/guildRegistry';
 import { runUserMutationForActorAndTarget } from '../../shared/userMutationQueue';
-import { ManagerEditAuthError } from './adminUserAuth';
 
 // Shared plumbing for the /admin/users member-mutation routes (adminUsersMutations.ts): running an
-// auth-check-then-write in the per-user mutation queue, and refreshing the guild registry after it.
+// authorization check and the write it guards together in the per-user mutation queue, and
+// refreshing the guild registry after a membership change.
 
 const log = createLogger('Web');
 
@@ -18,41 +18,48 @@ export async function reloadRegistrySafe(): Promise<void> {
   }
 }
 
+/** One /admin/users mutation, as run by {@link runGuardedUserMutation}. */
+export interface GuardedUserMutation {
+  /**
+   * The authorization check (`checkManagerEditAuth`, `checkRemoveAuth`, …): an `?error=` code
+   * when the actor may not make this change, or null when they may.
+   */
+  authorize: () => Promise<string | null>;
+  /** The write the check guards; may return an `?error=` code (e.g. `not_found`) instead of throwing. */
+  write: () => Promise<string | null | void>;
+  /** Called, and expected to redirect, when `authorize` or `write` throws. */
+  onError: (err: unknown) => void;
+}
+
 /**
- * Runs `operation` (typically a `checkManagerEditAuth`/`checkToggleTwitchAuth` check followed by
- * the write it guards) inside `runUserMutationForActorAndTarget` for `actorId`/`targetId`,
- * centralizing the `ManagerEditAuthError` → `?error=<code>` redirect shared by every queued
- * mutation route in `adminUsersMutations.ts` so it isn't repeated at each call site. Any other error is handled by
- * `onOtherError` instead.
+ * Runs `mutation.authorize` and then, if it allows the change, `mutation.write`, both inside one
+ * `runUserMutationForActorAndTarget` slot for `actorId`/`targetId`, then redirects back to
+ * `/admin/users`, carrying the error code either step returned.
  *
- * Serializing against both ids (not just `targetId`) matters here specifically because
- * `operation`'s authorization check re-reads the *acting* user's own current access level — see
- * `runUserMutationForActorAndTarget`'s doc comment for why a target-only lock still leaves that
- * read racing a concurrent demotion of the actor.
- *
- * Redirects to `/admin/users` itself on success, so callers don't need to repeat that redirect.
- * @param res - Express response, used to redirect on success or on a `ManagerEditAuthError`.
- * @param actorId - The acting user's discordId.
- * @param targetId - The user whose mutations `operation` should serialize against.
- * @param operation - The auth-check-then-write to run inside the queue.
- * @param onOtherError - Called (and expected to redirect) for any error other than
- *   `ManagerEditAuthError`.
+ * The check runs inside the queue, not before it, so it can't go stale against a write that lands
+ * while this request waits for the slot (see `checkManagerEditAuth`'s doc comment). Serializing
+ * against the actor's id as well as the target's matters because each check re-reads the *acting*
+ * user's own access level; see `runUserMutationForActorAndTarget`'s doc comment.
+ * @param res - Express response, used to redirect once the mutation has settled.
+ * @param actorId - Discord snowflake of the acting user.
+ * @param targetId - Discord snowflake of the user being changed.
+ * @param mutation - The check, the write it guards, and the handler for a thrown error.
+ * @returns Resolves once the redirect (or `mutation.onError`) has been issued.
  */
 export async function runGuardedUserMutation(
   res: Response,
   actorId: string,
   targetId: string,
-  operation: () => Promise<void>,
-  onOtherError: (err: unknown) => void,
+  mutation: GuardedUserMutation,
 ): Promise<void> {
+  let errorCode: string | null;
   try {
-    await runUserMutationForActorAndTarget(actorId, targetId, operation);
-    res.redirect('/admin/users');
+    errorCode = await runUserMutationForActorAndTarget(actorId, targetId, async () =>
+      (await mutation.authorize()) ?? (await mutation.write()) ?? null,
+    );
   } catch (err) {
-    if (err instanceof ManagerEditAuthError) {
-      res.redirect(`/admin/users?error=${err.code}`);
-    } else {
-      onOtherError(err);
-    }
+    mutation.onError(err);
+    return;
   }
+  res.redirect(errorCode ? `/admin/users?error=${errorCode}` : '/admin/users');
 }
