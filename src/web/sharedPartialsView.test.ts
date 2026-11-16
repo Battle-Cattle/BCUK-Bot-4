@@ -96,11 +96,12 @@ describe('partials/assignedUserBadges', () => {
 });
 
 describe('partials/streamdeckKeyApproveDeny', () => {
-  it('posts the requester\'s Discord id and the CSRF token to both approve and deny', async () => {
-    const html = await render('streamdeckKeyApproveDeny', { csrfToken: 'tok', discordId: '42' });
+  it('posts the requester\'s Discord id, the page\'s guild and the CSRF token to both approve and deny', async () => {
+    const html = await render('streamdeckKeyApproveDeny', { csrfToken: 'tok', discordId: '42', guildId: '900' });
     expect(html).toContain('action="/admin/streamdeck-keys/approve"');
     expect(html).toContain('action="/admin/streamdeck-keys/deny"');
     expect(html.match(/name="discord_id" value="42"/g)).toHaveLength(2);
+    expect(html.match(/name="guild_id" value="900"/g)).toHaveLength(2);
     expect(html.match(/name="_csrf" value="tok"/g)).toHaveLength(2);
   });
 });

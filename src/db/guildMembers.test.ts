@@ -13,6 +13,7 @@ import { findUser, AccessLevel } from './users';
 import {
   getMemberAccessLevel,
   setMemberAccessLevel,
+  updateMemberAccessLevel,
   removeGuildMember,
   getEffectiveAccessLevel,
   getEffectiveAccessLevelForUser,
@@ -50,6 +51,26 @@ describe('setMemberAccessLevel', () => {
 
   it('rejects an invalid access level', async () => {
     await expect(setMemberAccessLevel('111', '222', 7)).rejects.toThrow('Invalid accessLevel');
+    expect(pool.execute).not.toHaveBeenCalled();
+  });
+});
+
+describe('updateMemberAccessLevel', () => {
+  it('updates only an existing membership row and reports that it matched', async () => {
+    pool.execute.mockResolvedValueOnce([{ affectedRows: 1 }, []]);
+    expect(await updateMemberAccessLevel('111', '222', 2)).toBe(true);
+    const [sql, params] = pool.execute.mock.calls[0]!;
+    expect(sql).toBe('UPDATE guild_member SET access_level = ? WHERE guild_id = ? AND discord_id = ?');
+    expect(params).toEqual([2, '111', '222']);
+  });
+
+  it('returns false when the user has no membership row in the guild', async () => {
+    pool.execute.mockResolvedValueOnce([{ affectedRows: 0 }, []]);
+    expect(await updateMemberAccessLevel('111', '999', 1)).toBe(false);
+  });
+
+  it('rejects an invalid access level', async () => {
+    await expect(updateMemberAccessLevel('111', '222', 7)).rejects.toThrow('Invalid accessLevel');
     expect(pool.execute).not.toHaveBeenCalled();
   });
 });

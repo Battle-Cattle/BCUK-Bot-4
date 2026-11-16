@@ -1,8 +1,9 @@
 import { createLogger } from '../../shared/logger';
 import { Router, type Response } from 'express';
-import { setMemberAccessLevel, removeGuildMember } from '../../db';
+import { setMemberAccessLevel, updateMemberAccessLevel, removeGuildMember } from '../../db';
 import { reloadGuildRegistry } from '../../discord/guildRegistry';
 import { csrfProtection } from '../csrf';
+import { requireFormGuild } from '../formGuild';
 import { requireManager, requireAdmin } from '../middleware';
 import { getSessionUser, getCurrentGuildId } from '../session';
 import { trimField } from './validation';
@@ -30,6 +31,9 @@ import { handleDbError } from './adminUserErrors';
 
 const log = createLogger('Web');
 export const router = Router();
+
+// Every form on the page carries the guild it was rendered for; see formGuild.ts.
+const requireUsersPageGuild = requireFormGuild('/admin/users');
 
 /** Refresh the guild registry after a membership change; log but never fail the request. */
 async function reloadRegistrySafe(): Promise<void> {
@@ -91,14 +95,14 @@ async function runGuardedUserMutation(
  * name/Twitch fields are ignored. Reloads the guild registry afterwards, since a new member
  * may provision a previously-inert guild.
  * @param req - Express request; reads `discord_id`, `discord_name`, `access_level`,
- *   `twitch_name`, and `clear_twitch_name` from `req.body`, plus the acting manager's
+ *   `twitch_name`, `clear_twitch_name` and `guild_id` from `req.body`, plus the acting manager's
  *   `getSessionUser(req)` and current guild.
  * @param res - Express response; redirects to `/admin/users` on success, or to
  *   `/admin/users?error=<code>` for validation failures (e.g. `invalid_discord_id`,
  *   `invalid_access_level`, `access_level_too_high`, `invalid_twitch_name`,
- *   `duplicate_twitch_name`) or a DB failure (`add_failed`).
+ *   `duplicate_twitch_name`, `guild_changed`) or a DB failure (`add_failed`).
  */
-router.post('/users/add', requireManager, csrfProtection, async (req, res) => {
+router.post('/users/add', requireManager, csrfProtection, requireUsersPageGuild, async (req, res) => {
   const guildId = getCurrentGuildId(req);
 
   const { discord_id, discord_name, access_level, twitch_name, clear_twitch_name } = req.body as {
@@ -160,14 +164,16 @@ router.post('/users/add', requireManager, csrfProtection, async (req, res) => {
 // only set levels below their own and cannot modify members at their level or above)
 
 /**
- * POST /admin/users/update — updates a member's access level within the current guild.
- * @param req - Express request; reads `discord_id` and `access_level` from `req.body`.
+ * POST /admin/users/update — updates an existing member's access level within the current
+ * guild. Never creates a membership: a user with no row in the guild gets `not_found`.
+ * @param req - Express request; reads `discord_id`, `access_level` and `guild_id` from `req.body`.
  * @param res - Express response; redirects to `/admin/users` on success, or to
  *   `/admin/users?error=<code>` for validation failures (e.g. `invalid_discord_id`,
- *   `invalid_access_level`, `access_level_too_high`, `target_above_level`) or a DB
- *   failure (`update_failed`).
+ *   `invalid_access_level`, `access_level_too_high`, `target_above_level`), a form rendered
+ *   for another guild (`guild_changed`), a non-member (`not_found`) or a DB failure
+ *   (`update_failed`).
  */
-router.post('/users/update', requireManager, csrfProtection, async (req, res) => {
+router.post('/users/update', requireManager, csrfProtection, requireUsersPageGuild, async (req, res) => {
   const guildId = getCurrentGuildId(req);
 
   const { discord_id, access_level } = req.body as { discord_id?: string; access_level?: string };
@@ -183,7 +189,8 @@ router.post('/users/update', requireManager, csrfProtection, async (req, res) =>
     // Re-checked here, not before enqueueing — see checkManagerEditAuth's doc comment.
     const updateAuthErr = await checkManagerEditAuth(sessionUser, trimmedDiscordId, level, guildId);
     if (updateAuthErr) throw new ManagerEditAuthError(updateAuthErr);
-    await setMemberAccessLevel(guildId, trimmedDiscordId, level);
+    // Update-only: a level change never adds anyone to the guild (that's /users/add).
+    if (!(await updateMemberAccessLevel(guildId, trimmedDiscordId, level))) throw new ManagerEditAuthError('not_found');
   }, (err) => handleDbError(err, res, 'update_failed', 'Update access level'));
 });
 
@@ -197,14 +204,15 @@ router.post('/users/update', requireManager, csrfProtection, async (req, res) =>
  * closes the removed member's open streams (see `closeRemovedMemberConnections`),
  * and reloads the guild registry afterwards since removing the last member
  * un-provisions the guild.
- * @param req - Express request; reads `discord_id` from `req.body`.
+ * @param req - Express request; reads `discord_id` and `guild_id` from `req.body`.
  * @param res - Express response; redirects to `/admin/users` on success, or to
- *   `/admin/users?error=<code>` if `discord_id` is invalid (`invalid_discord_id`),
+ *   `/admin/users?error=<code>` if the form was rendered for another guild
+ *   (`guild_changed`), `discord_id` is invalid (`invalid_discord_id`),
  *   the target is the acting admin (`self_remove_forbidden`), the actor's own
  *   access has since dropped below Admin (`target_above_level`), or removal fails
  *   (`remove_failed`).
  */
-router.post('/users/remove', requireAdmin, csrfProtection, async (req, res) => {
+router.post('/users/remove', requireAdmin, csrfProtection, requireUsersPageGuild, async (req, res) => {
   const guildId = getCurrentGuildId(req);
 
   const { discord_id } = req.body as { discord_id?: string };
@@ -236,13 +244,13 @@ router.post('/users/remove', requireAdmin, csrfProtection, async (req, res) => {
  * POST /admin/users/toggle-twitch — toggles whether a user participates in the
  * Twitch bot. The flag is global, so a non-owner actor must outrank the target in
  * every guild the target belongs to (see `checkToggleTwitchAuth`).
- * @param req - Express request; reads `discord_id` and `is_twitch_bot_enabled`
- *   from `req.body`.
+ * @param req - Express request; reads `discord_id`, `is_twitch_bot_enabled` and
+ *   `guild_id` from `req.body`.
  * @param res - Express response; redirects to `/admin/users` on success, or to
  *   `/admin/users?error=<code>` for validation failures (e.g. `invalid_discord_id`,
- *   `invalid_twitch_state`) or a DB failure (`toggle_failed`).
+ *   `invalid_twitch_state`, `guild_changed`) or a DB failure (`toggle_failed`).
  */
-router.post('/users/toggle-twitch', requireManager, csrfProtection, async (req, res) => {
+router.post('/users/toggle-twitch', requireManager, csrfProtection, requireUsersPageGuild, async (req, res) => {
   const guildId = getCurrentGuildId(req);
 
   const { discord_id, is_twitch_bot_enabled } = req.body as {
