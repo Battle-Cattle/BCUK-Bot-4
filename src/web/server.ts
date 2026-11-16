@@ -6,6 +6,7 @@ import MySQLStore from 'express-mysql-session';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import path from 'path';
+import { createServer } from 'http';
 import type { Server } from 'http';
 import { WEB_HOST, WEB_PORT, SESSION_SECRET } from '../shared/config';
 import { getSessionPool } from '../db';
@@ -403,22 +404,32 @@ function stopSessionCleanup(): void {
  * hop of.
  * @param port - Port to listen on; defaults to {@link WEB_PORT} (tests pass 0 for a free port).
  * @param host - Interface to bind; defaults to {@link WEB_HOST}.
- * @returns Resolves with the listening server. Rejects with the listen error (e.g.
- *   `EADDRINUSE`) instead — Express 5 hands that error to the listen callback, so ignoring the
- *   callback's argument would log "Panel listening" for a panel that never came up.
+ * @returns Resolves with the listening server. Rejects with the listen error (e.g. `EADDRINUSE`)
+ *   instead, which Node emits as the server's `error` event, not through a listen callback. A failed
+ *   start leaves nothing running: the panel isn't recorded as up and the session cleanup isn't started.
  */
 export function startWebPanel(port: number = WEB_PORT, host: string = WEB_HOST): Promise<Server> {
+  const server = createServer(app);
   return new Promise((resolve, reject) => {
-    const server = app.listen(port, host, (err?: Error) => {
-      if (err) {
-        reject(err);
-        return;
-      }
+    /**
+     * Rejects with a listen failure, dropping the now-pointless `listening` handler.
+     * @param err - The bind error, e.g. `EADDRINUSE` or `EACCES`.
+     */
+    const onError = (err: Error): void => {
+      server.off('listening', onListening);
+      reject(err);
+    };
+    /** Records the panel as up, starts the session cleanup and resolves; the startup error handler goes. */
+    const onListening = (): void => {
+      server.off('error', onError);
       webServer = server;
       startSessionCleanup();
       log.info(`Panel listening on ${host}:${port}`);
       resolve(server);
-    });
+    };
+    server.once('error', onError);
+    server.once('listening', onListening);
+    server.listen(port, host);
   });
 }
 
