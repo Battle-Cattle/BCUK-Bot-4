@@ -12,7 +12,7 @@ import { parseReadinessReport, recordReadinessReport } from './sharedOverlayRead
 import { resolveSharedFile, sendStreamerFile } from './streamerFileServing';
 import { broadcastToChannel } from './sseChannel';
 import { createSseEventsHandler, createLoginValidator } from './sseEventsHandlers';
-import { SHARED_FOLDER } from './sharedOverlayVideoFiles';
+import { SHARED_FOLDER, SHARED_VIDEO_FILENAME_RE } from './sharedOverlayVideoFiles';
 import { servePreloadVideo } from './sharedOverlayPreload';
 import { isStreamerLive, noteLiveSent } from './sharedOverlayLiveState';
 
@@ -24,7 +24,6 @@ const log = createLogger('SharedOverlaySource');
 const router = Router();
 
 const LOGIN_RE = /^[a-zA-Z0-9_]{1,25}$/;
-const FILENAME_RE = /^[\w-]+\.(webm)$/i;
 // Words reserved for this router's own routes (and later admin paths) — not channel logins.
 const RESERVED_LOGINS = new Set(['settings', 'videos']);
 const isValidLogin = createLoginValidator(LOGIN_RE, RESERVED_LOGINS);
@@ -154,7 +153,7 @@ router.get('/videos/:filename', async (req, res) => {
   if (req.query.preload === '1') { await servePreloadVideo(req, res); return; }
   // POSIX join, like safeResolve (which the file helpers use on it) and the bot's Linux target.
   const folder = path.posix.join(OVERLAY_FOLDER, SHARED_FOLDER);
-  const file = await resolveSharedFile(res, folder, req.params.filename, FILENAME_RE);
+  const file = await resolveSharedFile(res, folder, req.params.filename, SHARED_VIDEO_FILENAME_RE);
   if (file) sendStreamerFile(res, file.realPath);
 });
 

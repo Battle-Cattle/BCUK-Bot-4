@@ -11,7 +11,7 @@ import {
 import { safeResolve, realPathWithin } from '../../shared/pathUtils';
 import { parsePositiveIntId } from './validation';
 import { logAndRedirectError } from './errorHandling';
-import { storeSharedVideo, recordSharedVideo, removeSharedVideoFile } from './sharedOverlayVideoStorage';
+import { storeAndRecordSharedVideo, removeSharedVideoFile } from './sharedOverlayVideoStorage';
 import { broadcastSharedVideoList } from './sharedOverlaySource';
 import { isWebmTranscodeQueueFull } from './overlayVideoTranscode';
 import { SHARED_SETTINGS_PATH } from './sharedOverlayAdminShared';
@@ -100,7 +100,7 @@ router.post('/:id/delete', csrfProtection, async (req, res) => {
 /** Most imports converted at once, the same cap as shared uploads. */
 const MAX_CONCURRENT_IMPORTS = 3;
 
-/** Imports whose copy and conversion are running right now. */
+/** Imports whose copy, conversion and DB insert are running right now. */
 let activeImports = 0;
 
 /**
@@ -136,11 +136,13 @@ async function importOwnVideo(streamerId: number, videoId: number, discordId: st
   if (busy) return `${SHARED_SETTINGS_PATH}?error=${busy}`;
   let filename: string;
   try {
-    filename = await storeSharedVideo((dest) => fs.promises.copyFile(real, dest, fs.constants.COPYFILE_EXCL));
+    filename = await storeAndRecordSharedVideo(
+      { name: video.name, uploadedBy: discordId },
+      (dest) => fs.promises.copyFile(real, dest, fs.constants.COPYFILE_EXCL),
+    );
   } finally {
     activeImports--;
   }
-  await recordSharedVideo(video.name, filename, discordId);
   await broadcastListQuietly();
   log.info(`Manager ${discordId} added overlay video ${videoId} to the shared list as ${filename}`);
   return `${SHARED_SETTINGS_PATH}?success=video_added`;

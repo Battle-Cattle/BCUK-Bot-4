@@ -12,7 +12,7 @@ import { parseUploadId, claimConversionProgress, setConversionProgress, releaseC
 import {
   adoptChunkedUpload, INCOMING_DIR, detectUploadedVideoType, placeUpload, discardUpload, sweepStaleIncomingUploads,
 } from './overlayUploadStorage';
-import { storeSharedVideo, recordSharedVideo } from './sharedOverlayVideoStorage';
+import { storeAndRecordSharedVideo } from './sharedOverlayVideoStorage';
 import { createUploadSlots } from './uploadSlots';
 import { broadcastSharedVideoList } from './sharedOverlaySource';
 import { SHARED_SETTINGS_PATH, SHARED_PROGRESS_KEY } from './sharedOverlayAdminShared';
@@ -64,11 +64,11 @@ async function convertAndRecord(req: Request, name: string): Promise<void> {
   const uploadId = parseUploadId(req.get('x-upload-id'));
   const owner = uploadId ? claimConversionProgress(SHARED_PROGRESS_KEY, uploadId) : null;
   try {
-    const filename = await storeSharedVideo(
+    const filename = await storeAndRecordSharedVideo(
+      { name, uploadedBy: getSessionUser(req).discordId },
       (sourcePath) => placeUpload(file, sourcePath),
       uploadId && owner ? (progress) => setConversionProgress(SHARED_PROGRESS_KEY, uploadId, owner, progress) : undefined,
     );
-    await recordSharedVideo(name, filename, getSessionUser(req).discordId);
     log.info(`Shared overlay video uploaded by ${getSessionUser(req).discordId}: ${filename}`);
   } finally {
     if (uploadId && owner) releaseConversionProgress(SHARED_PROGRESS_KEY, uploadId, owner);

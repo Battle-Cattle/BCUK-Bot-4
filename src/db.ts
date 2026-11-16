@@ -152,7 +152,7 @@ export {
 export type { OverlayLibraryVideo, AddVideoToLibraryResult } from './db/overlayVideoLibrary';
 export type { SharedOverlayVideo, SharedOverlayVideoWithUploader } from './db/sharedOverlayVideos';
 export {
-  listSharedVideos, listEnabledSharedVideos, getSharedVideo, addSharedVideo,
+  listSharedVideos, listEnabledSharedVideos, getSharedVideo, getRecordedSharedVideoFilenames, addSharedVideo,
   renameSharedVideo, setSharedVideoEnabled, removeSharedVideo,
 } from './db/sharedOverlayVideos';
 export {
