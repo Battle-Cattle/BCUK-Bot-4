@@ -24,6 +24,14 @@ export const UNAUTH_OVERLAY_SSE_MAX_CONNECTIONS = Math.max(1, Math.floor(SSE_MAX
  */
 export const UNAUTH_OVERLAY_SSE_MAX_PER_IP = 20;
 
+/**
+ * Most connections one client IP may hold to one channel's overlay stream (each of the
+ * reward-video, alerts and shared overlay streams counts separately). One OBS instance normally
+ * holds 1–2 per stream (a few scenes); without this, one machine could take all of a channel's
+ * `maxPerChannel` slots and lock the streamer's real browser sources out with a 429.
+ */
+export const OVERLAY_SSE_MAX_PER_CHANNEL_PER_IP = 3;
+
 /** The shared pool both unauthenticated overlay SSE endpoints attach under. */
 export const unauthenticatedOverlayPool = createSseConnectionPool(
   UNAUTH_OVERLAY_SSE_MAX_CONNECTIONS,

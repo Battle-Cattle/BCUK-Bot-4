@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import { SSE_MAX_TOTAL_CONNECTIONS } from '../../shared/config';
 import { tryReservePoolSlot, releasePoolSlot, type SseConnectionPool } from './sseConnectionPool';
+import { ipKey } from '../rateLimits';
 
 const KEEPALIVE_INTERVAL_MS = 25_000;
 
@@ -199,18 +200,49 @@ function startKeepalive(res: Response, cleanup: () => void): NodeJS.Timeout {
 }
 
 /**
- * Adds `res` to `key`'s client Set unless that would exceed `maxPerChannel`.
+ * Client IP key (see `ipKey`) of each connection attached with a `maxPerChannelPerIp` limit, so
+ * {@link countClientsFromIp} can count one IP's connections under a key. Connections attached
+ * without that limit have no entry.
+ */
+const clientIps = new WeakMap<Response, string>();
+
+/**
+ * Counts the clients in `clients` that were attached from client IP key `ip`.
+ * @param clients - One key's connected clients.
+ * @param ip - Client IP key (see `ipKey`) to count.
+ * @returns How many of `clients` were recorded under `ip`.
+ */
+function countClientsFromIp(clients: ReadonlySet<Response>, ip: string): number {
+  let count = 0;
+  for (const client of clients) if (clientIps.get(client) === ip) count++;
+  return count;
+}
+
+/** Per-key limits checked by {@link addClientWithinLimit}. */
+interface ClientLimits {
+  /** Maximum concurrent connections for the key. */
+  maxPerChannel: number;
+  /** When set, the client's IP key and the most connections that IP may hold under the key. */
+  perIp?: { ip: string; max: number };
+}
+
+/**
+ * Adds `res` to `key`'s client Set unless that would exceed the key's limit, or its per-IP limit
+ * when one is given.
  * @param connections - The endpoint's connections map.
  * @param key - The connection key.
  * @param res - The response to register.
- * @param maxPerChannel - Maximum concurrent connections for `key`.
- * @returns true if added; false (and nothing changed) if `key` was already at its limit.
+ * @param limits - The key's total limit and optional per-IP limit.
+ * @returns true if added; false (and nothing changed) if `key` or the client's IP was already at its limit.
  */
 function addClientWithinLimit<K>(
-  connections: Map<K, Set<Response>>, key: K, res: Response, maxPerChannel: number,
+  connections: Map<K, Set<Response>>, key: K, res: Response, limits: ClientLimits,
 ): boolean {
   const clients = connections.get(key) ?? new Set<Response>();
-  if (clients.size >= maxPerChannel) return false;
+  if (clients.size >= limits.maxPerChannel) return false;
+  const { perIp } = limits;
+  if (perIp && countClientsFromIp(clients, perIp.ip) >= perIp.max) return false;
+  if (perIp) clientIps.set(res, perIp.ip);
   clients.add(res);
   connections.set(key, clients);
   notifyCountChange(connections, key);
@@ -251,6 +283,12 @@ export interface AttachSseConnectionOptions<K> {
   /** Maximum concurrent SSE connections permitted for this key. */
   maxPerChannel: number;
   /**
+   * Optional limit on how many of this key's connections one client IP (see `ipKey`) may hold, so
+   * a single machine can't fill every slot of a public stream and lock its real clients out.
+   * Omit for authenticated streams.
+   */
+  maxPerChannelPerIp?: number;
+  /**
    * Optional sub-pool (see {@link SseConnectionPool}) whose total and per-IP limits also apply,
    * for endpoints reachable without authentication. Omit for authenticated streams.
    */
@@ -274,8 +312,8 @@ export interface AttachSseConnectionOptions<K> {
  * attaching, and a connection registered after its socket closed would never see the
  * 'close'/'error' events that release its slots.
  * @returns false if the client already disconnected (nothing is sent or reserved), or if the
- *   process-wide cap (`SSE_MAX_TOTAL_CONNECTIONS`), the `pool`'s total or per-IP limit, or the
- *   key's `maxPerChannel` was already reached (a 429 has already been sent to `res`); either way
+ *   process-wide cap (`SSE_MAX_TOTAL_CONNECTIONS`), the `pool`'s total or per-IP limit, the
+ *   key's `maxPerChannel`, or the client IP's `maxPerChannelPerIp` was already reached (a 429 has already been sent to `res`); either way
  *   the caller should stop handling the request. True once the connection is attached.
  */
 export function attachSseConnection<K>(
@@ -284,8 +322,12 @@ export function attachSseConnection<K>(
   options: AttachSseConnectionOptions<K>,
 ): boolean {
   if (res.closed || req.destroyed) return false;
-  const { connections, key, maxPerChannel, pool } = options;
-  const releasePool = reserveConnectionSlots(req, pool, () => addClientWithinLimit(connections, key, res, maxPerChannel));
+  const { connections, key, maxPerChannel, maxPerChannelPerIp, pool } = options;
+  const limits: ClientLimits = {
+    maxPerChannel,
+    perIp: maxPerChannelPerIp === undefined ? undefined : { ip: ipKey(req), max: maxPerChannelPerIp },
+  };
+  const releasePool = reserveConnectionSlots(req, pool, () => addClientWithinLimit(connections, key, res, limits));
   if (!releasePool) {
     res.status(429).end();
     return false;

@@ -21,7 +21,7 @@ import {
 } from './sseEventsHandlers';
 import {
   isKnownStreamerLogin, unauthenticatedOverlayPool,
-  UNAUTH_OVERLAY_SSE_MAX_CONNECTIONS, UNAUTH_OVERLAY_SSE_MAX_PER_IP, createEmptyKnownLoginCache,
+  UNAUTH_OVERLAY_SSE_MAX_CONNECTIONS, UNAUTH_OVERLAY_SSE_MAX_PER_IP, OVERLAY_SSE_MAX_PER_CHANNEL_PER_IP, createEmptyKnownLoginCache,
 } from './sseOverlayAccess';
 import { createSseConnectionPool } from './sseConnectionPool';
 import { getStreamerByDiscordId, getAllStreamersWithGroups } from '../../db';
@@ -309,6 +309,89 @@ describe('createSseEventsHandler — unauthenticated overlay protections', () =>
     expect(connections.get('streamer')?.has(otherIpRes as any)).toBe(true);
 
     triggerClose();
+    closers.forEach((close) => close());
+  });
+
+  it('replies 429 to a 4th connection from one IP to the same channel, while another IP still attaches', async () => {
+    const handler = createSseEventsHandler({
+      connections, isValidLogin, maxPerChannel: 10, maxPerChannelPerIp: 3,
+      pool: createSseConnectionPool(100, 100), isKnownLogin: async () => true,
+    });
+    const closers: Array<() => void> = [];
+    for (let i = 0; i < 3; i++) {
+      const res = makeRes();
+      const { req, triggerClose } = makeReq('streamer', '203.0.113.5');
+      await handler(req as any, res as any, vi.fn());
+      expect(res.status).not.toHaveBeenCalled();
+      closers.push(triggerClose);
+    }
+
+    const fourthRes = makeRes();
+    const { req: fourthReq } = makeReq('streamer', '203.0.113.5');
+    await handler(fourthReq as any, fourthRes as any, vi.fn());
+    expect(fourthRes.status).toHaveBeenCalledWith(429);
+    expect(connections.get('streamer')?.size).toBe(3);
+
+    const otherIpRes = makeRes();
+    const { req: otherIpReq, triggerClose } = makeReq('streamer', '198.51.100.7');
+    await handler(otherIpReq as any, otherIpRes as any, vi.fn());
+    expect(otherIpRes.status).not.toHaveBeenCalled();
+    expect(connections.get('streamer')?.has(otherIpRes as any)).toBe(true);
+
+    // The same IP can still reach another channel's stream.
+    const otherChannelRes = makeRes();
+    const { req: otherChannelReq, triggerClose: closeOtherChannel } = makeReq('otherstreamer', '203.0.113.5');
+    await handler(otherChannelReq as any, otherChannelRes as any, vi.fn());
+    expect(otherChannelRes.status).not.toHaveBeenCalled();
+
+    // Closing one of the capped IP's connections frees a slot for it again.
+    closers.pop()?.();
+    const retryRes = makeRes();
+    const { req: retryReq, triggerClose: closeRetry } = makeReq('streamer', '203.0.113.5');
+    await handler(retryReq as any, retryRes as any, vi.fn());
+    expect(retryRes.status).not.toHaveBeenCalled();
+
+    closeRetry();
+    closeOtherChannel();
+    triggerClose();
+    closers.forEach((close) => close());
+  });
+
+  it('applies the per-IP cap to each stream separately, so one IP can open the overlay, alerts and shared streams of a channel', async () => {
+    const pool = createSseConnectionPool(100, 100);
+    const streams = [new Map<string, Set<any>>(), new Map<string, Set<any>>(), new Map<string, Set<any>>()];
+    const closers: Array<() => void> = [];
+    for (const streamConnections of streams) {
+      const handler = createSseEventsHandler({
+        connections: streamConnections, isValidLogin, maxPerChannel: 10, maxPerChannelPerIp: 3,
+        pool, isKnownLogin: async () => true,
+      });
+      for (let i = 0; i < 3; i++) {
+        const res = makeRes();
+        const { req, triggerClose } = makeReq('streamer', '203.0.113.5');
+        await handler(req as any, res as any, vi.fn());
+        expect(res.status).not.toHaveBeenCalled();
+        closers.push(triggerClose);
+      }
+      expect(streamConnections.get('streamer')?.size).toBe(3);
+    }
+    closers.forEach((close) => close());
+    expect(pool.count).toBe(0);
+  });
+
+  it('defaults the per-channel per-IP cap to OVERLAY_SSE_MAX_PER_CHANNEL_PER_IP', async () => {
+    expect(OVERLAY_SSE_MAX_PER_CHANNEL_PER_IP).toBe(3);
+    const handler = buildHandler(10);
+    const closers: Array<() => void> = [];
+    for (let i = 0; i < OVERLAY_SSE_MAX_PER_CHANNEL_PER_IP; i++) {
+      const { req, triggerClose } = makeReq('streamer', '203.0.113.5');
+      await handler(req as any, makeRes() as any, vi.fn());
+      closers.push(triggerClose);
+    }
+    const overRes = makeRes();
+    const { req: overReq } = makeReq('streamer', '203.0.113.5');
+    await handler(overReq as any, overRes as any, vi.fn());
+    expect(overRes.status).toHaveBeenCalledWith(429);
     closers.forEach((close) => close());
   });
 
