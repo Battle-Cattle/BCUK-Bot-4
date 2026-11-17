@@ -5,7 +5,13 @@ vi.mock('./healthStore', () => ({
 }));
 
 import { recordError } from './healthStore';
-import { HealthStoreErrorTransport, createLogger, formatLogLine } from './logger';
+import fs from 'node:fs';
+import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { createLogger as winstonCreateLogger } from 'winston';
+import Transport from 'winston-transport';
+import { HealthStoreErrorTransport, createLogger, endAndFlushLogger, flushLogs, formatLogLine, rotatingFileTransport } from './logger';
 
 describe('HealthStoreErrorTransport', () => {
   it('forwards the log entry to healthStore.recordError under its label, then signals completion', async () => {
@@ -156,5 +162,146 @@ describe('root logger configuration (set at import)', () => {
 
     expect(rotateFileOptions).toEqual([]);
     expect(logger.createLogger('x').transports).toHaveLength(1);
+  });
+});
+
+describe('endAndFlushLogger', () => {
+  let dir: string | undefined;
+
+  afterEach(async () => {
+    if (dir) await rm(dir, { recursive: true, force: true });
+    dir = undefined;
+  });
+
+  /** Whether a file name is a log file, including a size-rotated one (`x.log.1`). */
+  const isLogFile = (name: string): boolean => /\.log(\.\d+)?$/.test(name);
+
+  /** Reads every log file written to the temp folder, joined. */
+  async function readLogFiles(folder: string): Promise<string> {
+    const names = (await readdir(folder)).filter(isLogFile);
+    const contents = await Promise.all(names.map((name) => readFile(path.join(folder, name), 'utf8')));
+    return contents.join('');
+  }
+
+  it('waits until the last line logged is in the rotating log file', async () => {
+    dir = await mkdtemp(path.join(tmpdir(), 'bcuk-logflush-'));
+    const logger = winstonCreateLogger({
+      transports: [rotatingFileTransport({ dirname: dir, filename: 'error-%DATE%.log', maxSize: '20m' })],
+    });
+    // Enough queued writes that the file can't have caught up synchronously.
+    for (let i = 0; i < 500; i++) logger.error(`filler ${i} ${'x'.repeat(200)}`);
+    logger.error('the fatal reason');
+
+    await endAndFlushLogger(logger, 5_000);
+
+    const written = await readLogFiles(dir);
+    expect(written).toContain('the fatal reason');
+    expect(written.trimEnd().split('\n')).toHaveLength(501);
+  });
+
+  it('waits for every file it rotated through to finish, not just the first or the last', async () => {
+    dir = await mkdtemp(path.join(tmpdir(), 'bcuk-logflush-'));
+    // Slow every write to the first file, so it finishes after the files rotated in after it: a
+    // flush that waited only for the first 'finish', or only for the last file, would resolve early.
+    const realCreate = fs.createWriteStream;
+    let slowed = false;
+    const createSpy = vi.spyOn(fs, 'createWriteStream').mockImplementation(((...args: Parameters<typeof fs.createWriteStream>) => {
+      const stream = realCreate(...args);
+      if (!slowed && String(args[0]).endsWith('.log')) {
+        slowed = true;
+        type Callback = (err?: Error | null) => void;
+        const internals = stream as unknown as {
+          _write: (chunk: unknown, encoding: unknown, callback: Callback) => void;
+          _writev?: (chunks: unknown, callback: Callback) => void;
+        };
+        // Delays each write to disk itself, not just its completion callback.
+        const write = internals._write.bind(stream);
+        internals._write = (chunk, encoding, callback) => { setTimeout(() => write(chunk, encoding, callback), 100); };
+        const writev = internals._writev?.bind(stream);
+        if (writev) internals._writev = (chunks, callback) => { setTimeout(() => writev(chunks, callback), 100); };
+      }
+      return stream;
+    }) as typeof fs.createWriteStream);
+    try {
+      const logger = winstonCreateLogger({
+        // Small enough that these lines rotate through several files.
+        transports: [rotatingFileTransport({ dirname: dir, filename: 'error-%DATE%.log', maxSize: '10k' })],
+      });
+      for (let i = 0; i < 300; i++) logger.error(`filler ${i} ${'x'.repeat(200)}`);
+      logger.error('the fatal reason');
+
+      await endAndFlushLogger(logger, 5_000);
+
+      expect(slowed).toBe(true);
+      expect((await readdir(dir)).filter(isLogFile).length).toBeGreaterThan(1);
+      const written = await readLogFiles(dir);
+      expect(written).toContain('the fatal reason');
+      expect(written).toContain('filler 0 ');
+      expect(written.trimEnd().split('\n')).toHaveLength(301);
+    } finally {
+      createSpy.mockRestore();
+    }
+  });
+
+  it('writes an entry logged after the flush began to stderr instead of losing it', async () => {
+    dir = await mkdtemp(path.join(tmpdir(), 'bcuk-logflush-'));
+    const logger = winstonCreateLogger({
+      transports: [rotatingFileTransport({ dirname: dir, filename: 'combined-%DATE%.log' })],
+    });
+    const child = logger.child({ label: 'Bot' });
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      child.info('before');
+
+      const flushing = endAndFlushLogger(logger, 5_000);
+      expect(() => child.error('late fatal reason')).not.toThrow();
+      await flushing;
+
+      expect(stderr).toHaveBeenCalledWith(expect.stringMatching(/\[ERROR\] \[Bot\] late fatal reason\n$/));
+      const written = await readLogFiles(dir);
+      expect(written).toContain('before');
+      expect(written).not.toContain('late fatal reason');
+    } finally {
+      stderr.mockRestore();
+    }
+  });
+
+  it('gives up at the time limit when a file never finishes', async () => {
+    dir = await mkdtemp(path.join(tmpdir(), 'bcuk-logflush-'));
+    const stuck = rotatingFileTransport({ dirname: dir, filename: 'never-%DATE%.log' });
+    // A transport whose close never ends its file, so the file never reports it's finished.
+    const realClose = stuck.close!.bind(stuck);
+    stuck.close = () => {};
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const logger = winstonCreateLogger({ transports: [stuck] });
+
+      let done = false;
+      const flushing = endAndFlushLogger(logger, 2_000).then(() => { done = true; });
+      await vi.advanceTimersByTimeAsync(1_999);
+      expect(done).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await flushing;
+      expect(done).toBe(true);
+    } finally {
+      vi.useRealTimers();
+      realClose();
+    }
+  });
+
+  it('resolves straight away for a logger with no log files', async () => {
+    class NullTransport extends Transport {
+      log(_info: unknown, callback: () => void) { callback(); }
+    }
+    const logger = winstonCreateLogger({ transports: [new NullTransport()] });
+    await expect(endAndFlushLogger(logger, 60_000)).resolves.toBeUndefined();
+  });
+});
+
+describe('flushLogs', () => {
+  it('flushes the root logger once, however many exit paths ask', async () => {
+    const first = flushLogs();
+    expect(flushLogs()).toBe(first);
+    await expect(first).resolves.toBeUndefined();
   });
 });

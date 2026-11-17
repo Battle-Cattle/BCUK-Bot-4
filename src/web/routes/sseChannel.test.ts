@@ -14,7 +14,7 @@ vi.mock('../session', () => ({ getSessionUser: vi.fn() }));
 
 import {
   attachSseConnection, broadcastToChannel, chainConnectionCleanup, getConnectionCountListenerCount, onConnectionCountChange,
-  SSE_MAX_PENDING_BYTES,
+  setSseConnectionsAccepted, SSE_MAX_PENDING_BYTES,
 } from './sseChannel';
 import {
   createSseEventsHandler, createLoginValidator, createStreamerSseEventsHandler, createOverlayStatusEventsHandler,
@@ -464,6 +464,28 @@ describe('isKnownStreamerLogin', () => {
 });
 
 describe('attachSseConnection', () => {
+  it('drops the socket without reserving anything while the panel is shutting down, then accepts again', () => {
+    setSseConnectionsAccepted(false);
+    try {
+      const res = makeRes();
+      const { req } = makeReq('unused');
+
+      // E.g. a dashboard stream whose streamer lookup finished after the drain began.
+      expect(attachSseConnection(req as any, res as any, { connections, key: 'late', maxPerChannel: 5 })).toBe(false);
+
+      expect(res.destroy).toHaveBeenCalledOnce();
+      expect(res.status).not.toHaveBeenCalled();
+      expect(res.write).not.toHaveBeenCalled();
+      expect(connections.get('late')).toBeUndefined();
+    } finally {
+      setSseConnectionsAccepted(true);
+    }
+    const res = makeRes();
+    const { req, triggerClose } = makeReq('unused');
+    expect(attachSseConnection(req as any, res as any, { connections, key: 'late', maxPerChannel: 5 })).toBe(true);
+    triggerClose();
+  });
+
   it('registers the connection under an arbitrary key type (e.g. a numeric streamer ID)', () => {
     const numericConnections = new Map<number, Set<any>>();
     const res = makeRes();

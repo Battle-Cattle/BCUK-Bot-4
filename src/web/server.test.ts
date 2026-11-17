@@ -18,6 +18,7 @@ vi.mock('../shared/config', () => ({
   DB_NAME: 'db',
   SFX_FOLDER: './sfx',
   SFX_MAX_FILE_MB: 10,
+  SSE_MAX_TOTAL_CONNECTIONS: 100,
 }));
 
 // The session pool server.ts hands the session store, and the store's constructor args/close calls.
@@ -165,6 +166,7 @@ vi.mock('./routes/health', () => ({ default: markerRouter('health') }));
 vi.mock('./routes/healthStatusEvents', () => ({ default: emptyRouter() }));
 
 import { app, generalLimiter, preSessionLimiter, sessionLimiter, startWebPanel, stopWebPanel } from './server';
+import { attachSseConnection } from './routes/sseChannel';
 import { overlayTrafficLimiter } from './rateLimits';
 import { createHmac } from 'crypto';
 import { requireAuth, requireAuthJson, requireGuildContext } from './middleware';
@@ -687,7 +689,7 @@ describe('startWebPanel / stopWebPanel', () => {
     await stopWebPanel();
   });
 
-  it('closes the server and drops in-flight connections on stop', async () => {
+  it('closes the server and drops connections still in progress at the drain limit, with a warning', async () => {
     const server = await startWebPanel(0);
     const { port } = server.address() as AddressInfo;
     const accepted = new Promise<net.Socket>((resolve) => server.once('connection', resolve));
@@ -702,10 +704,42 @@ describe('startWebPanel / stopWebPanel', () => {
     const serverSocket = await accepted;
     await waitFor(() => expect(serverSocket.bytesRead).toBeGreaterThan(0));
 
-    await stopWebPanel();
+    // A request still in progress is given up to the drain limit to finish before it's dropped.
+    mockLog.warn.mockClear();
+    await stopWebPanel(50);
 
     await socketClosed;
     expect(server.listening).toBe(false);
+    expect(mockLog.warn).toHaveBeenCalledWith(expect.stringContaining('still running 50ms after shutdown began'));
+  });
+
+  it('waits for a request still in progress instead of dropping it, then closes the session store', async () => {
+    const server = await startWebPanel(0);
+    const { port } = server.address() as AddressInfo;
+    const accepted = new Promise<net.Socket>((resolve) => server.once('connection', resolve));
+    const socket = net.connect(port, '127.0.0.1');
+    socket.on('error', () => {});
+    const socketClosed = new Promise<void>((resolve) => socket.once('close', () => resolve()));
+    let response = '';
+    socket.on('data', (chunk) => { response += chunk.toString('utf8'); });
+    await new Promise<void>((resolve) => socket.once('connect', () => resolve()));
+    socket.write('GET /healthz HTTP/1.1\r\nHost: localhost\r\n');
+    const serverSocket = await accepted;
+    await waitFor(() => expect(serverSocket.bytesRead).toBeGreaterThan(0));
+    storeClose.mockClear();
+    mockLog.warn.mockClear();
+
+    const stopping = stopWebPanel(5_000);
+    // The client finishes its request after shutdown began; it's still answered.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(storeClose).not.toHaveBeenCalled();
+    socket.write('\r\n');
+    await stopping;
+    await socketClosed;
+
+    expect(response).toMatch(/^HTTP\/1\.1 200/);
+    expect(storeClose).toHaveBeenCalledOnce();
+    expect(mockLog.warn).not.toHaveBeenCalledWith(expect.stringContaining('Dropped the web connections'));
   });
 
   it('binds the configured host, loopback by default', async () => {
@@ -721,6 +755,30 @@ describe('startWebPanel / stopWebPanel', () => {
   it('is a no-op when the panel is not running', async () => {
     await expect(stopWebPanel()).resolves.toBeUndefined();
     expect(storeClose).not.toHaveBeenCalled();
+  });
+
+  it('refuses new SSE connections once stopping begins, and accepts them again after a restart', async () => {
+    /** A minimal SSE request/response pair, enough for attachSseConnection. */
+    const sseExchange = () => {
+      const req = Object.assign(new EventEmitter(), { destroyed: false, ip: '10.0.0.1', socket: {} });
+      const res = Object.assign(new EventEmitter(), {
+        closed: false, writableLength: 0, destroy: vi.fn(), setHeader: vi.fn(), flushHeaders: vi.fn(), write: vi.fn(),
+        status: vi.fn().mockReturnThis(), end: vi.fn(),
+      });
+      return { req, res };
+    };
+    const connections = new Map<string, Set<any>>();
+
+    await startWebPanel(0);
+    await stopWebPanel();
+    const late = sseExchange();
+    expect(attachSseConnection(late.req as any, late.res as any, { connections, key: 'k', maxPerChannel: 5 })).toBe(false);
+    expect(late.res.destroy).toHaveBeenCalledOnce();
+
+    await startWebPanel(0);
+    const next = sseExchange();
+    expect(attachSseConnection(next.req as any, next.res as any, { connections, key: 'k', maxPerChannel: 5 })).toBe(true);
+    next.req.emit('close');
   });
 
   it('closes the session store after the server on stop', async () => {
