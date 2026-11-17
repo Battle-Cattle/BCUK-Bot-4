@@ -69,6 +69,12 @@ const DB_HEALTH_CHECK_TIMEOUT_MS = 10_000;
  * failing to deliver (see `discordBot.ts`'s `waitForDiscordReady`).
  */
 const DISCORD_READY_FOR_OWNER_DM_TIMEOUT_MS = 30_000;
+/**
+ * How long shutdown waits for the owner's "shutting down" DM. Together with the web panel's 10s
+ * drain (`WEB_DRAIN_TIMEOUT_MS` in `src/web/server.ts`), the rest of teardown and the 2s log flush,
+ * this keeps shutdown inside `TimeoutStopSec=30` (deploy/bcuk-bot.service).
+ */
+const SHUTDOWN_ANNOUNCEMENT_TIMEOUT_MS = 5_000;
 
 let dbHealthCheckTimer: ReturnType<typeof setInterval> | null = null;
 // Guards against overlapping probes: each probe is bounded by DB_HEALTH_CHECK_TIMEOUT_MS, which
@@ -116,13 +122,19 @@ function stopDbHealthCheck(): void {
  * `src/shared/logger.ts`, which gives up after a couple of seconds). Without the wait, the line
  * explaining a fatal exit would usually be lost from `error-*.log`/`combined-*.log`, reaching only
  * the console. Every exit goes through here: 1 for a failure, 0 only after a deliberate shutdown.
+ * A failure reported while an exit(0) is still waiting turns it into an exit(1).
  * @param code - The process exit code.
  * @returns Never resolves: the process exits.
  */
 async function exitProcess(code: 0 | 1): Promise<never> {
+  // Shared, so a failure reported while a deliberate exit(0) is still flushing still exits 1.
+  exitCode = Math.max(exitCode ?? 0, code) as 0 | 1;
   await flushLogs();
-  return process.exit(code);
+  return process.exit(exitCode);
 }
+
+/** The code {@link exitProcess} will exit with: the highest any caller asked for. */
+let exitCode: 0 | 1 | undefined;
 
 /** Set by the first {@link shutdown} call so a second SIGINT/SIGTERM can't run a concurrent teardown. */
 let shuttingDown = false;
@@ -162,7 +174,10 @@ async function shutdown(signal: string): Promise<void> {
   stopOwnerAlertWatcher();
   // ...then announce the shutdown itself, while the Discord client this DM needs is still up —
   // stopDiscordBot() below tears it down.
-  await safeStop('owner alert shutdown announcement', announceShutdown);
+  // Bounded, so a Discord client that's reconnecting can't eat the time the web drain and the
+  // rest of shutdown need inside the unit's TimeoutStopSec.
+  await safeStop('owner alert shutdown announcement', () =>
+    withTimeout(announceShutdown(), SHUTDOWN_ANNOUNCEMENT_TIMEOUT_MS, 'Shutdown announcement'));
   // Stop taking web requests before the components they'd act on start disconnecting.
   await safeStop('web panel', stopWebPanel);
   // With no more uploads coming in, kill any overlay video conversion still running, so an ffmpeg

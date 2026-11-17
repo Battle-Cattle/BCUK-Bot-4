@@ -720,6 +720,47 @@ describe('shutdown', () => {
     expect(exitSpy).toHaveBeenCalledWith(0);
   });
 
+  it('exits 1, not 0, when a fatal error arrives while the shutdown exit is still flushing', async () => {
+    const { flushLogs } = await import('./shared/logger.js');
+    let finishFlush!: () => void;
+    const flush = new Promise<void>((resolve) => { finishFlush = resolve; });
+    vi.mocked(flushLogs).mockReturnValueOnce(flush).mockReturnValueOnce(flush);
+    await runMain();
+    exitSpy.mockImplementation((() => {}) as never);
+
+    process.emit('SIGTERM');
+    await waitFor(() => expect(vi.mocked(flushLogs)).toHaveBeenCalled());
+    process.emit('uncaughtException', new Error('late failure'));
+    finishFlush();
+
+    await waitFor(() => expect(exitSpy).toHaveBeenCalled());
+    expect(exitSpy).not.toHaveBeenCalledWith(0);
+    expect(exitSpy).toHaveBeenCalledWith(1);
+  });
+
+  it('stops waiting for the shutdown announcement after 5s and carries on shutting down', async () => {
+    const { announceShutdown } = await import('./discord/ownerAlerts.js');
+    const { stopWebPanel } = await import('./web/server.js');
+    vi.mocked(announceShutdown).mockReturnValueOnce(new Promise<void>(() => { /* Discord never ready */ }));
+    await runMain();
+    exitSpy.mockImplementation((() => {}) as never);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      process.emit('SIGTERM');
+      await vi.advanceTimersByTimeAsync(4_999);
+      expect(vi.mocked(stopWebPanel)).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+    } finally {
+      vi.useRealTimers();
+    }
+
+    await waitFor(() => expect(exitSpy).toHaveBeenCalledWith(0));
+    expect(vi.mocked(stopWebPanel)).toHaveBeenCalledOnce();
+    expect(lastBotLogger?.error).toHaveBeenCalledWith(
+      'Error stopping owner alert shutdown announcement during shutdown:', expect.objectContaining({ message: expect.stringContaining('timed out after 5000ms') }),
+    );
+  });
+
   it('flushes the log files after closing the pool and before exiting(0)', async () => {
     const { closePool } = await import('./db.js');
     const { flushLogs } = await import('./shared/logger.js');

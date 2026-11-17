@@ -1,5 +1,4 @@
 import { createLogger as winstonCreateLogger, format, transports, type Logger } from 'winston';
-import type { EventEmitter } from 'node:events';
 import Transport from 'winston-transport';
 import DailyRotateFile from 'winston-daily-rotate-file';
 import { recordError } from './healthStore';
@@ -159,35 +158,64 @@ export function createLogger(module: string) {
 const LOG_FLUSH_TIMEOUT_MS = 2_000;
 
 /**
- * The file stream a `DailyRotateFile` transport writes through. Not part of its typings: it's the
- * only way to tell when a line has reached the file, since the transport itself reports a line as
- * logged once it's queued on this stream.
- * @param transport - One of the logger's transports.
- * @returns The transport's file stream, or undefined for a transport that doesn't write a file.
+ * Resolves once a `DailyRotateFile` transport has closed the file it was writing when the logger
+ * ended. Ending the logger ends the transport and then calls its `close()`, which ends the current
+ * file stream and emits a second `finish` once that file is written (the first `finish` is the
+ * transport's own, when its queued entries have been handed to the stream). Listening from inside
+ * `close()` catches that second one only, and a file rotated out earlier can't satisfy it.
+ * @param transport - A file transport of the logger about to be ended.
+ * @returns Resolves once the transport's current file has been written and closed.
  */
-function fileStreamOf(transport: unknown): EventEmitter | undefined {
-  if (!(transport instanceof DailyRotateFile)) return undefined;
-  return (transport as unknown as { logStream?: EventEmitter }).logStream;
+function fileClosed(transport: DailyRotateFile): Promise<void> {
+  return new Promise((resolve) => {
+    const close = transport.close?.bind(transport);
+    transport.close = () => {
+      transport.once('finish', () => resolve());
+      if (close) close();
+      else resolve();
+    };
+  });
+}
+
+/**
+ * Formats a log entry rejected because its logger has ended, as the console would show it.
+ * @param info - The winston log entry.
+ * @returns One line (plus any stack trace) ending in a newline.
+ */
+function formatLateEntry(info: Record<string, unknown>): string {
+  const text = (value: unknown): string | undefined => (typeof value === 'string' ? value : undefined);
+  const fields: LogLineFields = {
+    timestamp: new Date().toISOString(),
+    label: text(info.label) ?? 'unknown',
+    message: text(info.message) ?? '',
+    stack: text(info.stack),
+  };
+  return `${formatLogLine(fields, (text(info.level) ?? 'info').toUpperCase())}\n`;
 }
 
 /**
  * Ends `logger` and waits for its log files to finish writing everything already logged, for up
  * to `timeoutMs`. The file transports write asynchronously, so a `process.exit()` straight after a
- * log call loses the line (often the reason for the exit). Anything logged after this starts is
- * dropped from the files rather than raising a write-after-end error; the console still prints it.
+ * log call loses the line (often the reason for the exit). An entry logged after this starts can't
+ * go through the ended logger, so it's written straight to stderr instead (journald keeps it) rather
+ * than lost or raising a write-after-end error.
  * @param logger - The winston logger to end.
  * @param timeoutMs - Most milliseconds to wait for the files.
  * @returns Resolves once every file has been written, or at the time limit; never rejects.
  */
 export async function endAndFlushLogger(logger: Logger, timeoutMs: number): Promise<void> {
-  const fileStreams = logger.transports.map(fileStreamOf).filter((s): s is EventEmitter => s !== undefined);
-  // Ending the logger ends each transport, which ends its file stream; 'finish' then means every
-  // queued line is in the file.
-  const written = Promise.all(fileStreams.map((stream) => new Promise<void>((resolve) => {
-    stream.once('finish', () => resolve());
-    stream.once('error', () => resolve());
-  })));
-  logger.on('error', () => { /* a line logged after end(): already on the console, dropped from the files */ });
+  const fileTransports = logger.transports.filter((t): t is DailyRotateFile => t instanceof DailyRotateFile);
+  const written = Promise.all(fileTransports.map(fileClosed));
+  // Child loggers write through the parent's write(), so this catches their entries too.
+  // (winston's streams come from readable-stream, which doesn't set `writableEnded`, hence the flag.)
+  let ended = false;
+  const write = logger.write.bind(logger);
+  logger.write = ((info: Record<string, unknown>, ...rest: unknown[]) => {
+    if (!ended) return (write as (...args: unknown[]) => boolean)(info, ...rest);
+    process.stderr.write(formatLateEntry(info));
+    return true;
+  }) as typeof logger.write;
+  ended = true;
   logger.end();
   let timer: NodeJS.Timeout | undefined;
   const timedOut = new Promise<void>((resolve) => { timer = setTimeout(resolve, timeoutMs); });

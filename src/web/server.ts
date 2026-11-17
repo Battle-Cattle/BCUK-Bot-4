@@ -21,6 +21,7 @@ import { ensureSessionCsrfToken } from './csrf';
 import { enforceSessionLifetime, SESSION_IDLE_MS } from './sessionLifetime';
 import { renderView } from './routes/viewHelpers';
 import { trackForGracefulClose, type GracefulClose } from './serverDrain';
+import { setSseConnectionsAccepted } from './routes/sseChannel';
 import {
   ipKey,
   generalLimiterSkip,
@@ -435,6 +436,7 @@ export function startWebPanel(port: number = WEB_PORT, host: string = WEB_HOST):
     const onListening = (): void => {
       server.off('error', onError);
       webServer = { server, closeGracefully };
+      setSseConnectionsAccepted(true);
       startSessionCleanup();
       log.info(`Panel listening on ${host}:${port}`);
       resolve(server);
@@ -447,7 +449,7 @@ export function startWebPanel(port: number = WEB_PORT, host: string = WEB_HOST):
 
 /**
  * Stops the web panel: stops the expired-session cleanup timer, stops accepting connections, ends
- * the long-lived SSE streams, and lets requests still in progress finish — for up to `drainTimeoutMs`,
+ * the long-lived SSE streams (and refuses new ones, via `setSseConnectionsAccepted`), and lets requests still in progress finish — for up to `drainTimeoutMs`,
  * after which they're dropped (see {@link trackForGracefulClose}) — then closes the session store.
  * Shutdown stops the transcodes and closes the DB pool only after this resolves, so a request that
  * finishes in time never sees a killed ffmpeg or a closed pool. The store leaves its DB pool open;
@@ -460,6 +462,7 @@ export async function stopWebPanel(drainTimeoutMs: number = WEB_DRAIN_TIMEOUT_MS
   if (!panel) return;
   webServer = null;
   stopSessionCleanup();
+  setSseConnectionsAccepted(false);
   if (await panel.closeGracefully(drainTimeoutMs)) {
     log.warn(`Dropped the web connections still running ${drainTimeoutMs}ms after shutdown began.`);
   }

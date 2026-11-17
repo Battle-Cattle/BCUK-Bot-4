@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { EventEmitter } from 'node:events';
 
 vi.mock('./healthStore', () => ({
   recordError: vi.fn(),
@@ -174,9 +173,12 @@ describe('endAndFlushLogger', () => {
     dir = undefined;
   });
 
+  /** Whether a file name is a log file, including a size-rotated one (`x.log.1`). */
+  const isLogFile = (name: string): boolean => /\.log(\.\d+)?$/.test(name);
+
   /** Reads every log file written to the temp folder, joined. */
   async function readLogFiles(folder: string): Promise<string> {
-    const names = (await readdir(folder)).filter((name) => name.endsWith('.log'));
+    const names = (await readdir(folder)).filter(isLogFile);
     const contents = await Promise.all(names.map((name) => readFile(path.join(folder, name), 'utf8')));
     return contents.join('');
   }
@@ -197,33 +199,54 @@ describe('endAndFlushLogger', () => {
     expect(written.trimEnd().split('\n')).toHaveLength(501);
   });
 
-  it('drops a line logged after the flush began instead of raising a write-after-end error', async () => {
+  it('waits for the file being written at the end, across a rotation, not the first file to finish', async () => {
+    dir = await mkdtemp(path.join(tmpdir(), 'bcuk-logflush-'));
+    const logger = winstonCreateLogger({
+      // Small enough that these lines rotate through several files.
+      transports: [new DailyRotateFile({ dirname: dir, filename: 'error-%DATE%.log', maxSize: '10k' })],
+    });
+    for (let i = 0; i < 300; i++) logger.error(`filler ${i} ${'x'.repeat(200)}`);
+    logger.error('the fatal reason');
+
+    await endAndFlushLogger(logger, 5_000);
+
+    expect((await readdir(dir)).filter(isLogFile).length).toBeGreaterThan(1);
+    const written = await readLogFiles(dir);
+    expect(written).toContain('the fatal reason');
+    expect(written.trimEnd().split('\n')).toHaveLength(301);
+  });
+
+  it('writes an entry logged after the flush began to stderr instead of losing it', async () => {
     dir = await mkdtemp(path.join(tmpdir(), 'bcuk-logflush-'));
     const logger = winstonCreateLogger({
       transports: [new DailyRotateFile({ dirname: dir, filename: 'combined-%DATE%.log' })],
     });
-    logger.info('before');
+    const child = logger.child({ label: 'Bot' });
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      child.info('before');
 
-    const flushing = endAndFlushLogger(logger, 5_000);
-    expect(() => logger.info('after')).not.toThrow();
-    await flushing;
+      const flushing = endAndFlushLogger(logger, 5_000);
+      expect(() => child.error('late fatal reason')).not.toThrow();
+      await flushing;
 
-    const written = await readLogFiles(dir);
-    expect(written).toContain('before');
-    expect(written).not.toContain('after');
+      expect(stderr).toHaveBeenCalledWith(expect.stringMatching(/\[ERROR\] \[Bot\] late fatal reason\n$/));
+      const written = await readLogFiles(dir);
+      expect(written).toContain('before');
+      expect(written).not.toContain('late fatal reason');
+    } finally {
+      stderr.mockRestore();
+    }
   });
 
   it('gives up at the time limit when a file never finishes', async () => {
     dir = await mkdtemp(path.join(tmpdir(), 'bcuk-logflush-'));
     const stuck = new DailyRotateFile({ dirname: dir, filename: 'never-%DATE%.log' });
-    // Swap in a file stream that never reports it has finished writing.
-    const realStream = (stuck as unknown as { logStream: { end: () => void } }).logStream;
-    realStream.end();
-    const neverFinishes = new EventEmitter() as EventEmitter & { end: () => void };
-    neverFinishes.end = () => {};
+    // A transport whose close never reports its file finished; its real stream is ended here.
+    const realClose = stuck.close!.bind(stuck);
+    stuck.close = () => {};
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     try {
-      (stuck as unknown as { logStream: unknown }).logStream = neverFinishes;
       const logger = winstonCreateLogger({ transports: [stuck] });
 
       let done = false;
@@ -235,6 +258,7 @@ describe('endAndFlushLogger', () => {
       expect(done).toBe(true);
     } finally {
       vi.useRealTimers();
+      realClose();
     }
   });
 

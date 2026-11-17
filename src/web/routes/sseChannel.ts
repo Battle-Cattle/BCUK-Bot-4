@@ -295,6 +295,20 @@ export interface AttachSseConnectionOptions<K> {
   pool?: SseConnectionPool;
 }
 
+/** False while the web panel shuts down; see {@link setSseConnectionsAccepted}. */
+let acceptingConnections = true;
+
+/**
+ * Turns new SSE connections on or off. The web panel turns them off when it starts shutting down:
+ * its drain ends the streams already open, and a stream whose handshake was still waiting on a
+ * lookup (a dashboard stream resolving its streamer, say) would otherwise open afterwards and hold
+ * the drain open until its time limit. Turned back on when the panel starts.
+ * @param accepted - True to accept new connections, false to drop them.
+ */
+export function setSseConnectionsAccepted(accepted: boolean): void {
+  acceptingConnections = accepted;
+}
+
 /**
  * Registers `res` as an SSE connection for `key`: enforces the per-key connection limit, sends
  * the SSE handshake, and wires up the keepalive ping plus cleanup on disconnect or a failed
@@ -311,7 +325,8 @@ export interface AttachSseConnectionOptions<K> {
  * Nothing is reserved if the client has already gone away — callers often await a lookup before
  * attaching, and a connection registered after its socket closed would never see the
  * 'close'/'error' events that release its slots.
- * @returns false if the client already disconnected (nothing is sent or reserved), or if the
+ * @returns false if the client already disconnected (nothing is sent or reserved), if the web panel
+ *   is shutting down (see {@link setSseConnectionsAccepted}; the socket is dropped), or if the
  *   process-wide cap (`SSE_MAX_TOTAL_CONNECTIONS`), the `pool`'s total or per-IP limit, the
  *   key's `maxPerChannel`, or the client IP's `maxPerChannelPerIp` was already reached (a 429 has already been sent to `res`); either way
  *   the caller should stop handling the request. True once the connection is attached.
@@ -322,6 +337,12 @@ export function attachSseConnection<K>(
   options: AttachSseConnectionOptions<K>,
 ): boolean {
   if (res.closed || req.destroyed) return false;
+  if (!acceptingConnections) {
+    // Shutting down: drop the socket rather than answer with an error status, so the client's
+    // EventSource treats it as a network error and reconnects (to the next process).
+    res.destroy();
+    return false;
+  }
   const { connections, key, maxPerChannel, maxPerChannelPerIp, pool } = options;
   const limits: ClientLimits = {
     maxPerChannel,

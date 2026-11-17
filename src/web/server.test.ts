@@ -18,6 +18,7 @@ vi.mock('../shared/config', () => ({
   DB_NAME: 'db',
   SFX_FOLDER: './sfx',
   SFX_MAX_FILE_MB: 10,
+  SSE_MAX_TOTAL_CONNECTIONS: 100,
 }));
 
 // The session pool server.ts hands the session store, and the store's constructor args/close calls.
@@ -165,6 +166,7 @@ vi.mock('./routes/health', () => ({ default: markerRouter('health') }));
 vi.mock('./routes/healthStatusEvents', () => ({ default: emptyRouter() }));
 
 import { app, generalLimiter, preSessionLimiter, sessionLimiter, startWebPanel, stopWebPanel } from './server';
+import { attachSseConnection } from './routes/sseChannel';
 import { overlayTrafficLimiter } from './rateLimits';
 import { createHmac } from 'crypto';
 import { requireAuth, requireAuthJson, requireGuildContext } from './middleware';
@@ -753,6 +755,30 @@ describe('startWebPanel / stopWebPanel', () => {
   it('is a no-op when the panel is not running', async () => {
     await expect(stopWebPanel()).resolves.toBeUndefined();
     expect(storeClose).not.toHaveBeenCalled();
+  });
+
+  it('refuses new SSE connections once stopping begins, and accepts them again after a restart', async () => {
+    /** A minimal SSE request/response pair, enough for attachSseConnection. */
+    const sseExchange = () => {
+      const req = Object.assign(new EventEmitter(), { destroyed: false, ip: '10.0.0.1', socket: {} });
+      const res = Object.assign(new EventEmitter(), {
+        closed: false, writableLength: 0, destroy: vi.fn(), setHeader: vi.fn(), flushHeaders: vi.fn(), write: vi.fn(),
+        status: vi.fn().mockReturnThis(), end: vi.fn(),
+      });
+      return { req, res };
+    };
+    const connections = new Map<string, Set<any>>();
+
+    await startWebPanel(0);
+    await stopWebPanel();
+    const late = sseExchange();
+    expect(attachSseConnection(late.req as any, late.res as any, { connections, key: 'k', maxPerChannel: 5 })).toBe(false);
+    expect(late.res.destroy).toHaveBeenCalledOnce();
+
+    await startWebPanel(0);
+    const next = sseExchange();
+    expect(attachSseConnection(next.req as any, next.res as any, { connections, key: 'k', maxPerChannel: 5 })).toBe(true);
+    next.req.emit('close');
   });
 
   it('closes the session store after the server on stop', async () => {
