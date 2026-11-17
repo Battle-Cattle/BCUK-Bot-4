@@ -10,6 +10,16 @@ vi.mock('../../db', () => ({
 
 const { logErrorSpy, logWarnSpy, pushSpy } = vi.hoisted(() => ({ logErrorSpy: vi.fn(), logWarnSpy: vi.fn(), pushSpy: vi.fn() }));
 vi.mock('../../shared/logger', () => ({ createLogger: () => ({ error: logErrorSpy, warn: logWarnSpy }) }));
+// Vitest's fake timers don't replace node:timers/promises, so route the retry wait through the
+// (faked) global setTimeout, keeping its abort-signal behaviour, so tests advance it instantly.
+vi.mock('node:timers/promises', () => ({
+  setTimeout: (ms: number, value: unknown, options?: { signal?: AbortSignal }) => new Promise((resolve, reject) => {
+    const signal = options?.signal;
+    if (signal?.aborted) { reject(signal.reason); return; }
+    const timer = globalThis.setTimeout(() => resolve(value), ms);
+    signal?.addEventListener('abort', () => { globalThis.clearTimeout(timer); reject(signal.reason); }, { once: true });
+  }),
+}));
 vi.mock('../../twitch/eventsub/twitchEventSubRuntime', () => ({
   dashboardEventRuntimeRegistry: { get: () => ({ pushDashboardEvent: pushSpy }) },
 }));
