@@ -75,6 +75,13 @@ const DISCORD_READY_FOR_OWNER_DM_TIMEOUT_MS = 30_000;
  * this keeps shutdown inside `TimeoutStopSec=30` (deploy/bcuk-bot.service).
  */
 const SHUTDOWN_ANNOUNCEMENT_TIMEOUT_MS = 5_000;
+/**
+ * Longest a shutdown may take before it gives up on the remaining teardown and exits 1 (after the
+ * log flush), so a hung step (a bot or EventSub disconnect, the pool close) is logged and the exit
+ * still comes from us, not from systemd's SIGKILL at `TimeoutStopSec=30`, which would leave no log
+ * line. Leaves room for the 2s flush and a margin under 30s.
+ */
+const SHUTDOWN_DEADLINE_MS = 25_000;
 
 let dbHealthCheckTimer: ReturnType<typeof setInterval> | null = null;
 // Guards against overlapping probes: each probe is bounded by DB_HEALTH_CHECK_TIMEOUT_MS, which
@@ -159,6 +166,7 @@ async function safeStop(name: string, fn: () => void | Promise<void>): Promise<v
  * `ownerAlertWatcher.ts`'s `stopOwnerAlertWatcher` and `ownerAlerts.ts`'s `announceShutdown`) before anything actually
  * disconnects. Each teardown step is isolated via {@link safeStop} so a failure in one component
  * (e.g. the Twitch monitor) can't skip the rest — `closePool()` and the exit(0) always run.
+ * If the teardown is still running after {@link SHUTDOWN_DEADLINE_MS}, it logs that and exits 1.
  * Re-entrant calls (a second signal while teardown is still running) are logged and ignored.
  * @param signal - The name of the signal that triggered shutdown (e.g. `SIGINT`).
  */
@@ -169,6 +177,26 @@ async function shutdown(signal: string): Promise<void> {
   }
   shuttingDown = true;
   log.info(`${signal} received — disconnecting from voice and shutting down.`);
+  // Exits 1 if teardown hangs. Not unref'd: a step stuck on a promise with nothing else keeping the
+  // event loop alive would otherwise let the process end silently instead of logging why.
+  const deadline = setTimeout(() => {
+    log.error(`Shutdown still running after ${SHUTDOWN_DEADLINE_MS}ms; exiting without finishing teardown.`);
+    void exitProcess(1);
+  }, SHUTDOWN_DEADLINE_MS);
+  try {
+    await teardown();
+  } finally {
+    clearTimeout(deadline);
+  }
+  await exitProcess(0);
+}
+
+/**
+ * The teardown steps of {@link shutdown}, in order: owner alerts, the web panel, transcodes and
+ * schedulers, EventSub and the monitor, the bots, audio, then the DB pool.
+ * @returns Resolves once every step has run; a failing step is logged and skipped (see {@link safeStop}).
+ */
+async function teardown(): Promise<void> {
   // Before anything else — every stop* call below disconnects a component (Twitch chat, EventSub,
   // etc.), and none of that is a real outage the owner needs a DM about.
   stopOwnerAlertWatcher();
@@ -201,7 +229,6 @@ async function shutdown(signal: string): Promise<void> {
   await safeStop('audio player', () => disconnect());
   await closePool();
   log.info('Shutdown complete.');
-  await exitProcess(0);
 }
 
 process.on('SIGINT',  () => { shutdown('SIGINT').catch((err: unknown)  => { log.error('Shutdown error:', err); void exitProcess(1); }); });

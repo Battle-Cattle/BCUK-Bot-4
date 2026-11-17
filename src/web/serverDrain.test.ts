@@ -1,8 +1,12 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
+
+vi.mock('../shared/config', () => ({ SSE_MAX_TOTAL_CONNECTIONS: 10 }));
+
 import http, { type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { trackForGracefulClose, type GracefulClose } from './serverDrain';
 import { waitFor } from '../test-utils/waitFor';
+import { attachSseConnection, setSseConnectionsAccepted } from './routes/sseChannel';
 
 let server: Server | undefined;
 const agents: http.Agent[] = [];
@@ -100,6 +104,40 @@ describe('trackForGracefulClose', () => {
     await expect(closeGracefully(5_000)).resolves.toBe(false);
     expect(Date.now() - startedAt).toBeLessThan(1_000);
     await events;
+  });
+
+  it('drops an SSE stream whose lookup finishes after the drain began, without waiting for the time limit', async () => {
+    let finishLookup!: () => void;
+    const lookup = new Promise<void>((resolve) => { finishLookup = resolve; });
+    const connections = new Map<string, Set<any>>();
+    // Like a dashboard stream: an async lookup (the streamer record) before the SSE handshake.
+    const { port, closeGracefully, started } = await startServer((req, res) => {
+      void lookup.then(() => attachSseConnection(req as any, res as any, { connections, key: 'streamer', maxPerChannel: 5 }));
+    });
+    const clientClosed = new Promise<void>((resolve) => {
+      const agent = new http.Agent({ keepAlive: true });
+      agents.push(agent);
+      http.get({ host: '127.0.0.1', port, path: '/events', agent }, (res) => {
+        res.on('close', () => resolve());
+        res.resume();
+      }).on('error', () => resolve());
+    });
+    await waitFor(() => expect(started.has('/events')).toBe(true));
+
+    // What stopWebPanel does: refuse new SSE connections, then drain.
+    setSseConnectionsAccepted(false);
+    try {
+      const startedAt = Date.now();
+      const closing = closeGracefully(5_000);
+      finishLookup();
+
+      await expect(closing).resolves.toBe(false);
+      expect(Date.now() - startedAt).toBeLessThan(1_000);
+      await clientClosed;
+      expect(connections.size).toBe(0);
+    } finally {
+      setSseConnectionsAccepted(true);
+    }
   });
 
   it('closes idle keep-alive connections without waiting for the time limit', async () => {

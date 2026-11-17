@@ -738,6 +738,45 @@ describe('shutdown', () => {
     expect(exitSpy).toHaveBeenCalledWith(1);
   });
 
+  it('logs and exits 1 after 25s when a teardown step hangs, instead of waiting for systemd to kill it', async () => {
+    const { stopTwitchBot } = await import('./twitch/twitchBot.js');
+    const { closePool } = await import('./db.js');
+    const { flushLogs } = await import('./shared/logger.js');
+    vi.mocked(stopTwitchBot).mockReturnValueOnce(new Promise<void>(() => { /* never disconnects */ }));
+    await runMain();
+    exitSpy.mockImplementation((() => {}) as never);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      process.emit('SIGTERM');
+      await vi.advanceTimersByTimeAsync(24_999);
+      expect(exitSpy).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+    } finally {
+      vi.useRealTimers();
+    }
+
+    await waitFor(() => expect(exitSpy).toHaveBeenCalledWith(1));
+    expect(exitSpy).not.toHaveBeenCalledWith(0);
+    expect(vi.mocked(closePool)).not.toHaveBeenCalled();
+    expect(vi.mocked(flushLogs)).toHaveBeenCalled();
+    expect(lastBotLogger?.error).toHaveBeenCalledWith(expect.stringContaining('Shutdown still running after 25000ms'));
+  });
+
+  it('cancels the shutdown deadline once teardown finishes', async () => {
+    await runMain();
+    exitSpy.mockImplementation((() => {}) as never);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      process.emit('SIGTERM');
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.waitFor(() => expect(exitSpy).toHaveBeenCalledWith(0));
+      await vi.advanceTimersByTimeAsync(30_000);
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(exitSpy).toHaveBeenCalledTimes(1);
+  });
+
   it('stops waiting for the shutdown announcement after 5s and carries on shutting down', async () => {
     const { announceShutdown } = await import('./discord/ownerAlerts.js');
     const { stopWebPanel } = await import('./web/server.js');
