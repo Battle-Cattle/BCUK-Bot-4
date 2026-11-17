@@ -22,6 +22,19 @@ updates:
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
     groups:
+      # ESLint and its plugins all touch the same part of package-lock.json, so separate PRs
+      # conflict as soon as the first one merges. Majors stay separate: they usually need config
+      # or code changes of their own. Listed before `vitest` so `@vitest/eslint-plugin` (versioned
+      # apart from vitest itself) lands here: a dependency joins the first group that matches it.
+      eslint:
+        update-types: ["minor", "patch"]
+        patterns:
+          - "eslint"
+          - "eslint-*"
+          - "@eslint/*"
+          - "typescript-eslint"
+          - "@typescript-eslint/*"
+          - "@vitest/eslint-plugin"
       vitest:
         patterns:
           - "vitest"
