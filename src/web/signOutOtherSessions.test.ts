@@ -24,18 +24,25 @@ import session from 'express-session';
 import supertest from 'supertest';
 import { requireAuth, requireAuthJson } from './middleware';
 import { signOutOtherSessions } from './loginSession';
+import { csrfProtection } from './csrf';
 
 /**
- * An app with a test-only sign-in route (copying the row's generation as `establishDashboardSession`
- * does), a protected page, a protected `/api` route, and the sign-out action.
+ * An app set up as in production (secure cookie behind the proxy, CSRF-checked writes) with a
+ * test-only sign-in route that copies the row's generation as `establishDashboardSession` does and
+ * answers the session's CSRF token, a protected page, a protected `/api` route, and the sign-out.
  */
 function buildApp(): express.Express {
   const app = express();
-  app.use(session({ secret: 'test', resave: false, saveUninitialized: false, store: new session.MemoryStore() }));
-  app.post('/login', (req, res) => {
+  app.set('trust proxy', 1);
+  app.use(session({
+    secret: 'x'.repeat(32), resave: false, saveUninitialized: false, store: new session.MemoryStore(),
+    cookie: { secure: true, httpOnly: true, sameSite: 'lax' },
+  }));
+  app.use(csrfProtection);
+  app.get('/login', (req, res) => {
     req.session.user = { discordId: '42', discordName: 'Alice', discordAvatar: null, isOwner: false, accessLevel: 0, currentGuildId: 'g1', guilds: [] };
     req.session.sessionGeneration = row.session_generation;
-    res.sendStatus(204);
+    res.send(req.csrfToken());
   });
   app.get('/page', requireAuth, (_req, res) => { res.send('ok'); });
   app.get('/api/thing', requireAuthJson, (_req, res) => { res.json({ ok: true }); });
@@ -43,7 +50,41 @@ function buildApp(): express.Express {
     await signOutOtherSessions(req);
     res.sendStatus(204);
   });
+  app.use((err: { code?: string }, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (err.code === 'EBADCSRFTOKEN') res.sendStatus(403);
+    else next(err);
+  });
   return app;
+}
+
+/** A browser: keeps its session cookie by hand (supertest's agent won't send a `Secure` cookie over plain HTTP). */
+class Client {
+  cookie = '';
+  csrf = '';
+
+  constructor(private readonly app: express.Express) {}
+
+  /** Records a `Set-Cookie` from the response, if any. */
+  private keep(res: supertest.Response): supertest.Response {
+    const setCookie = ([] as string[]).concat(res.headers['set-cookie'] ?? [])[0];
+    if (setCookie) this.cookie = setCookie.split(';')[0]!;
+    return res;
+  }
+
+  async login(): Promise<void> {
+    const res = await this.get('/login');
+    if (res.status !== 200) throw new Error(`login failed: ${res.status}`);
+    this.csrf = res.text;
+  }
+
+  async get(path: string): Promise<supertest.Response> {
+    return this.keep(await supertest(this.app).get(path).set({ 'X-Forwarded-Proto': 'https', Cookie: this.cookie }));
+  }
+
+  async signOutOthers(): Promise<supertest.Response> {
+    return this.keep(await supertest(this.app).post('/sign-out-others')
+      .set({ 'X-Forwarded-Proto': 'https', Cookie: this.cookie, 'X-CSRF-Token': this.csrf }));
+  }
 }
 
 beforeEach(() => {
@@ -53,16 +94,14 @@ beforeEach(() => {
 describe('sign out other sessions (#1058)', () => {
   it('ends the other sessions (redirect, or 401 under /api) and keeps the one that asked', async () => {
     const app = buildApp();
-    const here = supertest.agent(app);
-    const otherBrowser = supertest.agent(app);
-    const otherScript = supertest.agent(app);
-    for (const agent of [here, otherBrowser, otherScript]) await agent.post('/login').expect(204);
-    await otherBrowser.get('/page').expect(200);
+    const [here, otherBrowser, otherScript] = [new Client(app), new Client(app), new Client(app)];
+    for (const client of [here, otherBrowser, otherScript]) await client.login();
+    expect((await otherBrowser.get('/page')).status).toBe(200);
 
-    await here.post('/sign-out-others').expect(204);
+    expect((await here.signOutOthers()).status).toBe(204);
 
-    await here.get('/page').expect(200, 'ok');
-    await here.get('/api/thing').expect(200);
+    expect((await here.get('/page')).text).toBe('ok');
+    expect((await here.get('/api/thing')).status).toBe(200);
     const page = await otherBrowser.get('/page');
     expect(page.status).toBe(302);
     expect(page.headers.location).toBe('/auth/login');
@@ -73,17 +112,26 @@ describe('sign out other sessions (#1058)', () => {
 
   it('re-issues the asking session under a new cookie, so a copy of its old cookie is signed out', async () => {
     const app = buildApp();
-    const login = await supertest(app).post('/login').expect(204);
-    const oldCookie = login.headers['set-cookie']![0]!.split(';')[0]!;
+    const here = new Client(app);
+    await here.login();
+    const copy = new Client(app);
+    copy.cookie = here.cookie;
 
-    const signOut = await supertest(app).post('/sign-out-others').set('Cookie', oldCookie).expect(204);
-    const newCookie = signOut.headers['set-cookie']![0]!.split(';')[0]!;
-    expect(newCookie).not.toBe(oldCookie);
+    expect((await here.signOutOthers()).status).toBe(204);
+    expect(here.cookie).not.toBe(copy.cookie);
 
-    await supertest(app).get('/page').set('Cookie', newCookie).expect(200);
-    const stale = await supertest(app).get('/page').set('Cookie', oldCookie);
+    expect((await here.get('/page')).status).toBe(200);
+    const stale = await copy.get('/page');
     expect(stale.status).toBe(302);
     expect(stale.headers.location).toBe('/auth/login');
   });
-});
 
+  it('refuses the sign-out without the session\'s CSRF token', async () => {
+    const app = buildApp();
+    const here = new Client(app);
+    await here.login();
+    here.csrf = 'wrong';
+    expect((await here.signOutOthers()).status).toBe(403);
+    expect(row.session_generation).toBe(0);
+  });
+});
