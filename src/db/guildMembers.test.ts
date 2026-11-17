@@ -93,6 +93,7 @@ describe('getEffectiveAccessLevel', () => {
     twitch_name: null,
     access_level: 0,
     is_owner: false,
+    session_generation: 0,
   };
 
   it('defaults to USER (0) when the user is not whitelisted', async () => {
@@ -133,6 +134,7 @@ describe('getEffectiveAccessLevelForUser', () => {
     twitch_name: null,
     access_level: 0,
     is_owner: false,
+    session_generation: 0,
   };
 
   it('returns ADMIN (3) for a bot owner regardless of membership, without a DB call', async () => {

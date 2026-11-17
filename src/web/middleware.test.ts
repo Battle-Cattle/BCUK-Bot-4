@@ -50,7 +50,7 @@ const GUILD = { guild_id: 'g1', name: 'Guild 1', voice_channel_id: null, access_
 
 describe('requireAuth', () => {
   it('calls next() when the session user still belongs to a guild', async () => {
-    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: false } as any);
+    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: false, session_generation: 0 } as any);
     vi.mocked(getGuildsForMember).mockResolvedValue([GUILD] as any);
     const req = makeReq({ session: { user: { discordId: 'u1', accessLevel: AccessLevel.USER } } });
     await requireAuth(req, makeRes(), next);
@@ -68,7 +68,7 @@ describe('requireAuth', () => {
   });
 
   it('destroys the session and redirects when the user was removed from their last guild (#1004)', async () => {
-    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: false } as any);
+    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: false, session_generation: 0 } as any);
     const destroy = vi.fn((cb: () => void) => { cb(); });
     const req = makeReq({ session: { user: { discordId: 'u1', accessLevel: AccessLevel.USER }, destroy } });
     const res = makeRes();
@@ -89,15 +89,45 @@ describe('requireAuth', () => {
   });
 
   it('keeps the bot owner signed in even with no guild_member rows', async () => {
-    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: true } as any);
+    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: true, session_generation: 0 } as any);
     vi.mocked(getAllGuilds).mockResolvedValue([]);
     const req = makeReq({ session: { user: { discordId: 'u1', accessLevel: AccessLevel.USER } } });
     await requireAuth(req, makeRes(), next);
     expect(next).toHaveBeenCalledOnce();
   });
 
+  it('destroys the session and redirects when its generation is older than the user row\'s (#1058)', async () => {
+    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: false, session_generation: 3 } as any);
+    vi.mocked(getGuildsForMember).mockResolvedValue([GUILD] as any);
+    const destroy = vi.fn((cb: () => void) => { cb(); });
+    const req = makeReq({ session: { user: { discordId: 'u1', accessLevel: AccessLevel.USER }, sessionGeneration: 2, destroy } });
+    const res = makeRes();
+    await requireAuth(req, res, next);
+    expect(destroy).toHaveBeenCalledOnce();
+    expect(res.redirect).toHaveBeenCalledWith('/auth/login');
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('keeps a session whose generation matches the user row\'s', async () => {
+    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: false, session_generation: 3 } as any);
+    vi.mocked(getGuildsForMember).mockResolvedValue([GUILD] as any);
+    const req = makeReq({ session: { user: { discordId: 'u1', accessLevel: AccessLevel.USER }, sessionGeneration: 3 } });
+    await requireAuth(req, makeRes(), next);
+    expect(next).toHaveBeenCalledOnce();
+  });
+
+  it('treats a session from before #1058 (no generation) as generation 0', async () => {
+    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: false, session_generation: 1 } as any);
+    vi.mocked(getGuildsForMember).mockResolvedValue([GUILD] as any);
+    const destroy = vi.fn((cb: () => void) => { cb(); });
+    const res = makeRes();
+    await requireAuth(makeReq({ session: { user: { discordId: 'u1', accessLevel: AccessLevel.USER }, destroy } }), res, next);
+    expect(res.redirect).toHaveBeenCalledWith('/auth/login');
+    expect(next).not.toHaveBeenCalled();
+  });
+
   it('reads the DB once per request, however many gates run on it', async () => {
-    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: false } as any);
+    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: false, session_generation: 0 } as any);
     vi.mocked(getGuildsForMember).mockResolvedValue([GUILD] as any);
     const req = makeReq({ session: { user: { discordId: 'u1', accessLevel: AccessLevel.USER, currentGuildId: 'g1' } } });
     await requireAuth(req, makeRes(), next);
@@ -114,7 +144,7 @@ describe('requireAuth', () => {
 
 describe('requireAuthJson', () => {
   it('calls next() when the session user still belongs to a guild', async () => {
-    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: false } as any);
+    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: false, session_generation: 0 } as any);
     vi.mocked(getGuildsForMember).mockResolvedValue([GUILD] as any);
     const req = makeReq({ session: { user: { discordId: 'u1', accessLevel: AccessLevel.USER } } });
     await requireAuthJson(req, makeRes(), next);
@@ -130,8 +160,20 @@ describe('requireAuthJson', () => {
     expect(next).not.toHaveBeenCalled();
   });
 
+  it('destroys the session and answers 401 when the session was signed out from elsewhere (#1058)', async () => {
+    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: false, session_generation: 1 } as any);
+    vi.mocked(getGuildsForMember).mockResolvedValue([GUILD] as any);
+    const destroy = vi.fn((cb: () => void) => { cb(); });
+    const res = makeRes();
+    await requireAuthJson(makeReq({ session: { user: { discordId: 'u1', accessLevel: AccessLevel.USER }, sessionGeneration: 0, destroy } }), res, next);
+    expect(destroy).toHaveBeenCalledOnce();
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(res.json).toHaveBeenCalledWith({ ok: false, error: 'unauthenticated' });
+    expect(next).not.toHaveBeenCalled();
+  });
+
   it('destroys the session and answers 401 when the user has no guild left', async () => {
-    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: false } as any);
+    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: false, session_generation: 0 } as any);
     const destroy = vi.fn((cb: () => void) => { cb(); });
     const res = makeRes();
     await requireAuthJson(makeReq({ session: { user: { discordId: 'u1', accessLevel: AccessLevel.USER }, destroy } }), res, next);
@@ -260,7 +302,7 @@ describe('requireAdmin', () => {
 
 describe('requireOwner', () => {
   it('calls next() when the DB user is the owner, regardless of accessLevel', async () => {
-    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: true } as any);
+    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: true, session_generation: 0 } as any);
     const req = makeReq({ session: { user: { discordId: 'u1', accessLevel: AccessLevel.USER, isOwner: true } } });
     await requireOwner(req, makeRes(), next);
     expect(vi.mocked(findUser)).toHaveBeenCalledWith('u1');
@@ -268,7 +310,7 @@ describe('requireOwner', () => {
   });
 
   it('returns 403 for an Admin who is not the owner', async () => {
-    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: false } as any);
+    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: false, session_generation: 0 } as any);
     const req = makeReq({ session: { user: { discordId: 'u1', accessLevel: AccessLevel.ADMIN, isOwner: false } } });
     const res = makeRes();
     await requireOwner(req, res, next);
@@ -277,7 +319,7 @@ describe('requireOwner', () => {
   });
 
   it('returns 403 and clears the cached flag when the session says owner but the DB no longer does', async () => {
-    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: false } as any);
+    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: false, session_generation: 0 } as any);
     const req = makeReq({ session: { user: { discordId: 'u1', accessLevel: AccessLevel.ADMIN, isOwner: true } } });
     const res = makeRes();
     await requireOwner(req, res, next);
@@ -296,7 +338,7 @@ describe('requireOwner', () => {
   });
 
   it('grants access and refreshes the cached flag when the DB was promoted to owner after login', async () => {
-    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: true } as any);
+    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: true, session_generation: 0 } as any);
     const req = makeReq({ session: { user: { discordId: 'u1', accessLevel: AccessLevel.ADMIN, isOwner: false } } });
     await requireOwner(req, makeRes(), next);
     expect(next).toHaveBeenCalled();
@@ -312,7 +354,7 @@ describe('requireOwner', () => {
   });
 
   it('renders error template with an Owner-required message', async () => {
-    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: false } as any);
+    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: false, session_generation: 0 } as any);
     const req = makeReq({ session: { user: { discordId: 'u1', accessLevel: AccessLevel.ADMIN, isOwner: false } } });
     const res = makeRes();
     await requireOwner(req, res, next);
@@ -325,14 +367,14 @@ describe('requireOwner', () => {
 
 describe('requireOwnerJson', () => {
   it('calls next() when the DB user is the owner, regardless of accessLevel', async () => {
-    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: true } as any);
+    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: true, session_generation: 0 } as any);
     const req = makeReq({ session: { user: { discordId: 'u1', accessLevel: AccessLevel.USER, isOwner: true } } });
     await requireOwnerJson(req, makeRes(), next);
     expect(next).toHaveBeenCalled();
   });
 
   it('returns a JSON 403 for an Admin who is not the owner', async () => {
-    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: false } as any);
+    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: false, session_generation: 0 } as any);
     const req = makeReq({ session: { user: { discordId: 'u1', accessLevel: AccessLevel.ADMIN, isOwner: false } } });
     const res = makeRes();
     await requireOwnerJson(req, res, next);
@@ -343,7 +385,7 @@ describe('requireOwnerJson', () => {
   });
 
   it('returns a JSON 403 when the session says owner but the DB no longer does', async () => {
-    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: false } as any);
+    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: false, session_generation: 0 } as any);
     const req = makeReq({ session: { user: { discordId: 'u1', accessLevel: AccessLevel.ADMIN, isOwner: true } } });
     const res = makeRes();
     await requireOwnerJson(req, res, next);
@@ -597,7 +639,7 @@ describe('requireCompanionKey', () => {
 
 describe('requireGuildContext', () => {
   beforeEach(() => {
-    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: false } as any);
+    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: false, session_generation: 0 } as any);
   });
 
   it('redirects to login when no session user', async () => {
@@ -612,6 +654,17 @@ describe('requireGuildContext', () => {
     vi.mocked(findUser).mockResolvedValue(null);
     const user = { discordId: 'u1', currentGuildId: 'g1', accessLevel: AccessLevel.MANAGER, guilds: [{ guildId: 'g1', name: 'A' }] };
     const req = makeReq({ session: { user } });
+    const res = makeRes();
+    await requireGuildContext(req, res, next);
+    expect(res.redirect).toHaveBeenCalledWith('/auth/login');
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('redirects to login when the session\'s generation is older than the user row\'s (#1058)', async () => {
+    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: false, session_generation: 2 } as any);
+    vi.mocked(getGuildsForMember).mockResolvedValue([{ guild_id: 'g1', name: 'A', voice_channel_id: null, access_level: AccessLevel.ADMIN }] as any);
+    const user = { discordId: 'u1', currentGuildId: 'g1', accessLevel: AccessLevel.MANAGER, guilds: [{ guildId: 'g1', name: 'A' }] };
+    const req = makeReq({ session: { user, sessionGeneration: 1 } });
     const res = makeRes();
     await requireGuildContext(req, res, next);
     expect(res.redirect).toHaveBeenCalledWith('/auth/login');
@@ -647,7 +700,7 @@ describe('requireGuildContext', () => {
   });
 
   it('uses getAllGuilds instead of getGuildsForMember when the database reports the user as owner', async () => {
-    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: true } as any);
+    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: true, session_generation: 0 } as any);
     vi.mocked(getAllGuilds).mockResolvedValue([{ guild_id: 'g1', name: 'A', voice_channel_id: null }] as any);
     vi.mocked(getEffectiveAccessLevelForUser).mockResolvedValue(AccessLevel.ADMIN);
     const user = { discordId: 'u1', currentGuildId: 'g1', accessLevel: AccessLevel.USER, isOwner: false, guilds: [{ guildId: 'g1', name: 'A' }] };

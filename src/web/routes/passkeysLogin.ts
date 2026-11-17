@@ -35,9 +35,12 @@ router.post('/login/options', async (req, res) => {
   }
 });
 
-/** Outcome of checking a sign-in assertion: the verified passkey, or the HTTP status and login error code to reply with. */
+/**
+ * Outcome of checking a sign-in assertion: the verified passkey and its owner's user row (null if
+ * the row is gone), or the HTTP status and login error code to reply with.
+ */
 type AssertionResult =
-  | { ok: true; passkey: StoredPasskey }
+  | { ok: true; passkey: StoredPasskey; dbUser: DbUser | null }
   | { ok: false; status: number; error: 'passkey_failed' | 'passkey_unknown' };
 
 /**
@@ -85,8 +88,8 @@ async function verifySignature(
  * and a failed write throws rather than letting it through.
  * @param assertion - The browser's `navigator.credentials.get()` result.
  * @param expectedChallenge - The challenge taken from the session.
- * @returns The verified passkey, or the failure status/code to reply with.
- * @throws If the passkey lookup or the counter/last-used write fails.
+ * @returns The verified passkey and its owner's user row, or the failure status/code to reply with.
+ * @throws If the passkey or user lookup, or the counter/last-used write, fails.
  */
 async function verifyAssertion(assertion: AuthenticationResponseJSON, expectedChallenge: string): Promise<AssertionResult> {
   const passkey = await findPasskey(assertion.id);
@@ -94,6 +97,14 @@ async function verifyAssertion(assertion: AuthenticationResponseJSON, expectedCh
 
   const newCounter = await verifySignature(assertion, expectedChallenge, passkey);
   if (newCounter === null) return { ok: false, status: 401, error: 'passkey_failed' };
+
+  // Read the user row (and so the session generation the new session gets) before claiming the
+  // counter. Removing a passkey deletes it and then bumps the generation (#1058): a removal that
+  // finishes before this read has already deleted the passkey, so the claim below fails, and one
+  // that bumps after it leaves this sign-in on the old generation, which requireAuth then rejects.
+  // Read after the claim, a removal landing in between would give the new session the bumped
+  // generation, and it would survive the sign-out.
+  const dbUser = await findUser(passkey.discordId);
 
   // Strict: the new signature counter must be accepted atomically before the sign-in succeeds. A
   // failed write throws (the route answers 500 `passkey_failed`); a rejected one means another
@@ -103,7 +114,7 @@ async function verifyAssertion(assertion: AuthenticationResponseJSON, expectedCh
     log.warn(`Passkey ${passkey.credentialId} sign-in rejected: counter already used or passkey removed`);
     return { ok: false, status: 401, error: 'passkey_failed' };
   }
-  return { ok: true, passkey };
+  return { ok: true, passkey, dbUser };
 }
 
 /**
@@ -145,9 +156,7 @@ router.post('/login/verify', async (req, res) => {
       res.status(result.status).json({ ok: false, error: result.error });
       return;
     }
-    const { discordId } = result.passkey;
-
-    const dbUser = await findUser(discordId);
+    const { dbUser } = result;
     if (!dbUser) {
       res.status(403).json({ ok: false, error: 'not_whitelisted' });
       return;

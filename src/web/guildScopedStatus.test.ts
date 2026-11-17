@@ -34,7 +34,7 @@ beforeEach(() => {
   vi.mocked(getStatus).mockReturnValue(BASE_STATUS as any);
   vi.mocked(getGuildById).mockResolvedValue({ guild_id: 'guild-A', name: 'Our Guild', voice_channel_id: null });
   vi.mocked(getGuildMemberUsers).mockResolvedValue([
-    { discord_id: '1', discord_name: 'Streamer', is_twitch_bot_enabled: true, twitch_name: 'ourstreamer', access_level: 2, is_owner: false },
+    { discord_id: '1', discord_name: 'Streamer', is_twitch_bot_enabled: true, twitch_name: 'ourstreamer', access_level: 2, is_owner: false, session_generation: 0 },
   ]);
 });
 
@@ -76,7 +76,7 @@ describe('getGuildScopedStatus — twitch scoping', () => {
 
   it('excludes a member\'s twitch channel when is_twitch_bot_enabled is false', async () => {
     vi.mocked(getGuildMemberUsers).mockResolvedValue([
-      { discord_id: '1', discord_name: 'Streamer', is_twitch_bot_enabled: false, twitch_name: 'ourstreamer', access_level: 2, is_owner: false },
+      { discord_id: '1', discord_name: 'Streamer', is_twitch_bot_enabled: false, twitch_name: 'ourstreamer', access_level: 2, is_owner: false, session_generation: 0 },
     ]);
     const result = await getGuildScopedStatus('guild-A');
     expect(result.twitch).toEqual({});
@@ -84,7 +84,7 @@ describe('getGuildScopedStatus — twitch scoping', () => {
 
   it('excludes a member with no twitch_name set', async () => {
     vi.mocked(getGuildMemberUsers).mockResolvedValue([
-      { discord_id: '1', discord_name: 'Streamer', is_twitch_bot_enabled: true, twitch_name: null, access_level: 2, is_owner: false },
+      { discord_id: '1', discord_name: 'Streamer', is_twitch_bot_enabled: true, twitch_name: null, access_level: 2, is_owner: false, session_generation: 0 },
     ]);
     const result = await getGuildScopedStatus('guild-A');
     expect(result.twitch).toEqual({});

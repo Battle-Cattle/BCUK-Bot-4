@@ -22,6 +22,7 @@ import {
   getAllTwitchLinkedUsers,
   setTwitchBotEnabledRecord,
   deleteUnlinkedUserRecord,
+  bumpSessionGeneration,
   USER_REFERENCING_COLUMNS,
   AccessLevel,
 } from './users';
@@ -108,6 +109,31 @@ describe('findUser', () => {
     const plainRow = { discord_id: '2', discord_name: 'User', is_twitch_bot_enabled: 0, twitch_name: null, access_level: 0, is_owner: 0 };
     vi.mocked(getPool).mockReturnValue(makePool([[plainRow]]) as any);
     expect((await findUser('2'))!.is_owner).toBe(false);
+  });
+
+  it('selects and maps the session generation (#1058)', async () => {
+    const row = { discord_id: '1', discord_name: 'A', is_twitch_bot_enabled: 0, twitch_name: null, is_owner: 0, session_generation: 7 };
+    const pool = makePool([[row]]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    expect((await findUser('1'))!.session_generation).toBe(7);
+    const [sql] = pool.execute.mock.calls[0]! as [string];
+    expect(sql).toContain('session_generation');
+  });
+});
+
+describe('bumpSessionGeneration', () => {
+  it('increments the generation in one atomic UPDATE and returns the new value', async () => {
+    const pool = makePool([{ affectedRows: 1, insertId: 4 }]);
+    vi.mocked(getPool).mockReturnValue(pool as any);
+    expect(await bumpSessionGeneration('42')).toBe(4);
+    const [sql, params] = pool.execute.mock.calls[0]! as [string, unknown[]];
+    expect(sql).toContain('session_generation = LAST_INSERT_ID(session_generation + 1)');
+    expect(params).toEqual(['42']);
+  });
+
+  it('returns null when the user row does not exist', async () => {
+    vi.mocked(getPool).mockReturnValue(makePool([{ affectedRows: 0, insertId: 0 }]) as any);
+    expect(await bumpSessionGeneration('42')).toBeNull();
   });
 });
 
@@ -255,8 +281,11 @@ describe('getGuildMemberUsers', () => {
     expect(result).toHaveLength(1);
     expect(result[0]!.discord_id).toBe('1');
     expect(result[0]!.access_level).toBe(3);
+    // A row without the column (as from an older query) still maps to generation 0.
+    expect(result[0]!.session_generation).toBe(0);
     const [sql, params] = vi.mocked(pool.execute).mock.calls[0] as [string, unknown[]];
     expect(sql).toContain('guild_member');
+    expect(sql).toContain('u.session_generation');
     expect(params).toEqual(['900000000000000001']);
   });
 });

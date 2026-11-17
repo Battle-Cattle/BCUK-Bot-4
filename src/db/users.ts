@@ -29,9 +29,14 @@ export interface DbUser {
   twitch_name: string | null;
   /** Bot-owner flag (global super-admin). Set only via direct DB access, never the web panel. */
   is_owner: boolean;
+  /**
+   * Web panel session generation: copied into a session at login, and a session holding an older
+   * value is signed out (see {@link bumpSessionGeneration}).
+   */
+  session_generation: number;
 }
 
-const USER_SELECT = 'discord_id, discord_name, is_twitch_bot_enabled, twitch_name, is_owner';
+const USER_SELECT = 'discord_id, discord_name, is_twitch_bot_enabled, twitch_name, is_owner, session_generation';
 
 /**
  * Maps a raw `user` table row to a {@link DbUser}.
@@ -45,6 +50,8 @@ function mapUser(r: mysql.RowDataPacket): DbUser {
     is_twitch_bot_enabled: fromBit(r.is_twitch_bot_enabled),
     twitch_name: r.twitch_name,
     is_owner: fromBit(r.is_owner),
+    // INT UNSIGNED, not BIGINT, so mysql2 already returns a number.
+    session_generation: (r.session_generation as number | undefined) ?? 0,
   };
 }
 
@@ -137,7 +144,7 @@ export interface DbGuildMemberUser extends DbUser {
 export async function getGuildMemberUsers(guildId: string): Promise<DbGuildMemberUser[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
     `SELECT u.discord_id, u.discord_name, u.is_twitch_bot_enabled, u.twitch_name,
-            gm.access_level AS access_level, u.is_owner
+            gm.access_level AS access_level, u.is_owner, u.session_generation
      FROM guild_member gm
      JOIN \`user\` u ON u.discord_id = gm.discord_id
      WHERE gm.guild_id = ?
@@ -272,6 +279,22 @@ export async function updateDiscordName(discordId: string, name: string): Promis
     'UPDATE `user` SET discord_name = ? WHERE discord_id = ?',
     [trimmed || null, discordId],
   );
+}
+
+/**
+ * Bumps a user's web panel session generation, so every session that was given the old value at
+ * login is signed out on its next request. `LAST_INSERT_ID(expr)` hands the new value back from the
+ * same atomic `UPDATE`, so two concurrent bumps each see their own result.
+ * @param discordId - Discord snowflake of the user whose sessions are being signed out.
+ * @returns The new generation, or null when the user row doesn't exist.
+ */
+export async function bumpSessionGeneration(discordId: string): Promise<number | null> {
+  const [result] = await getPool().execute<mysql.ResultSetHeader>(
+    'UPDATE `user` SET session_generation = LAST_INSERT_ID(session_generation + 1) WHERE discord_id = ?',
+    [discordId],
+  );
+  // insertId is the new INT UNSIGNED generation (at most 2^32 - 1), so Number() can't lose precision.
+  return result.affectedRows > 0 ? Number(result.insertId) : null;
 }
 
 /**

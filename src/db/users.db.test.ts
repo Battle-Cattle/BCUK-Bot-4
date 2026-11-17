@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type mysql from 'mysql2/promise';
 import { getPool } from './pool';
-import { deleteUnlinkedUserRecord, upsertUserRecord, USER_REFERENCING_COLUMNS } from './users';
+import { bumpSessionGeneration, deleteUnlinkedUserRecord, findUser, upsertUserRecord, USER_REFERENCING_COLUMNS } from './users';
 import { insertRow } from '../test-utils/realDbRows';
 
 // deleteUnlinkedUserRecord's guard against a real MySQL (npm run test:db): it must refuse while
@@ -60,3 +60,20 @@ describe('upsertUserRecord (real MySQL)', () => {
   });
 });
 
+
+describe('bumpSessionGeneration (real MySQL)', () => {
+  it('starts at 0, returns each new value from concurrent bumps, and leaves other users alone', async () => {
+    const discordId = String((await insertRow('user')).discord_id);
+    const otherId = String((await insertRow('user')).discord_id);
+    expect((await findUser(discordId))!.session_generation).toBe(0);
+
+    const results = await Promise.all([bumpSessionGeneration(discordId), bumpSessionGeneration(discordId)]);
+    expect([...results].sort()).toEqual([1, 2]);
+    expect((await findUser(discordId))!.session_generation).toBe(2);
+    expect((await findUser(otherId))!.session_generation).toBe(0);
+  });
+
+  it('returns null for a user that does not exist', async () => {
+    expect(await bumpSessionGeneration('1999999999999999999')).toBeNull();
+  });
+});

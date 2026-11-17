@@ -34,7 +34,7 @@ export { upsertOverride, removeOverride } from './db/guildCommandOverrideWrites'
 export {
   AccessLevel, ACCESS_LEVEL_LABELS,
   findUser, findUsersByIds, findUserByTwitchName, findOwnerUser, getGuildMemberUsers,
-  updateDiscordName, getTwitchEnabledChannels, getAllTwitchLinkedUsers,
+  updateDiscordName, getTwitchEnabledChannels, getAllTwitchLinkedUsers, bumpSessionGeneration,
 } from './db/users';
 export type { AccessLevelValue, DbUser, DbGuildMemberUser } from './db/users';
 export { upsertUser, updateTwitchBotEnabled, deleteUnlinkedUser } from './db/userWrites';
