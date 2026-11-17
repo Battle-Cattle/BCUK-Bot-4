@@ -5,6 +5,7 @@ import { findUser, getStreamerByDiscordId, saveEventConfig, clearStreamerToken, 
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import { getSessionUser } from '../session';
+import { signOutOtherSessions } from '../loginSession';
 import { trimField, filterQueryParam, parseCheckboxField } from './validation';
 import { renderError, renderView, getFriendlyErrorMessage } from './viewHelpers';
 import { logAndRedirectError } from './errorHandling';
@@ -34,8 +35,10 @@ const KNOWN_ERRORS = new Set([
   'passkey_code_invalid',
   'passkey_code_expired',
   'passkey_dm_failed',
+  'sign_out_others_failed',
+  'passkey_removed_sign_out_failed',
 ]);
-const KNOWN_SUCCESSES = new Set(['twitch_connected', 'passkey_added', 'passkey_removed', 'passkey_reauthed']);
+const KNOWN_SUCCESSES = new Set(['twitch_connected', 'passkey_added', 'passkey_removed', 'passkey_reauthed', 'signed_out_others']);
 
 const ERROR_MESSAGES: Record<string, string> = {
   no_streamer_record:            'You are not configured as a monitored streamer.',
@@ -54,6 +57,8 @@ const ERROR_MESSAGES: Record<string, string> = {
   passkey_code_invalid:          'That confirmation code was incorrect. Please try adding the passkey again.',
   passkey_code_expired:          'The confirmation code expired or had too many wrong attempts. Please try adding the passkey again.',
   passkey_dm_failed:             'The bot could not DM you the confirmation code. Allow direct messages from members of a server the bot is in, then try again.',
+  sign_out_others_failed:        'Could not sign out your other sessions. Please try again.',
+  passkey_removed_sign_out_failed: 'Passkey removed, but your other sessions could not be signed out. Use "Sign out other sessions" below to try again.',
 };
 
 /**
@@ -203,6 +208,24 @@ router.post('/twitch-disconnect', requireAuth, csrfProtection, async (req, res) 
     res.redirect('/user/settings');
   } catch (err) {
     logAndRedirectError({ res, log, logLabel: 'EventSub disconnect error:', err, basePath: '/user/settings', errorCode: 'eventsub_disconnect_failed' });
+  }
+});
+
+// POST /user/settings/sign-out-other-sessions
+
+/**
+ * POST /user/settings/sign-out-other-sessions — ends every other web panel session of the signed-in
+ * user (#1058), keeping this one signed in under a new session ID (see `signOutOtherSessions`).
+ * @param req - Express request; requires an authenticated session and CSRF token.
+ * @param res - Express response; redirects to `/user/settings?success=signed_out_others`, or to
+ *   `/user/settings?error=sign_out_others_failed` if the sign-out fails.
+ */
+router.post('/sign-out-other-sessions', requireAuth, csrfProtection, async (req, res) => {
+  try {
+    await signOutOtherSessions(req);
+    res.redirect('/user/settings?success=signed_out_others');
+  } catch (err) {
+    logAndRedirectError({ res, log, logLabel: 'Sign out other sessions error:', err, basePath: '/user/settings', errorCode: 'sign_out_others_failed' });
   }
 });
 

@@ -1,5 +1,5 @@
 import { createLogger } from '../../shared/logger';
-import { Router } from 'express';
+import { Router, type Request } from 'express';
 import { escapeMarkdown } from '@discordjs/formatters';
 import {
   generateRegistrationOptions,
@@ -11,6 +11,7 @@ import { insertPasskey, deletePasskey, listPasskeyDescriptorsForUser } from '../
 import { csrfProtection } from '../csrf';
 import { requireAuth } from '../middleware';
 import { getSessionUser } from '../session';
+import { signOutOtherSessions } from '../loginSession';
 import { logAndRedirectError } from './errorHandling';
 import { checkEnrollmentCode } from './passkeysEnrollmentCode';
 import { sendDiscordDirectMessage } from '../../discord/discordApi';
@@ -179,10 +180,30 @@ router.post('/register/verify', requireAuth, csrfProtection, async (req, res) =>
 });
 
 /**
- * POST /auth/passkey/delete — removes one of the signed-in user's passkeys.
+ * Signs the user out of their other sessions after a passkey was removed (#1058): a passkey being
+ * removed may have been used to sign in elsewhere. Logs instead of throwing, since the passkey is
+ * already gone and the caller must say so.
+ * @param req - Express request with the signed-in session that removed the passkey.
+ * @returns The `/user/settings` redirect: `success=passkey_removed`, or
+ *   `error=passkey_removed_sign_out_failed` when the sign-out failed.
+ */
+async function signOutAfterPasskeyRemoval(req: Request): Promise<string> {
+  try {
+    await signOutOtherSessions(req);
+    return '/user/settings?success=passkey_removed';
+  } catch (err) {
+    log.error('Sign out other sessions after passkey removal failed:', err);
+    return '/user/settings?error=passkey_removed_sign_out_failed';
+  }
+}
+
+/**
+ * POST /auth/passkey/delete — removes one of the signed-in user's passkeys, then signs them out of
+ * every other session (see {@link signOutAfterPasskeyRemoval}).
  * @param req - Express request; form body `credentialId`, requires an authenticated session and CSRF token.
- * @param res - Express response; redirects to `/user/settings?success=passkey_removed`, or to
- *   `/user/settings?error=passkey_delete_failed` if the ID is invalid, not the user's, or the delete fails.
+ * @param res - Express response; redirects to `/user/settings?success=passkey_removed`, to
+ *   `/user/settings?error=passkey_delete_failed` if the ID is invalid, not the user's, or the delete fails,
+ *   or to `/user/settings?error=passkey_removed_sign_out_failed` if only the sign-out failed.
  */
 router.post('/delete', requireAuth, csrfProtection, async (req, res) => {
   try {
@@ -192,7 +213,7 @@ router.post('/delete', requireAuth, csrfProtection, async (req, res) => {
       return;
     }
     const deleted = await deletePasskey(getSessionUser(req).discordId, credentialId);
-    res.redirect(deleted ? '/user/settings?success=passkey_removed' : '/user/settings?error=passkey_delete_failed');
+    res.redirect(deleted ? await signOutAfterPasskeyRemoval(req) : '/user/settings?error=passkey_delete_failed');
   } catch (err) {
     logAndRedirectError({ res, log, logLabel: 'Passkey delete error:', err, basePath: '/user/settings', errorCode: 'passkey_delete_failed' });
   }

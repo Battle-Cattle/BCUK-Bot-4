@@ -34,8 +34,9 @@ vi.mock('../guildAccess', () => ({
   fetchLiveGuildsForUser: vi.fn(),
   resolveAccessLevelForGuild: vi.fn(),
   // The signed-in user still has panel access (requireAuth's live check is covered in middleware.test.ts).
-  getLiveAccessForRequest: vi.fn().mockResolvedValue({ dbUser: { is_owner: false }, live: { guilds: [{}] } }),
+  getLiveAccessForRequest: vi.fn().mockResolvedValue({ dbUser: { is_owner: false, session_generation: 0 }, live: { guilds: [{}] } }),
   hasPanelAccess: vi.fn().mockReturnValue(true),
+  isCurrentSessionGeneration: vi.fn().mockReturnValue(true),
 }));
 vi.mock('./overlayAdminMutations', async () => {
   const { Router } = await import('express');

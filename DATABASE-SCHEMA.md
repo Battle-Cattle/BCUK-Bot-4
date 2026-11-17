@@ -122,6 +122,7 @@ Stores web/admin users plus Twitch bot participation state.
 | `twitch_name` | `VARCHAR(...)` nullable | Twitch channel name; should be unique when non-null |
 | `twitchoauth` | `VARCHAR(...)` nullable | Legacy/optional Twitch auth storage |
 | `is_owner` | `TINYINT(1)` | Global super-admin flag. Set manually in the DB only; never settable through the web panel |
+| `session_generation` | `INT UNSIGNED` default `0` | Web panel session generation. Copied into each session at login; bumping it ("Sign out other sessions", or removing a passkey) ends every session holding an older value |
 
 Expected constraints and behavior:
 

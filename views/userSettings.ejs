@@ -23,7 +23,10 @@
     <div class="card card-alert-success">Signed in again with Discord. You can now add a passkey.</div>
     <% } %>
     <% if (success === 'passkey_removed') { %>
-    <div class="card card-alert-success">Passkey removed.</div>
+    <div class="card card-alert-success">Passkey removed. Your other sessions have been signed out.</div>
+    <% } %>
+    <% if (success === 'signed_out_others') { %>
+    <div class="card card-alert-success">Your other sessions have been signed out. This one is still signed in.</div>
     <% } %>
 
     <!-- ── Profile ────────────────────────────────────────────────── -->
@@ -84,6 +87,20 @@
             <button type="button" class="btn btn-sm" id="passkey-add">Add a passkey on this device</button>
           </div>
           <p class="hint is-hidden" id="passkey-unsupported">This browser or device doesn't support passkeys.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Sessions ───────────────────────────────────────────────── -->
+    <section class="section">
+      <h2 class="section-title">Sessions</h2>
+      <div class="card">
+        <div class="card-body">
+          <p class="hint">Signs you out of the panel on every other browser and device, for example if you think someone else has used your account. This browser stays signed in. Removing a passkey does this too.</p>
+          <form method="POST" action="/user/settings/sign-out-other-sessions" class="inline-form-sm">
+            <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+            <button type="submit" class="btn btn-sm">Sign out other sessions</button>
+          </form>
         </div>
       </div>
     </section>

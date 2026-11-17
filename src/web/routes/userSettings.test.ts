@@ -38,11 +38,14 @@ vi.mock('../../shared/config', () => ({
 
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
+vi.mock('../loginSession', () => ({ signOutOtherSessions: vi.fn() }));
+
 import express from 'express';
 import supertest from 'supertest';
 import router, { buildEventSubConfig, findBotEnabledStreamer, hasOverlongMessage } from './userSettings';
 import { findUser, getStreamerByDiscordId, saveEventConfig, clearStreamerToken, listPasskeysForUser } from '../../db';
 import { reloadEventSubSubscriptions } from '../../twitch/eventsub/twitchEventSub';
+import { signOutOtherSessions } from '../loginSession';
 import { AccessLevel } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 import { makeSessionUser, type SessionUserFixture } from '../../test-utils/fixtures';
@@ -555,5 +558,33 @@ describe('buildEventSubConfig', () => {
 
   it('trims submitted messages', () => {
     expect(buildEventSubConfig({ raid_message: '  Hi raiders  ' }, null, true).raid_message).toBe('Hi raiders');
+  });
+});
+
+describe('POST /sign-out-other-sessions', () => {
+  it('signs out the other sessions and redirects with success (#1058)', async () => {
+    vi.mocked(signOutOtherSessions).mockResolvedValue(undefined);
+    const res = await supertest(buildApp()).post('/sign-out-other-sessions');
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('/user/settings?success=signed_out_others');
+    expect(signOutOtherSessions).toHaveBeenCalledOnce();
+  });
+
+  it('redirects with sign_out_others_failed when the sign-out fails', async () => {
+    vi.mocked(signOutOtherSessions).mockRejectedValue(new Error('DB down'));
+    const res = await supertest(buildApp()).post('/sign-out-other-sessions');
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('/user/settings?error=sign_out_others_failed');
+  });
+});
+
+describe('GET / — sign-out banners', () => {
+  it('passes the sign-out success and error codes through to the template', async () => {
+    const ok = await supertest(buildApp()).get('/?success=signed_out_others');
+    expect(ok.body.success).toBe('signed_out_others');
+    for (const code of ['sign_out_others_failed', 'passkey_removed_sign_out_failed']) {
+      const res = await supertest(buildApp()).get(`/?error=${code}`);
+      expect(res.body.error).toBe(code);
+    }
   });
 });

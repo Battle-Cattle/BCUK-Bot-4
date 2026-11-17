@@ -111,3 +111,15 @@ export function getLiveAccessForRequest(req: Request, discordId: string): Promis
 export function hasPanelAccess(access: LiveAccess | null): access is LiveAccess {
   return access !== null && (access.dbUser.is_owner || access.live.guilds.length > 0);
 }
+
+/**
+ * Whether a session was signed in under the user's current session generation, i.e. no
+ * "Sign out other sessions" (or passkey removal) has happened since (#1058). A session from before
+ * the generation was recorded counts as generation 0, so the deploy doesn't sign everyone out.
+ * @param sessionGeneration - The session's `sessionGeneration`, if it has one.
+ * @param access - The result of {@link getLiveAccessForRequest} (non-null).
+ * @returns True when the session's generation matches the user row's.
+ */
+export function isCurrentSessionGeneration(sessionGeneration: number | undefined, access: LiveAccess): boolean {
+  return (sessionGeneration ?? 0) === access.dbUser.session_generation;
+}

@@ -11,7 +11,7 @@
     var form = event.target;
     if (!(form instanceof HTMLFormElement) || !form.classList.contains('js-confirm-remove-passkey')) return;
     var label = form.dataset.passkeyLabel || 'this passkey';
-    if (!window.confirm('Remove "' + label + '"? You will no longer be able to sign in with it.')) event.preventDefault();
+    if (!window.confirm('Remove "' + label + '"? You will no longer be able to sign in with it, and you will be signed out on your other browsers and devices.')) event.preventDefault();
   });
 
   if (!addRow || !addButton || !window.BCUKPasskey) return;
