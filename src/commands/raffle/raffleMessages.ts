@@ -69,16 +69,23 @@ function joinNames(names: readonly string[]): string {
 }
 
 /**
- * Builds the result announcement once a raffle closes.
+ * Builds the result announcement once a raffle closes. Only winners whose points were added are
+ * congratulated; any whose credit failed are named plainly as not paid.
  * @param entries - Number of viewers who entered.
- * @param winners - Twitch logins of the winners, in draw order.
- * @param share - Points each winner received.
+ * @param paid - Twitch logins of the winners whose points were added, in draw order.
+ * @param unpaid - Twitch logins of the winners whose points couldn't be added, in draw order.
+ * @param share - Points each winner was owed.
  * @returns The chat message.
  */
-export function buildRaffleResultMessage(entries: number, winners: readonly string[], share: number): string {
-  if (winners.length === 0) return 'Raffle over. Nobody entered, so no points were given out.';
-  const entryText = `${entries} ${entries === 1 ? 'entry' : 'entries'}`;
-  const tagged = joinNames(winners.map((w) => `@${w}`));
-  if (winners.length === 1) return `🎉 Raffle over! ${entryText}, 1 winner: ${tagged} wins ${formatPoints(share)} points!`;
-  return `🎉 Raffle over! ${entryText}, ${winners.length} winners: ${tagged} win ${formatPoints(share)} points each!`;
+export function buildRaffleResultMessage(entries: number, paid: readonly string[], unpaid: readonly string[], share: number): string {
+  const winnerCount = paid.length + unpaid.length;
+  if (winnerCount === 0) return 'Raffle over. Nobody entered, so no points were given out.';
+  const summary = `${entries} ${entries === 1 ? 'entry' : 'entries'}, ${winnerCount} ${winnerCount === 1 ? 'winner' : 'winners'}`;
+  const tag = (names: readonly string[]): string => joinNames(names.map((w) => `@${w}`));
+  if (paid.length === 0) {
+    return `Raffle over! ${summary}: ${tag(unpaid)}, but the points couldn't be added. The streamer has been notified.`;
+  }
+  const payout = paid.length === 1 ? `wins ${formatPoints(share)} points` : `win ${formatPoints(share)} points each`;
+  const failure = unpaid.length > 0 ? ` Points for ${tag(unpaid)} couldn't be added. The streamer has been notified.` : '';
+  return `🎉 Raffle over! ${summary}: ${tag(paid)} ${payout}!${failure}`;
 }

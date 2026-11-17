@@ -39,20 +39,36 @@ describe('buildRaffleAlreadyRunningMessage', () => {
 
 describe('buildRaffleResultMessage', () => {
   it('reports that nobody entered', () => {
-    expect(buildRaffleResultMessage(0, [], 0)).toBe('Raffle over. Nobody entered, so no points were given out.');
+    expect(buildRaffleResultMessage(0, [], [], 0)).toBe('Raffle over. Nobody entered, so no points were given out.');
   });
 
   it('announces a single winner', () => {
-    expect(buildRaffleResultMessage(1, ['alice'], 1000)).toBe('🎉 Raffle over! 1 entry, 1 winner: @alice wins 1,000 points!');
+    expect(buildRaffleResultMessage(1, ['alice'], [], 1000)).toBe('🎉 Raffle over! 1 entry, 1 winner: @alice wins 1,000 points!');
   });
 
   it('announces two winners', () => {
-    expect(buildRaffleResultMessage(5, ['alice', 'bob'], 500))
+    expect(buildRaffleResultMessage(5, ['alice', 'bob'], [], 500))
       .toBe('🎉 Raffle over! 5 entries, 2 winners: @alice and @bob win 500 points each!');
   });
 
   it('lists three or more winners with commas', () => {
-    expect(buildRaffleResultMessage(9, ['a', 'b', 'c'], 33))
+    expect(buildRaffleResultMessage(9, ['a', 'b', 'c'], [], 33))
       .toBe('🎉 Raffle over! 9 entries, 3 winners: @a, @b and @c win 33 points each!');
+  });
+
+  it('congratulates only the paid winners and names the unpaid ones', () => {
+    expect(buildRaffleResultMessage(9, ['a'], ['b', 'c'], 33)).toBe(
+      "🎉 Raffle over! 9 entries, 3 winners: @a wins 33 points! Points for @b and @c couldn't be added. The streamer has been notified.",
+    );
+    expect(buildRaffleResultMessage(9, ['a', 'b'], ['c'], 33)).toBe(
+      "🎉 Raffle over! 9 entries, 3 winners: @a and @b win 33 points each! Points for @c couldn't be added. The streamer has been notified.",
+    );
+  });
+
+  it('claims no payout when every credit failed', () => {
+    expect(buildRaffleResultMessage(1, [], ['alice'], 1000))
+      .toBe("Raffle over! 1 entry, 1 winner: @alice, but the points couldn't be added. The streamer has been notified.");
+    expect(buildRaffleResultMessage(4, [], ['a', 'b'], 50))
+      .toBe("Raffle over! 4 entries, 2 winners: @a and @b, but the points couldn't be added. The streamer has been notified.");
   });
 });

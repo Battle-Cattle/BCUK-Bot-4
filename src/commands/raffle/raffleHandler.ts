@@ -1,6 +1,5 @@
 import { createLogger } from '../../shared/logger';
 import {
-  adjustLoyaltyPointsBalance,
   getLoyaltyPointsConfig,
   isExcludedFromLoyaltyPoints,
   MAX_LOYALTY_POINTS_BALANCE,
@@ -12,6 +11,7 @@ import { parsePointsAmount } from '../gambleAmount';
 import { normalizeTwitchChannelName } from '../../twitch/twitchChannelName';
 import { resolveSharedChatSessionId } from '../customCommandHandler';
 import { getPrizeShare, pickWinners, rollWinnerCount } from './raffleWinners';
+import { payRaffleWinners } from './rafflePayout';
 import {
   RAFFLE_DURATION_SECONDS,
   RAFFLE_USAGE_MESSAGE,
@@ -51,6 +51,13 @@ interface ActiveRaffle {
 // Open raffles by normalised channel login. In memory only: production runs a single bot
 // process (see "Single instance only" in CLAUDE.md), and a restart simply drops an open raffle.
 const activeRaffles = new Map<string, ActiveRaffle>();
+
+// Draws that have started (their raffle is no longer in activeRaffles) but not yet announced, so
+// shutdown can wait for their payouts before the DB pool closes.
+const inFlightDraws = new Set<Promise<void>>();
+
+// Aborted by stopAllRaffles() so an in-flight draw skips its remaining payout retries.
+let drawAbort = new AbortController();
 
 // ─── Twitch runtime (registered from index.ts before startTwitchBot) ─────────
 
@@ -106,39 +113,40 @@ function secondsLeft(raffle: ActiveRaffle): number {
 }
 
 /**
- * Credits each winner their share. A failed credit is logged and doesn't stop the others being paid.
- * @param streamerId - The streamer's `streamer.id` the points belong to.
- * @param winners - Twitch logins of the winners.
- * @param share - Points each winner gets.
- */
-async function payWinners(streamerId: number, winners: readonly string[], share: number): Promise<void> {
-  await Promise.all(winners.map(async (winner) => {
-    try {
-      await adjustLoyaltyPointsBalance(streamerId, winner, share);
-    } catch (err) {
-      log.error(`Failed to pay raffle winner ${winner} (streamer ${streamerId}):`, err);
-    }
-  }));
-}
-
-/**
  * Closes the raffle open in `channel`: removes it first so a late `!join` is ignored, draws a
  * random number of winners (up to one per three entrants, at most five), credits each an equal
  * whole-point share (any remainder isn't given out) and announces the result. Never rejects,
- * since it runs from a timer.
+ * since it runs from a timer. Tracked in {@link inFlightDraws} until it finishes, for shutdown.
  * @param channel - Normalised channel login the raffle is open in.
  */
 async function drawRaffle(channel: string): Promise<void> {
   const raffle = activeRaffles.get(channel);
   if (!raffle) return;
   activeRaffles.delete(channel);
+  const draw = runDraw(channel, raffle);
+  inFlightDraws.add(draw);
+  try {
+    await draw;
+  } finally {
+    inFlightDraws.delete(draw);
+  }
+}
+
+/**
+ * Draws the winners of a raffle that has just closed, pays them and announces the result, naming
+ * as winners only those whose points were added. Never rejects.
+ * @param channel - Normalised channel login the raffle was open in.
+ * @param raffle - The raffle, already removed from {@link activeRaffles}.
+ */
+async function runDraw(channel: string, raffle: ActiveRaffle): Promise<void> {
   try {
     const entrants = [...raffle.entrants];
     const winners = pickWinners(entrants, rollWinnerCount(entrants.length));
     const share = getPrizeShare(raffle.amount, winners.length);
-    await payWinners(raffle.streamerId, winners, share);
-    log.info(`Raffle in ${channel} drew ${winners.length} winner(s) from ${entrants.length} entr${entrants.length === 1 ? 'y' : 'ies'}.`);
-    await sendRaffleMessage(channel, buildRaffleResultMessage(entrants.length, winners, share));
+    const { paid, unpaid } = await payRaffleWinners(raffle.streamerId, winners, share, drawAbort.signal);
+    const unpaidNote = unpaid.length > 0 ? `; ${unpaid.length} couldn't be paid` : '';
+    log.info(`Raffle in ${channel} drew ${winners.length} winner(s) from ${entrants.length} entr${entrants.length === 1 ? 'y' : 'ies'}${unpaidNote}.`);
+    await sendRaffleMessage(channel, buildRaffleResultMessage(entrants.length, paid, unpaid, share));
   } catch (err) {
     log.error(`Failed to draw raffle in ${channel}:`, err);
   }
@@ -294,8 +302,16 @@ export async function executeRaffleCommandForTwitch(chat: RaffleChatMessage): Pr
   }
 }
 
-/** Cancels every open raffle without drawing it. Called from `shutdown()`, and by tests to reset state. */
-export function stopAllRaffles(): void {
+/**
+ * Cancels every open raffle without drawing it, then waits for any draw already under way to
+ * finish paying and announcing (skipping its remaining payout retries), so its credits don't run
+ * against a closed DB pool. Called from `shutdown()`, and by tests to reset state.
+ * @returns Resolves once no draw is in flight.
+ */
+export async function stopAllRaffles(): Promise<void> {
   for (const raffle of activeRaffles.values()) raffle.timers.forEach(clearTimeout);
   activeRaffles.clear();
+  drawAbort.abort();
+  await Promise.all(inFlightDraws);
+  drawAbort = new AbortController();
 }

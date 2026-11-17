@@ -217,7 +217,7 @@ async function teardown(): Promise<void> {
   stopDiskSpaceMonitor();
   stopDebugLogPruning();
   stopCounterScheduler();
-  stopAllRaffles();
+  await safeStop('raffles', stopAllRaffles);
   stopChannelReconciliationPoll();
   await safeStop('reward pricing scheduler', stopRewardPricingScheduler);
   await safeStop('timer command scheduler', stopTimerCommandScheduler);

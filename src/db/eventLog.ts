@@ -7,7 +7,7 @@ import { createLogger } from '../shared/logger';
 const log = createLogger('DB');
 
 /** Kind of streamer activity recorded in `streamer_event_log`. */
-export type StreamerEventType = 'follow' | 'sub' | 'resub' | 'giftsub' | 'raid' | 'redemption';
+export type StreamerEventType = 'follow' | 'sub' | 'resub' | 'giftsub' | 'raid' | 'redemption' | 'raffle_payout_failed';
 
 /** One recorded activity event for a streamer's dashboard "Recent Events" feed. */
 export interface StreamerEvent {

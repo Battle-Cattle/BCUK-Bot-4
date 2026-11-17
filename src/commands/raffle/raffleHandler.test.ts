@@ -1,18 +1,19 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('../../db', () => ({
-  adjustLoyaltyPointsBalance: vi.fn(),
   getLoyaltyPointsConfig: vi.fn(),
   isExcludedFromLoyaltyPoints: vi.fn(),
   MAX_LOYALTY_POINTS_BALANCE: 2_147_483_647,
 }));
 
+vi.mock('./rafflePayout', () => ({ payRaffleWinners: vi.fn() }));
 vi.mock('../customCommandHandler', () => ({ resolveSharedChatSessionId: vi.fn() }));
 
 const { logErrorSpy, logInfoSpy } = vi.hoisted(() => ({ logErrorSpy: vi.fn(), logInfoSpy: vi.fn() }));
 vi.mock('../../shared/logger', () => ({ createLogger: () => ({ info: logInfoSpy, error: logErrorSpy }) }));
 
-import { adjustLoyaltyPointsBalance, getLoyaltyPointsConfig, isExcludedFromLoyaltyPoints } from '../../db';
+import { getLoyaltyPointsConfig, isExcludedFromLoyaltyPoints } from '../../db';
+import { payRaffleWinners } from './rafflePayout';
 import { resolveSharedChatSessionId } from '../customCommandHandler';
 import {
   executeRaffleCommandForTwitch,
@@ -40,12 +41,12 @@ beforeEach(() => {
   registerRaffleTwitchRuntime({ send: SEND, getLoginUserIds: () => USER_IDS });
   vi.mocked(getLoyaltyPointsConfig).mockResolvedValue(ENABLED_CONFIG);
   vi.mocked(isExcludedFromLoyaltyPoints).mockResolvedValue(false);
-  vi.mocked(adjustLoyaltyPointsBalance).mockResolvedValue(0);
+  vi.mocked(payRaffleWinners).mockImplementation(async (_id, winners) => ({ paid: [...winners], unpaid: [] }));
   vi.mocked(resolveSharedChatSessionId).mockResolvedValue(null);
 });
 
-afterEach(() => {
-  stopAllRaffles();
+afterEach(async () => {
+  await stopAllRaffles();
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
@@ -151,7 +152,7 @@ describe('raffle lifecycle', () => {
     await chat('bob', '!join');
     vi.spyOn(Math, 'random').mockReturnValue(0);
     await vi.advanceTimersByTimeAsync(60_000);
-    expect(adjustLoyaltyPointsBalance).toHaveBeenCalledExactlyOnceWith(7, 'alice', 1000);
+    expect(payRaffleWinners).toHaveBeenCalledExactlyOnceWith(7, ['alice'], 1000, expect.anything());
     expect(SEND).toHaveBeenLastCalledWith('streamer', '🎉 Raffle over! 2 entries, 1 winner: @alice wins 1,000 points!');
   });
 
@@ -178,7 +179,7 @@ describe('raffle lifecycle', () => {
       channel: 'streamer!', streamerId: 7, message: '!join', userLogin: 'alice', command: '!join', isBroadcaster: false,
     });
     await vi.advanceTimersByTimeAsync(60_000);
-    expect(adjustLoyaltyPointsBalance).not.toHaveBeenCalled();
+    expect(payRaffleWinners).toHaveBeenCalledExactlyOnceWith(7, [], 0, expect.anything());
     expect(SEND).toHaveBeenLastCalledWith('streamer', 'Raffle over. Nobody entered, so no points were given out.');
   });
 
@@ -188,9 +189,8 @@ describe('raffle lifecycle', () => {
     // 7 entrants → up to 3 winners; 0.9999 rolls the max and takes the last entrant each pick.
     vi.spyOn(Math, 'random').mockReturnValue(0.9999);
     await vi.advanceTimersByTimeAsync(60_000);
-    expect(adjustLoyaltyPointsBalance).toHaveBeenCalledTimes(3);
     // 100 between 3 winners: 33 each, the leftover point isn't given out.
-    expect(vi.mocked(adjustLoyaltyPointsBalance).mock.calls.map((c) => c[2])).toEqual([33, 33, 33]);
+    expect(payRaffleWinners).toHaveBeenCalledExactlyOnceWith(7, ['g', 'a', 'b'], 33, expect.anything());
     expect(SEND.mock.lastCall![1]).toContain('3 winners');
     expect(SEND.mock.lastCall![1]).toContain('win 33 points each!');
   });
@@ -198,19 +198,28 @@ describe('raffle lifecycle', () => {
   it('announces when nobody entered and pays nobody', async () => {
     await chat('streamer', '!raffle 100', true);
     await vi.advanceTimersByTimeAsync(60_000);
-    expect(adjustLoyaltyPointsBalance).not.toHaveBeenCalled();
+    expect(payRaffleWinners).toHaveBeenCalledExactlyOnceWith(7, [], 0, expect.anything());
     expect(SEND).toHaveBeenLastCalledWith('streamer', 'Raffle over. Nobody entered, so no points were given out.');
   });
 
-  it('keeps paying the other winners when one credit fails', async () => {
+  it('congratulates only the winners who were paid and names the ones who were not', async () => {
     await chat('streamer', '!raffle 100', true);
     for (const user of ['a', 'b', 'c', 'd']) await chat(user, '!join');
     vi.spyOn(Math, 'random').mockReturnValue(0.9999);
-    vi.mocked(adjustLoyaltyPointsBalance).mockRejectedValueOnce(new Error('db down'));
+    vi.mocked(payRaffleWinners).mockResolvedValueOnce({ paid: ['c'], unpaid: ['d'] });
     await vi.advanceTimersByTimeAsync(60_000);
-    expect(adjustLoyaltyPointsBalance).toHaveBeenCalledTimes(2);
-    expect(logErrorSpy).toHaveBeenCalledWith(expect.stringContaining('Failed to pay raffle winner'), expect.any(Error));
-    expect(SEND.mock.lastCall![1]).toContain('2 winners');
+    expect(SEND).toHaveBeenLastCalledWith('streamer',
+      "🎉 Raffle over! 4 entries, 2 winners: @c wins 50 points! Points for @d couldn't be added. The streamer has been notified.");
+    expect(logInfoSpy).toHaveBeenCalledWith("Raffle in streamer drew 2 winner(s) from 4 entries; 1 couldn't be paid.");
+  });
+
+  it('claims no payout when every credit failed', async () => {
+    await chat('streamer', '!raffle 100', true);
+    await chat('alice', '!join');
+    vi.mocked(payRaffleWinners).mockResolvedValueOnce({ paid: [], unpaid: ['alice'] });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(SEND).toHaveBeenLastCalledWith('streamer',
+      "Raffle over! 1 entry, 1 winner: @alice, but the points couldn't be added. The streamer has been notified.");
   });
 
   it('ignores !join after the draw and allows a new raffle', async () => {
@@ -229,7 +238,7 @@ describe('raffle lifecycle', () => {
     await vi.advanceTimersByTimeAsync(60_000);
     release(false);
     await join;
-    expect(adjustLoyaltyPointsBalance).not.toHaveBeenCalled();
+    expect(payRaffleWinners).toHaveBeenCalledExactlyOnceWith(7, [], 0, expect.anything());
   });
 
   it('logs, rather than rejecting, when the draw itself fails', async () => {
@@ -238,14 +247,39 @@ describe('raffle lifecycle', () => {
     vi.spyOn(Math, 'random').mockImplementation(() => { throw new Error('rng broke'); });
     await vi.advanceTimersByTimeAsync(60_000);
     expect(logErrorSpy).toHaveBeenCalledWith('Failed to draw raffle in streamer:', expect.any(Error));
-    expect(adjustLoyaltyPointsBalance).not.toHaveBeenCalled();
+    expect(payRaffleWinners).not.toHaveBeenCalled();
   });
 
   it('cancels open raffles on stopAllRaffles', async () => {
     await chat('streamer', '!raffle 100', true);
-    stopAllRaffles();
+    await stopAllRaffles();
     await vi.advanceTimersByTimeAsync(60_000);
     expect(SEND).toHaveBeenCalledOnce();
+  });
+
+  it('waits for a draw already paying, aborting its retries, before stopAllRaffles resolves', async () => {
+    await chat('streamer', '!raffle 100', true);
+    await chat('alice', '!join');
+    let finishPaying: () => void = () => undefined;
+    let signal: AbortSignal | undefined;
+    vi.mocked(payRaffleWinners).mockImplementationOnce((_id, winners, _share, s) => {
+      signal = s;
+      return new Promise((resolve) => { finishPaying = () => resolve({ paid: [...winners], unpaid: [] }); });
+    });
+    await vi.advanceTimersByTimeAsync(60_000);
+    let stopped = false;
+    const stop = stopAllRaffles().then(() => { stopped = true; });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(signal?.aborted).toBe(true);
+    expect(stopped).toBe(false);
+    finishPaying();
+    await stop;
+    expect(SEND).toHaveBeenLastCalledWith('streamer', '🎉 Raffle over! 1 entry, 1 winner: @alice wins 100 points!');
+    // A later draw gets a fresh, un-aborted signal.
+    await chat('streamer', '!raffle 100', true);
+    await chat('alice', '!join');
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(vi.mocked(payRaffleWinners).mock.lastCall![3].aborted).toBe(false);
   });
 
   it('logs and carries on when a reminder fails to send', async () => {
@@ -268,7 +302,7 @@ describe('startRaffle', () => {
     SEND.mockReturnValueOnce(new Promise((_resolve, reject) => { failFirst = reject; }));
     const first = startRaffle('streamer', 7, 100);
     await vi.advanceTimersByTimeAsync(0);
-    stopAllRaffles();
+    await stopAllRaffles();
     expect(await startRaffle('streamer', 7, 200)).toBe('ok');
     failFirst(new Error('not connected'));
     expect(await first).toBe('chat_unavailable');
