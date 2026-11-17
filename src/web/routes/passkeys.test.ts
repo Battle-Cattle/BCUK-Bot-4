@@ -735,6 +735,24 @@ describe('POST /login/verify', () => {
     expect(vi.mocked(establishDashboardSession).mock.calls[0]![1]).toEqual({ id: '42', username: '42', avatar: null });
   });
 
+  it('reads the user row (and its session generation) before claiming the counter (#1058)', async () => {
+    // A passkey removal landing between the two must not hand the new session the bumped generation.
+    const { app } = buildApp(futureChallenge('login'));
+    await supertest(app).post('/login/verify').send({ response: CREDENTIAL });
+    expect(vi.mocked(findUser).mock.invocationCallOrder[0]!)
+      .toBeLessThan(vi.mocked(recordPasskeyUse).mock.invocationCallOrder[0]!);
+    expect(vi.mocked(establishDashboardSession).mock.calls[0]![2]).toBe(dbUser);
+  });
+
+  it('creates no session when the passkey was removed before its counter could be claimed', async () => {
+    vi.mocked(recordPasskeyUse).mockResolvedValue(false);
+    const { app } = buildApp(futureChallenge('login'));
+    const res = await supertest(app).post('/login/verify').send({ response: CREDENTIAL });
+    expect(res.status).toBe(401);
+    expect(res.body.error).toBe('passkey_failed');
+    expect(establishDashboardSession).not.toHaveBeenCalled();
+  });
+
   it('returns not_whitelisted when the user has since been removed', async () => {
     vi.mocked(findUser).mockResolvedValue(null);
     const { app } = buildApp(futureChallenge('login'));
