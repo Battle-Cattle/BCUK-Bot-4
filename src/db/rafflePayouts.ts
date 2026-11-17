@@ -2,7 +2,8 @@
 // most once. Rows are written before any points move; `paid_at` is set in the same transaction as
 // the `loyalty_points` credit, so retrying a credit whose commit was ambiguous can't pay twice.
 import mysql from 'mysql2/promise';
-import { getPool, withTransaction } from './pool';
+import { getPool, runInTransaction, withTransaction } from './pool';
+import { withShortLockTimeout } from './shortLockTimeout';
 import { adjustBalanceOnConn } from './loyaltyPoints';
 
 /** One winner's pending payout, as returned by {@link createRafflePayouts}. */
@@ -51,18 +52,23 @@ export async function createRafflePayouts(
 
 /**
  * Whether a payout row has been paid. Used to settle a credit whose last attempt failed, since
- * that attempt may have committed even though its reply never arrived.
+ * that attempt may have committed even though its reply never arrived. A locking read
+ * (`FOR SHARE`), so if that attempt's transaction is still finishing on the server this waits for
+ * its commit or rollback instead of reading the row as it was before; a plain `SELECT` would see
+ * the old unpaid version. The wait is capped at 5s, after which this throws (lock wait timeout).
  * @param payoutId - `raffle_payout.id` of the row.
  * @returns True if `paid_at` is set.
  */
 export async function isRafflePayoutPaid(payoutId: string): Promise<boolean> {
-  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
-    'SELECT paid_at FROM raffle_payout WHERE id = ?',
-    [payoutId],
-  );
-  const row = rows[0];
-  if (!row) throw new Error(`raffle_payout ${payoutId} not found`);
-  return row.paid_at !== null;
+  return withShortLockTimeout((conn) => runInTransaction(conn, async () => {
+    const [rows] = await conn.execute<mysql.RowDataPacket[]>(
+      'SELECT paid_at FROM raffle_payout WHERE id = ? FOR SHARE',
+      [payoutId],
+    );
+    const row = rows[0];
+    if (!row) throw new Error(`raffle_payout ${payoutId} not found`);
+    return row.paid_at !== null;
+  }));
 }
 
 /**

@@ -6,6 +6,17 @@ vi.mock('./pool', () => {
   const getPool = vi.fn();
   return {
     getPool,
+    runInTransaction: async (conn: any, work: () => Promise<unknown>) => {
+      await conn.beginTransaction();
+      try {
+        const result = await work();
+        await conn.commit();
+        return result;
+      } catch (err) {
+        await conn.rollback();
+        throw err;
+      }
+    },
     withTransaction: async (work: (conn: unknown) => Promise<unknown>) => {
       const conn = await getPool().getConnection();
       try {
@@ -58,14 +69,37 @@ describe('createRafflePayouts', () => {
 });
 
 describe('isRafflePayoutPaid', () => {
+  /** Builds a pool whose connection's locking read sees `rows`. */
+  function poolWithRows(rows: unknown[]) {
+    const conn = makeMockConnection();
+    conn.execute.mockImplementation(async (sql: string) => (sql.startsWith('SELECT') ? [rows, []] : [{}, []]));
+    vi.mocked(getPool).mockReturnValue(makeMockPool({ connection: conn }) as any);
+    return conn;
+  }
+
   it.each([[null, false], [new Date(), true]])('reports paid_at %j as paid=%j', async (paidAt, expected) => {
-    vi.mocked(getPool).mockReturnValue(makeMockPool({ rows: [{ paid_at: paidAt }] }) as any);
+    poolWithRows([{ paid_at: paidAt }]);
     expect(await isRafflePayoutPaid('10')).toBe(expected);
   });
 
+  it('reads with a share lock, under a short lock wait, inside a transaction', async () => {
+    const conn = poolWithRows([{ paid_at: null }]);
+    await isRafflePayoutPaid('10');
+    const statements = conn.execute.mock.calls.map(([sql]) => sql as string);
+    expect(statements).toEqual([
+      'SET SESSION innodb_lock_wait_timeout = 5',
+      expect.stringMatching(/FROM raffle_payout WHERE id = \? FOR SHARE$/),
+      'SET SESSION innodb_lock_wait_timeout = DEFAULT',
+    ]);
+    expect(conn.beginTransaction).toHaveBeenCalledOnce();
+    expect(conn.commit).toHaveBeenCalledOnce();
+    expect(conn.release).toHaveBeenCalledOnce();
+  });
+
   it('throws when the row does not exist', async () => {
-    vi.mocked(getPool).mockReturnValue(makeMockPool({ rows: [] }) as any);
+    const conn = poolWithRows([]);
     await expect(isRafflePayoutPaid('99')).rejects.toThrow('raffle_payout 99 not found');
+    expect(conn.rollback).toHaveBeenCalledOnce();
   });
 });
 
