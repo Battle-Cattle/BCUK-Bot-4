@@ -762,6 +762,36 @@ describe('shutdown', () => {
     expect(lastBotLogger?.error).toHaveBeenCalledWith(expect.stringContaining('Shutdown still running after 25000ms'));
   });
 
+  it('fits the worst-case announcement and web drain inside the deadline, then closes the pool, flushes and exits 0', async () => {
+    const { announceShutdown } = await import('./discord/ownerAlerts.js');
+    const { stopWebPanel } = await import('./web/server.js');
+    const { closePool } = await import('./db.js');
+    const { flushLogs } = await import('./shared/logger.js');
+    // Discord never becomes ready, and a web request runs into the 10s drain limit
+    // (stopWebPanel's own drain is covered by server.test.ts).
+    vi.mocked(announceShutdown).mockReturnValueOnce(new Promise<void>(() => { /* never ready */ }));
+    vi.mocked(stopWebPanel).mockImplementationOnce(() => new Promise<void>((resolve) => { setTimeout(resolve, 10_000); }));
+    await runMain();
+    exitSpy.mockImplementation((() => {}) as never);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      process.emit('SIGTERM');
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(vi.mocked(stopWebPanel)).toHaveBeenCalledOnce();
+      expect(vi.mocked(closePool)).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(vi.mocked(closePool)).toHaveBeenCalledOnce();
+      expect(vi.mocked(flushLogs)).toHaveBeenCalled();
+      expect(exitSpy).toHaveBeenCalledWith(0);
+      // Well past the 25s deadline: it was cleared, so nothing exits 1 afterwards.
+      await vi.advanceTimersByTimeAsync(15_000);
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(exitSpy).toHaveBeenCalledTimes(1);
+    expect(lastBotLogger?.error).not.toHaveBeenCalledWith(expect.stringContaining('Shutdown still running'));
+  });
+
   it('cancels the shutdown deadline once teardown finishes', async () => {
     await runMain();
     exitSpy.mockImplementation((() => {}) as never);
