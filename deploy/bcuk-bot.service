@@ -28,7 +28,9 @@ RestartSec=10
 RestartSteps=5
 RestartMaxDelaySec=300
 KillSignal=SIGTERM
-# shutdown() announces itself to the owner and closes Discord/Twitch/DB cleanly first.
+# shutdown() announces itself to the owner, lets in-flight web requests finish (up to 10s,
+# WEB_DRAIN_TIMEOUT_MS in src/web/server.ts) and closes Discord/Twitch/DB cleanly first, then
+# flushes the log files (up to 2s). Keep their total well under this.
 TimeoutStopSec=30
 
 # Sandboxing (defence in depth): limits what a compromised Node process (a dependency, or ffmpeg

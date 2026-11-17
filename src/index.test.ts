@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mockLogger } from './test-utils/loggerMock';
+import { waitFor } from './test-utils/waitFor';
 
 // All vi.mock calls are hoisted before imports. After vi.resetModules() in beforeEach,
 // re-importing any of these modules will re-run the factory and give fresh vi.fn() instances.
@@ -137,6 +138,7 @@ vi.mock('./shared/logger', () => ({
     if (name === 'Bot') lastBotLogger = logger;
     return logger;
   },
+  flushLogs: vi.fn().mockResolvedValue(undefined),
 }));
 
 let exitSpy: ReturnType<typeof vi.spyOn>;
@@ -368,6 +370,17 @@ describe('startup — guild registry preload', () => {
 
     expect(exitSpy).toHaveBeenCalledWith(1);
     expect(vi.mocked(startDiscordBot)).not.toHaveBeenCalled();
+  });
+
+  it('flushes the log files before exiting on a startup failure', async () => {
+    const db = await import('./db.js');
+    const { flushLogs } = await import('./shared/logger.js');
+    vi.mocked(db.runMigrations).mockRejectedValueOnce(new Error('Migration 0002_x failed: syntax error'));
+
+    await runMain();
+
+    expect(lastBotLogger?.error).toHaveBeenCalledWith('Database migration failed:', expect.any(Error));
+    expect(vi.mocked(flushLogs).mock.invocationCallOrder[0]).toBeLessThan(exitSpy.mock.invocationCallOrder[0]!);
   });
 
   it('calls process.exit(1) and does not start the bot when the DB connection ping fails', async () => {
@@ -706,59 +719,92 @@ describe('shutdown', () => {
     expect(exitSpy).toHaveBeenCalledTimes(1);
     expect(exitSpy).toHaveBeenCalledWith(0);
   });
+
+  it('flushes the log files after closing the pool and before exiting(0)', async () => {
+    const { closePool } = await import('./db.js');
+    const { flushLogs } = await import('./shared/logger.js');
+
+    await runMain();
+    exitSpy.mockImplementation((() => {}) as never);
+    process.emit('SIGTERM');
+    await waitFor(() => expect(exitSpy).toHaveBeenCalledWith(0));
+
+    const [closePoolOrder] = vi.mocked(closePool).mock.invocationCallOrder;
+    const [flushOrder] = vi.mocked(flushLogs).mock.invocationCallOrder;
+    expect(closePoolOrder).toBeLessThan(flushOrder!);
+    expect(flushOrder).toBeLessThan(exitSpy.mock.invocationCallOrder[0]!);
+  });
 });
 
 // ─── Global unhandled error handlers ──────────────────────────────────────────
 
 describe('global error handlers', () => {
+  beforeEach(() => {
+    // The handlers exit asynchronously (after the log flush), so a throwing exit would only turn
+    // into an unhandled rejection here; record the call instead.
+    exitSpy.mockImplementation((() => {}) as never);
+  });
+
   it('logs and exits the process on an unhandled promise rejection', async () => {
     await runMain();
     const reason = new Error('boom');
 
-    expect(() => {
-      process.emit('unhandledRejection', reason, Promise.reject(reason).catch(() => {}));
-    }).toThrow('process.exit');
+    process.emit('unhandledRejection', reason, Promise.reject(reason).catch(() => {}));
 
-    expect(exitSpy).toHaveBeenCalledWith(1);
     expect(lastBotLogger?.error).toHaveBeenCalledWith('Unhandled promise rejection:', reason);
+    await waitFor(() => expect(exitSpy).toHaveBeenCalledWith(1));
   });
 
   it('wraps a non-Error rejection reason in an Error so it is not dropped from the log', async () => {
     await runMain();
 
-    expect(() => {
-      process.emit('unhandledRejection', 'socket hang up', Promise.reject(new Error('x')).catch(() => {}));
-    }).toThrow('process.exit');
+    process.emit('unhandledRejection', 'socket hang up', Promise.reject(new Error('x')).catch(() => {}));
 
-    expect(exitSpy).toHaveBeenCalledWith(1);
     expect(lastBotLogger?.error).toHaveBeenCalledWith(
       'Unhandled promise rejection:', expect.objectContaining({ message: 'socket hang up' }),
     );
     const [, logged] = lastBotLogger!.error.mock.calls.at(-1)!;
     expect(logged).toBeInstanceOf(Error);
+    await waitFor(() => expect(exitSpy).toHaveBeenCalledWith(1));
   });
 
   it('wraps a non-Error thrown value in an Error on an uncaught exception', async () => {
     await runMain();
 
-    expect(() => {
-      process.emit('uncaughtException', 'thrown string' as unknown as Error);
-    }).toThrow('process.exit');
+    process.emit('uncaughtException', 'thrown string' as unknown as Error);
 
     expect(lastBotLogger?.error).toHaveBeenCalledWith(
       'Uncaught exception:', expect.objectContaining({ message: 'thrown string' }),
     );
+    await waitFor(() => expect(exitSpy).toHaveBeenCalledWith(1));
   });
 
   it('logs and exits the process on an uncaught exception', async () => {
     await runMain();
     const err = new Error('boom');
 
-    expect(() => {
-      process.emit('uncaughtException', err);
-    }).toThrow('process.exit');
+    process.emit('uncaughtException', err);
 
-    expect(exitSpy).toHaveBeenCalledWith(1);
     expect(lastBotLogger?.error).toHaveBeenCalledWith('Uncaught exception:', err);
+    await waitFor(() => expect(exitSpy).toHaveBeenCalledWith(1));
+  });
+
+  it('logs the error first and exits only once the log files have been flushed', async () => {
+    const { flushLogs } = await import('./shared/logger.js');
+    let finishFlush!: () => void;
+    vi.mocked(flushLogs).mockReturnValueOnce(new Promise<void>((resolve) => { finishFlush = resolve; }));
+    await runMain();
+
+    process.emit('uncaughtException', new Error('boom'));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(vi.mocked(flushLogs)).toHaveBeenCalledOnce();
+    expect(lastBotLogger!.error.mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(flushLogs).mock.invocationCallOrder[0]!,
+    );
+    expect(exitSpy).not.toHaveBeenCalled();
+
+    finishFlush();
+    await waitFor(() => expect(exitSpy).toHaveBeenCalledWith(1));
   });
 });

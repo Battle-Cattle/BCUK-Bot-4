@@ -1,11 +1,18 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
+import { EventEmitter } from 'node:events';
 
 vi.mock('./healthStore', () => ({
   recordError: vi.fn(),
 }));
 
 import { recordError } from './healthStore';
-import { HealthStoreErrorTransport, createLogger, formatLogLine } from './logger';
+import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { createLogger as winstonCreateLogger } from 'winston';
+import Transport from 'winston-transport';
+import DailyRotateFile from 'winston-daily-rotate-file';
+import { HealthStoreErrorTransport, createLogger, endAndFlushLogger, flushLogs, formatLogLine } from './logger';
 
 describe('HealthStoreErrorTransport', () => {
   it('forwards the log entry to healthStore.recordError under its label, then signals completion', async () => {
@@ -156,5 +163,94 @@ describe('root logger configuration (set at import)', () => {
 
     expect(rotateFileOptions).toEqual([]);
     expect(logger.createLogger('x').transports).toHaveLength(1);
+  });
+});
+
+describe('endAndFlushLogger', () => {
+  let dir: string | undefined;
+
+  afterEach(async () => {
+    if (dir) await rm(dir, { recursive: true, force: true });
+    dir = undefined;
+  });
+
+  /** Reads every log file written to the temp folder, joined. */
+  async function readLogFiles(folder: string): Promise<string> {
+    const names = (await readdir(folder)).filter((name) => name.endsWith('.log'));
+    const contents = await Promise.all(names.map((name) => readFile(path.join(folder, name), 'utf8')));
+    return contents.join('');
+  }
+
+  it('waits until the last line logged is in the rotating log file', async () => {
+    dir = await mkdtemp(path.join(tmpdir(), 'bcuk-logflush-'));
+    const logger = winstonCreateLogger({
+      transports: [new DailyRotateFile({ dirname: dir, filename: 'error-%DATE%.log', maxSize: '20m' })],
+    });
+    // Enough queued writes that the file can't have caught up synchronously.
+    for (let i = 0; i < 500; i++) logger.error(`filler ${i} ${'x'.repeat(200)}`);
+    logger.error('the fatal reason');
+
+    await endAndFlushLogger(logger, 5_000);
+
+    const written = await readLogFiles(dir);
+    expect(written).toContain('the fatal reason');
+    expect(written.trimEnd().split('\n')).toHaveLength(501);
+  });
+
+  it('drops a line logged after the flush began instead of raising a write-after-end error', async () => {
+    dir = await mkdtemp(path.join(tmpdir(), 'bcuk-logflush-'));
+    const logger = winstonCreateLogger({
+      transports: [new DailyRotateFile({ dirname: dir, filename: 'combined-%DATE%.log' })],
+    });
+    logger.info('before');
+
+    const flushing = endAndFlushLogger(logger, 5_000);
+    expect(() => logger.info('after')).not.toThrow();
+    await flushing;
+
+    const written = await readLogFiles(dir);
+    expect(written).toContain('before');
+    expect(written).not.toContain('after');
+  });
+
+  it('gives up at the time limit when a file never finishes', async () => {
+    dir = await mkdtemp(path.join(tmpdir(), 'bcuk-logflush-'));
+    const stuck = new DailyRotateFile({ dirname: dir, filename: 'never-%DATE%.log' });
+    // Swap in a file stream that never reports it has finished writing.
+    const realStream = (stuck as unknown as { logStream: { end: () => void } }).logStream;
+    realStream.end();
+    const neverFinishes = new EventEmitter() as EventEmitter & { end: () => void };
+    neverFinishes.end = () => {};
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      (stuck as unknown as { logStream: unknown }).logStream = neverFinishes;
+      const logger = winstonCreateLogger({ transports: [stuck] });
+
+      let done = false;
+      const flushing = endAndFlushLogger(logger, 2_000).then(() => { done = true; });
+      await vi.advanceTimersByTimeAsync(1_999);
+      expect(done).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await flushing;
+      expect(done).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('resolves straight away for a logger with no log files', async () => {
+    class NullTransport extends Transport {
+      log(_info: unknown, callback: () => void) { callback(); }
+    }
+    const logger = winstonCreateLogger({ transports: [new NullTransport()] });
+    await expect(endAndFlushLogger(logger, 60_000)).resolves.toBeUndefined();
+  });
+});
+
+describe('flushLogs', () => {
+  it('flushes the root logger once, however many exit paths ask', async () => {
+    const first = flushLogs();
+    expect(flushLogs()).toBe(first);
+    await expect(first).resolves.toBeUndefined();
   });
 });

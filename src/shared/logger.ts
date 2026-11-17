@@ -1,4 +1,5 @@
-import { createLogger as winstonCreateLogger, format, transports } from 'winston';
+import { createLogger as winstonCreateLogger, format, transports, type Logger } from 'winston';
+import type { EventEmitter } from 'node:events';
 import Transport from 'winston-transport';
 import DailyRotateFile from 'winston-daily-rotate-file';
 import { recordError } from './healthStore';
@@ -149,4 +150,63 @@ export function setDebugLogFile(enabled: boolean): boolean {
  */
 export function createLogger(module: string) {
   return rootLogger.child({ label: module });
+}
+
+/**
+ * How long {@link flushLogs} waits for the log files to be written before giving up, so a stuck
+ * disk can't hold up an exit.
+ */
+const LOG_FLUSH_TIMEOUT_MS = 2_000;
+
+/**
+ * The file stream a `DailyRotateFile` transport writes through. Not part of its typings: it's the
+ * only way to tell when a line has reached the file, since the transport itself reports a line as
+ * logged once it's queued on this stream.
+ * @param transport - One of the logger's transports.
+ * @returns The transport's file stream, or undefined for a transport that doesn't write a file.
+ */
+function fileStreamOf(transport: unknown): EventEmitter | undefined {
+  if (!(transport instanceof DailyRotateFile)) return undefined;
+  return (transport as unknown as { logStream?: EventEmitter }).logStream;
+}
+
+/**
+ * Ends `logger` and waits for its log files to finish writing everything already logged, for up
+ * to `timeoutMs`. The file transports write asynchronously, so a `process.exit()` straight after a
+ * log call loses the line (often the reason for the exit). Anything logged after this starts is
+ * dropped from the files rather than raising a write-after-end error; the console still prints it.
+ * @param logger - The winston logger to end.
+ * @param timeoutMs - Most milliseconds to wait for the files.
+ * @returns Resolves once every file has been written, or at the time limit; never rejects.
+ */
+export async function endAndFlushLogger(logger: Logger, timeoutMs: number): Promise<void> {
+  const fileStreams = logger.transports.map(fileStreamOf).filter((s): s is EventEmitter => s !== undefined);
+  // Ending the logger ends each transport, which ends its file stream; 'finish' then means every
+  // queued line is in the file.
+  const written = Promise.all(fileStreams.map((stream) => new Promise<void>((resolve) => {
+    stream.once('finish', () => resolve());
+    stream.once('error', () => resolve());
+  })));
+  logger.on('error', () => { /* a line logged after end(): already on the console, dropped from the files */ });
+  logger.end();
+  let timer: NodeJS.Timeout | undefined;
+  const timedOut = new Promise<void>((resolve) => { timer = setTimeout(resolve, timeoutMs); });
+  try {
+    await Promise.race([written, timedOut]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** The flush in progress, so a second exit path waits on the same one instead of ending twice. */
+let flushing: Promise<void> | null = null;
+
+/**
+ * Flushes the root logger's files before the process exits (see {@link endAndFlushLogger}). Call
+ * it last: nothing logged afterwards reaches the files. Safe to call more than once.
+ * @returns Resolves once the log files are written, or after {@link LOG_FLUSH_TIMEOUT_MS}.
+ */
+export function flushLogs(): Promise<void> {
+  flushing ??= endAndFlushLogger(rootLogger, LOG_FLUSH_TIMEOUT_MS);
+  return flushing;
 }

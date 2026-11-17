@@ -687,7 +687,7 @@ describe('startWebPanel / stopWebPanel', () => {
     await stopWebPanel();
   });
 
-  it('closes the server and drops in-flight connections on stop', async () => {
+  it('closes the server and drops connections still in progress at the drain limit, with a warning', async () => {
     const server = await startWebPanel(0);
     const { port } = server.address() as AddressInfo;
     const accepted = new Promise<net.Socket>((resolve) => server.once('connection', resolve));
@@ -702,10 +702,42 @@ describe('startWebPanel / stopWebPanel', () => {
     const serverSocket = await accepted;
     await waitFor(() => expect(serverSocket.bytesRead).toBeGreaterThan(0));
 
-    await stopWebPanel();
+    // A request still in progress is given up to the drain limit to finish before it's dropped.
+    mockLog.warn.mockClear();
+    await stopWebPanel(50);
 
     await socketClosed;
     expect(server.listening).toBe(false);
+    expect(mockLog.warn).toHaveBeenCalledWith(expect.stringContaining('still running 50ms after shutdown began'));
+  });
+
+  it('waits for a request still in progress instead of dropping it, then closes the session store', async () => {
+    const server = await startWebPanel(0);
+    const { port } = server.address() as AddressInfo;
+    const accepted = new Promise<net.Socket>((resolve) => server.once('connection', resolve));
+    const socket = net.connect(port, '127.0.0.1');
+    socket.on('error', () => {});
+    const socketClosed = new Promise<void>((resolve) => socket.once('close', () => resolve()));
+    let response = '';
+    socket.on('data', (chunk) => { response += chunk.toString('utf8'); });
+    await new Promise<void>((resolve) => socket.once('connect', () => resolve()));
+    socket.write('GET /healthz HTTP/1.1\r\nHost: localhost\r\n');
+    const serverSocket = await accepted;
+    await waitFor(() => expect(serverSocket.bytesRead).toBeGreaterThan(0));
+    storeClose.mockClear();
+    mockLog.warn.mockClear();
+
+    const stopping = stopWebPanel(5_000);
+    // The client finishes its request after shutdown began; it's still answered.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(storeClose).not.toHaveBeenCalled();
+    socket.write('\r\n');
+    await stopping;
+    await socketClosed;
+
+    expect(response).toMatch(/^HTTP\/1\.1 200/);
+    expect(storeClose).toHaveBeenCalledOnce();
+    expect(mockLog.warn).not.toHaveBeenCalledWith(expect.stringContaining('Dropped the web connections'));
   });
 
   it('binds the configured host, loopback by default', async () => {

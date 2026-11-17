@@ -43,7 +43,7 @@ import { startCounterScheduler, stopCounterScheduler } from './commands/counterS
 import { startRewardPricingScheduler, stopRewardPricingScheduler } from './twitch/pricing/rewardPricingScheduler';
 import { registerRewardPricingRuntime } from './twitch/pricing/rewardPricingService';
 import { startTimerCommandScheduler, stopTimerCommandScheduler, registerTimerCommandsRuntime } from './twitch/timers/timerCommandScheduler';
-import { createLogger } from './shared/logger';
+import { createLogger, flushLogs } from './shared/logger';
 import { withTimeout } from './shared/withTimeout';
 import { startEventLoopMonitor, stopEventLoopMonitor } from './shared/eventLoopMonitor';
 import { startDiskSpaceMonitor, stopDiskSpaceMonitor } from './shared/diskSpaceMonitor';
@@ -111,6 +111,19 @@ function stopDbHealthCheck(): void {
   if (dbHealthCheckTimer) { clearInterval(dbHealthCheckTimer); dbHealthCheckTimer = null; }
 }
 
+/**
+ * Exits the process once the log files hold everything logged so far (see `flushLogs` in
+ * `src/shared/logger.ts`, which gives up after a couple of seconds). Without the wait, the line
+ * explaining a fatal exit would usually be lost from `error-*.log`/`combined-*.log`, reaching only
+ * the console. Every exit goes through here: 1 for a failure, 0 only after a deliberate shutdown.
+ * @param code - The process exit code.
+ * @returns Never resolves: the process exits.
+ */
+async function exitProcess(code: 0 | 1): Promise<never> {
+  await flushLogs();
+  return process.exit(code);
+}
+
 /** Set by the first {@link shutdown} call so a second SIGINT/SIGTERM can't run a concurrent teardown. */
 let shuttingDown = false;
 
@@ -133,7 +146,7 @@ async function safeStop(name: string, fn: () => void | Promise<void>): Promise<v
  * Turns off owner-alert status reporting first and sends the owner a "shutting down" DM (see
  * `ownerAlertWatcher.ts`'s `stopOwnerAlertWatcher` and `ownerAlerts.ts`'s `announceShutdown`) before anything actually
  * disconnects. Each teardown step is isolated via {@link safeStop} so a failure in one component
- * (e.g. the Twitch monitor) can't skip the rest — `closePool()` and `process.exit(0)` always run.
+ * (e.g. the Twitch monitor) can't skip the rest — `closePool()` and the exit(0) always run.
  * Re-entrant calls (a second signal while teardown is still running) are logged and ignored.
  * @param signal - The name of the signal that triggered shutdown (e.g. `SIGINT`).
  */
@@ -172,11 +185,12 @@ async function shutdown(signal: string): Promise<void> {
   await safeStop('Discord bot', () => stopDiscordBot());
   await safeStop('audio player', () => disconnect());
   await closePool();
-  process.exit(0);
+  log.info('Shutdown complete.');
+  await exitProcess(0);
 }
 
-process.on('SIGINT',  () => { shutdown('SIGINT').catch((err: unknown)  => { log.error('Shutdown error:', err); process.exit(1); }); });
-process.on('SIGTERM', () => { shutdown('SIGTERM').catch((err: unknown) => { log.error('Shutdown error:', err); process.exit(1); }); });
+process.on('SIGINT',  () => { shutdown('SIGINT').catch((err: unknown)  => { log.error('Shutdown error:', err); void exitProcess(1); }); });
+process.on('SIGTERM', () => { shutdown('SIGTERM').catch((err: unknown) => { log.error('Shutdown error:', err); void exitProcess(1); }); });
 
 // Without these, a rejection or throw originating from inside a third-party library's own
 // internals (discord.js, @twurple/chat, mysql2, ws) rather than the app's own promise chains would go
@@ -199,22 +213,21 @@ function toError(value: unknown): Error {
  * Logs an unhandled promise rejection and exits, rather than letting Node's default
  * (process termination without a clean log line) or silently continuing.
  * @param reason - The rejection reason (typically an `Error`, but not guaranteed to be).
- * @returns Never returns — always calls `process.exit(1)`.
  */
 process.on('unhandledRejection', (reason) => {
   log.error('Unhandled promise rejection:', toError(reason));
-  process.exit(1);
+  void exitProcess(1);
 });
 
 /**
  * Logs an uncaught synchronous exception and exits — continuing after `uncaughtException` risks
- * running with corrupted state, so this deliberately does not attempt to recover.
+ * running with corrupted state, so this deliberately does not attempt to recover. The exit waits
+ * only for the log files to be written (at most a couple of seconds).
  * @param err - The uncaught error.
- * @returns Never returns — always calls `process.exit(1)`.
  */
 process.on('uncaughtException', (err) => {
   log.error('Uncaught exception:', toError(err));
-  process.exit(1);
+  void exitProcess(1);
 });
 
 /**
@@ -301,7 +314,7 @@ async function main(): Promise<void> {
     recordDbPing(true);
   } catch (err) {
     log.error('Cannot connect to database:', err);
-    process.exit(1);
+    return exitProcess(1);
   }
 
   // Bring the schema up to date before anything reads it. A failed migration stops startup rather
@@ -310,7 +323,7 @@ async function main(): Promise<void> {
     await runMigrations();
   } catch (err) {
     log.error('Database migration failed:', err);
-    process.exit(1);
+    return exitProcess(1);
   }
 
   // Rewrite any OAuth token not yet under the active EVENTSUB_TOKEN_SECRET (legacy tokens, or ones
@@ -332,7 +345,7 @@ async function main(): Promise<void> {
     await reloadGuildRegistry();
   } catch (err) {
     log.error('Cannot load guild registry:', err);
-    process.exit(1);
+    return exitProcess(1);
   }
 
   setChannelJoinedHook(() => reloadEventSubSubscriptions());
@@ -364,7 +377,7 @@ async function main(): Promise<void> {
     await startWebPanel();
   } catch (err) {
     log.error('Web panel failed to start:', err);
-    process.exit(1);
+    return exitProcess(1);
   }
   startChannelReconciliationPoll();
   startCounterScheduler();
@@ -386,5 +399,5 @@ async function main(): Promise<void> {
 
 main().catch((err: unknown) => {
   log.error('Fatal startup error:', err);
-  process.exit(1);
+  void exitProcess(1);
 });

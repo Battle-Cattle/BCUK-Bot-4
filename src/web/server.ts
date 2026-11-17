@@ -20,6 +20,7 @@ import { mountRoutes } from './routes/index';
 import { ensureSessionCsrfToken } from './csrf';
 import { enforceSessionLifetime, SESSION_IDLE_MS } from './sessionLifetime';
 import { renderView } from './routes/viewHelpers';
+import { trackForGracefulClose, type GracefulClose } from './serverDrain';
 import {
   ipKey,
   generalLimiterSkip,
@@ -360,8 +361,18 @@ export { app };
 // entire app to reach the 100/600 thresholds via every other mounted route.
 export { generalLimiter, preSessionLimiter, sessionLimiter };
 
-/** The panel's listening server, kept so {@link stopWebPanel} can close it on shutdown. */
-let webServer: Server | null = null;
+/**
+ * How long {@link stopWebPanel} waits for in-flight requests (an upload's last step, a video
+ * conversion, an admin change) to finish before dropping them. Well inside the systemd unit's
+ * `TimeoutStopSec=30` (deploy/bcuk-bot.service), which also has to cover the rest of shutdown.
+ */
+const WEB_DRAIN_TIMEOUT_MS = 10_000;
+
+/**
+ * The panel's listening server and its graceful close, kept so {@link stopWebPanel} can close it
+ * on shutdown.
+ */
+let webServer: { server: Server; closeGracefully: GracefulClose } | null = null;
 
 /** How often expired rows are deleted from the `sessions` table (the store's own default). */
 const SESSION_CLEANUP_INTERVAL_MS = 15 * 60 * 1000;
@@ -410,6 +421,7 @@ function stopSessionCleanup(): void {
  */
 export function startWebPanel(port: number = WEB_PORT, host: string = WEB_HOST): Promise<Server> {
   const server = createServer(app);
+  const closeGracefully = trackForGracefulClose(server);
   return new Promise((resolve, reject) => {
     /**
      * Rejects with a listen failure, dropping the now-pointless `listening` handler.
@@ -422,7 +434,7 @@ export function startWebPanel(port: number = WEB_PORT, host: string = WEB_HOST):
     /** Records the panel as up, starts the session cleanup and resolves; the startup error handler goes. */
     const onListening = (): void => {
       server.off('error', onError);
-      webServer = server;
+      webServer = { server, closeGracefully };
       startSessionCleanup();
       log.info(`Panel listening on ${host}:${port}`);
       resolve(server);
@@ -434,20 +446,22 @@ export function startWebPanel(port: number = WEB_PORT, host: string = WEB_HOST):
 }
 
 /**
- * Stops the web panel: stops the expired-session cleanup timer, stops accepting connections and
- * drops the open ones — long-lived SSE streams would otherwise hold `server.close()` open
- * indefinitely — then closes the session store. The store leaves its DB pool open; shutdown's
- * closePool() ends it last. No-op if the panel isn't running.
+ * Stops the web panel: stops the expired-session cleanup timer, stops accepting connections, ends
+ * the long-lived SSE streams, and lets requests still in progress finish — for up to `drainTimeoutMs`,
+ * after which they're dropped (see {@link trackForGracefulClose}) — then closes the session store.
+ * Shutdown stops the transcodes and closes the DB pool only after this resolves, so a request that
+ * finishes in time never sees a killed ffmpeg or a closed pool. The store leaves its DB pool open;
+ * shutdown's closePool() ends it last. No-op if the panel isn't running.
+ * @param drainTimeoutMs - How long to wait for in-flight requests; defaults to {@link WEB_DRAIN_TIMEOUT_MS}.
  * @returns Resolves once the server and the session store have closed.
  */
-export async function stopWebPanel(): Promise<void> {
-  const server = webServer;
-  if (!server) return;
+export async function stopWebPanel(drainTimeoutMs: number = WEB_DRAIN_TIMEOUT_MS): Promise<void> {
+  const panel = webServer;
+  if (!panel) return;
   webServer = null;
   stopSessionCleanup();
-  await new Promise<void>((resolve, reject) => {
-    server.close((err) => (err ? reject(err) : resolve()));
-    server.closeAllConnections();
-  });
+  if (await panel.closeGracefully(drainTimeoutMs)) {
+    log.warn(`Dropped the web connections still running ${drainTimeoutMs}ms after shutdown began.`);
+  }
   await sessionStore.close();
 }
