@@ -240,18 +240,31 @@ describe('GET /videos/:filename', () => {
 });
 
 describe('POST /:login/report', () => {
-  const connect = async (login = 'alice') => handler('/:login/events')(fake(login).req, fake(login).res, vi.fn());
-  const post = (login: string, body: unknown) => supertest(app()).post(`/${login}/report`).send(body as object);
+  /** Connects an overlay and returns the report nonce its init frame carried. */
+  let ipSuffix = 0;
+  const connect = async (login = 'alice'): Promise<string> => {
+    const { req, res } = fake(login);
+    req.ip = `10.0.1.${++ipSuffix}`; // its own IP, so the per-IP connection cap doesn't refuse a second overlay
+    await handler('/:login/events')(req, res, vi.fn());
+    return frames(res)[0].reportNonce;
+  };
+  let nonce = '';
+  const post = (login: string, body: unknown, withNonce: string | null = nonce) => {
+    const r = supertest(app()).post(`/${login}/report`);
+    return (withNonce === null ? r : r.set('X-Shared-Overlay-Nonce', withNonce)).send(body as object);
+  };
+  const aliceReportedAt = () => getReadinessSnapshot([{ id: 1, name: 'Clap' }], new Set(['alice'])).overlays[0]?.reportedAt;
 
   it('records a report from a connected overlay', async () => {
-    await connect();
+    nonce = await connect();
+    expect(nonce).toMatch(/^[0-9a-f]{64}$/);
     const res = await post('alice', { stored: [1], downloading: null });
     expect(res.status).toBe(204);
     expect(getReadinessSnapshot([{ id: 1, name: 'Clap' }], new Set(['alice'])).overlays[0]).toMatchObject({ stored: 1 });
   });
 
   it('is case-insensitive about the login', async () => {
-    await connect();
+    nonce = await connect();
     expect((await post('ALICE', { stored: [], downloading: null })).status).toBe(204);
   });
 
@@ -262,15 +275,48 @@ describe('POST /:login/report', () => {
   });
 
   it('refuses ids that are not on the current list and malformed bodies', async () => {
-    await connect();
+    nonce = await connect();
     expect((await post('alice', { stored: [99] })).status).toBe(400);
     expect((await post('alice', { stored: 'x' })).status).toBe(400);
     expect(getReadinessSnapshot([{ id: 1, name: 'Clap' }], new Set(['alice'])).overlays[0]).toMatchObject({ reportedAt: null });
   });
 
   it('answers 500 when the list cannot be read', async () => {
-    await connect();
+    nonce = await connect();
     listEnabledSharedVideos.mockRejectedValueOnce(new Error('db'));
     expect((await post('alice', { stored: [] })).status).toBe(500);
+  });
+
+  it('refuses a report with no nonce or a malformed one, and records nothing', async () => {
+    await connect();
+    expect((await post('alice', { stored: [1], downloading: null }, null)).status).toBe(403);
+    expect((await post('alice', { stored: [1], downloading: null }, 'not-a-nonce')).status).toBe(403);
+    expect(aliceReportedAt()).toBeNull();
+  });
+
+  it("refuses another login's nonce", async () => {
+    await connect('alice');
+    const bobNonce = await connect('bob');
+    expect((await post('alice', { stored: [1], downloading: null }, bobNonce)).status).toBe(403);
+    expect(aliceReportedAt()).toBeNull();
+  });
+
+  it('refuses the nonce of a connection that has closed', async () => {
+    const { req, res } = fake('alice');
+    req.ip = '10.0.2.1';
+    await handler('/:login/events')(req, res, vi.fn());
+    const stale = frames(res)[0].reportNonce;
+    await connect('alice'); // another overlay keeps the login connected
+    sharedConnections.get('alice')!.delete(res); // as the SSE cleanup does on close
+    expect((await post('alice', { stored: [1], downloading: null }, stale)).status).toBe(403);
+    expect(aliceReportedAt()).toBeNull();
+  });
+
+  it('gives each connection its own nonce, and accepts either while both are open', async () => {
+    const first = await connect('alice');
+    const second = await connect('alice');
+    expect(first).not.toBe(second);
+    expect((await post('alice', { stored: [], downloading: null }, first)).status).toBe(204);
+    expect((await post('alice', { stored: [1], downloading: null }, second)).status).toBe(204);
   });
 });
