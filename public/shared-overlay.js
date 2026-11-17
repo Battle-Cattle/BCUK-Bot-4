@@ -21,6 +21,7 @@
   let firstSyncDone = false;
   let streamerLive = true; // slow until the server says the streamer is offline
   let firstSyncTimer = null;
+  let reportNonce = null; // this connection's nonce from init; the server refuses reports without it
   let currentList = []; // newest list: the readiness report's basis, and what the delayed first sync uses
   let downloading = null; // { url, percent } while a background download runs
 
@@ -60,12 +61,13 @@
    * @returns {Promise<number|undefined>} The HTTP status, or undefined if the request failed.
    */
   async function postReadiness() {
+    if (!reportNonce) return undefined; // no init yet: the server would refuse it
     try {
       const storedUrls = storage ? await storage.listVideos() : [];
       const body = buildReadinessReport(currentList, storedUrls, downloading);
       const res = await fetch('/overlay/shared/' + login + '/report', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Shared-Overlay-Nonce': reportNonce },
         body: JSON.stringify(body),
       });
       return res.status;
@@ -273,6 +275,8 @@
     if (!data) return;
     if (data.type === 'init') {
       clockOffsetMs = data.serverTime - Date.now();
+      // Each connection gets its own nonce; a reconnect's init replaces the old one.
+      reportNonce = typeof data.reportNonce === 'string' ? data.reportNonce : null;
       if (typeof data.maxLateMs === 'number') maxLateMs = data.maxLateMs;
       if (typeof data.live === 'boolean') streamerLive = data.live;
       syncList(data.videos);
