@@ -68,24 +68,41 @@ function joinNames(names: readonly string[]): string {
   return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
 }
 
+/** Which winners of a draw were paid, as {@link buildRaffleResultMessage} reports them. */
+export interface RaffleResultWinners {
+  /** Winners whose points were added. */
+  paid: readonly string[];
+  /** Winners whose points weren't added. */
+  unpaid: readonly string[];
+  /** Winners whose points may or may not have been added (the ledger couldn't be read). */
+  unconfirmed: readonly string[];
+}
+
+/**
+ * Tags each name with `@` and joins them into readable English.
+ * @param names - Twitch logins.
+ * @returns E.g. `@a, @b and @c`.
+ */
+function tagNames(names: readonly string[]): string {
+  return joinNames(names.map((name) => `@${name}`));
+}
+
 /**
  * Builds the result announcement once a raffle closes. Only winners whose points were added are
- * congratulated; any whose credit failed are named plainly as not paid.
+ * congratulated; any whose credit failed, or couldn't be confirmed, are named plainly.
  * @param entries - Number of viewers who entered.
- * @param paid - Twitch logins of the winners whose points were added, in draw order.
- * @param unpaid - Twitch logins of the winners whose points couldn't be added, in draw order.
+ * @param winners - The draw's winners, in draw order, split by payout outcome.
  * @param share - Points each winner was owed.
  * @returns The chat message.
  */
-export function buildRaffleResultMessage(entries: number, paid: readonly string[], unpaid: readonly string[], share: number): string {
-  const winnerCount = paid.length + unpaid.length;
+export function buildRaffleResultMessage(entries: number, winners: RaffleResultWinners, share: number): string {
+  const { paid, unpaid, unconfirmed } = winners;
+  const winnerCount = paid.length + unpaid.length + unconfirmed.length;
   if (winnerCount === 0) return 'Raffle over. Nobody entered, so no points were given out.';
   const summary = `${entries} ${entries === 1 ? 'entry' : 'entries'}, ${winnerCount} ${winnerCount === 1 ? 'winner' : 'winners'}`;
-  const tag = (names: readonly string[]): string => joinNames(names.map((w) => `@${w}`));
-  if (paid.length === 0) {
-    return `Raffle over! ${summary}: ${tag(unpaid)}, but the points couldn't be added. The streamer has been notified.`;
-  }
+  const failures = (unpaid.length > 0 ? ` Points for ${tagNames(unpaid)} couldn't be added.` : '')
+    + (unconfirmed.length > 0 ? ` Points for ${tagNames(unconfirmed)} may not have been added.` : '');
+  if (paid.length === 0) return `Raffle over! ${summary}.${failures}`;
   const payout = paid.length === 1 ? `wins ${formatPoints(share)} points` : `win ${formatPoints(share)} points each`;
-  const failure = unpaid.length > 0 ? ` Points for ${tag(unpaid)} couldn't be added. The streamer has been notified.` : '';
-  return `🎉 Raffle over! ${summary}: ${tag(paid)} ${payout}!${failure}`;
+  return `🎉 Raffle over! ${summary}: ${tagNames(paid)} ${payout}!${failures}`;
 }

@@ -41,7 +41,7 @@ beforeEach(() => {
   registerRaffleTwitchRuntime({ send: SEND, getLoginUserIds: () => USER_IDS });
   vi.mocked(getLoyaltyPointsConfig).mockResolvedValue(ENABLED_CONFIG);
   vi.mocked(isExcludedFromLoyaltyPoints).mockResolvedValue(false);
-  vi.mocked(payRaffleWinners).mockImplementation(async (_id, winners) => ({ paid: [...winners], unpaid: [] }));
+  vi.mocked(payRaffleWinners).mockImplementation(async (_id, winners) => ({ paid: [...winners], unpaid: [], unconfirmed: [] }));
   vi.mocked(resolveSharedChatSessionId).mockResolvedValue(null);
 });
 
@@ -206,20 +206,28 @@ describe('raffle lifecycle', () => {
     await chat('streamer', '!raffle 100', true);
     for (const user of ['a', 'b', 'c', 'd']) await chat(user, '!join');
     vi.spyOn(Math, 'random').mockReturnValue(0.9999);
-    vi.mocked(payRaffleWinners).mockResolvedValueOnce({ paid: ['c'], unpaid: ['d'] });
+    vi.mocked(payRaffleWinners).mockResolvedValueOnce({ paid: ['c'], unpaid: ['d'], unconfirmed: [] });
     await vi.advanceTimersByTimeAsync(60_000);
     expect(SEND).toHaveBeenLastCalledWith('streamer',
-      "🎉 Raffle over! 4 entries, 2 winners: @c wins 50 points! Points for @d couldn't be added. The streamer has been notified.");
-    expect(logInfoSpy).toHaveBeenCalledWith("Raffle in streamer drew 2 winner(s) from 4 entries; 1 couldn't be paid.");
+      "🎉 Raffle over! 4 entries, 2 winners: @c wins 50 points! Points for @d couldn't be added.");
+    expect(logInfoSpy).toHaveBeenCalledWith("Raffle in streamer drew 2 winner(s) from 4 entries; 1 couldn't be confirmed paid.");
   });
 
   it('claims no payout when every credit failed', async () => {
     await chat('streamer', '!raffle 100', true);
     await chat('alice', '!join');
-    vi.mocked(payRaffleWinners).mockResolvedValueOnce({ paid: [], unpaid: ['alice'] });
+    vi.mocked(payRaffleWinners).mockResolvedValueOnce({ paid: [], unpaid: ['alice'], unconfirmed: [] });
     await vi.advanceTimersByTimeAsync(60_000);
-    expect(SEND).toHaveBeenLastCalledWith('streamer',
-      "Raffle over! 1 entry, 1 winner: @alice, but the points couldn't be added. The streamer has been notified.");
+    expect(SEND).toHaveBeenLastCalledWith('streamer', "Raffle over! 1 entry, 1 winner. Points for @alice couldn't be added.");
+  });
+
+  it('never draws more winners than the prize has points', async () => {
+    await chat('streamer', '!raffle 1', true);
+    for (const user of ['a', 'b', 'c', 'd', 'e', 'f', 'g']) await chat(user, '!join');
+    // 7 entrants would allow up to 3 winners, but a 1-point prize can only have one.
+    vi.spyOn(Math, 'random').mockReturnValue(0.9999);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(payRaffleWinners).toHaveBeenCalledExactlyOnceWith(7, ['g'], 1, expect.anything());
   });
 
   it('ignores !join after the draw and allows a new raffle', async () => {
@@ -264,7 +272,7 @@ describe('raffle lifecycle', () => {
     let signal: AbortSignal | undefined;
     vi.mocked(payRaffleWinners).mockImplementationOnce((_id, winners, _share, s) => {
       signal = s;
-      return new Promise((resolve) => { finishPaying = () => resolve({ paid: [...winners], unpaid: [] }); });
+      return new Promise((resolve) => { finishPaying = () => resolve({ paid: [...winners], unpaid: [], unconfirmed: [] }); });
     });
     await vi.advanceTimersByTimeAsync(60_000);
     let stopped = false;

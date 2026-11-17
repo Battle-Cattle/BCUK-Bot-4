@@ -26,7 +26,7 @@ vi.mock('mysql2/promise', () => ({ default: {} }));
 
 import { makeMockConnection, makeMockPool } from '../test-utils/mockMysqlPool';
 import { getPool } from './pool';
-import { createRafflePayouts, payRafflePayout } from './rafflePayouts';
+import { createRafflePayouts, isRafflePayoutPaid, payRafflePayout } from './rafflePayouts';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -54,6 +54,18 @@ describe('createRafflePayouts', () => {
     pool.execute.mockResolvedValueOnce([{ affectedRows: 1 }, []]).mockResolvedValueOnce([[], []]);
     vi.mocked(getPool).mockReturnValue(pool as any);
     await expect(createRafflePayouts('draw-1', 7, ['a'], 50)).rejects.toThrow('raffle_payout row for a missing');
+  });
+});
+
+describe('isRafflePayoutPaid', () => {
+  it.each([[null, false], [new Date(), true]])('reports paid_at %j as paid=%j', async (paidAt, expected) => {
+    vi.mocked(getPool).mockReturnValue(makeMockPool({ rows: [{ paid_at: paidAt }] }) as any);
+    expect(await isRafflePayoutPaid('10')).toBe(expected);
+  });
+
+  it('throws when the row does not exist', async () => {
+    vi.mocked(getPool).mockReturnValue(makeMockPool({ rows: [] }) as any);
+    await expect(isRafflePayoutPaid('99')).rejects.toThrow('raffle_payout 99 not found');
   });
 });
 

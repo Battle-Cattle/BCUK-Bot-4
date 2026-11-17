@@ -114,7 +114,8 @@ function secondsLeft(raffle: ActiveRaffle): number {
 
 /**
  * Closes the raffle open in `channel`: removes it first so a late `!join` is ignored, draws a
- * random number of winners (up to one per three entrants, at most five), credits each an equal
+ * random number of winners (up to one per three entrants, at most five, and never more than the
+ * prize in points), credits each an equal
  * whole-point share (any remainder isn't given out) and announces the result. Never rejects,
  * since it runs from a timer. Tracked in {@link inFlightDraws} until it finishes, for shutdown.
  * @param channel - Normalised channel login the raffle is open in.
@@ -141,12 +142,14 @@ async function drawRaffle(channel: string): Promise<void> {
 async function runDraw(channel: string, raffle: ActiveRaffle): Promise<void> {
   try {
     const entrants = [...raffle.entrants];
-    const winners = pickWinners(entrants, rollWinnerCount(entrants.length));
+    // Never more winners than points, so every winner's share is at least 1.
+    const winners = pickWinners(entrants, Math.min(rollWinnerCount(entrants.length), raffle.amount));
     const share = getPrizeShare(raffle.amount, winners.length);
-    const { paid, unpaid } = await payRaffleWinners(raffle.streamerId, winners, share, drawAbort.signal);
-    const unpaidNote = unpaid.length > 0 ? `; ${unpaid.length} couldn't be paid` : '';
-    log.info(`Raffle in ${channel} drew ${winners.length} winner(s) from ${entrants.length} entr${entrants.length === 1 ? 'y' : 'ies'}${unpaidNote}.`);
-    await sendRaffleMessage(channel, buildRaffleResultMessage(entrants.length, paid, unpaid, share));
+    const outcome = await payRaffleWinners(raffle.streamerId, winners, share, drawAbort.signal);
+    const failed = outcome.unpaid.length + outcome.unconfirmed.length;
+    const failedNote = failed > 0 ? `; ${failed} couldn't be confirmed paid` : '';
+    log.info(`Raffle in ${channel} drew ${winners.length} winner(s) from ${entrants.length} entr${entrants.length === 1 ? 'y' : 'ies'}${failedNote}.`);
+    await sendRaffleMessage(channel, buildRaffleResultMessage(entrants.length, outcome, share));
   } catch (err) {
     log.error(`Failed to draw raffle in ${channel}:`, err);
   }

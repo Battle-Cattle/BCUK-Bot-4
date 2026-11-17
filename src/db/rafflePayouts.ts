@@ -50,6 +50,22 @@ export async function createRafflePayouts(
 }
 
 /**
+ * Whether a payout row has been paid. Used to settle a credit whose last attempt failed, since
+ * that attempt may have committed even though its reply never arrived.
+ * @param payoutId - `raffle_payout.id` of the row.
+ * @returns True if `paid_at` is set.
+ */
+export async function isRafflePayoutPaid(payoutId: string): Promise<boolean> {
+  const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
+    'SELECT paid_at FROM raffle_payout WHERE id = ?',
+    [payoutId],
+  );
+  const row = rows[0];
+  if (!row) throw new Error(`raffle_payout ${payoutId} not found`);
+  return row.paid_at !== null;
+}
+
+/**
  * Credits one winner's payout, at most once: locks the row, and only if it's still unpaid adds its
  * amount to the winner's balance and sets `paid_at`, both in one transaction. Safe to retry after
  * a failure, including one where the commit reached the server but its reply didn't.

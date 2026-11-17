@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createRafflePayouts, payRafflePayout } from './rafflePayouts';
+import { createRafflePayouts, isRafflePayoutPaid, payRafflePayout } from './rafflePayouts';
 import { getBalance } from './loyaltyPoints';
 import { insertRow } from '../test-utils/realDbRows';
 
@@ -13,7 +13,9 @@ describe('raffle payouts (real MySQL)', () => {
     const payouts = await createRafflePayouts('11111111-1111-4111-8111-111111111111', streamerId, ['a', 'b'], 40);
     expect(payouts.map((p) => p.twitchUsername)).toEqual(['a', 'b']);
 
+    expect(await isRafflePayoutPaid(payouts[0]!.id)).toBe(false);
     expect(await payRafflePayout(payouts[0]!.id)).toBe('paid');
+    expect(await isRafflePayoutPaid(payouts[0]!.id)).toBe(true);
     expect(await payRafflePayout(payouts[0]!.id)).toBe('already_paid');
     expect(await getBalance(streamerId, 'a')).toBe(40);
     expect(await getBalance(streamerId, 'b')).toBe(0);

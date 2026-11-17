@@ -191,7 +191,7 @@ export { getExclusions as getLoyaltyPointsExclusions } from './db/loyaltyPointsE
 export { isExcludedFromLoyaltyPoints } from './db/loyaltyPointsExclusionCache';
 export { addLoyaltyPointsExclusion, removeLoyaltyPointsExclusion } from './db/loyaltyPointsExclusionWrites';
 export type { RafflePayout, RafflePayoutResult } from './db/rafflePayouts';
-export { createRafflePayouts, payRafflePayout } from './db/rafflePayouts';
+export { createRafflePayouts, isRafflePayoutPaid, payRafflePayout } from './db/rafflePayouts';
 
 // ─── Advanced commands ──────────────────────────────────────────────────────
 // Per-streamer commands with a loyalty-point cost, free Stream Deck triggers, and overlay and

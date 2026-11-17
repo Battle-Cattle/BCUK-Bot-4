@@ -330,7 +330,7 @@ Expected constraints:
 
 ## `raffle_payout`
 
-One row per raffle winner: the ledger that makes each winner's credit happen at most once. A draw writes its winners' rows (one shared `raffle_id`) before crediting anyone; each credit then locks its row and, only if `paid_at` is still `NULL`, adds `amount` to the winner's `loyalty_points` balance and sets `paid_at` in the same transaction. A retry after an ambiguous commit therefore finds the row paid and doesn't credit twice. A failed credit is retried twice (1s, then 3s later); a row still unpaid after that is a winner chat was told wasn't paid, and the streamer's dashboard shows a `raffle_payout_failed` event for it.
+One row per raffle winner: the ledger that makes each winner's credit happen at most once. A draw writes its winners' rows (one shared `raffle_id`) before crediting anyone; each credit then locks its row and, only if `paid_at` is still `NULL`, adds `amount` to the winner's `loyalty_points` balance and sets `paid_at` in the same transaction. A retry after an ambiguous commit therefore finds the row paid and doesn't credit twice. A failed credit is retried twice (1s, then 3s later), or not at all once shutdown has begun. After the last failed attempt the row is read back, since that attempt may have committed with its reply lost: a paid row counts as paid. A row still unpaid is a winner chat was told wasn't paid (or, if it couldn't be read, may not have been), and the streamer's dashboard shows a `raffle_payout_failed` event for it.
 
 | Column | Type | Notes |
 | --- | --- | --- |
