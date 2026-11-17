@@ -312,6 +312,20 @@ describe('POST /:login/report', () => {
     expect(aliceReportedAt()).toBeNull();
   });
 
+  it('refuses the report when its connection closes while the list is read', async () => {
+    const { req, res } = fake('alice');
+    req.ip = '10.0.3.1';
+    await handler('/:login/events')(req, res, vi.fn());
+    const closing = frames(res)[0].reportNonce;
+    await connect('alice'); // another overlay keeps the login connected
+    listEnabledSharedVideos.mockImplementationOnce(async () => {
+      sharedConnections.get('alice')!.delete(res); // closes during the lookup
+      return [{ id: 1, name: 'Clap', filename: 'a b.webm' }];
+    });
+    expect((await post('alice', { stored: [1], downloading: null }, closing)).status).toBe(403);
+    expect(aliceReportedAt()).toBeNull();
+  });
+
   it('gives each connection its own nonce, and accepts either while both are open', async () => {
     const first = await connect('alice');
     const second = await connect('alice');

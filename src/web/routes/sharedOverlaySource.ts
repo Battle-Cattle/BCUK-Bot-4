@@ -177,7 +177,9 @@ router.get('/:login', (req, res, next) => {
  * current download, for the admin page's readiness stats. No login (OBS can't log in), so it is
  * rate-limited per overlay, accepts only ids on the current list, and only with the nonce an open
  * shared overlay connection for that login was sent in its `init` frame, so nobody else can fake
- * an overlay's readiness (#1052). The stats are self-reported and only drive what the admin
+ * an overlay's readiness (#1052). An overlay page loaded before the nonce existed has no script
+ * to send one (reconnecting doesn't reload it), so its reports are refused until its OBS browser
+ * source is refreshed. The stats are self-reported and only drive what the admin
  * page shows, never what plays.
  * @param req - Express request; JSON body `{ stored: number[], downloading: {id, percent} | null }`
  *   and the connection's nonce in the `X-Shared-Overlay-Nonce` header.
@@ -189,9 +191,12 @@ router.post('/:login/report', sharedOverlayReportLimiter, async (req, res) => {
   const login = isValidLogin(String(req.params.login));
   const connections = login === null ? undefined : sharedConnections.get(login);
   if (login === null || !connections?.size) { res.status(404).end(); return; }
-  if (!isLiveReportNonce(req.get(REPORT_NONCE_HEADER), connections)) { res.status(403).end(); return; }
+  const nonce = req.get(REPORT_NONCE_HEADER);
+  if (!isLiveReportNonce(nonce, connections)) { res.status(403).end(); return; }
   try {
     const validIds = new Set((await getSharedVideoEntries()).map((v) => v.id));
+    // Check again: the connection may have closed while the list was read.
+    if (!isLiveReportNonce(nonce, sharedConnections.get(login))) { res.status(403).end(); return; }
     const report = parseReadinessReport(req.body, validIds);
     if (!report) { res.status(400).end(); return; }
     recordReadinessReport(login, report);
