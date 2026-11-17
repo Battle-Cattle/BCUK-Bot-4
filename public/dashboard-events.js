@@ -18,7 +18,7 @@ const EVENT_LABELS = {
   giftsub: 'gifted a sub',
   raid: 'raided',
   redemption: 'redeemed',
-  raffle_payout_failed: 'won a raffle but wasn\'t paid',
+  raffle_payout_failed: 'won a raffle',
 };
 
 const MAX_DISPLAYED_EVENTS = 20;
