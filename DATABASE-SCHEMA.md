@@ -212,7 +212,7 @@ Live activity log for the dashboard's "Recent Events" feed: follows, subs, raids
 | --- | --- | --- |
 | `id` | `INT` PK, auto-increment | |
 | `streamer_id` | `INT` | FK to `streamer.id` ON DELETE CASCADE |
-| `event_type` | `ENUM('follow','sub','resub','giftsub','raid','redemption')` | |
+| `event_type` | `ENUM('follow','sub','resub','giftsub','raid','redemption','raffle_payout_failed')` | `raffle_payout_failed` is a raffle winner whose points couldn't be added (see `raffle_payout`); dashboard only, never sent to the companion app |
 | `display_name` | `VARCHAR(255)` | The acting Twitch viewer's display name |
 | `detail` | `VARCHAR(500)` NULL | Short additional context (e.g. raid viewer count, redeemed reward name) |
 | `redemption_id` | `VARCHAR(64)` NULL, UNIQUE | Twitch's own redemption id, set only for `redemption` rows. Lets a retried `INSERT` for the same physical redemption (see `handleRedemption`'s dedup pending/handled lifecycle) collide on the unique index instead of creating a duplicate row. `NULL` for the other five event types, which have no equivalent id — a `UNIQUE` index permits any number of `NULL`s |
@@ -327,6 +327,25 @@ Expected constraints:
 
 - `UNIQUE KEY uq_loyalty_points (streamer_id, twitch_username)` — one balance row per viewer per streamer.
 - `KEY idx_loyalty_points_leaderboard (streamer_id, balance DESC)` — accelerates the `!points leaderboard` / web leaderboard query.
+
+## `raffle_payout`
+
+One row per raffle winner: the ledger that makes each winner's credit happen at most once. A draw writes its winners' rows (one shared `raffle_id`) before crediting anyone; each credit then locks its row and, only if `paid_at` is still `NULL`, adds `amount` to the winner's `loyalty_points` balance and sets `paid_at` in the same transaction. A retry after an ambiguous commit therefore finds the row paid and doesn't credit twice. A failed credit is retried twice (1s, then 3s later), or not at all once shutdown has begun. After the last failed attempt the row is read back with a locking read (`FOR SHARE`, waiting at most 5s), since that attempt may have committed with its reply lost, or still be finishing on the server: a paid row counts as paid. A row still unpaid is a winner chat was told wasn't paid (or, if it couldn't be read, may not have been), and the streamer's dashboard shows a `raffle_payout_failed` event for it.
+
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | `BIGINT` PK, auto-increment | |
+| `raffle_id` | `CHAR(36)` | UUID of the draw, shared by its winners' rows |
+| `streamer_id` | `INT` | FK to `streamer.id` ON DELETE CASCADE |
+| `twitch_username` | `VARCHAR(64)` | The winner's Twitch login |
+| `amount` | `INT` | Points owed; `CHECK (amount > 0)` |
+| `created_at` | `TIMESTAMP` | When the draw recorded the row |
+| `paid_at` | `TIMESTAMP` nullable | Set in the same transaction as the credit; `NULL` while unpaid |
+
+Expected constraints:
+
+- `UNIQUE KEY uq_raffle_payout_winner (raffle_id, twitch_username)` — one row per winner per draw.
+- `KEY idx_raffle_payout_streamer (streamer_id, created_at)`.
 
 ## `loyalty_points_config`
 

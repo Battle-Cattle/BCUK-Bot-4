@@ -414,12 +414,13 @@ describe('GET /events/recent', () => {
     expect(res.body).toEqual({ ok: false });
   });
 
-  it('returns activity events mapped to the companion shape, filtering out redemption rows', async () => {
+  it('returns activity events mapped to the companion shape, filtering out redemption and raffle payout failure rows', async () => {
     const occurredAt = new Date('2026-07-17T12:00:00Z');
     vi.mocked(getStreamerByDiscordId).mockResolvedValue({ id: 123 } as any);
     vi.mocked(getRecentStreamerEvents).mockResolvedValue([
       { id: 42, eventType: 'raid', displayName: 'raider1', detail: '12 viewers', occurredAt },
       { id: 43, eventType: 'redemption', displayName: 'redeemer1', detail: 'Cool Reward', occurredAt },
+      { id: 44, eventType: 'raffle_payout_failed', displayName: 'winner1', detail: "50 points couldn't be added", occurredAt },
     ]);
 
     const res = await supertest(buildApp()).get('/events/recent').set('x-test-discord-id', 'user1');

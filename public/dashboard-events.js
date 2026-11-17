@@ -8,6 +8,7 @@ const EVENT_ICONS = {
   giftsub: '🎁',
   raid: '🚀',
   redemption: '🪙',
+  raffle_payout_failed: '⚠️',
 };
 
 const EVENT_LABELS = {
@@ -17,6 +18,7 @@ const EVENT_LABELS = {
   giftsub: 'gifted a sub',
   raid: 'raided',
   redemption: 'redeemed',
+  raffle_payout_failed: 'won a raffle',
 };
 
 const MAX_DISPLAYED_EVENTS = 20;
