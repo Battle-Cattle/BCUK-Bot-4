@@ -43,7 +43,7 @@ function resolvePlaceholder(match: string, key: string, vars: Record<string, str
  * Zero-width space put in front of chat text that would otherwise begin with a Twitch chat
  * command character, so Twitch shows it as text instead of reading it as a command (e.g. `/me`).
  */
-export const CHAT_COMMAND_GUARD = '​';
+export const CHAT_COMMAND_GUARD = '\u200B';
 
 /**
  * Whether `text`, ignoring leading whitespace, begins with a character Twitch chat reads as the
