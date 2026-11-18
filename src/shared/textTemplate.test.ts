@@ -53,6 +53,12 @@ describe('fillTemplate', () => {
   });
 });
 
+describe('CHAT_COMMAND_GUARD', () => {
+  it('is a zero-width space', () => {
+    expect(CHAT_COMMAND_GUARD).toBe('\u200B');
+  });
+});
+
 describe('leadingChatCommandChar', () => {
   it('returns the command character a text begins with, ignoring leading whitespace', () => {
     expect(leadingChatCommandChar('/me hi')).toBe('/');
