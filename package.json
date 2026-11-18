@@ -73,7 +73,7 @@
     "@vitest/coverage-v8": "^5.1.0",
     "@vitest/eslint-plugin": "^1.6.28",
     "eslint": "^10.15.0",
-    "eslint-plugin-jsdoc": "^65.4.6",
+    "eslint-plugin-jsdoc": "^65.4.7",
     "eslint-plugin-sonarjs": "^4.2.2",
     "globals": "^17.14.0",
     "knip": "6.45.1",
