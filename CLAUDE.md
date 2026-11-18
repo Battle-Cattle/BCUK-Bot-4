@@ -211,25 +211,8 @@ The `precommit` skill runs "ALWAYS: Before Committing" and picks the full `npm t
 
 ## Related repos
 
-`BCUK-Companion-Core`, `BCUK-Companion-ExpiredMinotaur` and `BCUK-StreamDeck-Plugin` follow the same code standards, adapted to their language: tests with every change, docstrings on every function, Qlty's complexity limits, and fast checks on what changed before committing, with CI's full run as the gate. The plugin's `eslint.config.js` is a port of this repo's; the .NET repos enforce docs with StyleCop's SA1600 rules. Their `CLAUDE.md` files carry the same "PR Reviews (Qlty)" and "PR Reviews (CodeRabbit)" sections, word for word. When you change a shared rule here, make the same change in those three files.
+`BCUK-Companion-Core`, `BCUK-Companion-ExpiredMinotaur` and `BCUK-StreamDeck-Plugin` follow the same code standards, adapted to their language: tests with every change, docstrings on every function, Qlty's complexity limits, and fast checks on what changed before committing, with CI's full run as the gate. The plugin's `eslint.config.js` is a port of this repo's; the .NET repos enforce docs with StyleCop's SA1600 rules. Their `CLAUDE.md` files were once synced from this one to bring them up to the same standards; they're maintained separately now, so a change here doesn't need copying there.
 
-## PR Reviews (Qlty)
+## PR Reviews (Qlty and CodeRabbit)
 
-Qlty's PR comments (code smells such as file/function complexity, too many returns, duplication, plus diff-coverage gaps) are this repo's standards, not optional suggestions. **Never dismiss or resolve a Qlty finding without fixing it**, and never reply that it "stays as is". This applies to inline review comments and to rows in the "new issues" or coverage summary alike. Where the fix goes depends on its scope:
-- **In the same PR** when the fix stays within what the PR changes: code it adds (a new file, function or test) or the code it rewrites.
-- **In a follow-up PR** when the fix means restructuring existing code beyond the PR's change, typically a file-complexity finding on a file that already existed. Leave the finding on the PR, say in the PR description which follow-up fixes it, and open that follow-up (based on this PR's branch if it needs its changes). If you're unsure which applies, ask the user.
-
-How to fix each kind:
-- **Complexity, returns or structure:** refactor (extract helpers or a module) until the metric is under the threshold, keeping behaviour unchanged and tests green.
-- **File complexity ("High total complexity"):** the summary row doesn't name the file and Qlty's issue page needs a login, so ask the user which file it is instead of guessing. A file the PR creates is fixed in the PR; an existing file is a follow-up, as above. Either way, read the whole file and choose the split that follows the code's own seams over moving out whatever lifts out most easily: parsing or validation into the module that already owns it, repeated branching folded into a shared helper, or routes split by domain. Say which option you chose and why, and leave headroom under the threshold so the next small change doesn't trip it again.
-- **Uncovered new lines:** add tests that cover them, in the same PR.
-
-After pushing a fix, check that Qlty's next analysis of that PR no longer lists the finding.
-
-## PR Reviews (CodeRabbit)
-
-CodeRabbit reviews each push to a non-draft PR (marking a draft ready triggers one by itself). It's rate-limited per developer and **never retries on its own**. Only when a comment says "Review limit reached" with a wait time: wait that long, then post exactly one `@coderabbitai review` (only what changed since the last review), or `@coderabbitai full review` when the last Merge Risk was 🟡 Moderate or higher or the changes since are large. Any other "skipped" reason (draft, no new commits) needs no action.
-
-**Merge Risk:** after every review, read the **Merge Risk** line in CodeRabbit's "📝 Walkthrough" comment, which is rewritten in place each time, not just the inline comments. A caveat under it is a real concern even at 🔵 Low: fix it, or post one PR comment saying why it's acceptable, before treating the PR as mergeable. After pushing a fix, say what the risk was and which commit fixes it in a comment tagging `@coderabbitai`; if the risk was 🟡 Moderate or higher, the re-review must be a `@coderabbitai full review`. Repeat until a review comes back with the risk resolved or explicitly accepted. [BCUK-Bot-4 PR #612](https://github.com/Battle-Cattle/BCUK-Bot-4/pull/612) shows the full pattern. This applies to any PR you're driving to green.
-
-**Don't thrash:** never push while a review is in progress (it fails with "head commit changed"), and never re-trigger while rate-limited or in progress. A rate-limit reply only reports the remaining cooldown.
+Qlty's findings are this repo's standards: **never dismiss or resolve one without fixing it**. CodeRabbit's **Merge Risk** must be resolved or explicitly accepted before a PR counts as mergeable. The full rules (where each fix goes, how to fix each kind, when and how to re-trigger CodeRabbit) are in the `drive-pr` skill (`.claude/skills/drive-pr/SKILL.md`). Load it whenever you're driving a PR to green.
