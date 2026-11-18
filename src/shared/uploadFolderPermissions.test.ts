@@ -80,6 +80,19 @@ describe('checkUploadFolderPermissions', () => {
     expect(alert).toHaveBeenCalledOnce();
   });
 
+  it('stats the folders one at a time, so a hung mount holds at most one threadpool thread', async () => {
+    let release!: () => void;
+    const stat = vi.fn()
+      .mockImplementationOnce(() => new Promise((resolve) => { release = () => resolve({ mode: 0o40700, uid: UID }); }))
+      .mockResolvedValue({ mode: 0o40700, uid: UID });
+    const done = checkUploadFolderPermissions(alert, { uid: UID, platform: 'linux', stat });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(stat).toHaveBeenCalledTimes(1);
+    release();
+    expect(await done).toEqual([]);
+    expect(stat).toHaveBeenCalledTimes(4);
+  });
+
   it('lists every problem with a folder in one line', async () => {
     const stat = vi.fn().mockResolvedValue({ mode: 0o40777, uid: 0 });
     const [line] = await checkUploadFolderPermissions(alert, { folders: { SFX_FOLDER: '/x' }, uid: UID, platform: 'linux', stat });

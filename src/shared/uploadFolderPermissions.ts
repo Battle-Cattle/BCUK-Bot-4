@@ -80,6 +80,26 @@ async function checkFolder(
 }
 
 /**
+ * Checks the folders one at a time. A stat on a hung network mount holds a libuv threadpool thread
+ * (4 by default) until the mount answers; parallel stats could fill the pool and stall DNS, crypto
+ * and every other fs call in the bot, so this holds at most one.
+ * @param folders - Each setting's name paired with its configured folder.
+ * @param uid - The bot process's uid.
+ * @param stat - The `stat` implementation.
+ * @returns A warning line for each unsafe folder, in the order given.
+ */
+async function checkFolders(
+  folders: [string, string][], uid: number, stat: (target: string) => Promise<FolderStats>,
+): Promise<string[]> {
+  const warnings: string[] = [];
+  for (const [name, folder] of folders) {
+    const line = await checkFolder(name, folder, uid, stat);
+    if (line !== null) warnings.push(line);
+  }
+  return warnings;
+}
+
+/**
  * Warns, in the log and through `alert` (an owner DM in production), when an upload folder is
  * group- or world-writable or owned by another user: anyone else who can write there could race
  * the served-file containment check. Skipped on Windows, which has no POSIX modes or uids.
@@ -95,8 +115,7 @@ export async function checkUploadFolderPermissions(
   if (platform === 'win32' || uid === undefined) return [];
   const stat = options.stat ?? ((target: string) => fs.promises.stat(target));
   const folders = Object.entries(options.folders ?? uploadFolders());
-  const results = await Promise.all(folders.map(([name, folder]) => checkFolder(name, folder, uid, stat)));
-  const warnings = results.filter((line): line is string => line !== null);
+  const warnings = await checkFolders(folders, uid, stat);
   if (warnings.length === 0) return [];
   for (const line of warnings) log.warn(`Unsafe upload folder permissions: ${line}`);
   const fix = 'Make each folder owned and writable only by the bot\'s user, e.g. `chown -R <bot user> <folder> && chmod -R go-w <folder>` (README, "Deployment").';
