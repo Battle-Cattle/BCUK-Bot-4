@@ -1,0 +1,217 @@
+{
+  "_comment": "Illustrative data for ui-check only. Mixed states: a live channel whose bot is disconnected, a live connected one, an offline connected one and one never seen.",
+  "view": "dashboard",
+  "locals": {
+    "user": {
+      "discordId": "100000000000000001",
+      "discordName": "Streamer",
+      "accessLevel": 3,
+      "isOwner": false,
+      "currentGuildId": "900000000000000001",
+      "guilds": [
+        {
+          "id": "900000000000000001",
+          "name": "Battle Cattle"
+        }
+      ]
+    },
+    "status": {
+      "discord": {
+        "ready": true,
+        "tag": "BCUK Bot#0001",
+        "guildName": "Battle Cattle"
+      },
+      "voice": {
+        "connected": true,
+        "channelName": "General",
+        "playing": false,
+        "currentFile": null,
+        "lastCommand": "!clap",
+        "lastSource": "twitch",
+        "lastPlayedAt": "2026-11-18T10:40:00.000Z"
+      },
+      "twitch": {
+        "streamer_one": {
+          "connected": false,
+          "lastConnectedAt": "2026-11-18T09:00:00.000Z",
+          "lastDisconnectedAt": "2026-11-18T10:55:00.000Z",
+          "isLive": true
+        },
+        "streamer_two": {
+          "connected": true,
+          "lastConnectedAt": "2026-11-18T08:00:00.000Z",
+          "lastDisconnectedAt": null,
+          "isLive": true
+        },
+        "streamer_three": {
+          "connected": true,
+          "lastConnectedAt": "2026-11-18T07:30:00.000Z",
+          "lastDisconnectedAt": null,
+          "isLive": false
+        },
+        "streamer_four": {
+          "connected": false,
+          "lastConnectedAt": null,
+          "lastDisconnectedAt": null,
+          "isLive": false
+        }
+      }
+    },
+    "usageStats": {
+      "sfxCount": 12,
+      "commandCount": 34,
+      "counterCount": 5
+    },
+    "recentEvents": [
+      {
+        "eventType": "follow",
+        "displayName": "viewer_a",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:50:00.000Z"
+      },
+      {
+        "eventType": "cheer",
+        "displayName": "viewer_b",
+        "detail": "100 bits",
+        "occurredAt": "2026-11-18T10:45:00.000Z"
+      },
+      {
+        "eventType": "raid",
+        "displayName": "streamer_two",
+        "detail": "12 viewers",
+        "occurredAt": "2026-11-18T10:30:00.000Z"
+      }
+    ],
+    "hasStreamer": true,
+    "needsReconnect": false
+  },
+  "api": {
+    "/api/status": {
+      "discord": {
+        "ready": true,
+        "tag": "BCUK Bot#0001",
+        "guildName": "Battle Cattle"
+      },
+      "voice": {
+        "connected": true,
+        "channelName": "General",
+        "playing": false,
+        "currentFile": null,
+        "lastCommand": "!clap",
+        "lastSource": "twitch",
+        "lastPlayedAt": "2026-11-18T10:40:00.000Z"
+      },
+      "twitch": {
+        "streamer_one": {
+          "connected": false,
+          "lastConnectedAt": "2026-11-18T09:00:00.000Z",
+          "lastDisconnectedAt": "2026-11-18T10:55:00.000Z",
+          "isLive": true
+        },
+        "streamer_two": {
+          "connected": true,
+          "lastConnectedAt": "2026-11-18T08:00:00.000Z",
+          "lastDisconnectedAt": null,
+          "isLive": true
+        },
+        "streamer_three": {
+          "connected": true,
+          "lastConnectedAt": "2026-11-18T07:30:00.000Z",
+          "lastDisconnectedAt": null,
+          "isLive": false
+        },
+        "streamer_four": {
+          "connected": false,
+          "lastConnectedAt": null,
+          "lastDisconnectedAt": null,
+          "isLive": false
+        }
+      }
+    },
+    "/dashboard/events/recent": [
+      {
+        "eventType": "follow",
+        "displayName": "viewer_a",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:50:00.000Z"
+      },
+      {
+        "eventType": "cheer",
+        "displayName": "viewer_b",
+        "detail": "100 bits",
+        "occurredAt": "2026-11-18T10:45:00.000Z"
+      },
+      {
+        "eventType": "raid",
+        "displayName": "streamer_two",
+        "detail": "12 viewers",
+        "occurredAt": "2026-11-18T10:30:00.000Z"
+      }
+    ],
+    "/api/voice/channels": {
+      "ok": true,
+      "channels": [
+        {
+          "id": "1",
+          "name": "General"
+        },
+        {
+          "id": "2",
+          "name": "Gaming"
+        }
+      ],
+      "defaultChannelId": "1",
+      "currentChannelId": "1"
+    }
+  },
+  "sse": {
+    "/dashboard/status/events": [
+      {
+        "data": {
+          "discord": {
+            "ready": true,
+            "tag": "BCUK Bot#0001",
+            "guildName": "Battle Cattle"
+          },
+          "voice": {
+            "connected": true,
+            "channelName": "General",
+            "playing": false,
+            "currentFile": null,
+            "lastCommand": "!clap",
+            "lastSource": "twitch",
+            "lastPlayedAt": "2026-11-18T10:40:00.000Z"
+          },
+          "twitch": {
+            "streamer_one": {
+              "connected": false,
+              "lastConnectedAt": "2026-11-18T09:00:00.000Z",
+              "lastDisconnectedAt": "2026-11-18T10:55:00.000Z",
+              "isLive": true
+            },
+            "streamer_two": {
+              "connected": true,
+              "lastConnectedAt": "2026-11-18T08:00:00.000Z",
+              "lastDisconnectedAt": null,
+              "isLive": true
+            },
+            "streamer_three": {
+              "connected": true,
+              "lastConnectedAt": "2026-11-18T07:30:00.000Z",
+              "lastDisconnectedAt": null,
+              "isLive": false
+            },
+            "streamer_four": {
+              "connected": false,
+              "lastConnectedAt": null,
+              "lastDisconnectedAt": null,
+              "isLive": false
+            }
+          }
+        }
+      }
+    ],
+    "/dashboard/events": []
+  },
+  "waitMs": 800
+}

@@ -1,6 +1,6 @@
 # BCUK Bot 4 — Claude Code Instructions
 
-Folder rules load when you work there: `src/web/CLAUDE.md` (middleware order, auth, access levels) and `src/db/CLAUDE.md` (DB layer, SQL, migrations, DB tests). Task rules are skills: `precommit`, `drive-pr` (Qlty/CodeRabbit), `issue-management`.
+Folder rules load when you work there: `src/web/CLAUDE.md` (middleware order, auth, access levels), `src/db/CLAUDE.md` (DB layer, SQL, migrations, DB tests) and `views/CLAUDE.md` (front end: CSP, EJS, browser scripts, styling). **For work in `public/`, read `views/CLAUDE.md` first**: `public/` is served to the internet, so it holds no `CLAUDE.md`. Task rules are skills: `precommit`, `drive-pr` (Qlty/CodeRabbit), `issue-management`, `work-sub-issue` (one numbered sub-issue to a green PR) and `ui-check` (render a page in Chromium from fixture data).
 
 ## Node/npm version
 
@@ -89,7 +89,7 @@ Every new function or behaviour change **must** include or update a Vitest test,
 
 ## Delegation
 
-Cheaper subagents in `.claude/agents/` take reading-heavy or mechanical work (`pr-triage`, `lint-docs-fixer`, `coverage-filler`, `issue-gardener`); give them the exact files and findings, and review their diffs. Keep in the main session: `migrations/`, the auth middleware order, `src/shared/crypto.ts` and token handling, and the single-instance assumptions.
+Cheaper subagents in `.claude/agents/` take reading-heavy or mechanical work (`pr-triage`, `lint-docs-fixer`, `coverage-filler`, `issue-gardener`, `acceptance-checker`); give them the exact files and findings, and review their diffs. Keep in the main session: `migrations/`, the auth middleware order, `src/shared/crypto.ts` and token handling, and the single-instance assumptions.
 
 **Consult `advisor`** (Fable, about twice the main model's cost per token, so only here): before splitting a large issue or starting a cross-module feature; when choosing how to split a file Qlty flags for "High total complexity"; before pushing a migration or a change to the auth middleware or startup sequence; after two failed attempts at the same CI failure.
 

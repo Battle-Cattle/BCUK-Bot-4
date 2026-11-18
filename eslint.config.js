@@ -308,6 +308,24 @@ module.exports = tseslint.config(
     },
   },
   {
+    // Developer tooling bundled with Claude Code skills (e.g. .claude/skills/ui-check/render.mjs):
+    // Node ES modules, run directly via `node`, never shipped. Same docstring rules as src/.
+    files: ['.claude/**/*.mjs'],
+    languageOptions: {
+      sourceType: 'module',
+      globals: { ...globals.node },
+    },
+    plugins: { jsdoc },
+    rules: {
+      'jsdoc/require-jsdoc': ['error', { publicOnly: false, require: { FunctionDeclaration: true } }],
+      'jsdoc/require-param': ['error', { checkDestructured: false }],
+      'jsdoc/require-param-description': 'error',
+      'jsdoc/require-returns': 'error',
+      'jsdoc/require-returns-description': 'error',
+      'jsdoc/check-param-names': ['error', { checkDestructured: false }],
+    },
+  },
+  {
     // Plain CommonJS CLI scripts, run directly via `node` — not part of the src/**/*.ts
     // TypeScript program, so they need their own Node globals instead of tsconfig's.
     files: ['scripts/**/*.js'],
