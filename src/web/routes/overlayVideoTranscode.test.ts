@@ -51,9 +51,17 @@ describe('buildWebmTranscodeArgs', () => {
     const args = buildWebmTranscodeArgs('/in.mov.upload', '/out.webm');
     expect(args[args.indexOf('-i') + 1]).toBe('/in.mov.upload');
     expect(args.at(-1)).toBe('/out.webm');
-    expect(args[args.indexOf('-f') + 1]).toBe('webm');
+    expect(args[args.lastIndexOf('-f') + 1]).toBe('webm');
     expect(args[args.indexOf('-c:v') + 1]).toBe('libvpx-vp9');
     expect(args[args.indexOf('-c:a') + 1]).toBe('libopus');
+  });
+
+  it('pins the input to the QuickTime demuxer and local files before -i', () => {
+    const args = buildWebmTranscodeArgs('/in.mov.upload', '/out.webm');
+    const input = args.indexOf('-i');
+    expect(args.slice(input - 4, input + 2)).toEqual(['-protocol_whitelist', 'file', '-f', 'mov', '-i', '/in.mov.upload']);
+    // Nothing else before -i may override the pinned format or protocols.
+    expect(args.slice(0, input).filter((arg) => arg === '-f' || arg === '-protocol_whitelist')).toHaveLength(2);
   });
 
   it('keeps the alpha channel', () => {
