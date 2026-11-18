@@ -22,4 +22,4 @@ There are no releases. Only the current `main` branch, which is what's deployed,
 
 - **OAuth tokens** (the Twitch bot account's and the EventSub broadcaster tokens) are stored encrypted with AES-256-GCM under `EVENTSUB_TOKEN_SECRET`. On rotation, the bot re-encrypts them under the new key at startup (see the README's "Rotating EVENTSUB_TOKEN_SECRET").
 - **API keys and one-time codes** (Stream Deck keys, companion app tokens and OAuth codes) are stored only as SHA-256 hashes. The plaintext is shown once, when it's created.
-- **Secrets** (bot tokens, client secrets, database credentials, the encryption key) live only in `.env`, which is never committed.
+- **Secrets** (bot tokens, client secrets, database credentials, the encryption key) are set in `.env`, which is never committed. The README asks operators to keep copies elsewhere too: a backup of `.env` off the server, and the previous `EVENTSUB_TOKEN_SECRET` after a rotation, for restoring older dumps. Those copies, and the database dumps (which hold the encrypted tokens), need the same care as `.env` itself (see the README's "Backups").
