@@ -87,6 +87,11 @@ export function stopWebmTranscodes(): void {
  * from the uploader's machine ends up in the served file. `-loglevel info` makes ffmpeg print the
  * source's length (`Duration:`) and `-progress pipe:1` reports how far it has encoded on stdout,
  * which together give the conversion's percentage (see `createFfmpegProgressTracker`).
+ * The input is pinned rather than auto-detected: `-f mov` (ffmpeg's `mov,mp4,…` demuxer) because
+ * only uploads `detectVideoType` identified as QuickTime are converted, and
+ * `-protocol_whitelist file` so the input can only ever be read as a local file. Neither depends on
+ * the upload's magic-byte check or ffmpeg's probe order to keep playlist-style inputs (HLS,
+ * concat) that could reference other files or URLs from being opened.
  * @param inputPath - Absolute path of the uploaded source video.
  * @param outputPath - Absolute path to write the WebM to.
  * @returns The argument list to pass to ffmpeg.
@@ -94,7 +99,7 @@ export function stopWebmTranscodes(): void {
 export function buildWebmTranscodeArgs(inputPath: string, outputPath: string): string[] {
   return [
     '-hide_banner', '-nostdin', '-loglevel', 'info', '-nostats', '-progress', 'pipe:1', '-y',
-    '-i', inputPath,
+    '-protocol_whitelist', 'file', '-f', 'mov', '-i', inputPath,
     '-map', '0:v:0', '-map', '0:a:0?', '-map_metadata', '-1',
     '-c:v', 'libvpx-vp9', '-pix_fmt', 'yuva420p', '-auto-alt-ref', '0',
     '-crf', '32', '-b:v', '0', '-deadline', 'good', '-cpu-used', '4', '-row-mt', '1',

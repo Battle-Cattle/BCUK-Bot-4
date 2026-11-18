@@ -80,10 +80,21 @@ function formatFromFilename(filename: string): 'wav' | 'mp3' | 'ogg' | null {
 const TRANSCODE_TIMEOUT_MS = 10_000;
 
 /**
+ * ffmpeg arguments for {@link transcodeToMp3}: read OGG from stdin, write MP3 to stdout. Only
+ * clips stored as `ogg` (magic-byte-detected at upload) are transcoded, so the demuxer is pinned
+ * with `-f ogg`, and `-protocol_whitelist pipe` stops the input opening anything but stdin. Neither
+ * relies on the upload check or ffmpeg's probe order to keep playlist-style inputs out.
+ */
+const MP3_TRANSCODE_ARGS: readonly string[] = [
+  '-protocol_whitelist', 'pipe', '-f', 'ogg', '-i', 'pipe:0', '-f', 'mp3', 'pipe:1',
+];
+
+/**
  * Transcodes an in-memory audio buffer to MP3 via `ffmpeg-static`, entirely in memory
  * (stdin/stdout pipes) — used for `ogg` clips, since OpenAI's audio-input models only
  * accept `wav`/`mp3`. Kills the process and rejects if it hasn't finished within
  * `TRANSCODE_TIMEOUT_MS`, so a hung/corrupt input can't block the request indefinitely.
+ * The input is pinned rather than auto-detected (see {@link MP3_TRANSCODE_ARGS}).
  * @param buffer Raw bytes of the source audio file.
  * @returns The transcoded MP3 bytes.
  */
@@ -93,7 +104,7 @@ export function transcodeToMp3(buffer: Buffer): Promise<Buffer> {
       reject(new Error('ffmpeg-static returned no path'));
       return;
     }
-    const proc = spawn(ffmpegPath, ['-i', 'pipe:0', '-f', 'mp3', 'pipe:1']);
+    const proc = spawn(ffmpegPath, [...MP3_TRANSCODE_ARGS]);
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
     const timeout = setTimeout(() => {
