@@ -21,7 +21,7 @@ Do this once per session before `npm install`/`npm ci`/`npm test`/etc. — don't
 
 ## ALWAYS: Before Committing
 
-Run the fast checks on what you changed. CI (`.github/workflows/ci.yml`) runs everything else on every push, so don't repeat its full run locally:
+Run the fast checks on what you changed (the `precommit` skill does this and picks the full suite when needed). CI (`.github/workflows/ci.yml`) runs everything else on every push, so don't repeat its full run locally:
 
 ```bash
 npm run typecheck
@@ -181,22 +181,31 @@ Export `registerXRuntime(runtime)` from the handler file to store the platform c
 
 ## GitHub Issues
 
-Every issue has two independent ratings:
+The rules for issues (severity labels vs the Priority field, sub-issues, keeping issues up to date) are in the `issue-management` skill (`.claude/skills/issue-management/SKILL.md`). Load it before you create, triage, split, recheck or close an issue.
 
-- **Severity = impact**: how much it matters if it's never done (or how bad the bug is). It's a label: `severity:critical`/`severity:high`/`severity:medium`/`severity:low`. Titles don't need a severity prefix. Add a type label too (`bug`, `enhancement`, `documentation`, `security`, …).
-- **Priority = urgency**: how soon it should be done. It's the org-level **Priority** issue field (`Urgent`/`High`/`Medium`/`Low`), not a label or title prefix. Every open issue has one.
+---
 
-The two can differ (e.g. a low-impact fix that's wanted soon, or a high-impact feature that can wait). Don't "correct" one to match the other.
+## Delegation: subagents and the advisor
 
-**Large issues are split into sub-issues**, linked as real GitHub sub-issues (not just mentioned in the body):
+The main session does the design work and reviews everything the others hand back. Reading-heavy or mechanical work goes to a cheaper subagent in `.claude/agents/`, which returns a short result instead of filling the main context:
 
-- Title: `<parent topic> n/N: <what this part does>`, e.g. `Faster test suite 2/4: sub-second, configurable polling in deploy.sh`. Mark optional parts `(optional)`.
-- Body: which parent it's part of and which step of the parent's plan it covers, its scope, tests, and a "Depends on" list of the other parts it needs. The full design stays in the parent.
-- **Priority matches the parent.** Change the parent's and every open sub-issue's together.
-- **Severity is the same as the parent's or lower**, judged on what that part delivers on its own (e.g. a read-only page that's empty until a later part lands is lower than the parts that deliver the feature). **The parent's severity is the highest of its sub-issues'**: when a sub-issue's severity changes, recheck the parent's.
-- Closing the last open sub-issue completes the parent. Close a part that turned out not to be needed as "not planned", with a note on the parent.
+| Agent | Model | Use it for |
+|---|---|---|
+| `pr-triage` | Haiku | After a PR event: reading CI logs, CodeRabbit's walkthrough and Merge Risk, and Qlty's comments, and returning a short list of what to fix. Read-only. |
+| `lint-docs-fixer` | Sonnet | ESLint and JSDoc fixes in named files (`require-param`/`require-returns`, stale `@param`s, `no-floating-promises`). No behaviour changes. |
+| `coverage-filler` | Sonnet | Tests for named uncovered lines (e.g. a Qlty diff-coverage gap). Changes only `*.test.ts`. |
+| `issue-gardener` | Sonnet | Bulk issue work under the `issue-management` skill. |
+| `advisor` | Fable | A second opinion at a decision point (see below). Read-only; returns a plan or a list of risks, not code. |
 
-**Keeping issues up to date:** an issue says which commit it was checked against (``checked against `main` @ `<sha>` ``). When you recheck one, add a dated note with the new sha rather than silently rewriting it. Mark finished items as done (strike through or tick them, saying when and in which PR) instead of deleting them. When an issue's premise has changed (e.g. the code it describes was rewritten), re-scope it and keep the original description in a collapsed `<details>` block at the bottom. Before starting on an issue, check its file paths, line counts and defaults against current `main`.
+Keep in the main session: anything touching `migrations/`, the auth middleware order, `src/shared/crypto.ts` or token handling, the single-instance assumptions, and the final review of a subagent's diff. Give a subagent the exact files and findings to work on: it starts without this conversation's context.
+
+**Consult `advisor`** (it costs about twice as much per token as the main model, so only here):
+- before splitting a large issue into sub-issues, or starting a feature that spans several modules;
+- when choosing how to split a file that Qlty flags for "High total complexity";
+- before pushing a migration, or a change to the auth middleware or the startup sequence;
+- after two failed attempts at the same CI failure.
+
+The `precommit` skill runs "ALWAYS: Before Committing" and picks the full `npm test` when the diff touches shared infrastructure. The `drive-pr` skill drives a PR to green with `pr-triage`.
 
 ---
 
