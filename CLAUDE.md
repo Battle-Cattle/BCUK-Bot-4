@@ -91,7 +91,7 @@ Every new function or behaviour change **must** include or update a Vitest test,
 
 Cheaper subagents in `.claude/agents/` take reading-heavy or mechanical work (`pr-triage`, `lint-docs-fixer`, `coverage-filler`, `issue-gardener`, `acceptance-checker`); give them the exact files and findings, and review their diffs. Keep in the main session: `migrations/`, the auth middleware order, `src/shared/crypto.ts` and token handling, and the single-instance assumptions.
 
-**Consult `advisor`** (Fable, about twice the main model's cost per token, so only here): before splitting a large issue or starting a cross-module feature; when choosing how to split a file Qlty flags for "High total complexity"; before pushing a migration or a change to the auth middleware or startup sequence; after two failed attempts at the same CI failure.
+**Consult `advisor`** (Opus at high effort in a fresh, read-only context: a second opinion without this session's assumptions, so only here): before splitting a large issue or starting a cross-module feature; when choosing how to split a file Qlty flags for "High total complexity"; before pushing a migration or a change to the auth middleware or startup sequence; after two failed attempts at the same CI failure.
 
 ## PR reviews and issues
 
