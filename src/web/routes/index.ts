@@ -46,7 +46,7 @@ import { requireAuth, requireAuthJson, requireGuildContext } from '../middleware
 import { authLimiter, streamdeckAuthFailureLimiter } from '../rateLimits';
 
 // Every feature route, mounted in one place so server.ts keeps only the app-wide middleware
-// chain (see "Web Server" in CLAUDE.md). The order below matters: routers share prefixes and
+// chain (see "Web Server" in src/web/CLAUDE.md). The order below matters: routers share prefixes and
 // fall through via next(), and the requireAuth/requireGuildContext gates must run before any
 // router that checks an access level.
 

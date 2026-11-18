@@ -18,7 +18,9 @@ public/downloads/*
 .claude/*
 !.claude/settings.json
 !.claude/hooks/
-!.claude/skills
+!.claude/skills/
+!.claude/agents/
+ui-check-output/
 logs/*
 !logs/.gitkeep
 node_modules.old/
