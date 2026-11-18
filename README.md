@@ -196,3 +196,11 @@ ffmpeg -i airhorn.mp3 -c:a libopus -b:a 96k -ar 48000 -ac 2 airhorn.ogg
 ```
 
 A converted file is a new filename, so re-upload it on the SFX page (or update the `sfx.file` row) and remove the old one.
+
+## Security
+
+To report a vulnerability, see [SECURITY.md](SECURITY.md). Please don't open a public issue for one.
+
+## Licence
+
+No licence: all rights reserved. The code is public to read, but no permission is granted to copy, modify or redistribute it.
