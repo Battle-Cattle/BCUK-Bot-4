@@ -311,6 +311,58 @@ describe('sayInChannel', () => {
     expect(chunks).toEqual(['a'.repeat(500), `${'b'.repeat(250)} ${'c'.repeat(249)}`]);
   });
 
+  it('guards a later chunk that starts with / and leaves room for the guard within the length limit', async () => {
+    await connectBot();
+    const message = `${'a'.repeat(400)} /${'b'.repeat(600)}`;
+    const sent = sayInChannel('#streamer', message);
+    await vi.runAllTimersAsync();
+    await sent;
+    const chunks = mockClient.irc.say.mock.calls.map((call) => call[1] as string);
+    // The 600-character token is cut at 499 characters, not 500, so the guarded chunk is exactly 500.
+    expect(chunks).toEqual(['a'.repeat(400), `\u200B/${'b'.repeat(498)}`, 'b'.repeat(102)]);
+  });
+
+  it('does not split an emoji across chunks at a hard cut', async () => {
+    await connectBot();
+    const message = `${'a'.repeat(499)}😀${'b'.repeat(10)}`;
+    const sent = sayInChannel('#streamer', message);
+    await vi.runAllTimersAsync();
+    await sent;
+    const chunks = mockClient.irc.say.mock.calls.map((call) => call[1] as string);
+    expect(chunks).toEqual(['a'.repeat(499), `😀${'b'.repeat(10)}`]);
+  });
+
+  it('keeps the usual cut after a lone high surrogate that has no low half', async () => {
+    await connectBot();
+    const message = `${'a'.repeat(499)}\uD800${'b'.repeat(500)}`;
+    const sent = sayInChannel('#streamer', message);
+    await vi.runAllTimersAsync();
+    await sent;
+    const chunks = mockClient.irc.say.mock.calls.map((call) => call[1] as string);
+    expect(chunks).toEqual([`${'a'.repeat(499)}\uD800`, 'b'.repeat(500)]);
+  });
+
+  it('does not split an emoji at the shorter cut of a guarded chunk', async () => {
+    await connectBot();
+    const message = `${'a'.repeat(10)} /${'b'.repeat(497)}😀c`;
+    const sent = sayInChannel('#streamer', message);
+    await vi.runAllTimersAsync();
+    await sent;
+    const chunks = mockClient.irc.say.mock.calls.map((call) => call[1] as string);
+    expect(chunks).toEqual(['a'.repeat(10), `\u200B/${'b'.repeat(497)}`, '😀c']);
+    chunks.forEach((chunk) => { expect(chunk.length).toBeLessThanOrEqual(500); });
+  });
+
+  it('leaves the first chunk of a split message unguarded, since the sender decides that', async () => {
+    await connectBot();
+    const message = `/me ${'a'.repeat(496)} ${'b'.repeat(10)}`;
+    const sent = sayInChannel('#streamer', message);
+    await vi.runAllTimersAsync();
+    await sent;
+    const chunks = mockClient.irc.say.mock.calls.map((call) => call[1] as string);
+    expect(chunks).toEqual([`/me ${'a'.repeat(496)}`, 'b'.repeat(10)]);
+  });
+
   it('applies the non-privileged per-channel floor between chunks of the same split message', async () => {
     await connectBot();
     const longMessage = `${'a'.repeat(490)} ${'b'.repeat(20)}`;

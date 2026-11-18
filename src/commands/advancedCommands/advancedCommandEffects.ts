@@ -3,7 +3,7 @@
 // thrown), so one failing effect can't stop the others or undo the points already spent.
 import type { DbAdvancedCommand } from '../../db';
 import { createLogger } from '../../shared/logger';
-import { fillTemplate } from '../../shared/textTemplate';
+import { fillChatTemplate, fillTemplate } from '../../shared/textTemplate';
 import { pickWeightedRandom } from '../../audio/soundSelector';
 import {
   alertRuntimeRegistry,
@@ -63,7 +63,7 @@ async function sendReply(use: AdvancedCommandUse, vars: Record<string, string>):
   const runtime = advancedCommandRuntimeRegistry.get();
   if (use.source !== 'chat' || !use.command.response || !runtime) return;
   try {
-    await runtime.send(use.channel, fillTemplate(use.command.response, vars));
+    await runtime.send(use.channel, fillChatTemplate(use.command.response, vars));
   } catch (err) {
     log.error(`Failed to send reply for advanced command ${use.command.id} in ${use.channel}:`, err);
   }
