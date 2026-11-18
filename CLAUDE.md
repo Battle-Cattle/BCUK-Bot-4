@@ -1,27 +1,20 @@
 # BCUK Bot 4 — Claude Code Instructions
 
+Folder rules load when you work there: `src/web/CLAUDE.md` (middleware order, auth, access levels) and `src/db/CLAUDE.md` (DB layer, SQL, migrations, DB tests). Task rules are skills: `precommit`, `drive-pr` (Qlty/CodeRabbit), `issue-management`.
+
 ## Node/npm version
 
-`package.json` pins `"engines": { "node": ">=24.22.3" }`, and CI (`.github/workflows/ci.yml`) installs Node `24.x` via `actions/setup-node@v7`, which brings npm 11+. **Always match that before running any `npm` command** — a sandbox's default Node (e.g. the `/opt/node22` on PATH in some environments) ships an older npm whose `npm ci` is stricter about `overrides` bookkeeping than npm 11's and can fail with a spurious `Missing: <pkg>@<version> from lock file` even against a perfectly valid, CI-green lockfile (see the `filing-cabinet`/`typescript` override in `overrides` — this bit us once). If Node 24 isn't already active:
+Node 24.22.3+ with npm 11+, as in `package.json` `engines` and CI. **Check `node -v`/`npm -v` before any `npm` command**: an older npm's `npm ci` fails with a spurious `Missing: <pkg>@<version> from lock file` against this valid lockfile (the `filing-cabinet`/`typescript` override), and `.npmrc`'s `engine-strict=true` refuses older Node. The SessionStart hook switches to Node 24 when the session opens in this repo; otherwise:
 
 ```bash
-export NVM_DIR="${NVM_DIR:-/opt/nvm}" && source "$NVM_DIR/nvm.sh"
-nvm install 24 && nvm use 24
-node -v   # expect 24.x
-npm -v    # expect 11.x
+export NVM_DIR="${NVM_DIR:-/opt/nvm}" && source "$NVM_DIR/nvm.sh" && nvm install 24 && nvm use 24
 ```
 
-(If `$NVM_DIR/nvm.sh` doesn't exist in a given sandbox, find whatever installs/switches Node there instead — the point is Node 24.22.3+ / npm 11+, not this exact path.) `.npmrc` sets `engine-strict=true`, so npm refuses to install on an older Node.
-
-`@types/node` stays on the same major as `engines` (Dependabot ignores its major updates), so type-checking rejects APIs newer than the Node the bot runs on. Bump it in the same change that moves `engines` and CI to a new Node major.
-
-In cloud sessions, the "Cloud with Network" environment's setup script has already run `npm ci` under Node 24 (in this repo and in `BCUK-StreamDeck-Plugin`), so `node_modules` is in place. Your shell still starts on the default Node, so switch as above, but skip the install. The repo's own SessionStart hook (`.claude/hooks/session-start.sh`) only runs when the session opens inside this repo, not when several repos are attached.
-
-Do this once per session before `npm install`/`npm ci`/`npm test`/etc. — don't debug an `npm ci` failure by fighting the lockfile before first checking `node -v`/`npm -v`.
+In cloud sessions `node_modules` is already installed; switch Node but skip the install. `@types/node` stays on the `engines` major: bump it in the same change that moves `engines` and CI.
 
 ## ALWAYS: Before Committing
 
-Run the fast checks on what you changed (the `precommit` skill does this and picks the full suite when needed). CI (`.github/workflows/ci.yml`) runs everything else on every push, so don't repeat its full run locally:
+Run the fast checks on what you changed (the `precommit` skill does this):
 
 ```bash
 npm run typecheck
@@ -29,190 +22,81 @@ npx vitest run --changed origin/main   # only the tests that import a changed fi
 npx eslint $(git diff --name-only --diff-filter=d origin/main -- '*.ts' '*.js' '*.mjs' '*.mts')
 ```
 
-Not `npx tsc`. See "TypeScript 6 + 7" below for why the bare `tsc` command is ambiguous here.
-
-`--changed` follows imports from the changed files, so it misses tests that depend on something indirectly. **Run the full `npm test` instead** when the change touches shared infrastructure: `src/db.ts`, `migrations/` or `DATABASE-SCHEMA.md` (a test replays one against the other), `src/shared/`, `src/test-utils/`, `package.json`/`package-lock.json`, or a `tsconfig*`/`vitest*`/`eslint` config. Leave coverage, `build`, `check:circular`, `check:unused` and `test:toolchain` to CI unless you're changing what they check.
+**Run the full `npm test` instead** when the change touches shared infrastructure: `src/db.ts`, `migrations/` or `DATABASE-SCHEMA.md`, `src/shared/`, `src/test-utils/`, `package.json`/`package-lock.json`, or a `tsconfig*`/`vitest*`/`eslint` config. Leave coverage, `build`, `check:circular`, `check:unused` and `test:toolchain` to CI unless you're changing what they check.
 
 **CI is the gate, not the local run.** A PR isn't done until CI is green. If it fails, reproduce the failing check locally, fix it, and show it passing before pushing again.
 
 ## TypeScript 6 + 7
 
-The project is installed with two TypeScript versions side by side:
-
-- **`typescript7`** (`npm:typescript@7.0.2`, the native Go compiler) does all type-checking and building: `npm run typecheck` and `npm run build` (so `deploy.sh` and CI too). About 5× faster than 6.x on this project, with less memory.
-- **`typescript`** (6.x) stays the package that tools load as a library: typescript-eslint, eslint-plugin-sonarjs, madge and ts-node (`npm run dev`). TypeScript 7.x no longer exposes the JS compiler API (`require('typescript')` returns only `version`), and these tools still need it — typescript-eslint's peer range is `<6.1.0`, and ts-node crashes on 7.x ([TypeStrong/ts-node#2174](https://github.com/TypeStrong/ts-node/issues/2174)). A nested `overrides` entry can't give them their own copy, because a peer dependency always resolves to the root `typescript`. Dependabot ignores `typescript` major updates for the same reason.
-
-Both packages ship a `tsc` bin and which one npm links depends on how it installed (`npm i` and `npm ci` disagree), so `npx tsc`/`node_modules/.bin/tsc` may be either version. Scripts call the 7.x compiler by path (`node node_modules/typescript7/bin/tsc`); `src/shared/typescriptToolchain.test.ts` holds that in place.
-
-**Moving `typescript` itself to 7.x** once typescript-eslint, sonarjs and madge support it: drop the `typescript7` alias, point the scripts back at plain `tsc`, remove the Dependabot ignore, and keep ts-node working by adding `@typescript/typescript6` (the TypeScript team's package of the 6.x API) and running it with `TS_NODE_COMPILER=@typescript/typescript6` in `dev` and `register({ compiler: require.resolve('@typescript/typescript6') })` in the toolchain test (`require.resolve` is also what lets knip see the package as used) — or replace ts-node.
-
----
+`typescript7` (`npm:typescript@7.0.2`) does all type-checking and building; `typescript` (6.x) stays installed because typescript-eslint, sonarjs, madge and ts-node need its JS API, which 7.x doesn't expose. Both ship a `tsc` bin, so **never run `npx tsc`**: use `npm run typecheck`/`npm run build`, which call the 7.x compiler by path. `src/shared/typescriptToolchain.test.ts` holds that in place, and its header explains the setup and how to move `typescript` itself to 7.x. Dependabot ignores `typescript` major updates.
 
 ## Dev
 
 ```bash
 npm run dev             # ts-node src/index.ts
 npm test                # Vitest (everything except the ts-node toolchain smoke test)
-npm run test:toolchain  # ts-node smoke test only — slow (type-checks the project); CI runs it
-npm run test:db         # *.db.test.ts against a real MySQL (needs TEST_DB_*; see the README's "Database tests"); CI runs it
+npm run test:toolchain  # ts-node smoke test only — slow; CI runs it
+npm run test:db         # *.db.test.ts against a real MySQL (see src/db/CLAUDE.md); CI runs it
+npm run lint / check:circular (madge) / check:unused (knip)
 ```
 
-`npm run test:db` covers what the mocked-pool tests can't: foreign-key actions, unique-index errors and the migrations themselves, against MySQL 8.4.11 started from `docker-compose.test-db.yml`. Behaviour that only a real database shows goes in a `*.db.test.ts` next to the module. Run it locally if you change a migration or a DB module's SQL and Docker is available; otherwise leave it to CI.
+Tests run in Vitest's `vmThreads` pool: objects from Node built-ins come from a different realm, so assert on `.name`/`.code`, not `instanceof` against a Node built-in class. Prefer `waitFor` from `src/test-utils/waitFor.ts` over `vi.waitFor`. If a run looks stale, `rm -rf .vitest-cache`. For knip, an export used only in its own file is fine; an alias of another export needs an `@alias` JSDoc tag.
 
-Vitest keeps an on-disk transform cache in `.vitest-cache/` (gitignored, outside `node_modules` so it survives `npm ci`); `deploy.sh` and CI drop/re-key it when `package-lock.json` changes. If a run ever looks stale, `rm -rf .vitest-cache`. In tests, prefer `waitFor` from `src/test-utils/waitFor.ts` over `vi.waitFor` (1ms poll instead of 50ms).
-Tests run in Vitest's `vmThreads` pool (each file gets a fresh VM context on a reused worker thread; ~2x faster than `forks`). Module isolation between files is unchanged, but objects created by Node built-ins come from a different realm, so assert on `.name`/`.code` rather than `instanceof` against a Node built-in class.
+## Layout
 
----
+`src/index.ts` entry point · `src/db.ts` + `src/db/` DB facade and modules · `src/discord/` bot, guild registry, voice presence · `src/twitch/` chat bot, Helix client, `eventsub/`, `monitor/`, `pricing/`, `timers/` · `src/commands/` routing, cooldowns, handlers for both platforms · `src/audio/` voice playback and SFX · `src/web/` Express app and `routes/` · `src/shared/` config, logger, crypto, mutation queues, runtime registry · `src/types/` Express type augmentation · `src/test-utils/` shared fixtures. `DATABASE-SCHEMA.md` is the schema reference; `.devin/wiki.json` is a purpose-only map.
 
-## Directory Structure
+## Code rules
 
-- **`src/index.ts`** — entry point (see Startup Sequence below).
-- **`src/db.ts` + `src/db/`** — DB facade + one module per domain (`users.ts`, `guilds.ts`, `customCommands.ts`, `counters.ts`, `sfx.ts`, `streamMonitor.ts`, `eventSub.ts`, etc.), each with a co-located `*.test.ts`. Writes to cached tables get a cache-invalidating `*Writes.ts` wrapper module (`userWrites.ts`, `customCommandWrites.ts`, `counterWrites.ts`, `sfxWrites.ts`, etc., built on `withInvalidation.ts`) that `db.ts` re-exports in place of the raw write. `db.ts` itself is pure re-exports. Import from `src/db.ts` only (see Critical Invariants).
-- **`src/discord/`** — Discord bot bootstrap, guild registry, voice presence.
-- **`src/twitch/`** — Twitch chat bot + Helix API client, with `eventsub/`, `monitor/`, `pricing/`, `timers/` subfolders.
-- **`src/commands/`** — command routing/cooldowns/handlers shared by both platforms.
-- **`src/audio/`** — voice playback and SFX (see Voice adapter design decision below).
-- **`src/web/`** — Express app (`server.ts`) + route/controller files under `web/routes/` (see Web Server below).
-- **`src/shared/`** — cross-cutting utilities: `config.ts` (env vars), `logger.ts`, `crypto.ts`, `mutationQueue.ts`, `userMutationQueue.ts` (per-user write serialisation), `runtimeRegistry.ts` (runtime-injection slots), `statusStore.ts`, `textTemplate.ts`.
-- **`src/types/`** — Express `Request`/session type augmentation.
-- **`src/test-utils/`** — shared test fixtures/mocks.
-
----
-
-## Tech Stack
-
-- **Runtime:** discord.js v14, `@twurple/chat` + `@twurple/auth` (Twitch chat), `mediaplex` (Opus), express v5 + `express-session`/`express-mysql-session`, `mysql2`, `helmet`, `winston`.
-- **TypeScript:** `strict: true` plus `noUncheckedIndexedAccess` (so `rows[0]` is `T | undefined` — guard it, or use `!` only where a nearby check guarantees it, with a comment saying which), target ES2024, `moduleResolution: NodeNext`. `package.json` pins `"engines": { "node": ">=24.22.3" }` — see Node/npm version above.
-- **ESLint** (flat config, type-aware): `no-floating-promises`, `no-misused-promises`, and `no-console` are all **errors**, not warnings — these affect how code must be written (await/void everything, use `logger` not `console.*`). `no-explicit-any` is a warning; relaxed for `*.test.ts`. `eslint-plugin-jsdoc` enforces the Docstrings rule below (`require-jsdoc` on function declarations, methods and module-level arrow functions, in `src/` and the `public/` browser scripts alike; `require-param`/`require-returns`, with descriptions, for what each documented function takes and returns; `check-param-names` catches stale `@param`s), `eslint-plugin-sonarjs` adds complexity checks on source files (`sonarjs/cognitive-complexity` ≤ 15, the same metric as Qlty's function-complexity smell, plus cyclomatic `complexity` ≤ 12, `max-params` 5, `max-depth` 3, `max-nested-callbacks` 3, all errors), and `@vitest/eslint-plugin` guards tests (no `.only`/`.skip`, no assertion-free tests). The browser scripts in `public/` (classic `<script>`s, no bundler) are linted too, with browser globals: a name a script uses from another script on the same page goes in a `/* global name */` header at its top (`name:writable` if it assigns to it).
-- **Test/build scripts:** `npm run build` (`tsc -p tsconfig.build.json`, on TypeScript 7), `npm run typecheck` (`tsc --noEmit`, the whole project including tests, on TypeScript 7), `npm run lint`, `npm run check:circular` (madge), `npm run check:unused` (knip: unused files, exports and dependencies; `knip.json`). An export used only in its own file is fine; an alias of another export needs an `@alias` JSDoc tag.
-
----
-
-## Startup Sequence (`src/index.ts`)
-
-Boot order in `main()`: verify DB connectivity (ping, exit 1 on failure) → apply pending schema migrations (exit 1 on failure) → re-encrypt stored OAuth tokens under the active `EVENTSUB_TOKEN_SECRET` (`reencryptStoredTokens`; catch-and-log only, see the README's "Rotating EVENTSUB_TOKEN_SECRET") → wire Twitch/EventSub runtime callbacks → `reloadGuildRegistry()` (must complete before Discord connects, exit 1 on failure) → start Discord bot → start Twitch bot → start web panel (a listen failure such as `EADDRINUSE` exits 1 — most likely an old process still running) → start schedulers (counter/reward-pricing/timer) → start Twitch monitor + EventSub (fire-and-forget, catch-and-log only, doesn't crash the process).
-
-- **`uncaughtException`/`unhandledRejection`** both log and exit 1 — deliberate: the app fails loudly instead of limping on with a corrupted state, and production's systemd unit (`deploy/bcuk-bot.service`, `Restart=on-failure`) brings it back up from a clean start. Exit 1 for fatal errors and 0 only after a deliberate `shutdown()`, so systemd can tell them apart. Don't add a handler that swallows and continues. Every exit goes through `exitProcess(code)` in `index.ts`, never a bare `process.exit()`: it waits (up to 2s, `flushLogs` in `src/shared/logger.ts`) for the log files to be written, so the reason for a fatal exit reaches `error-*.log`, not just the console.
-- **`GET /healthz`** (`src/web/server.ts`) answers once the web panel is listening, which `main()` reaches only after the DB ping, guild registry and bot startup. `deploy.sh` polls it after restarting the service, then checks the bot stays up for 30s; if either fails it rolls back to the previous build (see the README's "Deployment"). Keep it unauthenticated, ahead of the session and rate-limit middleware, and free of any detail beyond "ok".
-- **`shutdown()`** runs on `SIGINT`/`SIGTERM`: sends the owner's "shutting down" DM (given up after 5s), closes the web panel (ends SSE streams at once and refuses new ones, lets in-flight requests finish for up to 10s, `WEB_DRAIN_TIMEOUT_MS`, then drops the rest; all inside the unit's `TimeoutStopSec=30`), stops ffmpeg transcodes and the schedulers/EventSub/monitor/bots, disconnects audio, closes the DB pool, flushes the log files, then exits 0. A teardown still running after 25s (`SHUTDOWN_DEADLINE_MS`, e.g. a hung bot disconnect) is logged and exits 1 instead, before systemd's SIGKILL.
-- **Single instance only.** Production runs exactly one bot process against the database. Several subsystems rely on that: the redemption reconciliation cursors (`twitchEventSubReconciliationCursors.ts`) and the WebSocket/redemption dedup caches are in-memory per process, the schedulers (counter/reward-pricing/timer) assume they're the only ticker, and the `redemption_handled` ledger is a check-then-act guard, not a cross-process lock. Don't design for horizontal scaling without first revisiting those; a change that assumes more than one instance needs a design decision, not a drive-by fix.
-
----
-
-## Web Server (`src/web/server.ts`)
-
-Middleware order: `helmet` (custom CSP) → `GET /healthz` → EJS views → static → body parsers → `trust proxy: 1` → `preSessionLimiter` (coarse per-IP cap, so a replayed session cookie can't hit the session store unthrottled) → session (`express-mysql-session`, backed by the `sessions` MySQL table, on its own bounded pool from `getSessionPool`; a full queue answers 503) → `enforceSessionLifetime` (`src/web/sessionLifetime.ts`: a session lasts 24h since its last page load, renewed only by `Sec-Fetch-Mode: navigate` requests, and at most 7 days since login) → rate limiters (general/overlay/session; `streamdeckLimiter` is applied per-route instead. An OBS overlay's own requests (`isOverlayTraffic` in `src/web/overlayTraffic.ts`: event streams, file downloads, the shared overlay's reports) skip the general limiter and get `overlayTrafficLimiter`) → `res.locals.user`/csrfToken → feature routes (`mountRoutes` in `src/web/routes/index.ts`, which keeps their mount order) → 404 and error handlers. The general/session rate limiters run after session middleware deliberately — `sessionLimiter`'s key generator needs `req.session` populated.
-
-Auth middleware (`src/web/middleware.ts`), applied in this order:
-1. **`requireAuth`** — session check.
-2. **`requireGuildContext`** — re-derives the user's access level from the DB for the active guild on every request. **Must run before any `requireAccessLevel` check** — skipping it leaves a stale or absent access level that could bypass a mod/manager/admin gate.
-3. **`requireAccessLevel(level)`** factory → `requireMod`/`requireManager`/`requireAdmin`.
-4. **`requireOwner`** — separate global super-admin check via `is_owner`, not part of the `AccessLevel` ladder.
-5. **`authenticateBearerToken()`** factory → `requireApiKey` (Streamdeck) / `requireCompanionKey` (companion app), for API routes that bypass session auth entirely.
-
----
+- **TypeScript:** `strict` plus `noUncheckedIndexedAccess`, so `rows[0]` is `T | undefined`: guard it, or use `!` only where a nearby check guarantees it, with a comment saying which.
+- **ESLint errors that shape code:** `no-floating-promises`/`no-misused-promises` (await or `void` everything), `no-console` (use `logger`), and complexity limits on source files: `sonarjs/cognitive-complexity` ≤ 15 (Qlty's metric too), `complexity` ≤ 12, `max-params` 5, `max-depth` 3, `max-nested-callbacks` 3. `public/` browser scripts are linted too: a name used from another script on the same page goes in a `/* global name */` header (`name:writable` if assigned).
+- **Lightweight Discord imports:** `discord.js` costs ~300ms per test file, so take runtime values from the packages it re-exports: `discord-api-types/v10` (`ChannelType`, `Routes`, `RESTJSONErrorCodes`), `@discordjs/rest` (`DiscordAPIError`, `HTTPError`, `makeURLSearchParams`), `@discordjs/builders` (`EmbedBuilder`), `@discordjs/formatters` (`escapeMarkdown`). Types-only uses are `import type { … } from 'discord.js'`. Only `discordBot.ts` imports `discord.js` at runtime.
 
 ## Critical Invariants
 
 - **`mediaplex` must be the first import in `src/index.ts`** — registers the Opus provider. Never reorder.
-- **Import DB functions from `src/db.ts` only**, never `src/db/*` directly. The facade re-exports some writes from the cache-invalidating `src/db/*Writes.ts` wrappers (`upsertUser`, `updateTwitchBotEnabled`, …) instead of the raw DB modules; `src/db.test.ts` checks that every wrapper is the one exported.
-- **BIGINT columns are strings** (`bigNumberStrings: true` on the pool) — never coerce to `Number`. This protects against precision loss on values that can exceed `Number.MAX_SAFE_INTEGER`, like Discord snowflakes — it does not apply to a BIGINT result you can prove is bounded well within that range (e.g. `COUNT(*)` on a small admin table). If you do parse one of those back to a number, say so at the call site (why this particular value is bounded) — don't let it read like the same blind coercion the rule forbids elsewhere. See `getRowCount` in `src/db/utils.ts` for the pattern.
-- **Blank Twitch names → `NULL`** — `user.twitch_name` has a unique index; empty strings collide.
-- **`mutationQueue`** for concurrent-unsafe DB writes — user mutations serialise through it via `runUserMutation` in `src/shared/userMutationQueue.ts`.
-- **POST routes redirect to `?error=code`** on failure; GET reads it and passes to EJS. Never render errors from a POST handler.
+- **Import DB functions from `src/db.ts` only**, never `src/db/*` directly: it re-exports the cache-invalidating `*Writes.ts` wrappers in place of the raw writes.
+- **BIGINT columns are strings** — never coerce to `Number` (exception for provably bounded values in `src/db/CLAUDE.md`).
+- **Schema changes are a new numbered migration plus a `DATABASE-SCHEMA.md` update.** Never edit an applied migration.
+- **`requireGuildContext` must run before any `requireAccessLevel` check** (`src/web/CLAUDE.md`). Use the `AccessLevel` const, not raw numbers.
+- **POST routes redirect to `?error=code`** on failure; never render errors from a POST handler.
 - **`src/discord/discordUtils.ts`** has `isDiscordNotFoundError` and `tryDeleteDiscordMessage` — import, don't duplicate.
 
----
+## Startup Sequence (`src/index.ts`)
 
-## Access Levels
+Boot order in `main()`: DB ping → migrations → re-encrypt stored OAuth tokens (catch-and-log) → wire Twitch/EventSub callbacks → `reloadGuildRegistry()` (before Discord connects) → Discord bot → Twitch bot → web panel → schedulers → Twitch monitor + EventSub (fire-and-forget, catch-and-log). The DB ping, migrations, guild registry and web listen failures exit 1.
 
-0=User, 1=Mod (+voice), 2=Manager (+user list, streams/commands/counters/SFX), 3=Admin (full). Use `AccessLevel` const from `src/db/users.ts` — not raw numbers. Manager+ = ≥ 2.
-
-**Custom Commands exception:** any user with a linked Twitch account can manage the commands on their own channel. They can add Twitch-only commands, edit/delete commands assigned to them alone, and remove themselves from shared ones. Mod+ manage the whole catalog: Discord/multi-Twitch flags, assignments and server overrides. The rules live in `src/web/routes/commandPermissions.ts`; the Mod+ catalog check, assignee lookup and new-entry assignee rule shared with Timers live in `src/web/routes/selfServiceAccess.ts`.
-
-**Timers exception:** the same self-service model applies to Timers. A user with a linked Twitch account can add timers to their own channel, edit/toggle/delete timers assigned to them alone, and remove themselves from shared ones. Mod+ manage the whole catalog and its assignments. The rules live in `src/web/routes/timerPermissions.ts` (plus the shared `selfServiceAccess.ts`), and streamer writes go through the owner-checked `*OwnTimerCommand*` DB functions.
-
-**Advanced Commands:** per-streamer and self-service only — no catalog, assignments or Mod+ override. Every route resolves the session user's (or the Stream Deck/companion key owner's) streamer record, and every DB function is scoped by `streamer_id`. The DB layer is `src/db/advancedCommand*.ts`, the runtime (gates, effects, companion acknowledgements and refunds) is `src/commands/advancedCommands/`, and the use ledger `advanced_command_usage` makes a refund happen at most once.
-
----
+- **`uncaughtException`/`unhandledRejection` log and exit 1**, deliberately: systemd (`Restart=on-failure`) restarts from a clean state. Don't add a handler that swallows and continues. Exit 0 only after a deliberate `shutdown()`. Every exit goes through `exitProcess(code)`, never a bare `process.exit()`, so the logs are flushed first.
+- **`shutdown()`** (`SIGINT`/`SIGTERM`) tears everything down inside systemd's `TimeoutStopSec=30`; a teardown still running after `SHUTDOWN_DEADLINE_MS` (25s) exits 1.
+- **Single instance only.** Production runs exactly one bot process against the database. The redemption reconciliation cursors, the WebSocket/redemption dedup caches and other in-memory state are per process, the schedulers assume they're the only ticker, and the `redemption_handled` ledger is a check-then-act guard, not a cross-process lock. A change that assumes more than one instance needs a design decision, not a drive-by fix.
 
 ## Design Decisions
 
-**Command matching:** `trigger_string` stores the full prefixed string (e.g. `!clap`). First word is lowercased and queried directly — **no prefix stripping**.
-
-**Lightweight Discord imports:** loading `discord.js` costs ~300ms per test file, so modules that only need a few runtime values take them from the packages discord.js re-exports instead (direct dependencies, kept at the versions discord.js uses): `discord-api-types/v10` (`ChannelType`, `Routes`, `RESTJSONErrorCodes`), `@discordjs/rest` (`DiscordAPIError`, `HTTPError`, `makeURLSearchParams`), `@discordjs/builders` (`EmbedBuilder`), `@discordjs/formatters` (`escapeMarkdown`). Types-only uses are `import type { … } from 'discord.js'`. Only code that constructs the client itself (`discordBot.ts`) imports `discord.js` at runtime; `audioPlayer.ts` is handed the client and only needs its types.
-
-**Voice adapter:** `audioPlayer.ts` uses a custom `DiscordGatewayAdapterCreator` via `client.on('raw', ...)`. `guild.voiceAdapterCreator` is unused — discord.js v14 incompatibility.
-
-**`customCommands.ts` does not own its cache:** it's a pure DB layer with no cache knowledge, to break its import cycle with `customCommandCache.ts`. `customCommandWrites.ts` owns invalidation instead (re-exported by `db.ts`), via `withInvalidation()`-wrapped write functions that call `invalidateCustomCommandLookupCache()` after the underlying `customCommands.ts` write succeeds (same pattern used for `counters.ts`/`alertConfig.ts`/`sfx.ts` via `counterWrites.ts`/`alertConfigWrites.ts`/`sfxWrites.ts`). Don't add a second invalidation call inside `customCommands.ts` itself.
-
-**MySQL 8 upsert:** Row-alias form only: `VALUES (...) AS new_row`. Deprecated `VALUES(col)` not used.
-
-**Migrations:** the bot applies pending `migrations/NNNN_*.sql` files on startup (`src/db/migrations.ts`, tracked in `schema_migrations`; see the README's "Database migrations"). `0001_baseline.sql` is the full schema at the switch. Any schema change is a new numbered file plus a matching `DATABASE-SCHEMA.md` update (a test replays the migrations against the doc). Never edit an applied migration — startup fails on a checksum mismatch. A deploy that brings new migrations and then fails its health check doesn't roll back automatically (the previous build refuses to start against a migration it has no file for, and a migration that failed part way leaves unrecorded DDL behind), so `deploy.sh` stops and prints the manual steps, starting with the database backup it takes before every restart (`scripts/backup-db.sh`).
-
-**Docs:** `DATABASE-SCHEMA.md` is the schema reference. `.devin/wiki.json` is a purpose-only architecture outline (no full prose) — useful as a map before diving into source, not a substitute for reading it.
-
----
+- **Command matching:** `trigger_string` stores the full prefixed string (e.g. `!clap`). The first word is lowercased and queried directly — **no prefix stripping**.
+- **Voice adapter:** `audioPlayer.ts` uses a custom `DiscordGatewayAdapterCreator` via `client.on('raw', ...)`; `guild.voiceAdapterCreator` is unused (discord.js v14 incompatibility).
+- **New Command Handler Pattern:** export `registerXRuntime(runtime)` from the handler file to store the platform client, avoiding circular imports with `src/index.ts`. Build the slot with `createRuntimeRegistry()` from `src/shared/runtimeRegistry.ts`, and call it from `index.ts` after the client is ready.
 
 ## Tests
 
-- Every new function or behaviour change **must** include or update a Vitest test in the relevant `*.test.ts` file alongside the source file.
-- Tests live in `src/__tests__/` or co-located `*.test.ts` files — match the convention of the file being tested.
-- When modifying existing behaviour, update affected tests before committing — never leave a passing-but-wrong test.
-- Run the tests for what you changed before committing (see "ALWAYS: Before Committing" for when that means the full suite), and make sure CI's full run passes.
-
----
+Every new function or behaviour change **must** include or update a Vitest test, co-located `*.test.ts` or `src/__tests__/` (match the file being tested). Update affected tests when behaviour changes — never leave a passing-but-wrong test.
 
 ## Docstrings
 
-- All functions — including exported functions, internal helpers, and anonymous functions (e.g. inline Express route handlers) — **must** have a JSDoc comment describing what they do, their parameters, and return value — one line is enough for simple cases.
-- Each parameter gets an `@param` and a function that returns a value gets an `@returns`, each with a description (e.g. `@param guildId - Discord snowflake of the guild.`). No `{type}` in TypeScript; the signature has it. Say what the value is, not just its name: "Discord snowflake of the guild", not "The guild ID." A destructured parameter needs only its root `@param`.
-- When you change a function's signature or behaviour, update its JSDoc to match — stale docs are worse than no docs.
-- **Test files (`*.test.ts`) are exempt.** Test-local helpers (mock builders like `mockLog`/`mockRes`, response/fixture factories, etc.) and `describe`/`it`/`vi.mock` callbacks don't need JSDoc — a descriptive `it('...')` name documents the behaviour instead. This applies only inside `*.test.ts` files; source files still follow the rule above.
-- **Concise inline callbacks** (e.g. `.map()` row mappers, a `Promise` executor, a `setTimeout` callback, a `catch` handler) don't need a separate JSDoc block. Add a short inline comment only when the behaviour isn't obvious from the code itself.
+- Every function in source files — exported, internal helpers, inline Express route handlers — **must** have a JSDoc comment saying what it does; one line is enough for simple cases. `eslint-plugin-jsdoc` enforces presence; you own the quality.
+- Each parameter gets an `@param` and a function that returns a value gets an `@returns`, each saying what the value is ("Discord snowflake of the guild", not "The guild ID"). No `{type}`. A destructured parameter needs only its root `@param`.
+- When you change a function's signature or behaviour, update its JSDoc — stale docs are worse than none.
+- Exempt: `*.test.ts` files (helpers and `describe`/`it`/`vi.mock` callbacks) and concise inline callbacks (`.map()` mappers, `Promise` executors, `setTimeout`/`catch` handlers).
 
----
+## Delegation
 
-## New Command Handler Pattern
+Cheaper subagents in `.claude/agents/` take reading-heavy or mechanical work (`pr-triage`, `lint-docs-fixer`, `coverage-filler`, `issue-gardener`); give them the exact files and findings, and review their diffs. Keep in the main session: `migrations/`, the auth middleware order, `src/shared/crypto.ts` and token handling, and the single-instance assumptions.
 
-Export `registerXRuntime(runtime)` from the handler file to store the platform client — avoids circular imports with `src/index.ts`. Build the slot with `createRuntimeRegistry()` from `src/shared/runtimeRegistry.ts`. Call it from `index.ts` after the client is ready.
+**Consult `advisor`** (Fable, about twice the main model's cost per token, so only here): before splitting a large issue or starting a cross-module feature; when choosing how to split a file Qlty flags for "High total complexity"; before pushing a migration or a change to the auth middleware or startup sequence; after two failed attempts at the same CI failure.
 
----
+## PR reviews and issues
 
-## GitHub Issues
-
-The rules for issues (severity labels vs the Priority field, sub-issues, keeping issues up to date) are in the `issue-management` skill (`.claude/skills/issue-management/SKILL.md`). Load it before you create, triage, split, recheck or close an issue.
-
----
-
-## Delegation: subagents and the advisor
-
-The main session does the design work and reviews everything the others hand back. Reading-heavy or mechanical work goes to a cheaper subagent in `.claude/agents/`, which returns a short result instead of filling the main context:
-
-| Agent | Model | Use it for |
-|---|---|---|
-| `pr-triage` | Haiku | After a PR event: reading CI logs, CodeRabbit's walkthrough and Merge Risk, and Qlty's comments, and returning a short list of what to fix. Read-only. |
-| `lint-docs-fixer` | Sonnet | ESLint and JSDoc fixes in named files (`require-param`/`require-returns`, stale `@param`s, `no-floating-promises`). No behaviour changes. |
-| `coverage-filler` | Sonnet | Tests for named uncovered lines (e.g. a Qlty diff-coverage gap). Changes only `*.test.ts`. |
-| `issue-gardener` | Sonnet | Bulk issue work under the `issue-management` skill. |
-| `advisor` | Fable | A second opinion at a decision point (see below). Read-only; returns a plan or a list of risks, not code. |
-
-Keep in the main session: anything touching `migrations/`, the auth middleware order, `src/shared/crypto.ts` or token handling, the single-instance assumptions, and the final review of a subagent's diff. Give a subagent the exact files and findings to work on: it starts without this conversation's context.
-
-**Consult `advisor`** (it costs about twice as much per token as the main model, so only here):
-- before splitting a large issue into sub-issues, or starting a feature that spans several modules;
-- when choosing how to split a file that Qlty flags for "High total complexity";
-- before pushing a migration, or a change to the auth middleware or the startup sequence;
-- after two failed attempts at the same CI failure.
-
-The `precommit` skill runs "ALWAYS: Before Committing" and picks the full `npm test` when the diff touches shared infrastructure. The `drive-pr` skill drives a PR to green with `pr-triage`.
-
----
+Qlty's findings are this repo's standards: **never dismiss or resolve one without fixing it**. CodeRabbit's **Merge Risk** must be resolved or explicitly accepted before a PR counts as mergeable. The full rules are in the `drive-pr` skill; the issue rules (severity vs Priority, sub-issues) are in `issue-management`.
 
 ## Related repos
 
-`BCUK-Companion-Core`, `BCUK-Companion-ExpiredMinotaur` and `BCUK-StreamDeck-Plugin` follow the same code standards, adapted to their language: tests with every change, docstrings on every function, Qlty's complexity limits, and fast checks on what changed before committing, with CI's full run as the gate. The plugin's `eslint.config.js` is a port of this repo's; the .NET repos enforce docs with StyleCop's SA1600 rules. Their `CLAUDE.md` files were once synced from this one to bring them up to the same standards; they're maintained separately now, so a change here doesn't need copying there.
-
-## PR Reviews (Qlty and CodeRabbit)
-
-Qlty's findings are this repo's standards: **never dismiss or resolve one without fixing it**. CodeRabbit's **Merge Risk** must be resolved or explicitly accepted before a PR counts as mergeable. The full rules (where each fix goes, how to fix each kind, when and how to re-trigger CodeRabbit) are in the `drive-pr` skill (`.claude/skills/drive-pr/SKILL.md`). Load it whenever you're driving a PR to green.
+`BCUK-Companion-Core`, `BCUK-Companion-ExpiredMinotaur` and `BCUK-StreamDeck-Plugin` follow the same code standards, adapted to their language. Their `CLAUDE.md` files were once synced from this one and are maintained separately now.
