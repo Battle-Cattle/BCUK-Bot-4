@@ -322,6 +322,27 @@ describe('sayInChannel', () => {
     expect(chunks).toEqual(['a'.repeat(400), `\u200B/${'b'.repeat(498)}`, 'b'.repeat(102)]);
   });
 
+  it('does not split an emoji across chunks at a hard cut', async () => {
+    await connectBot();
+    const message = `${'a'.repeat(499)}😀${'b'.repeat(10)}`;
+    const sent = sayInChannel('#streamer', message);
+    await vi.runAllTimersAsync();
+    await sent;
+    const chunks = mockClient.irc.say.mock.calls.map((call) => call[1] as string);
+    expect(chunks).toEqual(['a'.repeat(499), `😀${'b'.repeat(10)}`]);
+  });
+
+  it('does not split an emoji at the shorter cut of a guarded chunk', async () => {
+    await connectBot();
+    const message = `${'a'.repeat(10)} /${'b'.repeat(497)}😀c`;
+    const sent = sayInChannel('#streamer', message);
+    await vi.runAllTimersAsync();
+    await sent;
+    const chunks = mockClient.irc.say.mock.calls.map((call) => call[1] as string);
+    expect(chunks).toEqual(['a'.repeat(10), `\u200B/${'b'.repeat(497)}`, '😀c']);
+    chunks.forEach((chunk) => { expect(chunk.length).toBeLessThanOrEqual(500); });
+  });
+
   it('leaves the first chunk of a split message unguarded, since the sender decides that', async () => {
     await connectBot();
     const message = `/me ${'a'.repeat(496)} ${'b'.repeat(10)}`;

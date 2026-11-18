@@ -82,6 +82,15 @@ describe('fillChatTemplate', () => {
     expect(fillChatTemplate('{arg}.', { arg: '/me' })).toBe(`${CHAT_COMMAND_GUARD}/me.`);
   });
 
+  it('leaves a streamer-written / unchanged when a placeholder before it is empty', () => {
+    expect(fillChatTemplate('{args}/me waves', { args: '' })).toBe('/me waves');
+    expect(fillChatTemplate('{nope} /me waves', {})).toBe(' /me waves');
+  });
+
+  it('guards a / from a placeholder that follows an empty placeholder', () => {
+    expect(fillChatTemplate('{user}{args}', { user: '', args: '/me hi' })).toBe(`${CHAT_COMMAND_GUARD}/me hi`);
+  });
+
   it('leaves a response that does not start with a command character unchanged', () => {
     expect(fillChatTemplate('{user} said {args}', { user: 'bob', args: '/me hi' })).toBe('bob said /me hi');
   });

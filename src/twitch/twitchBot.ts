@@ -205,6 +205,20 @@ export async function startTwitchBot(): Promise<void> {
 const MAX_MESSAGE_LENGTH = 500;
 
 /**
+ * Where to cut `text` at `index` when there's no space to break on, moved back one code unit if
+ * `index` falls between the two halves of a surrogate pair (an emoji, say), so the character isn't
+ * split across two messages.
+ * @param text - The text being split.
+ * @param index - The cut position the length budget allows.
+ * @returns `index`, or `index - 1` when that would split a surrogate pair.
+ */
+function hardCutIndex(text: string, index: number): number {
+  const before = text.charCodeAt(index - 1);
+  const splitsPair = index < text.length && before >= 0xd800 && before <= 0xdbff;
+  return splitsPair ? index - 1 : index;
+}
+
+/**
  * Splits `text` into chunks no longer than `maxLength`, breaking on the last space at or before
  * each boundary where possible so words aren't cut mid-word. Adapted from Twurple's own internal
  * `ChatClient#say()` splitting logic (`splitOnSpaces` in `@twurple/chat`'s `messageUtil`), which
@@ -218,7 +232,8 @@ const MAX_MESSAGE_LENGTH = 500;
  * (and is cut one character shorter to leave room for it), since that character comes from the
  * middle of the message and Twitch would otherwise read it as a chat command such as `/me`. The
  * first chunk is left as it is: whether a leading command character was meant is decided when the
- * message is built (see `fillChatTemplate`).
+ * message is built (see `fillChatTemplate`). A cut with no space to break on never splits a surrogate
+ * pair (see {@link hardCutIndex}).
  * @param text - The message text to split.
  * @param maxLength - Maximum length of each returned chunk.
  * @returns One or more chunks within `maxLength`, or `[text]` unchanged if it already fits.
@@ -233,7 +248,7 @@ function splitMessageOnSpaces(text: string, maxLength: number): string[] {
     const budget = guard ? maxLength - CHAT_COMMAND_GUARD.length : maxLength;
     let spaceIndex = trimmed.lastIndexOf(' ', startIndex + budget);
     if (spaceIndex === -1 || spaceIndex <= startIndex || trimmed.length - startIndex <= budget) {
-      spaceIndex = startIndex + budget;
+      spaceIndex = hardCutIndex(trimmed, startIndex + budget);
     }
     const chunk = trimmed.slice(startIndex, spaceIndex).trim();
     if (chunk.length) chunks.push(guard ? `${CHAT_COMMAND_GUARD}${chunk}` : chunk);
