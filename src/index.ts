@@ -1,7 +1,7 @@
 import 'mediaplex'; // Must be imported first to register as Opus provider
 import { getPool, closePool, pingDb, runMigrations, reencryptStoredTokens } from './db';
 import { recordDbPing } from './shared/healthStore';
-import { registerOwnerAlertRuntime, announceShutdown, announceStartup } from './discord/ownerAlerts';
+import { registerOwnerAlertRuntime, announceShutdown, announceStartup, sendOwnerAlert } from './discord/ownerAlerts';
 import { primeOwnerAlertBaseline, startOwnerAlertWatcher, stopOwnerAlertWatcher } from './discord/ownerAlertWatcher';
 import { startTwitchBot, stopTwitchBot, sayInChannel } from './twitch/twitchBot';
 import { getActiveChannels, getActiveChannelUserIds, setChannelJoinedHook } from './twitch/twitchChannelMembership';
@@ -47,6 +47,7 @@ import { createLogger, flushLogs } from './shared/logger';
 import { withTimeout } from './shared/withTimeout';
 import { startEventLoopMonitor, stopEventLoopMonitor } from './shared/eventLoopMonitor';
 import { startDiskSpaceMonitor, stopDiskSpaceMonitor } from './shared/diskSpaceMonitor';
+import { checkUploadFolderPermissions } from './shared/uploadFolderPermissions';
 import { restoreDebugLogging, startDebugLogPruning, stopDebugLogPruning } from './shared/debugLogging';
 
 const log = createLogger('Bot');
@@ -429,6 +430,8 @@ async function main(): Promise<void> {
   startDbHealthCheck();
   startEventLoopMonitor();
   startDiskSpaceMonitor();
+  // Fire-and-forget: logs and DMs the owner if an upload folder is writable by another user (#1059).
+  checkUploadFolderPermissions(sendOwnerAlert).catch((err: unknown) => log.error('Upload folder permission check failed:', err));
 
   startTwitchMonitor().catch((err: unknown) => log.error('TwitchMonitor startup error:', err));
   startEventSub();

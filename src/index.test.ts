@@ -25,6 +25,7 @@ vi.mock('./discord/ownerAlerts', () => ({
   registerOwnerAlertRuntime: vi.fn(),
   announceShutdown: vi.fn().mockResolvedValue(undefined),
   announceStartup: vi.fn().mockResolvedValue(undefined),
+  sendOwnerAlert: vi.fn().mockResolvedValue(true),
 }));
 vi.mock('./discord/ownerAlertWatcher', () => ({
   primeOwnerAlertBaseline: vi.fn(),
@@ -124,6 +125,9 @@ vi.mock('./shared/eventLoopMonitor', () => ({
 vi.mock('./shared/diskSpaceMonitor', () => ({
   startDiskSpaceMonitor: vi.fn(),
   stopDiskSpaceMonitor: vi.fn(),
+}));
+vi.mock('./shared/uploadFolderPermissions', () => ({
+  checkUploadFolderPermissions: vi.fn().mockResolvedValue([]),
 }));
 vi.mock('./twitch/pricing/rewardPricingService', () => ({
   registerRewardPricingRuntime: vi.fn(),
@@ -408,6 +412,8 @@ describe('startup — reward pricing scheduler', () => {
     const { startChannelReconciliationPoll } = await import('./twitch/twitchChannelReconciliationPoll.js');
     const { startEventLoopMonitor } = await import('./shared/eventLoopMonitor.js');
     const { startDiskSpaceMonitor } = await import('./shared/diskSpaceMonitor.js');
+    const { checkUploadFolderPermissions } = await import('./shared/uploadFolderPermissions.js');
+    const { sendOwnerAlert } = await import('./discord/ownerAlerts.js');
     const { restoreDebugLogging, startDebugLogPruning } = await import('./shared/debugLogging.js');
 
     await runMain();
@@ -418,6 +424,7 @@ describe('startup — reward pricing scheduler', () => {
     expect(vi.mocked(startRewardPricingScheduler)).toHaveBeenCalledOnce();
     expect(vi.mocked(startEventLoopMonitor)).toHaveBeenCalledOnce();
     expect(vi.mocked(startDiskSpaceMonitor)).toHaveBeenCalledOnce();
+    expect(vi.mocked(checkUploadFolderPermissions)).toHaveBeenCalledExactlyOnceWith(vi.mocked(sendOwnerAlert));
     expect(vi.mocked(startEventSub)).toHaveBeenCalledOnce();
     expect(vi.mocked(startEventSubReconciliation)).toHaveBeenCalledOnce();
     expect(vi.mocked(startChannelReconciliationPoll)).toHaveBeenCalledOnce();
