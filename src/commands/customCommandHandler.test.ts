@@ -180,6 +180,15 @@ describe('executeCustomCommandForDiscord', () => {
     expect(msg.reply).toHaveBeenCalledWith({ content: expected, allowedMentions: { parse: [] } });
   });
 
+  it('leaves a Discord reply that viewer {args} make start with / unguarded', async () => {
+    vi.mocked(getCustomCommandForDiscord).mockResolvedValue({ output: '{args}', is_multi_twitch: false } as any);
+    const msg = mockMsg('!hello /me hi');
+
+    await executeCustomCommandForDiscord(msg as any, 'viewer1');
+
+    expect(msg.reply).toHaveBeenCalledWith({ content: '/me hi', allowedMentions: { parse: [] } });
+  });
+
   it('substitutes an unknown placeholder with an empty string', async () => {
     vi.mocked(getCustomCommandForDiscord).mockResolvedValue({
       output: 'Hi {user}, unknown: [{nope}]',
@@ -330,6 +339,22 @@ describe('executeCustomCommandForTwitch', () => {
 
     const expected = 'viewer1 said foo bar (first: foo)';
     expect(mockRuntime.send).toHaveBeenCalledWith('#chan', expected);
+  });
+
+  it('guards a response that viewer {args} make start with /, so Twitch does not run it as a command', async () => {
+    vi.mocked(getCustomCommandForTwitchChannel).mockResolvedValue({ output: '{args}', is_multi_twitch: false } as any);
+
+    await executeCustomCommandForTwitch('#chan', '!hey /me hi', 'viewer1');
+
+    expect(mockRuntime.send).toHaveBeenCalledWith('#chan', '\u200B/me hi');
+  });
+
+  it('sends a response the streamer wrote as /me {args} unchanged', async () => {
+    vi.mocked(getCustomCommandForTwitchChannel).mockResolvedValue({ output: '/me {args}', is_multi_twitch: false } as any);
+
+    await executeCustomCommandForTwitch('#chan', '!hey waves', 'viewer1');
+
+    expect(mockRuntime.send).toHaveBeenCalledWith('#chan', '/me waves');
   });
 
   it('substitutes an unknown placeholder with an empty string', async () => {

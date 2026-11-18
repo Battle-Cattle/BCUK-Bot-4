@@ -8,6 +8,7 @@ import { recordTwitchChatConnected } from '../shared/healthStore';
 import { normalizeTwitchChannelName } from './twitchChannelName';
 import { throttledTwitchSend, withTimeout } from './twitchSendQueue';
 import { createLogger } from '../shared/logger';
+import { CHAT_COMMAND_GUARD, leadingChatCommandChar } from '../shared/textTemplate';
 import { getBotChatToken } from '../db';
 import {
   setChatClient,
@@ -213,6 +214,11 @@ const MAX_MESSAGE_LENGTH = 500;
  * Fixes an off-by-one present in Twurple's original: its fit check used `remaining + 1 <= maxLength`,
  * which — for a final remainder exactly `maxLength` long — falsely failed the check and let an
  * unrelated space inside that remainder force an unnecessary extra chunk.
+ * A chunk after the first that begins with `/` or `.` gets {@link CHAT_COMMAND_GUARD} in front
+ * (and is cut one character shorter to leave room for it), since that character comes from the
+ * middle of the message and Twitch would otherwise read it as a chat command such as `/me`. The
+ * first chunk is left as it is: whether a leading command character was meant is decided when the
+ * message is built (see `fillChatTemplate`).
  * @param text - The message text to split.
  * @param maxLength - Maximum length of each returned chunk.
  * @returns One or more chunks within `maxLength`, or `[text]` unchanged if it already fits.
@@ -222,16 +228,16 @@ function splitMessageOnSpaces(text: string, maxLength: number): string[] {
   const trimmed = text.trim();
   const chunks: string[] = [];
   let startIndex = 0;
-  let endIndex = maxLength;
   while (startIndex < trimmed.length) {
-    let spaceIndex = trimmed.lastIndexOf(' ', endIndex);
-    if (spaceIndex === -1 || spaceIndex <= startIndex || trimmed.length - startIndex <= maxLength) {
-      spaceIndex = startIndex + maxLength;
+    const guard = startIndex > 0 && leadingChatCommandChar(trimmed.slice(startIndex)) !== null;
+    const budget = guard ? maxLength - CHAT_COMMAND_GUARD.length : maxLength;
+    let spaceIndex = trimmed.lastIndexOf(' ', startIndex + budget);
+    if (spaceIndex === -1 || spaceIndex <= startIndex || trimmed.length - startIndex <= budget) {
+      spaceIndex = startIndex + budget;
     }
     const chunk = trimmed.slice(startIndex, spaceIndex).trim();
-    if (chunk.length) chunks.push(chunk);
+    if (chunk.length) chunks.push(guard ? `${CHAT_COMMAND_GUARD}${chunk}` : chunk);
     startIndex = spaceIndex + (trimmed[spaceIndex] === ' ' ? 1 : 0);
-    endIndex = startIndex + maxLength;
   }
   return chunks;
 }

@@ -7,7 +7,7 @@ import { getSharedChatSession } from '../twitch/twitchApi';
 import { extractArgs, resolveCommand } from './commandUtils';
 import { NO_MENTIONS, trySendDiscordReply } from '../discord/discordUtils';
 import type { MultiTwitchGroupInfo } from '../twitch/monitor/twitchMonitorTypes';
-import { fillTemplate } from '../shared/textTemplate';
+import { fillChatTemplate, fillTemplate } from '../shared/textTemplate';
 import { sendDedupedBySession } from './twitchBroadcast';
 import { createRuntimeRegistry } from '../shared/runtimeRegistry';
 import type { TwitchBroadcastRuntime } from './twitchRuntime';
@@ -89,23 +89,21 @@ async function lookupCommand(
 }
 
 /**
- * Extracts args from `rawMessage` and runs `rawResponse` through {@link fillTemplate}
- * with `{user}` (the invoking username), `{args}` (the raw text after the command
- * token), and `{arg}` (the first whitespace-delimited word of `{args}`) substituted
- * in. Shared by both the Discord and Twitch execute paths so the placeholder set
+ * Builds the placeholder values for a custom command response: `{user}` (the invoking username),
+ * `{args}` (the raw text after the command token), and `{arg}` (the first whitespace-delimited
+ * word of `{args}`). Shared by both the Discord and Twitch execute paths so the placeholder set
  * stays in sync between them.
- * @param rawResponse - The command's output template.
  * @param rawMessage - Full chat message text, used to extract `{args}`/`{arg}`.
  * @param username - Invoking username for `{user}`; null or undefined substitutes an empty string.
- * @returns The response with all placeholders filled in.
+ * @returns The template variables.
  */
-function buildFilledResponse(rawResponse: string, rawMessage: string, username?: string | null): string {
+function buildResponseVars(rawMessage: string, username?: string | null): Record<string, string> {
   const args = extractArgs(rawMessage);
-  return fillTemplate(rawResponse, {
+  return {
     user: username ?? '',
     args,
     arg: args.split(/\s+/)[0] ?? '',
-  });
+  };
 }
 
 // ─── Multi-twitch broadcast ───────────────────────────────────────────────────
@@ -260,7 +258,7 @@ export async function executeCustomCommandForDiscord(
   // as an unmatched command above.
   if (!customCommandCooldown.tryClaim(`discord:${resolvedGuildId}`)) return;
 
-  const filledResponse = buildFilledResponse(result.response, message.content, username);
+  const filledResponse = fillTemplate(result.response, buildResponseVars(message.content, username));
 
   const sent = await trySendDiscordReply(
     message,
@@ -277,10 +275,11 @@ export async function executeCustomCommandForDiscord(
  * and, if matched, sends the response — broadcasting to other active channels
  * sharing a multi-twitch group when the command is flagged multi-twitch.
  *
- * Before sending, the matched response is run through {@link fillTemplate} with
+ * Before sending, the matched response is run through {@link fillChatTemplate} with
  * `{user}` (the invoking username), `{args}` (the raw text after the command token),
  * and `{arg}` (the first whitespace-delimited word of `{args}`) substituted in —
- * unknown placeholders resolve to an empty string; for multi-twitch broadcasts the
+ * unknown placeholders resolve to an empty string, and a response that a viewer's text
+ * makes start with `/` or `.` is guarded so Twitch doesn't run it as a chat command; for multi-twitch broadcasts the
  * same filled string is reused for every target channel (no per-channel re-fill).
  *
  * A matched command is throttled per channel by `GLOBAL_COOLDOWN_MS` — a match found while
@@ -310,7 +309,7 @@ export async function executeCustomCommandForTwitch(
   // as an unmatched command above.
   if (!customCommandCooldown.tryClaim(`twitch:${channel}`)) return;
 
-  const filledResponse = buildFilledResponse(result.response, rawMessage, username);
+  const filledResponse = fillChatTemplate(result.response, buildResponseVars(rawMessage, username));
 
   const runtime = twitchChatRuntime.get();
   if (!runtime) return;

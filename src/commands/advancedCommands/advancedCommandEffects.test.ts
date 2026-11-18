@@ -66,6 +66,11 @@ describe('runAdvancedCommandEffects', () => {
     expect(send).toHaveBeenCalledWith('streamer', 'Alice paid 100, 400 left: big');
   });
 
+  it('guards a chat reply that viewer {args} make start with /', async () => {
+    await runAdvancedCommandEffects(use({ command: command({ response: '{args}' }), args: '/me hi' }));
+    expect(send).toHaveBeenCalledWith('streamer', '\u200B/me hi');
+  });
+
   it('posts no chat reply for a Stream Deck use', async () => {
     await runAdvancedCommandEffects(use({
       command: command({ response: 'hi' }), source: 'streamdeck', userLogin: null, userName: 'Streamer', args: '', pointsSpent: 0,
