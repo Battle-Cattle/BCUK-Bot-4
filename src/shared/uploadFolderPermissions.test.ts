@@ -14,6 +14,8 @@ vi.mock('./config', () => config);
 import { checkUploadFolderPermissions, describePermissionProblems, uploadFolders } from './uploadFolderPermissions';
 
 const UID = 1000;
+/** Real-folder tests need POSIX modes: on Windows `chmod` only toggles the read-only bit. */
+const isWindows = process.platform === 'win32';
 let dir: string;
 let alert: ReturnType<typeof vi.fn<(message: string) => Promise<unknown>>>;
 
@@ -51,7 +53,7 @@ describe('describePermissionProblems', () => {
 });
 
 describe('checkUploadFolderPermissions', () => {
-  it('warns and alerts the owner about a real 0o777 folder', async () => {
+  it.skipIf(isWindows)('warns and alerts the owner about a real 0o777 folder', async () => {
     fs.chmodSync(dir, 0o777);
     const warnings = await checkUploadFolderPermissions(alert, { folders: { OVERLAY_FOLDER: dir }, uid: fs.statSync(dir).uid, platform: 'linux' });
     expect(warnings).toEqual([`OVERLAY_FOLDER (${dir}) is writable by group or others (mode 777)`]);
@@ -61,7 +63,7 @@ describe('checkUploadFolderPermissions', () => {
     expect(alert.mock.calls[0]![0]).toContain('chmod -R go-w');
   });
 
-  it('does not warn about a real 0o700 folder owned by the process uid', async () => {
+  it.skipIf(isWindows)('does not warn about a real 0o700 folder owned by the process uid', async () => {
     fs.chmodSync(dir, 0o700);
     const warnings = await checkUploadFolderPermissions(alert, { folders: { OVERLAY_FOLDER: dir }, uid: fs.statSync(dir).uid, platform: 'linux' });
     expect(warnings).toEqual([]);
