@@ -11,7 +11,7 @@ const config = vi.hoisted(() => ({
 }));
 vi.mock('./config', () => config);
 
-import { checkUploadFolderPermissions, describePermissionProblems, uploadFolders } from './uploadFolderPermissions';
+import { buildAlert, checkUploadFolderPermissions, describePermissionProblems, uploadFolders } from './uploadFolderPermissions';
 
 const UID = 1000;
 /** Real-folder tests need POSIX modes: on Windows `chmod` only toggles the read-only bit. */
@@ -59,8 +59,8 @@ describe('checkUploadFolderPermissions', () => {
     expect(warnings).toEqual([`OVERLAY_FOLDER (${dir}) is writable by group or others (mode 777)`]);
     expect(mockLog.warn).toHaveBeenCalledWith(expect.stringContaining('OVERLAY_FOLDER'));
     expect(alert).toHaveBeenCalledOnce();
-    expect(alert.mock.calls[0]![0]).toContain(`OVERLAY_FOLDER (${dir})`);
-    expect(alert.mock.calls[0]![0]).toContain('chmod -R go-w');
+    expect(alert).toHaveBeenCalledWith(expect.stringContaining(`OVERLAY_FOLDER (${dir})`));
+    expect(alert).toHaveBeenCalledWith(expect.stringContaining('realpath'));
   });
 
   it.skipIf(isWindows)('does not warn about a real 0o700 folder owned by the process uid', async () => {
@@ -121,9 +121,29 @@ describe('checkUploadFolderPermissions', () => {
     expect(alert).not.toHaveBeenCalled();
   });
 
-  it('defaults to the process platform and uid', async () => {
-    fs.chmodSync(dir, 0o700);
+  it.skipIf(isWindows)('defaults to the process platform and uid, so a real unsafe folder is reported', async () => {
+    fs.chmodSync(dir, 0o777);
     const warnings = await checkUploadFolderPermissions(alert, { folders: { OVERLAY_FOLDER: dir } });
-    expect(warnings).toEqual([]);
+    expect(warnings).toEqual([`OVERLAY_FOLDER (${dir}) is writable by group or others (mode 777)`]);
+    expect(alert).toHaveBeenCalledOnce();
+  });
+
+  it('sends a summary pointing to the log when the full list would exceed a Discord message', async () => {
+    const long = `/${'x'.repeat(600)}`;
+    const stat = vi.fn().mockResolvedValue({ mode: 0o40777, uid: 0 });
+    const warnings = await checkUploadFolderPermissions(alert, { uid: UID, platform: 'linux', stat, folders: { A: long, B: long, C: long, D: long } });
+    expect(warnings).toHaveLength(4);
+    const message = alert.mock.calls[0]?.[0] ?? '';
+    expect(message.length).toBeLessThanOrEqual(2000);
+    expect(message).toContain('4 upload folder(s) have unsafe permissions');
+    expect(message).not.toContain(long);
+  });
+});
+
+describe('buildAlert', () => {
+  it('lists every folder and the fix when it fits', () => {
+    const message = buildAlert(['A (/a) is owned by uid 0, not the bot\'s uid 1000']);
+    expect(message).toContain('• A (/a) is owned by uid 0');
+    expect(message).toContain('d="$(realpath <folder>)"');
   });
 });

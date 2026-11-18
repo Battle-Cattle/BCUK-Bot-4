@@ -96,8 +96,9 @@ async function resolveFolderFile(
   // followed. Closing that needs fd-based serving (losing sendFile's Range/ETag handling, which
   // videos rely on), and exploiting it needs write access to the folder — which already allows
   // replacing the served files. Keeping the folder writable only by the bot's user (README,
-  // "Deployment") is what actually closes it; `uploadFolderPermissions.ts` warns the owner at
-  // startup when an upload folder isn't.
+  // "Deployment") is what actually closes it. `uploadFolderPermissions.ts` checks part of that at
+  // startup: it warns the owner when an upload folder itself is group- or world-writable or owned
+  // by another user (not its parent directories or subfolders).
   const realPath = await realPathWithin(folder, resolved).catch(() => null);
   if (!realPath) {
     res.status(404).end();

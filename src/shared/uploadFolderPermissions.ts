@@ -99,6 +99,29 @@ async function checkFolders(
   return warnings;
 }
 
+/** Discord's limit on a message's length; a longer DM is rejected rather than truncated. */
+const DISCORD_MESSAGE_LIMIT = 2000;
+
+/**
+ * How to fix an unsafe folder. `chown -R`/`chmod -R` don't follow a symlink named on the command
+ * line, so the advice targets the folder's real path.
+ */
+const FIX_ADVICE = 'Make each folder owned and writable only by the bot\'s user, on its real path (a symlinked folder isn\'t followed otherwise), '
+  + 'e.g. `d="$(realpath <folder>)" && chown -R <bot user> "$d" && chmod -R go-w "$d"` (README, "Deployment").';
+
+/**
+ * Builds the owner alert listing the unsafe folders. Falls back to a summary that points to the
+ * log when the full list wouldn't fit in one Discord message (long configured paths).
+ * @param warnings - One line per unsafe folder.
+ * @returns The alert text, at most {@link DISCORD_MESSAGE_LIMIT} characters.
+ */
+export function buildAlert(warnings: string[]): string {
+  const list = warnings.map((line) => `• ${line}`).join('\n');
+  const full = `⚠️ Unsafe upload folder permissions:\n${list}\n${FIX_ADVICE}`;
+  if (full.length <= DISCORD_MESSAGE_LIMIT) return full;
+  return `⚠️ ${warnings.length} upload folder(s) have unsafe permissions; the bot log's "Unsafe upload folder permissions" lines list them.\n${FIX_ADVICE}`;
+}
+
 /**
  * Warns, in the log and through `alert` (an owner DM in production), when an upload folder is
  * group- or world-writable or owned by another user: anyone else who can write there could race
@@ -118,8 +141,6 @@ export async function checkUploadFolderPermissions(
   const warnings = await checkFolders(folders, uid, stat);
   if (warnings.length === 0) return [];
   for (const line of warnings) log.warn(`Unsafe upload folder permissions: ${line}`);
-  const fix = 'Make each folder owned and writable only by the bot\'s user, e.g. `chown -R <bot user> <folder> && chmod -R go-w <folder>` (README, "Deployment").';
-  const list = warnings.map((line) => `• ${line}`).join('\n');
-  await alert(`⚠️ Unsafe upload folder permissions:\n${list}\n${fix}`);
+  await alert(buildAlert(warnings));
   return warnings;
 }

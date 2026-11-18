@@ -117,7 +117,7 @@ The suite reads only the `TEST_DB_*` variables, never the bot's `DB_*` ones, and
 
 The web panel serves uploaded files straight from disk: overlay videos from `OVERLAY_FOLDER`, alert images and sounds from `ALERT_ASSETS_FOLDER`, and sounds from `SFX_FOLDER`. The bot checks every served path stays inside its folder, following symlinks, but the check can't be atomic with the file read. So:
 
-- Make these folders owned and writable **only** by the user the bot runs as (e.g. `chown -R bot:bot <folder> && chmod -R go-w <folder>`). Anyone else who can write there could plant a symlink to a file outside the folder and race the check. The bot logs a warning and DMs the owner at startup when one of these folders is group- or world-writable or owned by another user (not checked on Windows).
+- Make these folders owned and writable **only** by the user the bot runs as (e.g. `d="$(realpath <folder>)" && chown -R bot:bot "$d" && chmod -R go-w "$d"`: use the real path, since `-R` doesn't follow a symlinked folder named on the command line). Anyone else who can write there could plant a symlink to a file outside the folder and race the check. The bot logs a warning and DMs the owner at startup when one of these folders is group- or world-writable or owned by another user. It checks the folder itself, not its parents or subfolders, and doesn't run on Windows.
 - Don't point them at a shared or world-writable location (e.g. `/tmp`), and don't nest one inside a directory other users can write to.
 - Keep them outside the repo checkout and away from `.env` and other secrets.
 - The same applies to `UPLOAD_INCOMING_FOLDER`, where SFX and alert uploads are assembled before they're checked (overlay videos use `OVERLAY_FOLDER/.incoming`).
