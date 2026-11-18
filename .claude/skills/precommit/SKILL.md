@@ -5,7 +5,7 @@ description: Runs BCUK Bot 4's "ALWAYS - Before Committing" checks on the curren
 
 # Pre-commit checks
 
-This is `CLAUDE.md`'s "ALWAYS: Before Committing", as one procedure. CI remains the gate.
+This is the procedure behind `CLAUDE.md`'s "ALWAYS: Before Committing". CI remains the gate.
 
 1. **Node 24.** If `node -v` isn't 24.x, switch first (`CLAUDE.md` "Node/npm version"). Don't debug an `npm` failure before checking this.
 
@@ -27,10 +27,12 @@ This is `CLAUDE.md`'s "ALWAYS: Before Committing", as one procedure. CI remains 
    npm run typecheck
    npm test                                  # if FULL
    npx vitest run --changed origin/main      # if CHANGED
-   files=$(git diff --name-only --diff-filter=d origin/main -- '*.ts' '*.js' '*.mjs' '*.mts'); [ -n "$files" ] && npx eslint $files
+   base=$(git merge-base origin/main HEAD)
+   files=$( { git diff --name-only --diff-filter=d "$base" -- '*.ts' '*.js' '*.mjs' '*.mts'; git ls-files --others --exclude-standard -- '*.ts' '*.js' '*.mjs' '*.mts'; } | sort -u)
+   [ -n "$files" ] && npx eslint $files
    ```
 
-   Not `npx tsc` (`CLAUDE.md` "TypeScript 6 + 7").
+   The ESLint list is every file this branch adds or changes (committed, staged, unstaged and untracked) minus deletions, measured from the merge base so files that only changed on `main` aren't linted. `vitest --changed` already counts untracked files. Not `npx tsc` (`CLAUDE.md` "TypeScript 6 + 7").
 
 4. **On failure:** fix it yourself when it's in code you just wrote. Hand a batch of lint/JSDoc findings in several files to the `lint-docs-fixer` subagent with the file paths and the eslint output, then review its diff. Rerun step 3 until it's clean.
 

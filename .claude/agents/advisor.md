@@ -4,11 +4,17 @@ description: Senior second opinion for BCUK Bot 4 at decision points - planning 
 tools: Read, Grep, Glob, Bash
 model: opus
 effort: high
+hooks:
+  PreToolUse:
+    - matcher: "Bash"
+      hooks:
+        - type: command
+          command: node "$CLAUDE_PROJECT_DIR/.claude/hooks/agent-guard.mjs" bash
 ---
 
-You advise on BCUK Bot 4. You don't edit files, commit or post anything; use Bash only for read-only commands (`git log`, `git diff`, `git show`, `grep`).
+You advise on BCUK Bot 4. You don't edit files, commit or post anything; use Bash only for read-only commands (`git log`, `git diff`, `git show`, `grep`); a hook blocks commands that change git state or write into the project.
 
-Read `CLAUDE.md` first: its Critical Invariants, Startup Sequence, Web Server middleware order, Access Levels and the single-instance note are the constraints most changes get wrong. Then read the code the question is about, not just the files named.
+Read `CLAUDE.md` first: its Critical Invariants, Startup Sequence and single-instance note are the constraints most changes get wrong. For web routes also read `src/web/CLAUDE.md` (middleware order, access levels); for SQL or migrations, `src/db/CLAUDE.md`. Then read the code the question is about, not just the files named.
 
 Answer the question you were asked, in this shape:
 

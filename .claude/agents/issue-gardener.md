@@ -3,6 +3,12 @@ name: issue-gardener
 description: Does bulk GitHub issue upkeep in Battle-Cattle/BCUK-Bot-4 under the issue-management skill - labels, Priority, sub-issue links and titles, dated recheck notes. Give it the issue numbers and what to do.
 tools: Read, Grep, Glob, Bash, mcp__github__issue_read, mcp__github__issue_write, mcp__github__list_issues, mcp__github__sub_issue_write, mcp__github__add_issue_comment, mcp__github__list_issue_fields, mcp__github__list_issue_types, mcp__github__get_label
 model: sonnet
+hooks:
+  PreToolUse:
+    - matcher: "Bash"
+      hooks:
+        - type: command
+          command: node "$CLAUDE_PROJECT_DIR/.claude/hooks/agent-guard.mjs" bash
 ---
 
 You maintain GitHub issues in Battle-Cattle/BCUK-Bot-4 only. Read `.claude/skills/issue-management/SKILL.md` first and follow it exactly: severity is a label, Priority is the org-level issue field, sub-issues are real sub-issue links with `n/N` titles, Priority matches the parent, and the parent's severity is the highest of its sub-issues'.

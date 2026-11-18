@@ -14,15 +14,9 @@ In cloud sessions `node_modules` is already installed; switch Node but skip the 
 
 ## ALWAYS: Before Committing
 
-Run the fast checks on what you changed (the `precommit` skill does this):
+Run the `precommit` skill: `npm run typecheck`, the tests that import a changed file, and ESLint on every file the branch adds or changes (new untracked files included). Its commands are the reference; don't retype them from memory.
 
-```bash
-npm run typecheck
-npx vitest run --changed origin/main   # only the tests that import a changed file
-npx eslint $(git diff --name-only --diff-filter=d origin/main -- '*.ts' '*.js' '*.mjs' '*.mts')
-```
-
-**Run the full `npm test` instead** when the change touches shared infrastructure: `src/db.ts`, `migrations/` or `DATABASE-SCHEMA.md`, `src/shared/`, `src/test-utils/`, `package.json`/`package-lock.json`, or a `tsconfig*`/`vitest*`/`eslint` config. Leave coverage, `build`, `check:circular`, `check:unused` and `test:toolchain` to CI unless you're changing what they check.
+**It runs the full `npm test` instead** when the change touches shared infrastructure: `src/db.ts`, `migrations/` or `DATABASE-SCHEMA.md`, `src/shared/`, `src/test-utils/`, `package.json`/`package-lock.json`, or a `tsconfig*`/`vitest*`/`eslint` config. Leave coverage, `build`, `check:circular`, `check:unused` and `test:toolchain` to CI unless you're changing what they check.
 
 **CI is the gate, not the local run.** A PR isn't done until CI is green. If it fails, reproduce the failing check locally, fix it, and show it passing before pushing again.
 
@@ -89,7 +83,15 @@ Every new function or behaviour change **must** include or update a Vitest test,
 
 ## Delegation
 
-Cheaper subagents in `.claude/agents/` take reading-heavy or mechanical work (`pr-triage`, `lint-docs-fixer`, `coverage-filler`, `issue-gardener`, `acceptance-checker`); give them the exact files and findings, and review their diffs. Keep in the main session: `migrations/`, the auth middleware order, `src/shared/crypto.ts` and token handling, and the single-instance assumptions.
+Cheaper subagents in `.claude/agents/` take reading-heavy or mechanical work; give them the exact files and findings, and review their diffs:
+
+- `pr-triage` (read-only): every PR activity event, instead of reading CI logs and review comments here.
+- `lint-docs-fixer`: ESLint/JSDoc findings spread over several files. Edits only; can't touch config, CI, migrations or crypto, or add `eslint-disable`.
+- `coverage-filler`: named uncovered lines. Can only edit `*.test.ts`.
+- `acceptance-checker` (read-only): before an issue's PR leaves draft.
+- `issue-gardener`: bulk issue labels, Priority, sub-issue links and recheck notes.
+
+A PreToolUse hook (`.claude/hooks/agent-guard.mjs`) enforces those scopes and stops every subagent changing git state or writing files from Bash; it catches accidents, so diff review still applies. Keep in the main session: `migrations/`, the auth middleware order, `src/shared/crypto.ts` and token handling, and the single-instance assumptions.
 
 **Consult `advisor`** (Opus at high effort in a fresh, read-only context: a second opinion without this session's assumptions, so only here): before splitting a large issue or starting a cross-module feature; when choosing how to split a file Qlty flags for "High total complexity"; before pushing a migration or a change to the auth middleware or startup sequence; after two failed attempts at the same CI failure.
 
