@@ -7,35 +7,24 @@ description: Runs BCUK Bot 4's "ALWAYS - Before Committing" checks on the curren
 
 This is the procedure behind `CLAUDE.md`'s "ALWAYS: Before Committing". CI remains the gate.
 
-1. **Node 24.** If `node -v` isn't 24.x, switch first (`CLAUDE.md` "Node/npm version"). Don't debug an `npm` failure before checking this.
+1. **Node 24.** If `node -v` isn't 24.x, switch first (`CLAUDE.md` "Node/npm version"). The script refuses to run on another major.
 
-2. **Pick the test scope.** The full suite is needed when the diff against `origin/main` (committed, staged, unstaged and untracked) touches shared infrastructure:
-
-   ```bash
-   git fetch -q origin main
-   changed=$( { git diff --name-only origin/main...HEAD; git diff --name-only HEAD; git ls-files --others --exclude-standard; } | sort -u)
-   if echo "$changed" | grep -qE '^(src/db\.ts|migrations/|DATABASE-SCHEMA\.md|src/shared/|src/test-utils/|package(-lock)?\.json|tsconfig[^/]*|vitest[^/]*|eslint[^/]*)'; then
-     echo FULL
-   else
-     echo CHANGED
-   fi
-   ```
-
-3. **Run, in one Bash call so failures surface together:**
+2. **Run the checks:**
 
    ```bash
-   npm run typecheck
-   npm test                                  # if FULL
-   npx vitest run --changed origin/main      # if CHANGED
-   base=$(git merge-base origin/main HEAD)
-   files=$( { git diff --name-only --diff-filter=d "$base" -- '*.ts' '*.js' '*.mjs' '*.mts'; git ls-files --others --exclude-standard -- '*.ts' '*.js' '*.mjs' '*.mts'; } | sort -u)
-   [ -n "$files" ] && npx eslint $files
+   node .claude/skills/precommit/precommit.mjs          # add --full to force the full suite
    ```
 
-   The ESLint list is every file this branch adds or changes (committed, staged, unstaged and untracked) minus deletions, measured from the merge base so files that only changed on `main` aren't linted. `vitest --changed` already counts untracked files. Not `npx tsc` (`CLAUDE.md` "TypeScript 6 + 7").
+   It fetches `origin/main` and runs `npm run typecheck`, then the tests, then ESLint, reporting every failure rather than stopping at the first:
+   - **Tests:** the full `npm test` when anything the branch changes (committed, staged, unstaged or untracked) is shared infrastructure: `src/db.ts`, `migrations/`, `DATABASE-SCHEMA.md`, `src/shared/`, `src/test-utils/`, `package(-lock).json`, or a `tsconfig*`/`vitest*`/`eslint*` file. That includes test-only changes under those paths. Otherwise `npx vitest run --changed origin/main`.
+   - **ESLint:** every `.ts`/`.js`/`.mjs`/`.mts` file the branch adds or changes, measured from the merge base so files that only changed on `main` aren't linted.
 
-4. **On failure:** fix it yourself when it's in code you just wrote. Hand a batch of lint/JSDoc findings in several files to the `lint-docs-fixer` subagent with the file paths and the eslint output, then review its diff. Rerun step 3 until it's clean.
+   Don't run these commands by hand instead: only the script records a pass. Not `npx tsc` (`CLAUDE.md` "TypeScript 6 + 7").
+
+3. **On failure:** fix it yourself when it's in code you just wrote. Hand a batch of lint/JSDoc findings in several files to the `lint-docs-fixer` subagent with the file paths and the eslint output, then review its diff. Rerun step 2 until it passes.
+
+4. **Commit what was checked.** On a pass the script records a hash of the working tree it checked (tracked and untracked files, minus ignored ones) in `.git/claude-workflow/precommit.json`. The commit hook (`.claude/hooks/workflow-guard.mjs`) allows `git commit` only while the working tree still matches it, so any edit after a pass, even to a test file, needs another run. Commit in a Bash call of its own (`git add` before it is fine): the hook checks the tree from before the command line runs. If files change while the checks run, nothing is recorded.
 
 5. If a migration or a DB module's SQL changed and Docker is available, also run `npm run test:db`; otherwise say it's left to CI.
 
-Report the scope you chose and each command's result in one or two lines.
+Report the scope the script chose and each check's result in one or two lines.

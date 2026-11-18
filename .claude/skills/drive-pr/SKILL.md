@@ -19,6 +19,8 @@ Subscribe to its activity (`subscribe_pr_activity`) and end the turn. Never poll
    - Uncovered lines: `coverage-filler`, with the file and line ranges.
    - "High total complexity" without a file name: ask the user which file. Once known, ask `advisor` how to split it along the code's own seams before restructuring.
    - The same CI failure surviving two attempts: ask `advisor` before a third.
+   - A fix that changes `migrations/`, `src/index.ts`, `src/web/middleware.ts`, `src/web/server.ts` or `src/shared/crypto.ts`: ask `advisor` about it, then run `node .claude/hooks/workflow-state.mjs record advisor`. The push hook blocks until you do.
+   - A `ready_for_review` event on a PR that closes an issue: run `acceptance-checker` if it hasn't run on the current commit, then run `node .claude/hooks/workflow-state.mjs record acceptance`.
    - Review the diff of every subagent before committing it.
 4. **Run the `precommit` skill**, commit, and push once with all the fixes for this round.
 5. **Close the loop on CodeRabbit** (rules below): for a Merge Risk caveat, comment tagging `@coderabbitai` with what the risk was and which commit fixes it, using `@coderabbitai full review` when the risk was 🟡 Moderate or higher. After a "Review limit reached" reply, wait the stated time and post exactly one review request.
