@@ -332,6 +332,16 @@ describe('sayInChannel', () => {
     expect(chunks).toEqual(['a'.repeat(499), `😀${'b'.repeat(10)}`]);
   });
 
+  it('keeps the usual cut after a lone high surrogate that has no low half', async () => {
+    await connectBot();
+    const message = `${'a'.repeat(499)}\uD800${'b'.repeat(500)}`;
+    const sent = sayInChannel('#streamer', message);
+    await vi.runAllTimersAsync();
+    await sent;
+    const chunks = mockClient.irc.say.mock.calls.map((call) => call[1] as string);
+    expect(chunks).toEqual([`${'a'.repeat(499)}\uD800`, 'b'.repeat(500)]);
+  });
+
   it('does not split an emoji at the shorter cut of a guarded chunk', async () => {
     await connectBot();
     const message = `${'a'.repeat(10)} /${'b'.repeat(497)}😀c`;

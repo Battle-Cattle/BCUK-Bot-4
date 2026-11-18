@@ -207,14 +207,15 @@ const MAX_MESSAGE_LENGTH = 500;
 /**
  * Where to cut `text` at `index` when there's no space to break on, moved back one code unit if
  * `index` falls between the two halves of a surrogate pair (an emoji, say), so the character isn't
- * split across two messages.
+ * split across two messages. A lone high surrogate with no low half after it doesn't move the cut.
  * @param text - The text being split.
  * @param index - The cut position the length budget allows.
  * @returns `index`, or `index - 1` when that would split a surrogate pair.
  */
 function hardCutIndex(text: string, index: number): number {
   const before = text.charCodeAt(index - 1);
-  const splitsPair = index < text.length && before >= 0xd800 && before <= 0xdbff;
+  const after = text.charCodeAt(index); // NaN past the end, which fails the range check below
+  const splitsPair = before >= 0xd800 && before <= 0xdbff && after >= 0xdc00 && after <= 0xdfff;
   return splitsPair ? index - 1 : index;
 }
 
