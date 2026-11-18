@@ -104,20 +104,33 @@ function serveSse(res, events) {
 }
 
 /**
+ * Builds the ordered routes for one page: the first route whose `matches` accepts a path handles it.
+ * @param html - The rendered page, served at `/`.
+ * @param fixture - The loaded fixture (its `api` and `sse` stubs).
+ * @returns `{ matches(path), handle(res, path) }` entries, most specific first.
+ */
+function buildRoutes(html, fixture) {
+  return [
+    { matches: (p) => p === '/', handle: (res) => send(res, 200, 'text/html', html) },
+    { matches: (p) => p in fixture.api, handle: (res, p) => send(res, 200, 'application/json', JSON.stringify(fixture.api[p])) },
+    { matches: (p) => p in fixture.sse, handle: (res, p) => serveSse(res, fixture.sse[p]) },
+    // Unstubbed SSE/API paths fail, so the page shows its unavailable state rather than hanging.
+    { matches: (p) => !path.extname(p), handle: (res) => send(res, 503, 'text/plain', 'not stubbed') },
+    { matches: () => true, handle: (res, p) => void serveStatic(res, p) },
+  ];
+}
+
+/**
  * Starts the throwaway server for one rendered page.
  * @param html - The rendered page, served at `/`.
  * @param fixture - The loaded fixture (its `api` and `sse` stubs).
  * @returns The listening server and its base URL.
  */
 async function startServer(html, fixture) {
+  const routes = buildRoutes(html, fixture);
   const server = createServer((req, res) => {
     const urlPath = new URL(req.url ?? '/', 'http://localhost').pathname;
-    if (urlPath === '/') return send(res, 200, 'text/html', html);
-    if (urlPath in fixture.api) return send(res, 200, 'application/json', JSON.stringify(fixture.api[urlPath]));
-    if (urlPath in fixture.sse) return serveSse(res, fixture.sse[urlPath]);
-    // Unstubbed SSE/API paths fail, so the page shows its unavailable state rather than hanging.
-    if (!path.extname(urlPath)) return send(res, 503, 'text/plain', 'not stubbed');
-    return void serveStatic(res, urlPath);
+    routes.find((r) => r.matches(urlPath)).handle(res, urlPath);
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const { port } = server.address();
