@@ -1,4 +1,4 @@
-/* global applyStatus, fetchStatus, loadVoiceChannels */
+/* global applyStatus, fetchStatus, isStatusFeedStale, loadVoiceChannels, setStatusStreamOpen */
 /* ── Dashboard initialisation ────────────────────────────── */
 
 // Apply server-provided initial status without inline script execution.
@@ -17,7 +17,13 @@ loadVoiceChannels();
 // Live-push status updates over SSE rather than polling; the browser's built-in
 // EventSource auto-reconnect handles transient disconnects.
 const statusSource = new EventSource('/dashboard/status/events');
+statusSource.onopen = () => {
+  setStatusStreamOpen(true);
+  // The stream sends no snapshot on connect, so after an outage fetch fresh data rather than trusting the old values.
+  if (isStatusFeedStale()) fetchStatus();
+};
 statusSource.onmessage = (msg) => {
+  setStatusStreamOpen(true);
   try {
     applyStatus(JSON.parse(msg.data));
   } catch {
@@ -25,8 +31,9 @@ statusSource.onmessage = (msg) => {
   }
 };
 statusSource.onerror = () => {
-  // fetchStatus's own consecutive-failure tracking flags the UI as stale if the
-  // one-off fallback fetch also fails; EventSource itself keeps retrying the stream.
+  // The stream is down (reconnecting or closed). fetchStatus's consecutive-failure tracking then flags the
+  // dashboard as not current if /api/status keeps failing too; EventSource itself keeps retrying the stream.
+  setStatusStreamOpen(false);
   fetchStatus();
 };
 

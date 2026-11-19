@@ -4,6 +4,7 @@ import path from 'path';
 import vm from 'vm';
 
 const utilsPath = path.join(__dirname, '../../public/dashboard-utils.js');
+const healthPath = path.join(__dirname, '../../public/dashboard-health.js');
 const statusPath = path.join(__dirname, '../../public/dashboard-status.js');
 
 /** A minimal element: enough of the DOM for dashboard-utils.js and dashboard-status.js. */
@@ -13,13 +14,21 @@ class FakeElement {
   style: Record<string, string> = {};
   children: FakeElement[] = [];
   attributes: Record<string, string> = {};
+  dataset: Record<string, string> = {};
   disabled = false;
+  hidden = false;
   classList = {
     // Like DOMTokenList.add: a class already present isn't added twice.
     add: (cls: string) => {
       const classes = this.className.split(/\s+/).filter(Boolean);
       if (!classes.includes(cls)) this.className = [...classes, cls].join(' ');
     },
+    // Like DOMTokenList.toggle with `force`.
+    toggle: (cls: string, force: boolean) => {
+      const classes = this.className.split(/\s+/).filter((c) => c && c !== cls);
+      this.className = (force ? [...classes, cls] : classes).join(' ');
+    },
+    contains: (cls: string) => this.className.split(/\s+/).includes(cls),
   };
 
   get firstChild(): FakeElement | undefined {
@@ -48,10 +57,17 @@ class FakeElement {
 const IDS = [
   'dot-discord', 'discord-state', 'discord-tag', 'discord-guild', 'dot-voice', 'voice-channel', 'voice-state',
   'btn-rejoin-voice', 'last-command', 'last-file', 'last-source', 'last-when', 'twitch-channels',
+  'health-indicator', 'bot-status', 'status-stale-note',
 ];
 
-/** Runs the dashboard utils and status scripts in one fresh context, the way the page loads them. */
-function runScripts() {
+/** A fake /api/status response: `null` is a network error, a number is that HTTP status, an object is a 200 body. */
+type FetchResult = null | number | Record<string, unknown>;
+
+/**
+ * Runs the dashboard utils, health and status scripts in one fresh context, the way the page loads them.
+ * `fetch` answers /api/status from `responses` in order (a 503 once they run out).
+ */
+function runScripts(responses: FetchResult[] = []) {
   const els = new Map(IDS.map((id) => [id, new FakeElement()]));
   /** The fake element with this id; throws if the fixture doesn't define it, so a typo fails here, not later. */
   const el = (id: string): FakeElement => {
@@ -61,16 +77,35 @@ function runScripts() {
   };
   el('dot-discord').className = 'dot dot--offline';
   el('dot-voice').className = 'dot dot--inactive';
+  el('health-indicator').className = 'health health--unknown';
+  el('health-indicator').dataset.state = 'unknown';
+  el('health-indicator').textContent = 'Status unknown';
+  el('bot-status').className = 'section dashboard-status';
+  el('status-stale-note').hidden = true;
+  const fetch = (): Promise<unknown> => {
+    const next = responses.length > 0 ? responses.shift() : 503;
+    if (next === null || next === undefined) return Promise.reject(new Error('offline'));
+    if (typeof next === 'number') return Promise.resolve({ ok: false, status: next, json: () => Promise.resolve({}) });
+    return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(next) });
+  };
   const context: Record<string, unknown> = {
     document: {
       getElementById: (id: string) => els.get(id) ?? null,
       createElement: () => new FakeElement(),
     },
+    fetch,
   };
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(utilsPath, 'utf8'), context);
+  vm.runInContext(fs.readFileSync(healthPath, 'utf8'), context);
   vm.runInContext(fs.readFileSync(statusPath, 'utf8'), context);
-  return { el, applyStatus: context.applyStatus as (status: unknown) => void };
+  return {
+    el,
+    applyStatus: context.applyStatus as (status: unknown) => void,
+    fetchStatus: context.fetchStatus as () => Promise<void>,
+    setStatusStreamOpen: context.setStatusStreamOpen as (open: boolean) => void,
+    isStatusFeedStale: context.isStatusFeedStale as () => boolean,
+  };
 }
 
 /** An /api/status payload with the given Discord, voice and Twitch states. */
@@ -181,5 +216,109 @@ describe('public/dashboard-status.js Twitch channel badges', () => {
       ['badge badge-online', 'Connected'],
       ['badge badge-offline', 'Disconnected'],
     ]);
+  });
+});
+
+describe('public/dashboard-status.js health indicator and feed staleness', () => {
+  const healthy = status(true, { connected: true }, { a: { connected: true, isLive: false, lastConnectedAt: null, lastDisconnectedAt: null } });
+
+  it('renders the overall health from each applied status', () => {
+    const { el, applyStatus } = runScripts();
+    applyStatus(healthy);
+    expect(el('health-indicator').textContent).toBe('All Systems Operational');
+
+    applyStatus(status(false, { connected: true }));
+    expect(el('health-indicator').textContent).toBe('Service down');
+  });
+
+  it('goes Unknown, even after a malformed payload throws part-way through', () => {
+    const { el, applyStatus } = runScripts();
+    applyStatus(healthy);
+
+    expect(() => applyStatus({ voice: {} })).toThrow();
+    expect(el('health-indicator').textContent).toBe('Status unknown');
+  });
+
+  it('marks everything not current after 3 failed fetches with the stream down', async () => {
+    const { el, applyStatus, fetchStatus, setStatusStreamOpen, isStatusFeedStale } = runScripts([503, null, 500]);
+    applyStatus(healthy);
+    setStatusStreamOpen(false);
+    await fetchStatus();
+    await fetchStatus();
+    expect(isStatusFeedStale()).toBe(false);
+
+    await fetchStatus();
+
+    expect(isStatusFeedStale()).toBe(true);
+    expect(el('health-indicator').textContent).toBe('Status unknown');
+    expect(el('health-indicator').textContent).not.toBe('All Systems Operational');
+    expect(el('bot-status').classList.contains('is-stale')).toBe(true);
+    expect(el('status-stale-note').hidden).toBe(false);
+    expect(el('discord-state').textContent).toBe('Unknown');
+    expect(el('voice-state').textContent).toBe('Unknown');
+    expect(el('dot-discord').className).toBe('dot dot--unknown');
+    expect(el('dot-discord').attributes['aria-label']).toBe('Discord: Status unknown');
+  });
+
+  it('stays current while the stream is still open, however many fetches fail', async () => {
+    const { el, applyStatus, fetchStatus, setStatusStreamOpen, isStatusFeedStale } = runScripts([503, 503, 503, 503]);
+    applyStatus(healthy);
+    setStatusStreamOpen(true);
+    for (let i = 0; i < 4; i++) await fetchStatus();
+
+    expect(isStatusFeedStale()).toBe(false);
+    expect(el('health-indicator').textContent).toBe('All Systems Operational');
+  });
+
+  it('goes Unknown as soon as the stream drops if fetches have already failed 3 times', async () => {
+    const { el, applyStatus, fetchStatus, setStatusStreamOpen } = runScripts([503, 503, 503]);
+    applyStatus(healthy);
+    setStatusStreamOpen(true);
+    for (let i = 0; i < 3; i++) await fetchStatus();
+    expect(el('health-indicator').textContent).toBe('All Systems Operational');
+
+    setStatusStreamOpen(false);
+
+    expect(el('health-indicator').textContent).toBe('Status unknown');
+  });
+
+  it('stays Unknown when the stream merely reopens, and recovers on fresh data', async () => {
+    const { el, applyStatus, fetchStatus, setStatusStreamOpen, isStatusFeedStale } = runScripts([503, 503, 503, healthy]);
+    applyStatus(healthy);
+    setStatusStreamOpen(false);
+    for (let i = 0; i < 3; i++) await fetchStatus();
+
+    setStatusStreamOpen(true);
+    expect(isStatusFeedStale()).toBe(true);
+    expect(el('health-indicator').textContent).toBe('Status unknown');
+
+    await fetchStatus();
+
+    expect(isStatusFeedStale()).toBe(false);
+    expect(el('health-indicator').textContent).toBe('All Systems Operational');
+    expect(el('bot-status').classList.contains('is-stale')).toBe(false);
+    expect(el('status-stale-note').hidden).toBe(true);
+    expect(el('discord-state').textContent).toBe('Connected');
+    expect(el('dot-voice').className).toBe('dot dot--online');
+  });
+
+  it('recovers when a stream message brings fresh data', async () => {
+    const { el, applyStatus, fetchStatus, setStatusStreamOpen } = runScripts([503, 503, 503]);
+    setStatusStreamOpen(false);
+    for (let i = 0; i < 3; i++) await fetchStatus();
+
+    applyStatus(status(false, { connected: false }));
+
+    expect(el('health-indicator').textContent).toBe('Service down');
+    expect(el('discord-state').textContent).toBe('Disconnected');
+  });
+
+  it('no longer overwrites the Discord account with "(status unavailable)"', async () => {
+    const { el, applyStatus, fetchStatus, setStatusStreamOpen } = runScripts([503, 503, 503]);
+    applyStatus(healthy);
+    setStatusStreamOpen(false);
+    for (let i = 0; i < 3; i++) await fetchStatus();
+
+    expect(el('discord-tag').textContent).toBe('Bot#0001');
   });
 });
