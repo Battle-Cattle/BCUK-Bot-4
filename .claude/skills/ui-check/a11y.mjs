@@ -101,11 +101,12 @@ export async function auditFocus(page) {
 function collectTextElements() {
   const skip = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'OPTION']);
   const directText = (el) => [...el.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join('').trim().replace(/\s+/g, ' ');
-  const measurable = (el) => {
+  const hasText = (el) => !skip.has(el.tagName) && directText(el) !== '' && !el.closest(':disabled');
+  const shown = (el) => {
     const rect = el.getBoundingClientRect();
-    return !skip.has(el.tagName) && directText(el) !== '' && rect.width > 1 && rect.height > 1 && !el.closest(':disabled')
-      && el.checkVisibility({ opacityProperty: true, visibilityProperty: true });
+    return rect.width > 1 && rect.height > 1 && el.checkVisibility({ opacityProperty: true, visibilityProperty: true });
   };
+  const measurable = (el) => hasText(el) && shown(el);
   const layers = (el) => {
     const out = [];
     for (let node = el; node; node = node.parentElement) {
