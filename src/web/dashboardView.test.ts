@@ -56,7 +56,7 @@ describe('views/dashboard.ejs layout', () => {
 
   it('shows the Twitch channel status as a Bot Status card instead of a separate Channels section', async () => {
     const html = await render();
-    const status = between(html, '<section class="section dashboard-status">', '</section>');
+    const status = between(html, '<section class="section dashboard-status" id="bot-status">', '</section>');
 
     expect(divBlock(status, '<div class="status-grid">')).toContain('id="twitch-channels"');
     expect(html).not.toContain('<h2 class="section-title">Channels</h2>');
@@ -66,7 +66,7 @@ describe('views/dashboard.ejs layout', () => {
     const layout = divBlock(await render(), '<div class="dashboard-layout">');
 
     const positions = [
-      '<section class="section dashboard-status">',
+      '<section class="section dashboard-status" id="bot-status">',
       '<aside class="dashboard-sidebar"',
       '<section class="section dashboard-links">',
       '<section class="section dashboard-usage">',
@@ -259,5 +259,72 @@ describe('Discord and Voice card text states', () => {
     const html = await render();
 
     for (const id of ['last-command', 'last-file', 'last-source', 'last-when']) expect(html).toContain(`id="${id}"`);
+  });
+});
+
+describe('overall health indicator', () => {
+  const css = fs.readFileSync(stylePath, 'utf8');
+
+  it('renders exactly one indicator, as a polite live region above the dashboard layout', async () => {
+    const html = await render();
+
+    expect(html.match(/id="health-indicator"/g)).toHaveLength(1);
+    expect(html).toMatch(/<div id="health-indicator" class="health health--unknown" data-state="unknown" role="status">Status unknown<\/div>/);
+    expect(html.indexOf('id="health-indicator"')).toBeLessThan(html.indexOf('<div class="dashboard-layout">'));
+  });
+
+  it.each([
+    ['signed in', {}],
+    ['signed out', { user: null }],
+  ])('never claims health in the server render (%s): it starts Unknown until data arrives', async (_case, locals) => {
+    const html = await render(locals);
+
+    expect(html).not.toContain('All Systems Operational');
+    expect(html).toContain('>Status unknown</div>');
+  });
+
+  it('has a hidden note on Bot Status for when the feed is unreachable', async () => {
+    const status = between(await render(), '<section class="section dashboard-status" id="bot-status">', '</section>');
+
+    expect(status).toContain('<p id="status-stale-note" class="status-stale-note" hidden>');
+  });
+
+  it('loads the health script before the status script that calls it', async () => {
+    const html = await render();
+
+    expect(html.indexOf('<script src="/dashboard-health.js">')).toBeGreaterThan(-1);
+    expect(html.indexOf('<script src="/dashboard-health.js">')).toBeLessThan(html.indexOf('<script src="/dashboard-status.js">'));
+  });
+
+  it.each([
+    ['healthy', '\\2713'],
+    ['degraded', '\\25B2'],
+    ['unhealthy', '\\2715'],
+    ['unknown', '?'],
+  ])('gives the %s state its own icon, hidden from screen readers', (state, icon) => {
+    const escaped = icon.replace(/[\\?]/g, (c) => `\\${c}`);
+    const rule = new RegExp(`\\.health--${state}::before\\s*\\{[^}]*content:\\s*"${escaped}"\\s*/\\s*""`);
+
+    expect(css).toMatch(rule);
+  });
+
+  it('keeps Unknown neutral grey, never green', () => {
+    expect(css).toMatch(/\.health--unknown\s*\{\s*color:\s*var\(--muted\);\s*\}/);
+  });
+
+  it('mutes stale values by colour, not opacity, so text keeps its contrast', () => {
+    const staleRules = css.match(/\.is-stale[^{]*\{[^}]*\}/g) ?? [];
+
+    expect(staleRules.length).toBeGreaterThan(0);
+    for (const rule of staleRules) expect(rule).not.toMatch(/opacity/);
+    expect(css).toMatch(/\.dot--unknown\s*\{[^}]*border:\s*2px dashed/);
+  });
+
+  it('mutes every kind of Bot Status value while stale, including the Twitch channel rows and their badges', () => {
+    for (const selector of ['.is-stale .stat-value', '.is-stale .channel-name', '.is-stale .channel-meta']) {
+      expect(css).toContain(selector);
+    }
+    // Badges lose their fill and the LIVE pulse stops, so a stale LIVE neither reads as current nor drops below AA.
+    expect(css).toMatch(/\.is-stale \.badge\s*\{[^}]*background:\s*transparent;[^}]*color:\s*var\(--muted\);[^}]*animation:\s*none;/);
   });
 });

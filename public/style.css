@@ -219,6 +219,33 @@ a:hover { text-decoration: underline; }
 .status-text--idle::before         { content: "\25CF"; content: "\25CF" / ""; }
 .status-text--playing      { color: var(--accent-blue); }
 .status-text--playing::before      { content: "\25B6"; content: "\25B6" / ""; }
+.status-text--unknown      { color: var(--muted); }
+.status-text--unknown::before      { content: "?"; content: "?" / ""; }
+/* Status not known (feed unreachable): a dashed ring, distinct from the solid connected/disconnected shapes. */
+.dot--unknown  { background: transparent; border: 2px dashed var(--muted); }
+
+/* ── Overall health indicator (dashboard-health.js) ───────
+   One roll-up of the required services. Every state has its own icon and words as well as colour; Unknown is
+   neutral grey and never green. */
+.health { display: inline-flex; align-items: center; gap: .5rem; margin-bottom: 1.25rem; padding: .45rem .9rem; border: 1px solid var(--border); border-radius: 99px; background: var(--bg-card); font-weight: 700; }
+.health--healthy   { color: var(--success); }
+.health--healthy::before   { content: "\2713"; content: "\2713" / ""; }
+.health--degraded  { color: var(--warning); }
+.health--degraded::before  { content: "\25B2"; content: "\25B2" / ""; }
+.health--unhealthy { color: var(--danger-text); }
+.health--unhealthy::before { content: "\2715"; content: "\2715" / ""; }
+.health--unknown   { color: var(--muted); }
+.health--unknown::before   { content: "?"; content: "?" / ""; }
+
+/* Bot Status while the feed is unreachable (markStatusStale in dashboard-status.js): values are muted, not faded,
+   so text stays above AA, and a note says they are the last received, not live. Badges lose their fills so
+   white-on-red LIVE text can't turn grey on red, and the LIVE pulse (which animates the fill) stops: a stale value isn't live. */
+.status-stale-note { margin-bottom: .75rem; padding: .5rem .75rem; border-left: 3px solid var(--muted); background: var(--bg-card); color: var(--text); font-size: .85rem; }
+.status-stale-note::before { content: "?"; content: "?" / ""; margin-right: .4em; color: var(--muted); font-weight: 700; }
+.is-stale .stat-value,
+.is-stale .channel-name,
+.is-stale .channel-meta { color: var(--muted); }
+.is-stale .badge { background: transparent; border: 1px solid var(--border); color: var(--muted); animation: none; }
 .overlay-status { display: flex; align-items: center; gap: .5rem; margin-top: .5rem; font-size: .85rem; color: var(--muted); }
 
 /* ── Channel list (inside card-body) ──────────────────── */

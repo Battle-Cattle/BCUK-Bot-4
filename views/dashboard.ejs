@@ -11,11 +11,17 @@ function htmlAttrJson(value) {
   <%- include('partials/nav') %>
 
   <main class="container container--wide">
+    <!-- The one overall health indicator: a roll-up of the required services (Discord, and the Twitch chat
+         connections when any are configured), never voice or live state. dashboard-health.js derives it from the
+         status feed; it starts Unknown so the page never claims health before data arrives. -->
+    <div id="health-indicator" class="health health--unknown" data-state="unknown" role="status">Status unknown</div>
+
     <div class="dashboard-layout">
 
       <!-- ── Status Cards ── -->
-      <section class="section dashboard-status">
+      <section class="section dashboard-status" id="bot-status">
         <h2 class="section-title">Bot Status</h2>
+        <p id="status-stale-note" class="status-stale-note" hidden>Status unknown: these are the last values received, not live.</p>
         <div class="status-grid">
 
           <div class="card" id="card-discord">
@@ -126,6 +132,7 @@ function htmlAttrJson(value) {
   <%- include('partials/footer') %>
   <script src="/dashboard-utils.js"></script>
   <script src="/dashboard-layout.js"></script>
+  <script src="/dashboard-health.js"></script>
   <script src="/dashboard-status.js"></script>
   <script src="/dashboard-voice.js"></script>
   <script src="/dashboard-events.js"></script>
