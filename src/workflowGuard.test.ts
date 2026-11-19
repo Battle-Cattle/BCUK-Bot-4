@@ -298,13 +298,19 @@ describe.skipIf(isWindows)('workflow-guard notify', () => {
     expect(output.hookSpecificOutput.additionalContext).toContain('pr-triage');
   });
 
+  it('still reminds when a merge notice arrives alongside other PR activity, naming only that activity', () => {
+    const result = hook('notify', { tool_name: 'ReadNotifications', tool_response: `${event('pull_request.closed')}\n${event('check_run.completed')}` });
+    expect(result.stdout).toContain('(check_run.completed)');
+  });
+
   it('finds events in a structured (JSON-escaped) tool response', () => {
     const result = hook('notify', { tool_name: 'ReadNotifications', tool_response: { text: event('pull_request_review.submitted') } });
     expect(result.stdout).toContain('pull_request_review.submitted');
   });
 
-  it('says nothing for a subscription notice alone, or for another tool', () => {
+  it('says nothing for a subscription notice or a merged/closed PR alone, or for another tool', () => {
     expect(hook('notify', { tool_name: 'ReadNotifications', tool_response: event('subscription.created') }).stdout).toBe('');
+    expect(hook('notify', { tool_name: 'ReadNotifications', tool_response: event('pull_request.closed') }).stdout).toBe('');
     expect(hook('notify', { tool_name: 'Bash', tool_response: event('check_run.completed') }).stdout).toBe('');
   });
 });
