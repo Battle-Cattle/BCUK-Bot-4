@@ -229,8 +229,9 @@ async function fetchStatus() {
     } else {
       const data = await res.json();
       if (generation !== statusGeneration) return;
-      consecutiveFailures = 0;
       applyStatus(data);
+      // Reset only once the payload applied: a 200 with a malformed body throws above and counts as a failure.
+      consecutiveFailures = 0;
     }
   } catch (_) {
     consecutiveFailures++;

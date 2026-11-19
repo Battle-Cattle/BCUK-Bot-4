@@ -361,6 +361,18 @@ describe('public/dashboard-status.js update ordering', () => {
     expect(el('health-indicator').textContent).toBe('All Systems Operational');
   });
 
+  it('counts 200 responses with malformed bodies as failures, so three in a row with the stream down go Unknown', async () => {
+    const malformed = { discord: { ready: true }, twitch: {} }; // no voice section: applying it throws
+    const { el, applyStatus, fetchStatus, setStatusStreamOpen, isStatusFeedStale } = runScripts([malformed, malformed, malformed]);
+    applyStatus(healthy);
+    setStatusStreamOpen(false);
+    for (let i = 0; i < 3; i++) await fetchStatus();
+
+    expect(isStatusFeedStale()).toBe(true);
+    expect(el('bot-status').classList.contains('is-stale')).toBe(true);
+    expect(el('health-indicator').textContent).toBe('Status unknown');
+  });
+
   it('keeps the cards marked not current when a fresh payload is malformed', async () => {
     const { el, applyStatus, fetchStatus, setStatusStreamOpen, isStatusFeedStale } = runScripts([503, 503, 503]);
     applyStatus(healthy);
