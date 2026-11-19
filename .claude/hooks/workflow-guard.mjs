@@ -12,6 +12,7 @@
 //                                  to a migration, startup, auth middleware or token crypto file
 //   leaving draft                  unless acceptance-checker ran on the current HEAD (create_pull_request
 //                                  without draft: true, or update_pull_request with draft: false)
+//   resolving a review thread      always: the reviewer (CodeRabbit, Qlty or a person) closes its own thread
 // notify adds a reminder to dispatch pr-triage when PR activity arrives; it never blocks.
 //
 // A git or filesystem error lets the call through: the guard must never wedge a session over a
@@ -166,6 +167,12 @@ function checkPre(toolName, input, cwd) {
     return;
   }
   if (toolName === 'mcp__github__update_pull_request' && input.draft === false) requireAcceptance(cwd);
+  if (toolName === 'mcp__github__resolve_review_thread') {
+    block(
+      'review threads are closed by the reviewer who opened them, not by this session: reply on the thread with the fixing commit ' +
+      'and let CodeRabbit (or the person) confirm and resolve it. A thread it reopens or disputes stays open until it agrees.',
+    );
+  }
 }
 
 /**

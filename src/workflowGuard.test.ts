@@ -254,6 +254,18 @@ describe.skipIf(isWindows)('workflow-guard pre: acceptance before leaving draft'
   });
 });
 
+describe.skipIf(isWindows)('workflow-guard pre: review threads', () => {
+  it('blocks resolving a review thread, which the reviewer closes', () => {
+    const result = hook('pre', { tool_name: 'mcp__github__resolve_review_thread', tool_input: { threadId: 'PRRT_x' } });
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('closed by the reviewer');
+  });
+
+  it('leaves replying on a thread alone', () => {
+    expect(hook('pre', { tool_name: 'mcp__github__add_reply_to_pull_request_comment', tool_input: { body: 'Fixed in abc' } }).status).toBe(0);
+  });
+});
+
 describe.skipIf(isWindows)('workflow-guard notify', () => {
   const event = (kind: string) => `<event source="github" kind="${kind}" from="system">{}</event>`;
 
