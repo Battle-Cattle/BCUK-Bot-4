@@ -107,17 +107,18 @@ function setStatusText(id, state) {
  * Updates the dashboard from a status payload: the cards, then the health indicator and the not-current marking.
  * The cards go first, so a malformed payload that throws part-way never clears the not-current marking; instead
  * the indicator goes to Unknown and the error propagates (the stream handler drops it, fetchStatus counts it).
- * Every call counts as a newer update (see statusGeneration), so an in-flight fetch can't overwrite it.
+ * Each successful call counts as a newer update (see statusGeneration), so an in-flight fetch can't overwrite it.
  * @param status - The parsed /api/status JSON (`discord`, `voice`, `twitch` sections, plus the last played sound).
  */
 function applyStatus(status) {
-  statusGeneration++;
   try {
     applyStatusCards(status);
   } catch (err) {
     renderHealth(deriveHealth(null, true));
     throw err;
   }
+  // Only a successful apply supersedes an in-flight fetch; a malformed message must not block a pending recovery.
+  statusGeneration++;
   renderHealth(deriveHealth(status, true));
   statusFeedStale = false;
   markStatusStale(false);

@@ -354,6 +354,20 @@ describe('public/dashboard-status.js update ordering', () => {
     expect(el('discord-state').textContent).toBe('Disconnected');
   });
 
+  it('still applies a pending fetch when the stream message in between was malformed', async () => {
+    let resolveFetch: (body: Record<string, unknown>) => void = () => {};
+    const slow = new Promise<Record<string, unknown>>((resolve) => { resolveFetch = resolve; });
+    const { el, applyStatus, fetchStatus } = runScripts([slow]);
+
+    const pending = fetchStatus();
+    expect(() => applyStatus({ discord: { ready: true }, twitch: {} })).toThrow(); // no voice section
+    resolveFetch(healthy);
+    await pending;
+
+    expect(el('health-indicator').textContent).toBe('All Systems Operational');
+    expect(el('discord-state').textContent).toBe('Connected');
+  });
+
   it('still applies a fetch response nothing overtook', async () => {
     const { el, fetchStatus } = runScripts([healthy]);
     await fetchStatus();
