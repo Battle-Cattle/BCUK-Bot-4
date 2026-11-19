@@ -93,6 +93,22 @@ describe('checkUploadFolderPermissions', () => {
     expect(stat).toHaveBeenCalledTimes(4);
   });
 
+  it('logs an unsafe folder before checking the next, so a later hung stat can\'t swallow it', async () => {
+    let release!: () => void;
+    const stat = vi.fn()
+      .mockResolvedValueOnce({ mode: 0o40777, uid: UID })
+      .mockImplementationOnce(() => new Promise((resolve) => { release = () => resolve({ mode: 0o40700, uid: UID }); }))
+      .mockResolvedValue({ mode: 0o40700, uid: UID });
+    const done = checkUploadFolderPermissions(alert, { uid: UID, platform: 'linux', stat });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(stat).toHaveBeenCalledTimes(2);
+    expect(mockLog.warn).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('OVERLAY_FOLDER'));
+    expect(alert).not.toHaveBeenCalled();
+    release();
+    expect(await done).toHaveLength(1);
+    expect(alert).toHaveBeenCalledOnce();
+  });
+
   it('lists every problem with a folder in one line', async () => {
     const stat = vi.fn().mockResolvedValue({ mode: 0o40777, uid: 0 });
     const [line] = await checkUploadFolderPermissions(alert, { folders: { SFX_FOLDER: '/x' }, uid: UID, platform: 'linux', stat });

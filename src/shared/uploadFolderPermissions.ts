@@ -94,7 +94,10 @@ async function checkFolders(
   const warnings: string[] = [];
   for (const [name, folder] of folders) {
     const line = await checkFolder(name, folder, uid, stat);
-    if (line !== null) warnings.push(line);
+    if (line === null) continue;
+    // Logged as found, so a later folder's hung stat can't swallow a warning already found.
+    log.warn(`Unsafe upload folder permissions: ${line}`);
+    warnings.push(line);
   }
   return warnings;
 }
@@ -141,7 +144,6 @@ export async function checkUploadFolderPermissions(
   const folders = Object.entries(options.folders ?? uploadFolders());
   const warnings = await checkFolders(folders, uid, stat);
   if (warnings.length === 0) return [];
-  for (const line of warnings) log.warn(`Unsafe upload folder permissions: ${line}`);
   await alert(buildAlert(warnings));
   return warnings;
 }
