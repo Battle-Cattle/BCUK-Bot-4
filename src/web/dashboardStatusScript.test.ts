@@ -130,6 +130,29 @@ describe('public/dashboard-status.js Voice card', () => {
   });
 });
 
+describe('public/dashboard-status.js Last Played card', () => {
+  it('shows the last command, file, source and when it played', () => {
+    const { el, applyStatus } = runScripts();
+    const payload = status(true, { connected: true });
+    applyStatus({
+      ...payload,
+      voice: { ...payload.voice, lastCommand: '!clap', currentFile: 'clap.mp3', lastSource: 'twitch', lastPlayedAt: new Date().toISOString() },
+    });
+
+    expect(el('last-command').textContent).toBe('!clap');
+    expect(el('last-file').textContent).toBe('clap.mp3');
+    expect(el('last-source').textContent).toBe('twitch');
+    expect(el('last-when').textContent).toBe('just now');
+  });
+
+  it('shows dashes when nothing has played yet', () => {
+    const { el, applyStatus } = runScripts();
+    applyStatus(status(true, { connected: false }));
+
+    for (const id of ['last-command', 'last-file', 'last-source', 'last-when']) expect(el(id).textContent).toBe('—');
+  });
+});
+
 describe('public/dashboard-status.js state changes', () => {
   it('replaces the previous classes, names and text when the state changes', () => {
     const { el, applyStatus } = runScripts();
