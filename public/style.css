@@ -195,12 +195,30 @@ a:hover { text-decoration: underline; }
 /* ── Online dot ────────────────────────────────────────── */
 .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
 /* Each state has its own shape as well as colour, so it reads without colour (greyscale, colour blindness):
-   filled disc = connected, hollow ring = disconnected, play triangle = playing. The dot's role="img" and
-   aria-label (setStatusDot in dashboard-utils.js) give it a name in words. */
-.dot--online  { background: var(--success); box-shadow: 0 0 6px var(--success); }
-.dot--offline { background: transparent; border: 2px solid var(--danger); }
-.dot--playing { background: var(--warning); border-radius: 0; clip-path: polygon(10% 0, 100% 50%, 10% 100%); animation: pulse 1s infinite; }
+   filled disc = connected, hollow ring = disconnected/inactive, play triangle = playing. The dot's role="img" and
+   aria-label (setStatusDot in dashboard-utils.js) give it a name in words. Red is only for a required service
+   being down (Discord); voice is informational, so "not connected" is a neutral grey ring and "playing" uses
+   the brand accent rather than warning amber. */
+.dot--online   { background: var(--success); box-shadow: 0 0 6px var(--success); }
+.dot--offline  { background: transparent; border: 2px solid var(--danger); }
+.dot--inactive { background: transparent; border: 2px solid var(--muted); }
+.dot--playing  { background: var(--accent-blue); border-radius: 0; clip-path: polygon(10% 0, 100% 50%, 10% 100%); animation: pulse 1s infinite; }
 @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.5; } }
+
+/* A card's state in words (#discord-state, #voice-state), set by setStatusText in dashboard-status.js. Each
+   state has its own icon as well as colour; the `/ ""` alt text keeps the icon out of the accessible name. */
+.status-text { font-weight: 600; }
+.status-text::before { margin-right: .35em; }
+.status-text--connected    { color: var(--success); }
+.status-text--connected::before    { content: "\2713"; content: "\2713" / ""; }
+.status-text--disconnected { color: var(--danger-text); }
+.status-text--disconnected::before { content: "\2715"; content: "\2715" / ""; }
+.status-text--inactive     { color: var(--muted); }
+.status-text--inactive::before     { content: "\25CB"; content: "\25CB" / ""; }
+.status-text--idle         { color: var(--text); }
+.status-text--idle::before         { content: "\25CF"; content: "\25CF" / ""; }
+.status-text--playing      { color: var(--accent-blue); }
+.status-text--playing::before      { content: "\25B6"; content: "\25B6" / ""; }
 .overlay-status { display: flex; align-items: center; gap: .5rem; margin-top: .5rem; font-size: .85rem; color: var(--muted); }
 
 /* ── Channel list (inside card-body) ──────────────────── */
