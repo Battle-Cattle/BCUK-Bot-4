@@ -62,14 +62,45 @@ function renderChannels(container, channelMap) {
 }
 
 /**
- * Picks the voice dot's state class and accessible name: hollow "Not connected", play-triangle "Playing" or filled "Idle".
- * @param voice - The `voice` section of an /api/status response (`connected`, `playing`).
- * @returns The dot's classes and the words that describe its state.
+ * Picks the Discord card's state: connected (filled dot, "Connected") or disconnected (red ring, "Disconnected").
+ * Discord is a required service, so disconnected is styled as a fault.
+ * @param discord - The `discord` section of an /api/status response (`ready`).
+ * @returns The dot's classes, its accessible name, and the visible state text and its style modifier.
  */
-function voiceDotState(voice) {
-  if (!voice.connected) return { className: 'dot dot--offline', label: 'Voice: Not connected' };
-  if (voice.playing) return { className: 'dot dot--playing', label: 'Voice: Playing' };
-  return { className: 'dot dot--online', label: 'Voice: Connected, idle' };
+function discordState(discord) {
+  if (discord.ready) {
+    return { dotClass: 'dot dot--online', label: 'Discord: Connected', text: 'Connected', modifier: 'connected' };
+  }
+  return { dotClass: 'dot dot--offline', label: 'Discord: Disconnected', text: 'Disconnected', modifier: 'disconnected' };
+}
+
+/**
+ * Picks the Voice card's state: not connected, idle or playing. Voice is informational (being out of a channel is
+ * normal), so not connected is neutral grey rather than a fault, and playing uses the brand accent, not amber.
+ * @param voice - The `voice` section of an /api/status response (`connected`, `playing`).
+ * @returns The dot's classes, its accessible name, and the visible state text and its style modifier.
+ */
+function voiceState(voice) {
+  if (!voice.connected) {
+    return { dotClass: 'dot dot--inactive', label: 'Voice: Not connected', text: 'Not connected', modifier: 'inactive' };
+  }
+  if (voice.playing) {
+    return { dotClass: 'dot dot--playing', label: 'Voice: Playing', text: 'Playing', modifier: 'playing' };
+  }
+  return { dotClass: 'dot dot--online', label: 'Voice: Connected, idle', text: 'Idle', modifier: 'idle' };
+}
+
+/**
+ * Shows a card's state in words, with the icon and colour its `status-text--*` modifier gives it in style.css;
+ * does nothing if the element is missing.
+ * @param id - Id of the state text element.
+ * @param state - The state from discordState()/voiceState(): its visible `text` and style `modifier`.
+ */
+function setStatusText(id, state) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.className = `stat-value status-text status-text--${state.modifier}`;
+  el.textContent = state.text;
 }
 
 /**
@@ -78,34 +109,18 @@ function voiceDotState(voice) {
  */
 function applyStatus(status) {
   // Discord bot
-  const discordOn = status.discord.ready;
-  setStatusDot(
-    'dot-discord',
-    discordOn ? 'dot dot--online' : 'dot dot--offline',
-    discordOn ? 'Discord: Connected' : 'Discord: Disconnected',
-  );
+  const discord = discordState(status.discord);
+  setStatusDot('dot-discord', discord.dotClass, discord.label);
+  setStatusText('discord-state', discord);
   setText('discord-tag',   status.discord.tag);
   setText('discord-guild', status.discord.guildName);
 
   // Voice
   const voiceOn = status.voice.connected;
-  const voiceDot = voiceDotState(status.voice);
-  setStatusDot('dot-voice', voiceDot.className, voiceDot.label);
+  const voice = voiceState(status.voice);
+  setStatusDot('dot-voice', voice.dotClass, voice.label);
+  setStatusText('voice-state', voice);
   setText('voice-channel', status.voice.channelName);
-
-  const voiceStateEl = document.getElementById('voice-state');
-  if (voiceStateEl) {
-    if (!voiceOn) {
-      voiceStateEl.textContent = 'Not connected';
-      voiceStateEl.style.color = 'var(--danger)';
-    } else if (status.voice.playing) {
-      voiceStateEl.textContent = `▶ Playing…`;
-      voiceStateEl.style.color = 'var(--warning)';
-    } else {
-      voiceStateEl.textContent = 'Idle';
-      voiceStateEl.style.color = 'var(--success)';
-    }
-  }
 
   // Keep the rejoin/leave button label in sync with connection state
   const voiceBtn = document.getElementById('btn-rejoin-voice');

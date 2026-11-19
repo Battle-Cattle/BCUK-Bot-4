@@ -25,6 +25,7 @@ function htmlAttrJson(value) {
               <span class="dot dot--offline" id="dot-discord" role="img" aria-label="Discord: Disconnected" title="Discord: Disconnected"></span>
             </div>
             <div class="card-body">
+              <div class="stat-row"><span class="stat-label">Status</span><span class="stat-value status-text" id="discord-state">—</span></div>
               <div class="stat-row"><span class="stat-label">Account</span><span class="stat-value" id="discord-tag">—</span></div>
               <div class="stat-row"><span class="stat-label">Server</span><span class="stat-value" id="discord-guild">—</span></div>
             </div>
@@ -34,11 +35,11 @@ function htmlAttrJson(value) {
             <div class="card-header">
               <span class="card-icon">🔊</span>
               <span class="card-label">Voice Channel</span>
-              <span class="dot dot--offline" id="dot-voice" role="img" aria-label="Voice: Not connected" title="Voice: Not connected"></span>
+              <span class="dot dot--inactive" id="dot-voice" role="img" aria-label="Voice: Not connected" title="Voice: Not connected"></span>
             </div>
             <div class="card-body">
               <div class="stat-row"><span class="stat-label">Channel</span><span class="stat-value" id="voice-channel">—</span></div>
-              <div class="stat-row"><span class="stat-label">State</span><span class="stat-value" id="voice-state">Idle</span></div>
+              <div class="stat-row"><span class="stat-label">State</span><span class="stat-value status-text" id="voice-state">—</span></div>
               <% if (user && user.accessLevel >= 1) { %>
               <div class="stat-row stat-row-top-gap">
                 <div class="d-flex flex-wrap gap-05 items-center">

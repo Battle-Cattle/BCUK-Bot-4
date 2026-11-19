@@ -182,12 +182,13 @@ describe('dashboard status cues without colour or motion', () => {
     const html = await render();
 
     expect(html).toMatch(/class="dot dot--offline" id="dot-discord" role="img" aria-label="Discord: Disconnected"/);
-    expect(html).toMatch(/class="dot dot--offline" id="dot-voice" role="img" aria-label="Voice: Not connected"/);
+    expect(html).toMatch(/class="dot dot--inactive" id="dot-voice" role="img" aria-label="Voice: Not connected"/);
   });
 
   it('draws each dot state as a different shape, not only a different colour', () => {
-    // filled disc = connected, hollow ring = disconnected, play triangle = playing
+    // filled disc = connected, hollow ring = disconnected/inactive, play triangle = playing
     expect(css).toMatch(/\.dot--offline\s*\{[^}]*background:\s*transparent;[^}]*border:\s*2px solid/);
+    expect(css).toMatch(/\.dot--inactive\s*\{[^}]*background:\s*transparent;[^}]*border:\s*2px solid var\(--muted\)/);
     expect(css).toMatch(/\.dot--playing\s*\{[^}]*clip-path:\s*polygon\(/);
   });
 
@@ -205,5 +206,58 @@ describe('dashboard status cues without colour or motion', () => {
     const reduced = /@media \(prefers-reduced-motion: reduce\) \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? '';
 
     expect(reduced).toMatch(/\*, \*::before, \*::after\s*\{[^}]*animation:\s*none !important;[^}]*transition:\s*none !important;/);
+  });
+});
+
+describe('Discord and Voice card text states', () => {
+  const css = fs.readFileSync(stylePath, 'utf8');
+
+  it('gives the Discord card a Status row and the Voice card a State row, both neutral until status loads', async () => {
+    const discord = divBlock(await render(), '<div class="card" id="card-discord">');
+    const voice = divBlock(await render(), '<div class="card" id="card-voice">');
+
+    expect(discord).toContain('<span class="stat-label">Status</span><span class="stat-value status-text" id="discord-state">—</span>');
+    expect(voice).toContain('<span class="stat-label">State</span><span class="stat-value status-text" id="voice-state">—</span>');
+    // Every id the status script writes to is still there.
+    for (const id of ['dot-discord', 'discord-tag', 'discord-guild']) expect(discord).toContain(`id="${id}"`);
+    for (const id of ['dot-voice', 'voice-channel']) expect(voice).toContain(`id="${id}"`);
+  });
+
+  it.each([
+    ['connected', '\\2713'],
+    ['disconnected', '\\2715'],
+    ['inactive', '\\25CB'],
+    ['idle', '\\25CF'],
+    ['playing', '\\25B6'],
+  ])('gives the %s state text its own icon, hidden from screen readers', (modifier, icon) => {
+    const rule = new RegExp(`\\.status-text--${modifier}::before\\s*\\{[^}]*content:\\s*"\\${icon}"\\s*/\\s*""`);
+
+    expect(css).toMatch(rule);
+  });
+
+  it('keeps status red/amber off the informational voice states', () => {
+    for (const cls of ['status-text--inactive', 'status-text--idle', 'status-text--playing', 'dot--inactive', 'dot--playing']) {
+      const rule = new RegExp(`\\.${cls}\\s*\\{([^}]*)\\}`).exec(css)?.[1] ?? '';
+
+      expect(rule).not.toBe('');
+      expect(rule).not.toMatch(/--danger|--warning/);
+    }
+  });
+
+  it.each([
+    [0, false],
+    [1, true],
+    [3, true],
+  ])('shows the voice channel selector and Join/Leave button only to Mod+ (access level %i)', async (accessLevel, shown) => {
+    const voice = divBlock(await render({ user: { ...USER, accessLevel } }), '<div class="card" id="card-voice">');
+
+    expect(voice.includes('id="voice-channel-select"')).toBe(shown);
+    expect(voice.includes('id="btn-rejoin-voice"')).toBe(shown);
+  });
+
+  it('keeps the Last Played card and its fields', async () => {
+    const html = await render();
+
+    for (const id of ['last-command', 'last-file', 'last-source', 'last-when']) expect(html).toContain(`id="${id}"`);
   });
 });
