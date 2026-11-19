@@ -78,7 +78,8 @@ function playwrightAvailable() {
 /**
  * Lists the skill self-tests to run: `.claude/skills/<name>/selftest.mjs` for each skill folder the
  * branch changes. They sit outside Vitest's `src/**` include, so nothing else runs them. One that
- * needs Playwright is skipped, with a note, where Playwright isn't installed.
+ * loads Playwright (names `'playwright'` in an import or require) is skipped, with a note, where
+ * Playwright isn't installed.
  * @param cwd the repository folder
  * @param paths the paths the branch changes
  * @returns the self-test paths, relative to the repository
@@ -87,7 +88,7 @@ function skillSelftests(cwd, paths) {
   const skills = new Set(paths.map((p) => /^\.claude\/skills\/([^/]+)\//.exec(p)?.[1]).filter(Boolean));
   const tests = [...skills].sort().map((name) => `.claude/skills/${name}/selftest.mjs`).filter((t) => existsSync(path.join(cwd, t)));
   return tests.filter((t) => {
-    const needsBrowser = readFileSync(path.join(cwd, t), 'utf8').includes("require('playwright')");
+    const needsBrowser = /['"]playwright['"]/.test(readFileSync(path.join(cwd, t), 'utf8'));
     if (needsBrowser && !playwrightAvailable()) {
       process.stdout.write(`Skipping ${t}: it needs the pre-installed Playwright, which isn't available here.\n`);
       return false;

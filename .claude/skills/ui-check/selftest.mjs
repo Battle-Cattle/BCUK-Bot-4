@@ -169,6 +169,9 @@ describe('in the browser', () => {
     assert.equal((await renderTexts('dashboard.json', ['#discord-state']))['#discord-state'], 'Connected');
     assert.equal((await renderTexts('dashboard-discord-down.json', ['#discord-state']))['#discord-state'], 'Disconnected');
     assert.equal((await renderTexts('dashboard-voice-playing.json', ['#voice-state']))['#voice-state'], 'Playing');
+    const channels = (await renderTexts('dashboard-all-connected.json', ['#twitch-channels']))['#twitch-channels'];
+    assert.equal(channels.match(/\bConnected\b/g)?.length, 4, 'all four channels show Connected');
+    assert.doesNotMatch(channels, /Disconnected|Never connected/i);
     const unavailable = await renderTexts('dashboard-feed-unavailable.json', ['#health-indicator', '#status-stale-note']);
     assert.match(unavailable['#health-indicator'], /unknown/i);
     assert.match(unavailable['#status-stale-note'], /not live/);

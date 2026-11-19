@@ -63,12 +63,17 @@ function runScript(script: string, ...args: string[]) {
  * offline. The fake records each call's arguments to npx.log and exits with `npxExit`.
  */
 function runPrecommitWithFakeNpx(npxExit: number, ...args: string[]) {
+  return runPrecommitWithFakeNpxIn({}, npxExit, ...args);
+}
+
+/** Like runPrecommitWithFakeNpx, with extra environment variables for the script. */
+function runPrecommitWithFakeNpxIn(env: NodeJS.ProcessEnv, npxExit: number, ...args: string[]) {
   const bin = path.join(path.dirname(repo), 'bin');
   fs.mkdirSync(bin, { recursive: true });
   const log = path.join(path.dirname(repo), 'npx.log');
   fs.writeFileSync(path.join(bin, 'npx'), `#!/bin/sh\necho "$@" >> "${log}"\nexit ${npxExit}\n`, { mode: 0o755 });
   const result = spawnSync('node', [PRECOMMIT, ...args], {
-    cwd: repo, encoding: 'utf8', env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}` },
+    cwd: repo, encoding: 'utf8', env: { ...process.env, ...env, PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}` },
   });
   const calls = fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n') : [];
   return { status: result.status, stdout: result.stdout, calls };
@@ -363,6 +368,21 @@ describe.skipIf(isWindows)('precommit.mjs', () => {
     const failing = runPrecommitWithFakeNpx(0);
     expect(failing.status).toBe(1);
     expect(failing.stdout).toContain('precommit failed (changed tests): skill self-tests');
+  });
+
+  it('skips a self-test that loads Playwright, with a note, when Playwright can\'t be resolved', () => {
+    write('.claude/skills/browser/selftest.mjs', "import { createRequire } from 'node:module';\ncreateRequire(import.meta.url)('playwright');\n");
+    write('.claude/skills/plain/selftest.mjs', "import { it } from 'node:test';\nit('passes', () => {});\n");
+    commitAll('fixture scripts');
+    git('push', '-q', 'origin', 'HEAD:main');
+    write('.claude/skills/browser/SKILL.md', 'changed\n');
+    write('.claude/skills/plain/SKILL.md', 'changed\n');
+    // The pre-installed Playwright is found through NODE_PATH; without it, require.resolve fails.
+    const result = runPrecommitWithFakeNpxIn({ NODE_PATH: '' }, 0);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('Skipping .claude/skills/browser/selftest.mjs: it needs the pre-installed Playwright');
+    expect(result.stdout).toContain('skill self-tests: node --test .claude/skills/plain/selftest.mjs');
+    expect(result.stdout).toContain('1 skill self-test(s)');
   });
 
   it('runs no self-test for a skill folder without one', () => {
