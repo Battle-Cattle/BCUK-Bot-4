@@ -1,17 +1,22 @@
 // ui-check: renders one EJS view from a fixture and inspects it in the pre-installed Chromium,
 // without starting the bot (no Discord, Twitch or MySQL). See SKILL.md next to this file.
 //
-//   node .claude/skills/ui-check/render.mjs <fixture.json> [outDir]
+//   node .claude/skills/ui-check/render.mjs <fixture.json> [outDir] [--no-a11y]
 //
 // The page is served from a throwaway local server under the production CSP (copied from
 // src/web/server.ts; keep the two in step), so inline scripts, inline styles and `on*`
 // attributes show up as violations here exactly as they would in production.
+//
+// Each run's findings go to report.json, including a keyboard-focus and text-contrast audit
+// (a11y.mjs). Those are report-only: only a CSP violation or an uncaught page error exits 1.
 
 import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { auditContrast, auditFocus, summariseA11y } from './a11y.mjs';
+import { loadFixture } from './fixture.mjs';
 
 const require = createRequire(import.meta.url);
 const ejs = require('ejs');
@@ -40,24 +45,11 @@ const MIME = {
 };
 
 /**
- * Reads and validates a fixture file.
- * @param fixturePath - Path to the fixture JSON: `{ view, locals, api?, sse?, waitMs? }`.
- * @returns The parsed fixture, with defaults filled in.
- */
-async function loadFixture(fixturePath) {
-  const fixture = JSON.parse(await readFile(fixturePath, 'utf8'));
-  if (typeof fixture.view !== 'string' || !/^[\w-]+$/.test(fixture.view)) {
-    throw new Error('fixture.view must be the name of a file in views/ (e.g. "dashboard")');
-  }
-  return { locals: {}, api: {}, sse: {}, waitMs: 500, ...fixture };
-}
-
-/**
  * Renders the fixture's view with the locals the server would give every page.
  * @param fixture - The loaded fixture.
  * @returns The rendered HTML.
  */
-function renderPage(fixture) {
+export function renderPage(fixture) {
   const viewPath = path.join(ROOT, 'views', `${fixture.view}.ejs`);
   return ejs.renderFile(viewPath, { user: null, csrfToken: 'ui-check-csrf', ...fixture.locals });
 }
@@ -126,7 +118,7 @@ function buildRoutes(html, fixture) {
  * @param fixture - The loaded fixture (its `api` and `sse` stubs).
  * @returns The listening server and its base URL.
  */
-async function startServer(html, fixture) {
+export async function startServer(html, fixture) {
   const routes = buildRoutes(html, fixture);
   const server = createServer((req, res) => {
     const urlPath = new URL(req.url ?? '/', 'http://localhost').pathname;
@@ -138,29 +130,61 @@ async function startServer(html, fixture) {
 }
 
 /**
+ * Lets the page settle: waits `waitMs`, then, when the fixture asks, advances the page's fake clock in
+ * steps (letting real network replies land between them) so slow timers such as a 60s poll fire in seconds.
+ * @param page - The Playwright page, loaded with the clock installed when `clock` is set.
+ * @param run - The run, with the fixture's `waitMs` and `clock` (`{ advanceMs, stepMs? }` or null).
+ * @returns Resolves once the page has settled.
+ */
+export async function settle(page, run) {
+  await page.waitForTimeout(run.waitMs);
+  if (!run.clock) return;
+  const step = run.clock.stepMs ?? 10000;
+  for (let done = 0; done < run.clock.advanceMs; done += step) {
+    await page.clock.fastForward(step);
+    await page.waitForTimeout(50);
+  }
+  await page.waitForTimeout(200);
+}
+
+/**
+ * Runs the accessibility audits a run asks for, after its screenshot so tabbing doesn't change it.
+ * @param page - The settled Playwright page.
+ * @param run - The run, with its `focusAudit` and `contrastAudit` switches.
+ * @returns `{ focus?, contrast? }`, or null when the run audits nothing.
+ */
+async function auditA11y(page, run) {
+  if (!run.focusAudit && !run.contrastAudit) return null;
+  const contrast = run.contrastAudit ? await auditContrast(page) : undefined;
+  const focus = run.focusAudit ? await auditFocus(page) : undefined;
+  return { focus, contrast };
+}
+
+/**
  * Loads the page in one browser context and records what a reviewer needs to check.
  * @param browser - The Playwright browser.
  * @param baseUrl - The throwaway server's URL.
- * @param run - Viewport, motion and colour settings, and where to write the screenshot.
- * @returns Findings for this run: console errors, CSP violations, failed requests, overflow, animations.
+ * @param run - Viewport, motion and colour settings, audits, and where to write the screenshot.
+ * @returns Findings for this run: console errors, CSP violations, failed requests, overflow, animations, a11y.
  */
 async function inspect(browser, baseUrl, run) {
+  // Every run enforces the CSP, the greyscale one included: its filter is set through the DOM below.
   const context = await browser.newContext({
     viewport: { width: run.width, height: run.height },
     deviceScaleFactor: 1,
     reducedMotion: run.reducedMotion ? 'reduce' : 'no-preference',
-    // Only the greyscale run bypasses the CSP, to inject its filter; every other run enforces it.
-    bypassCSP: run.greyscale,
   });
   const page = await context.newPage();
+  if (run.clock) await page.clock.install();
   const consoleErrors = [];
   const failedRequests = [];
   page.on('console', (msg) => { if (msg.type() === 'error') consoleErrors.push(msg.text()); });
   page.on('pageerror', (err) => consoleErrors.push(`pageerror: ${err.message}`));
   page.on('response', (res) => { if (res.status() >= 400) failedRequests.push(`${res.status()} ${new URL(res.url()).pathname}`); });
   await page.goto(baseUrl, { waitUntil: 'load' });
-  await page.waitForTimeout(run.waitMs);
-  if (run.greyscale) await page.addStyleTag({ content: 'html { filter: grayscale(1) !important; }' });
+  await settle(page, run);
+  // CSSOM writes are allowed under `style-src 'self'`; an injected <style> (addStyleTag) is not.
+  if (run.greyscale) await page.evaluate(() => { globalThis.document.documentElement.style.filter = 'grayscale(1)'; });
   // Runs in the page, so `document` is the browser's (reached via globalThis for the Node linter).
   const metrics = await page.evaluate(() => ({
     scrollWidth: globalThis.document.documentElement.scrollWidth,
@@ -176,6 +200,7 @@ async function inspect(browser, baseUrl, run) {
   await page.screenshot({ path: run.screenshot, fullPage: true });
   const aria = run.ariaPath ? await page.locator('body').ariaSnapshot() : null;
   if (aria) await writeFile(run.ariaPath, aria);
+  const a11y = await auditA11y(page, run);
   await context.close();
   return {
     run: run.label,
@@ -185,24 +210,30 @@ async function inspect(browser, baseUrl, run) {
     cspViolations: consoleErrors.filter((e) => e.includes('Content Security Policy')),
     consoleErrors: consoleErrors.filter((e) => !e.includes('Content Security Policy')),
     failedRequests,
+    ...(a11y ? { a11y } : {}),
   };
 }
 
 /**
- * Lists the runs: each viewport normally, plus reduced motion and greyscale at desktop and mobile.
+ * Lists the runs: each viewport normally, plus reduced motion and greyscale at desktop and mobile. The
+ * focus audit runs at each viewport; the contrast audit on every run but greyscale (whose filter only
+ * changes the screenshot, not computed colours), so animated colours are also caught at rest.
  * @param outDir - Directory for screenshots and the ARIA snapshot.
- * @param waitMs - How long to let the page's scripts settle before capturing.
+ * @param fixture - The loaded fixture: its `waitMs` (settle time) and `clock` (fake-clock advance, or null).
+ * @param a11y - False to skip the focus and contrast audits (`--no-a11y`).
  * @returns The runs to perform.
  */
-function planRuns(outDir, waitMs) {
-  const runs = VIEWPORTS.map((v) => ({ ...v, label: v.name, reducedMotion: false, greyscale: false }));
+function planRuns(outDir, fixture, a11y) {
+  const runs = VIEWPORTS.map((v) => ({ ...v, label: v.name, reducedMotion: false, greyscale: false, focusAudit: a11y }));
   for (const v of [VIEWPORTS[0], VIEWPORTS[2]]) {
-    runs.push({ ...v, label: `${v.name}-reduced-motion`, reducedMotion: true, greyscale: false });
-    runs.push({ ...v, label: `${v.name}-greyscale`, reducedMotion: false, greyscale: true });
+    runs.push({ ...v, label: `${v.name}-reduced-motion`, reducedMotion: true, greyscale: false, focusAudit: false });
+    runs.push({ ...v, label: `${v.name}-greyscale`, reducedMotion: false, greyscale: true, focusAudit: false });
   }
   return runs.map((r) => ({
     ...r,
-    waitMs,
+    contrastAudit: a11y && !r.greyscale,
+    waitMs: fixture.waitMs,
+    clock: fixture.clock,
     screenshot: path.join(outDir, `${r.label}.png`),
     ariaPath: r.label === 'desktop' ? path.join(outDir, 'aria-snapshot.yml') : null,
   }));
@@ -213,8 +244,10 @@ function planRuns(outDir, waitMs) {
  * @returns Resolves when the report is written; the process exits 1 on a CSP violation or page error.
  */
 async function main() {
-  const [fixturePath, outArg] = process.argv.slice(2);
-  if (!fixturePath) throw new Error('usage: node .claude/skills/ui-check/render.mjs <fixture.json> [outDir]');
+  const args = process.argv.slice(2);
+  const a11y = !args.includes('--no-a11y');
+  const [fixturePath, outArg] = args.filter((a) => a !== '--no-a11y');
+  if (!fixturePath) throw new Error('usage: node .claude/skills/ui-check/render.mjs <fixture.json> [outDir] [--no-a11y]');
   const fixture = await loadFixture(fixturePath);
   const outDir = path.resolve(outArg ?? path.join(ROOT, 'ui-check-output', fixture.view));
   await mkdir(outDir, { recursive: true });
@@ -222,9 +255,10 @@ async function main() {
   const browser = await chromium.launch();
   try {
     const results = [];
-    for (const run of planRuns(outDir, fixture.waitMs)) results.push(await inspect(browser, baseUrl, run));
+    for (const run of planRuns(outDir, fixture, a11y)) results.push(await inspect(browser, baseUrl, run));
     await writeFile(path.join(outDir, 'report.json'), `${JSON.stringify(results, null, 2)}\n`);
     console.log(JSON.stringify(results, null, 2));
+    if (a11y) console.log(summariseA11y(results));
     const blocking = results.some((r) => r.cspViolations.length > 0 || r.consoleErrors.some((e) => e.startsWith('pageerror')));
     process.exitCode = blocking ? 1 : 0;
   } finally {
@@ -234,4 +268,5 @@ async function main() {
   }
 }
 
-await main();
+// Run only from the command line, so selftest.mjs can import the server helpers.
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) await main();
