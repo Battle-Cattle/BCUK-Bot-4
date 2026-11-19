@@ -176,6 +176,12 @@ function checkPre(toolName, input, cwd) {
 }
 
 /**
+ * PR events with nothing for pr-triage to find: the notice that a subscription started, and the
+ * PR being merged or closed (the session is unsubscribed at that point).
+ */
+const NO_TRIAGE_KINDS = new Set(['subscription.created', 'pull_request.closed']);
+
+/**
  * Builds the reminder for PR activity in a ReadNotifications result.
  * @param response the tool_response of the ReadNotifications call
  * @returns the reminder, or null when the result holds no PR activity to act on
@@ -184,7 +190,7 @@ function triageReminder(response) {
   const text = typeof response === 'string' ? response : JSON.stringify(response ?? '');
   const kinds = [...text.matchAll(/source=\\?"github\\?"\s+kind=\\?"([\w.]+)\\?"/g)]
     .map((m) => m[1])
-    .filter((kind) => kind !== 'subscription.created');
+    .filter((kind) => !NO_TRIAGE_KINDS.has(kind));
   if (kinds.length === 0) return null;
   return `PR activity arrived (${[...new Set(kinds)].join(', ')}). CLAUDE.md "Delegation": dispatch the pr-triage subagent for it ` +
     'before acting, and follow the drive-pr skill for what to do with its findings.';
