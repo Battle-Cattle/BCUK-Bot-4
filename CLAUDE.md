@@ -89,7 +89,7 @@ Cheaper subagents in `.claude/agents/` take reading-heavy or mechanical work; gi
 - `lint-docs-fixer`: ESLint/JSDoc findings spread over several files. Edits only; can't touch config, CI, migrations or crypto, or add `eslint-disable`.
 - `coverage-filler`: named uncovered lines. Can only edit `*.test.ts`.
 - `acceptance-checker` (read-only): before an issue's PR leaves draft.
-- `issue-gardener`: bulk issue labels, Priority, sub-issue links and recheck notes.
+- `issue-gardener`: bulk issue labels, Priority and Effort, sub-issue links and recheck notes.
 
 **Enforced steps.** `.claude/hooks/workflow-guard.mjs` blocks the main session from skipping three steps. Each step leaves a marker in `.git/claude-workflow/` that covers only the content it checked, so a later change needs the step again. `node .claude/hooks/workflow-state.mjs status` shows which markers are current.
 
@@ -105,7 +105,7 @@ A PreToolUse hook (`.claude/hooks/agent-guard.mjs`) enforces those scopes and st
 
 ## PR reviews and issues
 
-Qlty's findings are this repo's standards: **never dismiss or resolve one without fixing it**. CodeRabbit's **Merge Risk** must be resolved or explicitly accepted before a PR counts as mergeable. The full rules are in the `drive-pr` skill; the issue rules (severity vs Priority, sub-issues) are in `issue-management`.
+Qlty's findings are this repo's standards: **never dismiss or resolve one without fixing it**. CodeRabbit's **Merge Risk** must be resolved or explicitly accepted before a PR counts as mergeable. The full rules are in the `drive-pr` skill; the issue rules (severity, Priority and Effort, sub-issues) are in `issue-management`.
 
 ## Related repos
 
