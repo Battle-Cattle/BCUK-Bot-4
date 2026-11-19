@@ -7,10 +7,25 @@
   --primary:   #5865f2;
   --primary-h: #4752c4;
   --text:      #e2e8f0;
-  --muted:     #7b87a6;
+  /* Secondary text: at least 6.3:1 on --bg, --bg-card and --bg-hover (WCAG AA needs 4.5:1). */
+  --muted:     #98a2bf;
+  /* Green, amber and red are for operational state only (healthy, warning/degraded, error/offline/live),
+     never for brand, decoration or data series: use --primary and the blues/purples for those. */
   --success:   #22c55e;
   --danger:    #ef4444;
   --warning:   #f59e0b;
+  /* Red text on a red-tinted badge (--danger alone is 4.0:1 there; this is 5.0:1 even on --bg-hover). */
+  --danger-text:  #f87171;
+  /* Solid red fill behind white text, e.g. the LIVE badge (white on --danger is only 3.8:1; this is 5.7:1). */
+  --danger-solid: #c81e1e;
+  /* Darker end of the LIVE badge's pulse: white on it is 8.3:1. */
+  --danger-deep:  #991b1b;
+  /* Keyboard focus ring: brand indigo, at least 8:1 against every background (3:1 needed). */
+  --focus-ring:   #a5b4fc;
+  /* Brand/data accents for text on a 20% tint of themselves: at least 6.4:1 on every background. */
+  --accent-blue:   #93c5fd;
+  --accent-indigo: #a5b4fc;
+  --accent-violet: #d8b4fe;
   --discord:   #5865f2;
   --radius:    10px;
   --font:      system-ui, -apple-system, 'Segoe UI', sans-serif;
@@ -23,6 +38,10 @@ html { overflow-x: clip; }
 body { background: var(--bg); color: var(--text); font-family: var(--font); font-size: 14px; line-height: 1.5; min-height: 100vh; overflow-x: clip; }
 a { color: var(--primary); text-decoration: none; }
 a:hover { text-decoration: underline; }
+/* Visible keyboard focus on every interactive element (links, buttons, selects, focusable scroll regions).
+   :focus-visible keeps it off mouse clicks. Inner scroll regions draw it inset so a card's overflow:hidden can't clip it. */
+:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.dashboard-scroll:focus-visible { outline-offset: -2px; }
 
 /* ── Navbar ────────────────────────────────────────────── */
 .navbar {
@@ -98,14 +117,15 @@ a:hover { text-decoration: underline; }
   background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius);
   padding: 1rem .5rem; color: var(--text); text-align: center; transition: background .15s, border-color .15s;
 }
-.quick-link-card:hover { background: var(--bg-hover); border-color: var(--primary); text-decoration: none; }
+.quick-link-card:hover,
+.quick-link-card:focus-visible { background: var(--bg-hover); border-color: var(--primary); text-decoration: none; }
 .quick-link-icon  { font-size: 1.5rem; }
-.quick-link-label { font-size: .85rem; font-weight: 600; }
+.quick-link-label { font-size: .9rem; font-weight: 600; }
 
 /* ── Usage stat cards (dashboard) ─────────────────────── */
 .stat-card-body  { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .25rem; padding: 1.25rem 1rem; }
 .stat-big        { font-size: 2rem; font-weight: 800; line-height: 1; }
-.stat-big-label  { color: var(--muted); font-size: .78rem; text-transform: uppercase; letter-spacing: .06em; }
+.stat-big-label  { color: var(--muted); font-size: .82rem; text-transform: uppercase; letter-spacing: .06em; }
 
 /* ── Recent events feed (dashboard) ───────────────────── */
 .event-item  { display: flex; align-items: flex-start; gap: .6rem; padding: .55rem 0; border-bottom: 1px solid var(--border); }
@@ -113,7 +133,7 @@ a:hover { text-decoration: underline; }
 .event-icon  { font-size: 1.1rem; flex-shrink: 0; line-height: 1.4; }
 .event-body  { flex: 1; min-width: 0; }
 .event-line  { font-size: .88rem; overflow-wrap: break-word; }
-.event-meta  { font-size: .75rem; color: var(--muted); margin-top: .1rem; }
+.event-meta  { font-size: .8rem; color: var(--muted); margin-top: .1rem; }
 
 /* ── Dashboard layout: main column + live events sidebar ─ */
 /* Source order is Status, events sidebar, Quick Links, Usage, so screen readers and keyboard users
@@ -169,7 +189,7 @@ a:hover { text-decoration: underline; }
 /* ── Stat rows ─────────────────────────────────────────── */
 .stat-row   { display: flex; justify-content: space-between; align-items: baseline; padding: .3rem 0; border-bottom: 1px solid var(--border); }
 .stat-row:last-child { border-bottom: none; }
-.stat-label { color: var(--muted); font-size: .82rem; }
+.stat-label { color: var(--muted); font-size: .85rem; }
 .stat-value { font-size: .88rem; text-align: right; max-width: 60%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* ── Online dot ────────────────────────────────────────── */
@@ -184,7 +204,7 @@ a:hover { text-decoration: underline; }
 .channel-item { display: flex; justify-content: space-between; align-items: center; padding: .45rem 0; border-bottom: 1px solid var(--border); }
 .channel-item:last-child { border-bottom: none; }
 .channel-name { font-family: var(--mono); font-size: .85rem; }
-.channel-meta { font-size: .75rem; color: var(--muted); margin-top: .15rem; }
+.channel-meta { font-size: .8rem; color: var(--muted); margin-top: .15rem; }
 .channel-badges { display: flex; gap: .35rem; align-items: center; flex-shrink: 0; }
 
 /* ── Badges ────────────────────────────────────────────── */
@@ -192,12 +212,16 @@ a:hover { text-decoration: underline; }
 .badge-active    { background: rgba(34,197,94,.15);  color: var(--success); }
 .badge-hidden    { background: rgba(234,179,8,.15);  color: #ca8a04; }
 .badge-online    { background: rgba(34,197,94,.15);  color: var(--success); }
-.badge-offline   { background: rgba(239,68,68,.15);  color: var(--danger); }
-.badge-live      { background: #ef4444; color: #fff; animation: pulse 1.5s ease-in-out infinite; }
+.badge-offline   { background: rgba(239,68,68,.15);  color: var(--danger-text); }
+/* The LIVE pulse darkens the fill instead of fading the badge, so the white label never drops below
+   5.7:1 (the shared opacity `pulse` took it to about 3.3:1 at its trough). */
+.badge-live      { background: var(--danger-solid); color: #fff; animation: live-pulse 1.5s ease-in-out infinite; }
+@keyframes live-pulse { 0%,100% { background-color: var(--danger-solid); } 50% { background-color: var(--danger-deep); } }
+/* Access levels are identity, not state, so they use brand hues (never status green/amber/red); the label carries the meaning. */
 .level-0 { background: rgba(113,113,122,.2); color: var(--muted); }
-.level-1 { background: rgba(59,130,246,.2);  color: #60a5fa; }
-.level-2 { background: rgba(245,158,11,.2);  color: var(--warning); }
-.level-3 { background: rgba(239,68,68,.2);   color: var(--danger); }
+.level-1 { background: rgba(59,130,246,.2);  color: var(--accent-blue); }
+.level-2 { background: rgba(99,102,241,.2);  color: var(--accent-indigo); }
+.level-3 { background: rgba(168,85,247,.2);  color: var(--accent-violet); }
 
 /* ── Buttons ───────────────────────────────────────────── */
 .btn         { display: inline-flex; align-items: center; gap: .4rem; padding: .45rem 1rem; border-radius: 6px; font-size: .85rem; font-weight: 600; cursor: pointer; border: none; transition: background .15s, opacity .15s; background: var(--primary); color: #fff; }
@@ -266,7 +290,10 @@ a:hover { text-decoration: underline; }
 
 /* ── Forms ─────────────────────────────────────────────── */
 .input { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); padding: .45rem .75rem; font-size: .85rem; transition: border-color .15s; }
+/* Mouse focus keeps just the border colour; keyboard focus also gets the shared ring (the bare
+   :focus outline:none would otherwise override the global :focus-visible rule). */
 .input:focus { outline: none; border-color: var(--primary); }
+.input:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 .input-sm { padding: .28rem .6rem; font-size: .8rem; }
 textarea.input, .stream-textarea { width: 100%; resize: vertical; font-family: var(--mono); font-size: .82rem; line-height: 1.5; }
 .inline-form    { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; padding: .75rem 1rem; }
@@ -276,6 +303,7 @@ textarea.input, .stream-textarea { width: 100%; resize: vertical; font-family: v
 .hint           { font-size: .78rem; color: var(--muted); padding: 0 1rem .75rem; }
 .search-input   { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); padding: .4rem .75rem; font-size: .85rem; width: 220px; }
 .search-input:focus { outline: none; border-color: var(--primary); }
+.search-input:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 
 /* ── Commands page helpers ────────────────────────────── */
 .card-spaced { margin-bottom: 1.5rem; }
@@ -350,7 +378,7 @@ textarea.input, .stream-textarea { width: 100%; resize: vertical; font-family: v
 /* ── Misc ──────────────────────────────────────────────── */
 .mono       { font-family: var(--mono); font-size: .82rem; }
 .muted      { color: var(--muted); }
-.empty-msg  { color: var(--muted); font-size: .85rem; text-align: center; padding: .75rem; }
+.empty-msg  { color: var(--muted); font-size: .9rem; text-align: center; padding: .75rem; }
 .is-hidden  { display: none; }
 
 /* Upload progress bar (registerUploadFormHandler in utils.js); no `value` = indeterminate. */
