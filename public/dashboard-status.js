@@ -104,15 +104,30 @@ function setStatusText(id, state) {
 }
 
 /**
- * Updates the dashboard (Discord bot, voice connection, last played sound, channels) from an /api/status response.
+ * Updates the dashboard from a status payload: the cards, then the health indicator and the not-current marking.
+ * The cards go first, so a malformed payload that throws part-way never clears the not-current marking; instead
+ * the indicator goes to Unknown and the error propagates (the stream handler drops it, fetchStatus counts it).
+ * Every call counts as a newer update (see statusGeneration), so an in-flight fetch can't overwrite it.
  * @param status - The parsed /api/status JSON (`discord`, `voice`, `twitch` sections, plus the last played sound).
  */
 function applyStatus(status) {
-  // Health first: if the payload is malformed, the code below throws, but the indicator has already gone to Unknown.
+  statusGeneration++;
+  try {
+    applyStatusCards(status);
+  } catch (err) {
+    renderHealth(deriveHealth(null, true));
+    throw err;
+  }
   renderHealth(deriveHealth(status, true));
   statusFeedStale = false;
   markStatusStale(false);
+}
 
+/**
+ * Writes a status payload into the Discord, Voice, Last Played and Twitch cards; throws on a malformed payload.
+ * @param status - The parsed /api/status JSON (`discord`, `voice`, `twitch` sections, plus the last played sound).
+ */
+function applyStatusCards(status) {
   // Discord bot
   const discord = discordState(status.discord);
   setStatusDot('dot-discord', discord.dotClass, discord.label);
@@ -146,6 +161,8 @@ function applyStatus(status) {
 
 let consecutiveFailures = 0;
 const STALE_THRESHOLD = 3;
+/** Counts applied status updates, so fetchStatus can drop a response that a newer stream message overtook. */
+let statusGeneration = 0;
 /** Whether the /dashboard/status/events stream's last event was an open or a message (not an error). */
 let statusStreamOpen = false;
 /** Whether the dashboard is showing its last values as not current because the status feed is unreachable. */
@@ -198,14 +215,20 @@ function isStatusFeedStale() {
   return statusFeedStale;
 }
 
-/** Polls /api/status and applies it; after STALE_THRESHOLD failures in a row with the stream down, flags the feed unreachable. */
+/**
+ * Polls /api/status and applies it, unless a newer update (a stream message) was applied while the request was in
+ * flight: that response is dropped untouched, without resetting the failure count. After STALE_THRESHOLD failures
+ * in a row with the stream down, flags the feed unreachable.
+ */
 async function fetchStatus() {
+  const generation = statusGeneration;
   try {
     const res = await fetch('/api/status');
     if (!res.ok) {
       consecutiveFailures++;
     } else {
       const data = await res.json();
+      if (generation !== statusGeneration) return;
       consecutiveFailures = 0;
       applyStatus(data);
     }

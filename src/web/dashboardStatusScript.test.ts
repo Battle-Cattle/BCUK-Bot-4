@@ -60,8 +60,11 @@ const IDS = [
   'health-indicator', 'bot-status', 'status-stale-note',
 ];
 
-/** A fake /api/status response: `null` is a network error, a number is that HTTP status, an object is a 200 body. */
-type FetchResult = null | number | Record<string, unknown>;
+/**
+ * A fake /api/status response: `null` is a network error, a number is that HTTP status, an object is a 200 body,
+ * and a promise is a 200 body that arrives when the test resolves it.
+ */
+type FetchResult = null | number | Record<string, unknown> | Promise<Record<string, unknown>>;
 
 /**
  * Runs the dashboard utils, health and status scripts in one fresh context, the way the page loads them.
@@ -86,6 +89,7 @@ function runScripts(responses: FetchResult[] = []) {
     const next = responses.length > 0 ? responses.shift() : 503;
     if (next === null || next === undefined) return Promise.reject(new Error('offline'));
     if (typeof next === 'number') return Promise.resolve({ ok: false, status: next, json: () => Promise.resolve({}) });
+    if (next instanceof Promise) return next.then((body) => ({ ok: true, status: 200, json: () => Promise.resolve(body) }));
     return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(next) });
   };
   const context: Record<string, unknown> = {
@@ -330,5 +334,44 @@ describe('public/dashboard-status.js zero Twitch channels', () => {
 
     expect(el('health-indicator').textContent).toBe('All Systems Operational');
     expect(el('twitch-channels').descendants().map((e) => e.textContent)).toContain('None configured.');
+  });
+});
+
+describe('public/dashboard-status.js update ordering', () => {
+  const healthy = status(true, { connected: true }, { a: { connected: true, isLive: false, lastConnectedAt: null, lastDisconnectedAt: null } });
+
+  it('drops a fetch response that a newer stream message overtook', async () => {
+    let resolveFetch: (body: Record<string, unknown>) => void = () => {};
+    const slow = new Promise<Record<string, unknown>>((resolve) => { resolveFetch = resolve; });
+    const { el, applyStatus, fetchStatus } = runScripts([slow]);
+
+    const pending = fetchStatus();
+    applyStatus(status(false, { connected: false })); // the newer stream message
+    resolveFetch(healthy); // the older snapshot lands afterwards
+    await pending;
+
+    expect(el('health-indicator').textContent).toBe('Service down');
+    expect(el('discord-state').textContent).toBe('Disconnected');
+  });
+
+  it('still applies a fetch response nothing overtook', async () => {
+    const { el, fetchStatus } = runScripts([healthy]);
+    await fetchStatus();
+
+    expect(el('health-indicator').textContent).toBe('All Systems Operational');
+  });
+
+  it('keeps the cards marked not current when a fresh payload is malformed', async () => {
+    const { el, applyStatus, fetchStatus, setStatusStreamOpen, isStatusFeedStale } = runScripts([503, 503, 503]);
+    applyStatus(healthy);
+    setStatusStreamOpen(false);
+    for (let i = 0; i < 3; i++) await fetchStatus();
+
+    expect(() => applyStatus({ discord: { ready: true }, twitch: {} })).toThrow(); // no voice section
+
+    expect(isStatusFeedStale()).toBe(true);
+    expect(el('bot-status').classList.contains('is-stale')).toBe(true);
+    expect(el('status-stale-note').hidden).toBe(false);
+    expect(el('health-indicator').textContent).toBe('Status unknown');
   });
 });
