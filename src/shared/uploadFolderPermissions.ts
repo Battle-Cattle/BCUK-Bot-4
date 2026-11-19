@@ -106,8 +106,9 @@ const DISCORD_MESSAGE_LIMIT = 2000;
  * How to fix an unsafe folder. `chown -R`/`chmod -R` don't follow a symlink named on the command
  * line, so the advice targets the folder's real path.
  */
-const FIX_ADVICE = 'Make each folder owned and writable only by the bot\'s user, on its real path (a symlinked folder isn\'t followed otherwise), '
-  + 'e.g. `d="$(realpath <folder>)" && chown -R <bot user> "$d" && chmod -R go-w "$d"` (README, "Deployment").';
+const FIX_ADVICE = 'Make each folder owned and writable only by the bot\'s user, on its real path (a symlinked folder isn\'t followed otherwise). '
+  + 'First check `realpath <folder>` prints the directory you expect, since the recursive commands change everything under it; '
+  + 'then `d="$(realpath <folder>)" && chown -R <bot user> "$d" && chmod -R go-w "$d"` (README, "Deployment").';
 
 /**
  * Builds the owner alert listing the unsafe folders. Falls back to a summary that points to the

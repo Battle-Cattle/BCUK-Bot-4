@@ -121,11 +121,39 @@ describe('checkUploadFolderPermissions', () => {
     expect(alert).not.toHaveBeenCalled();
   });
 
-  it.skipIf(isWindows)('defaults to the process platform and uid, so a real unsafe folder is reported', async () => {
-    fs.chmodSync(dir, 0o777);
-    const warnings = await checkUploadFolderPermissions(alert, { folders: { OVERLAY_FOLDER: dir } });
-    expect(warnings).toEqual([`OVERLAY_FOLDER (${dir}) is writable by group or others (mode 777)`]);
-    expect(alert).toHaveBeenCalledOnce();
+  describe('process defaults', () => {
+    const realPlatform = process.platform;
+    /** Makes `process.platform` read as the given value until the test ends. */
+    const setPlatform = (platform: NodeJS.Platform) => Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+
+    afterEach(() => {
+      setPlatform(realPlatform);
+      vi.restoreAllMocks();
+    });
+
+    it.skipIf(isWindows)('reads the bot\'s uid from process.getuid()', async () => {
+      setPlatform('linux');
+      const getuid = vi.spyOn(process, 'getuid').mockReturnValue(4242);
+      const stat = vi.fn().mockResolvedValue({ mode: 0o40700, uid: 1000 });
+      const warnings = await checkUploadFolderPermissions(alert, { folders: { OVERLAY_FOLDER: '/x' }, stat });
+      expect(getuid).toHaveBeenCalled();
+      expect(stat).toHaveBeenCalledOnce();
+      expect(warnings).toEqual([`OVERLAY_FOLDER (${path.resolve('/x')}) is owned by uid 1000, not the bot's uid 4242`]);
+    });
+
+    it('skips the check when process.platform is win32', async () => {
+      setPlatform('win32');
+      const stat = vi.fn().mockResolvedValue({ mode: 0o40777, uid: 0 });
+      expect(await checkUploadFolderPermissions(alert, { uid: UID, stat })).toEqual([]);
+      expect(stat).not.toHaveBeenCalled();
+    });
+
+    it.skipIf(isWindows)('reports a real unsafe folder with no overrides at all', async () => {
+      fs.chmodSync(dir, 0o777);
+      const warnings = await checkUploadFolderPermissions(alert, { folders: { OVERLAY_FOLDER: dir } });
+      expect(warnings).toEqual([`OVERLAY_FOLDER (${dir}) is writable by group or others (mode 777)`]);
+      expect(alert).toHaveBeenCalledOnce();
+    });
   });
 
   it('sends a summary pointing to the log when the full list would exceed a Discord message', async () => {
