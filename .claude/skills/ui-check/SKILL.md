@@ -27,6 +27,6 @@ Attach the relevant screenshots to the PR (before and after for visual changes).
 The script copies the production CSP from `src/web/server.ts`: when that CSP changes, update `CSP` in `render.mjs` too.
 
 ## Known findings on `main` (Nov 2026)
-- The LIVE badge's `pulse` animation keeps running under reduced motion (#1072).
+- The LIVE badge's `live-pulse` animation keeps running under reduced motion (#1072).
 - A channel that is live while its bot is disconnected shows no LIVE badge (#998, #1077).
 - The status dots are indistinguishable in greyscale (#1072).

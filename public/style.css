@@ -18,6 +18,8 @@
   --danger-text:  #f87171;
   /* Solid red fill behind white text, e.g. the LIVE badge (white on --danger is only 3.8:1; this is 5.7:1). */
   --danger-solid: #c81e1e;
+  /* Darker end of the LIVE badge's pulse: white on it is 8.3:1. */
+  --danger-deep:  #991b1b;
   /* Keyboard focus ring: brand indigo, at least 8:1 against every background (3:1 needed). */
   --focus-ring:   #a5b4fc;
   /* Brand/data accents for text on a 20% tint of themselves: at least 6.4:1 on every background. */
@@ -211,7 +213,10 @@ a:hover { text-decoration: underline; }
 .badge-hidden    { background: rgba(234,179,8,.15);  color: #ca8a04; }
 .badge-online    { background: rgba(34,197,94,.15);  color: var(--success); }
 .badge-offline   { background: rgba(239,68,68,.15);  color: var(--danger-text); }
-.badge-live      { background: var(--danger-solid); color: #fff; animation: pulse 1.5s ease-in-out infinite; }
+/* The LIVE pulse darkens the fill instead of fading the badge, so the white label never drops below
+   5.7:1 (the shared opacity `pulse` took it to about 3.3:1 at its trough). */
+.badge-live      { background: var(--danger-solid); color: #fff; animation: live-pulse 1.5s ease-in-out infinite; }
+@keyframes live-pulse { 0%,100% { background-color: var(--danger-solid); } 50% { background-color: var(--danger-deep); } }
 /* Access levels are identity, not state, so they use brand hues (never status green/amber/red); the label carries the meaning. */
 .level-0 { background: rgba(113,113,122,.2); color: var(--muted); }
 .level-1 { background: rgba(59,130,246,.2);  color: var(--accent-blue); }
@@ -285,7 +290,10 @@ a:hover { text-decoration: underline; }
 
 /* ── Forms ─────────────────────────────────────────────── */
 .input { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); padding: .45rem .75rem; font-size: .85rem; transition: border-color .15s; }
+/* Mouse focus keeps just the border colour; keyboard focus also gets the shared ring (the bare
+   :focus outline:none would otherwise override the global :focus-visible rule). */
 .input:focus { outline: none; border-color: var(--primary); }
+.input:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 .input-sm { padding: .28rem .6rem; font-size: .8rem; }
 textarea.input, .stream-textarea { width: 100%; resize: vertical; font-family: var(--mono); font-size: .82rem; line-height: 1.5; }
 .inline-form    { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; padding: .75rem 1rem; }
@@ -295,6 +303,7 @@ textarea.input, .stream-textarea { width: 100%; resize: vertical; font-family: v
 .hint           { font-size: .78rem; color: var(--muted); padding: 0 1rem .75rem; }
 .search-input   { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); padding: .4rem .75rem; font-size: .85rem; width: 220px; }
 .search-input:focus { outline: none; border-color: var(--primary); }
+.search-input:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 
 /* ── Commands page helpers ────────────────────────────── */
 .card-spaced { margin-bottom: 1.5rem; }
