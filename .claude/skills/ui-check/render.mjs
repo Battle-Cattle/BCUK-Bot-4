@@ -17,6 +17,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { auditContrast, auditFocus, summariseA11y } from './a11y.mjs';
 import { loadFixture } from './fixture.mjs';
+import { findClippedContent } from './layout.mjs';
 
 const require = createRequire(import.meta.url);
 const ejs = require('ejs');
@@ -165,7 +166,7 @@ async function auditA11y(page, run) {
  * @param browser - The Playwright browser.
  * @param baseUrl - The throwaway server's URL.
  * @param run - Viewport, motion and colour settings, audits, and where to write the screenshot.
- * @returns Findings for this run: console errors, CSP violations, failed requests, overflow, animations, a11y.
+ * @returns Findings for this run: console errors, CSP violations, failed requests, overflow, clipped content, animations, a11y.
  */
 async function inspect(browser, baseUrl, run) {
   // Every run enforces the CSP, the greyscale one included: its filter is set through the DOM below.
@@ -197,6 +198,7 @@ async function inspect(browser, baseUrl, run) {
         return `${a.animationName ?? a.transitionProperty ?? 'animation'} on ${where}`;
       }),
   }));
+  const clippedContent = await findClippedContent(page);
   await page.screenshot({ path: run.screenshot, fullPage: true });
   const aria = run.ariaPath ? await page.locator('body').ariaSnapshot() : null;
   if (aria) await writeFile(run.ariaPath, aria);
@@ -206,6 +208,7 @@ async function inspect(browser, baseUrl, run) {
     run: run.label,
     screenshot: path.relative(ROOT, run.screenshot),
     horizontalOverflow: metrics.scrollWidth > metrics.clientWidth ? `${metrics.scrollWidth - metrics.clientWidth}px` : 'none',
+    clippedContent,
     runningAnimations: metrics.runningAnimations,
     cspViolations: consoleErrors.filter((e) => e.includes('Content Security Policy')),
     consoleErrors: consoleErrors.filter((e) => !e.includes('Content Security Policy')),

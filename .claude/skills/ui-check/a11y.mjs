@@ -1,8 +1,9 @@
 // ui-check accessibility audits: visible keyboard focus and WCAG AA text contrast. See "What to check"
 // in SKILL.md for what each one reports and its limits.
 //
-// The functions passed to page.evaluate run in the browser, so they must be self-contained (no
-// closures over this module) and reach `document`/`window` through globalThis for the Node linter.
+// The page only collects raw computed styles (the functions passed to page.evaluate, which must be
+// self-contained and reach `document` through globalThis for the Node linter); every judgement and
+// all the colour maths happen here in Node, in small functions selftest.mjs checks directly.
 
 /** Tab presses before giving up on the focus order cycling back (a page with more stops is reported as truncated). */
 const MAX_TAB_STOPS = 250;
@@ -10,32 +11,56 @@ const MAX_TAB_STOPS = 250;
 /** Selector for a mobile nav toggle that hides links until opened (views/partials/nav.ejs). */
 const NAV_TOGGLE = '.navbar-toggle[aria-expanded="false"]';
 
+/** WCAG AA minimum contrast for normal and for large text. */
+const AA_NORMAL = 4.5;
+const AA_LARGE = 3;
+
+/** The canvas behind an unpainted root. */
+const WHITE = { r: 255, g: 255, b: 255, a: 1 };
+
 /**
- * Describes the focused element and whether it draws a focus indicator. Runs in the page.
- * @returns `null` when nothing (or the body) has focus, otherwise the element's selector, label and focus styles.
+ * Reads the focused element's raw focus styles. Runs in the page.
+ * @returns `null` when nothing (or the body) has focus, otherwise `{ repeat, element, label, outline*, boxShadow }`.
  */
-function describeActiveElement() {
+function readActiveElement() {
   const doc = globalThis.document;
   const el = doc.activeElement;
   if (!el || el === doc.body || el === doc.documentElement) return null;
-  globalThis.__uiCheckFocusSeen ??= [];
-  const index = globalThis.__uiCheckFocusSeen.indexOf(el);
-  if (index === -1) globalThis.__uiCheckFocusSeen.push(el);
+  const seen = (globalThis.__uiCheckFocusSeen ??= []);
+  const repeat = seen.includes(el);
+  if (!repeat) seen.push(el);
   const style = globalThis.getComputedStyle(el);
-  const outlineWidth = Number.parseFloat(style.outlineWidth) || 0;
-  const transparent = (c) => c === 'transparent' || /rgba\([^)]*,\s*0\)$/.test(c);
-  const outline = style.outlineStyle !== 'none' && outlineWidth > 0 && !transparent(style.outlineColor);
-  const shadow = style.boxShadow !== 'none' && !/^rgba\([^)]*,\s*0\)/.test(style.boxShadow);
-  const name = `${el.tagName.toLowerCase()}${el.id ? `#${el.id}` : ''}${[...el.classList].map((c) => `.${c}`).join('')}`;
-  const label = (el.getAttribute('aria-label') || el.textContent || el.getAttribute('title') || '').trim().replace(/\s+/g, ' ').slice(0, 40);
+  const classes = [...el.classList].map((c) => `.${c}`).join('');
   return {
-    repeat: index !== -1,
-    element: name,
-    label,
-    outline: `${style.outlineStyle} ${style.outlineWidth} ${style.outlineColor}`,
+    repeat,
+    element: `${el.tagName.toLowerCase()}${el.id ? `#${el.id}` : ''}${classes}`,
+    label: (el.getAttribute('aria-label') ?? el.textContent ?? '').trim().replace(/\s+/g, ' ').slice(0, 40),
+    outlineStyle: style.outlineStyle,
+    outlineWidth: style.outlineWidth,
+    outlineColor: style.outlineColor,
     boxShadow: style.boxShadow,
-    visible: outline || shadow,
   };
+}
+
+/**
+ * Says whether a computed colour string is fully transparent.
+ * @param css - A computed colour, e.g. `rgba(0, 0, 0, 0)`.
+ * @returns True for `transparent` or a zero alpha.
+ */
+function isTransparent(css) {
+  return css === 'transparent' || /^rgba\([^)]*,\s*0\)/.test(css);
+}
+
+/**
+ * Decides whether a focused element draws a visible ring: a non-zero, non-transparent outline or a
+ * non-transparent box-shadow.
+ * @param stop - Raw focus styles from readActiveElement.
+ * @returns True when a focus indicator is drawn.
+ */
+export function hasFocusIndicator(stop) {
+  const outline = stop.outlineStyle !== 'none' && Number.parseFloat(stop.outlineWidth) > 0 && !isTransparent(stop.outlineColor);
+  const shadow = stop.boxShadow !== 'none' && !isTransparent(stop.boxShadow);
+  return outline || shadow;
 }
 
 /**
@@ -56,124 +81,176 @@ export async function auditFocus(page) {
   });
   const stops = [];
   let truncated = true;
-  for (let i = 0; i < MAX_TAB_STOPS; i++) {
+  for (let i = 0; i < MAX_TAB_STOPS && truncated; i++) {
     await page.keyboard.press('Tab');
-    const stop = await page.evaluate(describeActiveElement);
-    if (stop?.repeat) { truncated = false; break; }
-    if (stop) stops.push(stop);
+    const stop = await page.evaluate(readActiveElement);
+    if (stop?.repeat) truncated = false;
+    else if (stop) stops.push(stop);
   }
-  return {
-    visited: stops.length,
-    missingIndicator: stops.filter((s) => !s.visible).map(({ element, label, outline, boxShadow }) => ({ element, label, outline, boxShadow })),
-    truncated,
-  };
+  const missingIndicator = stops.filter((s) => !hasFocusIndicator(s))
+    .map((s) => ({ element: s.element, label: s.label, outline: `${s.outlineStyle} ${s.outlineWidth} ${s.outlineColor}`, boxShadow: s.boxShadow }));
+  return { visited: stops.length, missingIndicator, truncated };
 }
 
 /**
- * Measures the WCAG contrast of every visible element with direct text against its effective
- * background. Runs in the page.
- * @returns `{ checked, failures, unverifiable }`: elements measured, those under AA, and those whose
- *   background is an image or gradient (so a solid-colour ratio can't be trusted).
+ * Collects every visible element with direct text and the raw styles its contrast depends on. Runs
+ * in the page. Visually hidden (1px) text and disabled controls are skipped: they're exempt.
+ * @returns `{ element, text, color, fontSize, fontWeight, layers }` per element, where `layers` runs
+ *   from the element up to the root: `{ background, image, opacity }` each.
  */
-function measureContrast() {
-  const doc = globalThis.document;
-  const ctx = doc.createElement('canvas').getContext('2d', { willReadFrequently: true });
-  // Any CSS colour (rgb, oklch, color-mix, …) to sRGB 0-255 plus alpha 0-1, via a 1px canvas.
-  const toRgba = (css) => {
+function collectTextElements() {
+  const skip = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'OPTION']);
+  const directText = (el) => [...el.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join('').trim().replace(/\s+/g, ' ');
+  const measurable = (el) => {
+    const rect = el.getBoundingClientRect();
+    return !skip.has(el.tagName) && directText(el) !== '' && rect.width > 1 && rect.height > 1 && !el.closest(':disabled')
+      && el.checkVisibility({ opacityProperty: true, visibilityProperty: true });
+  };
+  const layers = (el) => {
+    const out = [];
+    for (let node = el; node; node = node.parentElement) {
+      const s = globalThis.getComputedStyle(node);
+      out.push({ background: s.backgroundColor, image: s.backgroundImage !== 'none', opacity: Number(s.opacity) });
+    }
+    return out;
+  };
+  return [...globalThis.document.body.querySelectorAll('*')].filter(measurable).map((el) => {
+    const s = globalThis.getComputedStyle(el);
+    return {
+      element: `${el.tagName.toLowerCase()}${el.id ? `#${el.id}` : ''}${[...el.classList].map((c) => `.${c}`).join('')}`,
+      text: directText(el).slice(0, 40),
+      color: s.color,
+      fontSize: Number.parseFloat(s.fontSize),
+      fontWeight: Number(s.fontWeight),
+      layers: layers(el),
+    };
+  });
+}
+
+/**
+ * Converts CSS colours (any syntax the page's computed styles use: rgb, oklch, color-mix, …) to
+ * sRGB through a 1px canvas. Runs in the page.
+ * @param colours - Distinct CSS colour strings.
+ * @returns `[css, { r, g, b, a }]` pairs, channels 0-255 and alpha 0-1.
+ */
+function colourValues(colours) {
+  const ctx = globalThis.document.createElement('canvas').getContext('2d', { willReadFrequently: true });
+  return colours.map((css) => {
     ctx.clearRect(0, 0, 1, 1);
-    ctx.fillStyle = '#000';
     ctx.fillStyle = css;
     ctx.fillRect(0, 0, 1, 1);
     const [r, g, b, a] = ctx.getImageData(0, 0, 1, 1).data;
-    return { r, g, b, a: a / 255 };
-  };
-  const over = (top, under) => ({
-    r: top.r * top.a + under.r * (1 - top.a),
-    g: top.g * top.a + under.g * (1 - top.a),
-    b: top.b * top.a + under.b * (1 - top.a),
-    a: 1,
+    return [css, { r, g, b, a: a / 255 }];
   });
-  const luminance = ({ r, g, b }) => {
-    const lin = (v) => { const s = v / 255; return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; };
-    return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
-  };
-  const hex = ({ r, g, b }) => `#${[r, g, b].map((v) => Math.round(v).toString(16).padStart(2, '0')).join('')}`;
-  const describe = (el) => `${el.tagName.toLowerCase()}${el.id ? `#${el.id}` : ''}${[...el.classList].map((c) => `.${c}`).join('')}`;
-
-  // Background layers from the element up to the first opaque one, then blended bottom-up.
-  const background = (el) => {
-    const layers = [];
-    let image = false;
-    for (let node = el; node && node.nodeType === 1; node = node.parentElement) {
-      const style = globalThis.getComputedStyle(node);
-      if (style.backgroundImage !== 'none') image = true;
-      const colour = toRgba(style.backgroundColor);
-      if (colour.a > 0) layers.push(colour);
-      if (colour.a >= 1) break;
-    }
-    // The canvas behind an unpainted root is white.
-    let bg = { r: 255, g: 255, b: 255, a: 1 };
-    for (const layer of layers.reverse()) bg = over(layer, bg);
-    return { bg, image };
-  };
-  const opacity = (el) => {
-    let value = 1;
-    for (let node = el; node && node.nodeType === 1; node = node.parentElement) value *= Number(globalThis.getComputedStyle(node).opacity);
-    return value;
-  };
-
-  const failures = [];
-  const unverifiable = [];
-  let checked = 0;
-  const seen = new Set();
-  for (const el of doc.body.querySelectorAll('*')) {
-    const text = [...el.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join('').trim().replace(/\s+/g, ' ');
-    if (!text || ['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE', 'OPTION'].includes(el.tagName)) continue;
-    if (!el.checkVisibility({ opacityProperty: true, visibilityProperty: true })) continue;
-    const rect = el.getBoundingClientRect();
-    // Visually hidden (sr-only) text and disabled controls are exempt from the contrast criterion.
-    if (rect.width <= 1 || rect.height <= 1 || el.closest(':disabled')) continue;
-    const style = globalThis.getComputedStyle(el);
-    const { bg, image } = background(el);
-    const fgRaw = toRgba(style.color);
-    const fg = over({ ...fgRaw, a: fgRaw.a * opacity(el) }, bg);
-    const [hi, lo] = [luminance(fg), luminance(bg)].sort((a, b) => b - a);
-    const ratio = Math.round(((hi + 0.05) / (lo + 0.05)) * 100) / 100;
-    const size = Number.parseFloat(style.fontSize);
-    const large = size >= 24 || (size >= 18.66 && Number(style.fontWeight) >= 700);
-    const required = large ? 3 : 4.5;
-    checked++;
-    const entry = { element: describe(el), text: text.slice(0, 40), ratio, required, color: hex(fg), background: hex(bg) };
-    const key = `${entry.element}|${entry.color}|${entry.background}`;
-    if (image) { if (!seen.has(key)) unverifiable.push(entry); seen.add(key); continue; }
-    if (ratio < required && !seen.has(key)) { failures.push(entry); seen.add(key); }
-  }
-  return { checked, failures, unverifiable };
 }
 
 /**
- * Runs the contrast audit on the page as it is now.
- * @param page - The Playwright page, already loaded and settled.
- * @returns The contrast findings (see measureContrast).
+ * Paints one colour over another.
+ * @param top - The upper colour, with its alpha.
+ * @param under - The opaque colour beneath.
+ * @returns The opaque result.
  */
-export function auditContrast(page) {
-  return page.evaluate(measureContrast);
+export function blend(top, under) {
+  const mix = (c) => top[c] * top.a + under[c] * (1 - top.a);
+  return { r: mix('r'), g: mix('g'), b: mix('b'), a: 1 };
+}
+
+/**
+ * Computes the WCAG contrast ratio of two opaque colours.
+ * @param a - One colour.
+ * @param b - The other.
+ * @returns The ratio, rounded to two decimals (1 to 21).
+ */
+export function contrastRatio(a, b) {
+  const lin = (v) => { const s = v / 255; return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4; };
+  const lum = ({ r, g, b: blue }) => 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(blue);
+  const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x);
+  return Math.round(((hi + 0.05) / (lo + 0.05)) * 100) / 100;
+}
+
+/**
+ * Gives the AA minimum for a text size: 3:1 for large text (≥ 24px, or ≥ 18.66px bold), else 4.5:1.
+ * @param fontSize - Computed font size in px.
+ * @param fontWeight - Computed numeric font weight.
+ * @returns The minimum ratio.
+ */
+export function requiredRatio(fontSize, fontWeight) {
+  return fontSize >= 24 || (fontSize >= 18.66 && fontWeight >= 700) ? AA_LARGE : AA_NORMAL;
+}
+
+/**
+ * Works out what an element's text is drawn on and in: background layers from the element up to the
+ * first opaque one blended bottom-up over white, and the text colour faded by every layer's opacity.
+ * @param item - One collected element (`color`, `layers`).
+ * @param rgba - CSS colour string to `{ r, g, b, a }`.
+ * @returns `{ fg, bg, image }`: opaque text and background colours, and whether an image or gradient sits behind.
+ */
+export function effectiveColours(item, rgba) {
+  const firstOpaque = item.layers.findIndex((l) => rgba.get(l.background).a >= 1);
+  const behind = firstOpaque === -1 ? item.layers : item.layers.slice(0, firstOpaque + 1);
+  const bg = behind.map((l) => rgba.get(l.background)).reverse().reduce((under, top) => blend(top, under), WHITE);
+  const opacity = item.layers.reduce((product, l) => product * l.opacity, 1);
+  const text = rgba.get(item.color);
+  return { fg: blend({ ...text, a: text.a * opacity }, bg), bg, image: behind.some((l) => l.image) };
+}
+
+/**
+ * Formats a colour as `#rrggbb`.
+ * @param colour - An opaque colour.
+ * @returns The hex string.
+ */
+function hex({ r, g, b }) {
+  return `#${[r, g, b].map((v) => Math.round(v).toString(16).padStart(2, '0')).join('')}`;
+}
+
+/**
+ * Judges collected elements against AA, once per element/colour pair.
+ * @param items - Collected elements (see collectTextElements).
+ * @param rgba - CSS colour string to `{ r, g, b, a }`.
+ * @returns `{ checked, failures, unverifiable }`: elements measured, those under AA, and those over an
+ *   image or gradient (so a solid-colour ratio can't be trusted).
+ */
+export function judgeContrast(items, rgba) {
+  const failures = [];
+  const unverifiable = [];
+  const seen = new Set();
+  for (const item of items) {
+    const { fg, bg, image } = effectiveColours(item, rgba);
+    const entry = {
+      element: item.element, text: item.text, ratio: contrastRatio(fg, bg),
+      required: requiredRatio(item.fontSize, item.fontWeight), color: hex(fg), background: hex(bg),
+    };
+    const key = `${entry.element}|${entry.color}|${entry.background}`;
+    const list = image ? unverifiable : (entry.ratio < entry.required ? failures : null);
+    if (list && !seen.has(key)) list.push(entry);
+    seen.add(key);
+  }
+  return { checked: items.length, failures, unverifiable };
+}
+
+/**
+ * Runs the contrast audit on the page as it is now: collects text elements in the page, converts
+ * their colours there, and judges them here.
+ * @param page - The Playwright page, already loaded and settled.
+ * @returns The contrast findings (see judgeContrast).
+ */
+export async function auditContrast(page) {
+  const items = await page.evaluate(collectTextElements);
+  const colours = [...new Set(items.flatMap((i) => [i.color, ...i.layers.map((l) => l.background)]))];
+  const rgba = new Map(await page.evaluate(colourValues, colours));
+  return judgeContrast(items, rgba);
 }
 
 /**
  * Sums the audits across runs into one line for the console.
  * @param results - Each run's findings, some with `a11y.focus` and `a11y.contrast`.
- * @returns A one-line summary such as "a11y: 0 focus stops without an indicator, 2 contrast failures (report-only)".
+ * @returns A one-line summary such as "a11y: 0 focus stop(s) without a visible indicator, 2 contrast failure(s), …".
  */
 export function summariseA11y(results) {
-  let focus = 0;
-  let contrast = 0;
-  let unverifiable = 0;
-  for (const { a11y } of results) {
-    focus += a11y?.focus?.missingIndicator.length ?? 0;
-    contrast += a11y?.contrast?.failures.length ?? 0;
-    unverifiable += a11y?.contrast?.unverifiable.length ?? 0;
-  }
+  const total = (pick) => results.reduce((sum, r) => sum + (pick(r.a11y ?? {})?.length ?? 0), 0);
+  const focus = total((a) => a.focus?.missingIndicator);
+  const contrast = total((a) => a.contrast?.failures);
+  const unverifiable = total((a) => a.contrast?.unverifiable);
   return `a11y: ${focus} focus stop(s) without a visible indicator, ${contrast} contrast failure(s), ` +
     `${unverifiable} text element(s) over an image or gradient to check by eye (report-only; see report.json)`;
 }

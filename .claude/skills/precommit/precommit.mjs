@@ -5,12 +5,15 @@
 //   node .claude/skills/precommit/precommit.mjs --full    always run the full suite
 //
 // Runs typecheck, the tests (the full suite when shared infrastructure changed, otherwise the
-// tests that import a changed file) and ESLint on every file the branch adds or changes, and
+// tests that import a changed file), the self-test of each skill whose folder changed, and ESLint
+// on every file the branch adds or changes, and
 // reports every failure rather than stopping at the first. Only when all pass, and nothing changed
 // while they ran, does it record the working tree it checked; the commit hook allows a commit of
 // exactly that content.
 
 import { spawnSync } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { git, worktreeTree, writeMarker } from '../../hooks/workflow-state.mjs';
@@ -56,6 +59,40 @@ function lintTargets(cwd, base) {
 }
 
 /**
+ * Says whether the pre-installed Playwright can be loaded from here (it isn't a project dependency).
+ * @returns true when `require('playwright')` would resolve
+ */
+function playwrightAvailable() {
+  try {
+    createRequire(import.meta.url).resolve('playwright');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Lists the skill self-tests to run: `.claude/skills/<name>/selftest.mjs` for each skill folder the
+ * branch changes. They sit outside Vitest's `src/**` include, so nothing else runs them. One that
+ * needs Playwright is skipped, with a note, where Playwright isn't installed.
+ * @param cwd the repository folder
+ * @param paths the paths the branch changes
+ * @returns the self-test paths, relative to the repository
+ */
+function skillSelftests(cwd, paths) {
+  const skills = new Set(paths.map((p) => /^\.claude\/skills\/([^/]+)\//.exec(p)?.[1]).filter(Boolean));
+  const tests = [...skills].sort().map((name) => `.claude/skills/${name}/selftest.mjs`).filter((t) => existsSync(path.join(cwd, t)));
+  return tests.filter((t) => {
+    const needsBrowser = readFileSync(path.join(cwd, t), 'utf8').includes("require('playwright')");
+    if (needsBrowser && !playwrightAvailable()) {
+      process.stdout.write(`Skipping ${t}: it needs the pre-installed Playwright, which isn't available here.\n`);
+      return false;
+    }
+    return true;
+  });
+}
+
+/**
  * Decides whether the change needs the full suite.
  * @param paths the paths the branch changes
  * @returns true when any of them is shared infrastructure
@@ -97,12 +134,15 @@ function main(argv, cwd) {
   }
   const base = git(['merge-base', 'origin/main', 'HEAD'], { cwd });
   const before = worktreeTree(cwd);
-  const full = argv.includes('--full') || needsFullSuite(changedPaths(cwd, base));
+  const paths = changedPaths(cwd, base);
+  const full = argv.includes('--full') || needsFullSuite(paths);
   const files = lintTargets(cwd, base);
+  const selftests = skillSelftests(cwd, paths);
 
   const failed = [
     runCheck(cwd, 'typecheck', 'npm', ['run', 'typecheck']),
     full ? runCheck(cwd, 'tests (full)', 'npm', ['test']) : runCheck(cwd, 'tests (changed)', 'npx', ['vitest', 'run', '--changed', 'origin/main']),
+    selftests.length ? runCheck(cwd, 'skill self-tests', 'node', ['--test', ...selftests]) : null,
     files.length ? runCheck(cwd, 'eslint', 'npx', ['eslint', ...files]) : null,
   ].filter(Boolean);
 
@@ -116,7 +156,7 @@ function main(argv, cwd) {
     return 1;
   }
   writeMarker(cwd, 'precommit', { tree: before, scope });
-  process.stdout.write(`\n✔ precommit passed (${scope}; eslint on ${files.length} file(s)). Recorded: this exact working tree may be committed.\n`);
+  process.stdout.write(`\n✔ precommit passed (${scope}; ${selftests.length} skill self-test(s); eslint on ${files.length} file(s)). Recorded: this exact working tree may be committed.\n`);
   return 0;
 }
 

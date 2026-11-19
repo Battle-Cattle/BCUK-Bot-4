@@ -1,5 +1,5 @@
-// Tests for list-sub-issues.mjs's parsing and formatting (no network). Not part of `npm test`; run
-// after changing the script:
+// Tests for list-sub-issues.mjs's parsing and formatting (no network). Not part of `npm test`; the
+// precommit script runs them when this folder changes, or run them directly:
 //
 //   node --test .claude/skills/work-sub-issue/selftest.mjs
 

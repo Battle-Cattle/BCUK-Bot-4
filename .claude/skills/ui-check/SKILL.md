@@ -1,6 +1,6 @@
 ---
 name: ui-check
-description: Renders a BCUK Bot 4 web panel page (an EJS view) from fixture data in the pre-installed Chromium, without starting the bot, and reports CSP violations, script errors, failed requests, horizontal overflow, animations still running under reduced motion, focus stops without a visible indicator and text below WCAG AA contrast, with desktop/tablet/mobile, reduced-motion and greyscale screenshots plus an ARIA snapshot. Use for any change to views/ or public/, and to check responsive, reduced-motion, non-colour, focus and contrast acceptance criteria.
+description: Renders a BCUK Bot 4 web panel page (an EJS view) from fixture data in the pre-installed Chromium, without starting the bot, and reports CSP violations, script errors, failed requests, horizontal overflow and content clipped at the viewport edge, animations still running under reduced motion, focus stops without a visible indicator and text below WCAG AA contrast, with desktop/tablet/mobile, reduced-motion and greyscale screenshots plus an ARIA snapshot. Use for any change to views/ or public/, and to check responsive, reduced-motion, non-colour, focus and contrast acceptance criteria.
 ---
 
 # ui-check
@@ -28,7 +28,8 @@ A fixture is JSON: `{ "view": "dashboard", "locals": {…}, "api": {"/path": jso
   Add a variant for any other state you need (signed out, no channels, a Manager user with the reconnect modal), and keep fixture data obviously illustrative.
 
 ## What to check
-1. **`report.json`** for each run: `cspViolations` and `consoleErrors` must be empty, `failedRequests` should only list deliberately unstubbed paths, `horizontalOverflow` must be `none` at every width, and the `*-reduced-motion` runs must list no `runningAnimations`.
+1. **`report.json`** for each run: `cspViolations` and `consoleErrors` must be empty, `failedRequests` should only list deliberately unstubbed paths, `horizontalOverflow` must be `none` and `clippedContent` empty at every width, and the `*-reduced-motion` runs must list no `runningAnimations`.
+   `clippedContent` lists visible text and controls that sit partly past the viewport's side edges. It catches what `horizontalOverflow` can't: the panel sets `overflow-x: clip` on `html` and `body`, so overflowing content is cut off rather than scrollable, and the document never reports a scroll width. Content inside an element that clips or scrolls on its own (`.table-scroll`, the feeds) isn't counted.
 2. **`a11y.focus`** (desktop, tablet and mobile runs): Tab is pressed from the top of the page until focus comes back to an element already visited; on a narrow layout the nav toggle is opened first. `visited` is the number of distinct stops and `missingIndicator` lists each stop with no visible `outline` (non-zero width, not transparent) or `box-shadow` ring when focused. `truncated: true` means the 250-stop cap ran out before focus cycled.
 3. **`a11y.contrast`** (every run but greyscale, so the reduced-motion runs also catch a colour that is only fine mid-animation): every visible element with direct text has its `color` measured against its effective background, found by alpha-blending translucent ancestor backgrounds down to the first opaque one. `failures` lists those under 4.5:1, or 3:1 for large text (≥ 24px, or ≥ 18.66px bold), with the colours and ratio. Visually hidden (1px) text and disabled controls are skipped.
 4. **Screenshots** (`desktop`, `tablet`, `mobile`, plus `*-reduced-motion` and `*-greyscale` at desktop and mobile): look at them. In greyscale every status must still be readable from its text and icon. The greyscale filter is set through the DOM, so that run enforces the CSP too.
@@ -40,8 +41,9 @@ Attach the relevant screenshots to the PR (before and after for visual changes).
 
 The script copies the production CSP from `src/web/server.ts`: when that CSP changes, update `CSP` in `render.mjs` too.
 
-After changing anything in this folder, run its own tests: `node --test .claude/skills/ui-check/selftest.mjs` (fixture merging, the variants rendering their states, and the audits catching a link with `outline: none` and grey-on-grey text). They aren't part of `npm test`, because Playwright isn't a project dependency.
+After changing anything in this folder, run its own tests: `node --test .claude/skills/ui-check/selftest.mjs` (fixture merging, the variants rendering their states, the audits catching a link with `outline: none` and grey-on-grey text, and clipped content). They aren't part of `npm test`, because Playwright isn't a project dependency; the `precommit` script runs them when this folder changes.
 
 ## Known findings on `main` (Nov 2026)
 - A channel that is live while its bot is disconnected shows no LIVE badge (#998, #1077).
+- Between 641px and about 944px the nav is wider than the window and its right end is clipped: `clippedContent` on the tablet run lists the access badge and Logout (#1109).
 - `.disclosure-toggle:focus-visible` uses `--primary` instead of `--focus-ring` (`public/style.css`). The focus audit passes it, since it has an outline; only its colour is off.

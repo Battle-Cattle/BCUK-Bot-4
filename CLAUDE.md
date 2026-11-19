@@ -14,7 +14,7 @@ In cloud sessions `node_modules` is already installed; switch Node but skip the 
 
 ## ALWAYS: Before Committing
 
-Run the `precommit` skill, which runs `node .claude/skills/precommit/precommit.mjs`: `npm run typecheck`, the tests that import a changed file, and ESLint on every file the branch adds or changes (new untracked files included). A hook blocks `git commit` unless that script passed on exactly the working tree being committed, so running the commands by hand doesn't count.
+Run the `precommit` skill, which runs `node .claude/skills/precommit/precommit.mjs`: `npm run typecheck`, the tests that import a changed file, the `selftest.mjs` of any skill whose folder changed, and ESLint on every file the branch adds or changes (new untracked files included). A hook blocks `git commit` unless that script passed on exactly the working tree being committed, so running the commands by hand doesn't count.
 
 **The script runs the full `npm test` instead** when the change touches shared infrastructure: `src/db.ts`, `migrations/` or `DATABASE-SCHEMA.md`, `src/shared/`, `src/test-utils/`, `package.json`/`package-lock.json`, or a `tsconfig*`/`vitest*`/`eslint` config. Leave coverage, `build`, `check:circular`, `check:unused` and `test:toolchain` to CI unless you're changing what they check.
 
