@@ -58,6 +58,22 @@ function runScript(script: string, ...args: string[]) {
   return { status: result.status, stdout: result.stdout, stderr: result.stderr };
 }
 
+/**
+ * Runs precommit.mjs with a fake `npx` first on PATH, so its changed-tests and ESLint steps run
+ * offline. The fake records each call's arguments to npx.log and exits with `npxExit`.
+ */
+function runPrecommitWithFakeNpx(npxExit: number, ...args: string[]) {
+  const bin = path.join(path.dirname(repo), 'bin');
+  fs.mkdirSync(bin, { recursive: true });
+  const log = path.join(path.dirname(repo), 'npx.log');
+  fs.writeFileSync(path.join(bin, 'npx'), `#!/bin/sh\necho "$@" >> "${log}"\nexit ${npxExit}\n`, { mode: 0o755 });
+  const result = spawnSync('node', [PRECOMMIT, ...args], {
+    cwd: repo, encoding: 'utf8', env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}` },
+  });
+  const calls = fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n') : [];
+  return { status: result.status, stdout: result.stdout, calls };
+}
+
 /** Writes a package.json whose typecheck and test scripts exit with the given codes. */
 function fakeScripts(typecheck: number, test: number): void {
   write('package.json', JSON.stringify({
@@ -218,10 +234,14 @@ describe.skipIf(isWindows)('workflow-guard pre: advisor before push', () => {
     expect(bash('git fetch -q origin main && git push -u origin feature').status).toBe(0);
   });
 
-  it('applies to create_pull_request too', () => {
+  it('applies to create_pull_request too, until the consult is recorded', () => {
     write('src/index.ts', 'export const x = 1;\n');
     commitAll('one');
-    expect(hook('pre', { tool_name: 'mcp__github__create_pull_request', tool_input: { draft: true } }).status).toBe(2);
+    const blocked = hook('pre', { tool_name: 'mcp__github__create_pull_request', tool_input: { draft: true } });
+    expect(blocked.status).toBe(2);
+    expect(blocked.stderr).toContain('record advisor');
+    expect(runScript(STATE, 'record', 'advisor').status).toBe(0);
+    expect(hook('pre', { tool_name: 'mcp__github__create_pull_request', tool_input: { draft: true } }).status).toBe(0);
   });
 });
 
@@ -290,6 +310,55 @@ describe.skipIf(isWindows)('workflow-guard notify', () => {
 });
 
 describe.skipIf(isWindows)('precommit.mjs', () => {
+  it('records nothing when files change while the checks run', () => {
+    write('package.json', JSON.stringify({
+      name: 'fixture',
+      scripts: { typecheck: 'node -e "0"', test: 'node -e "require(\'fs\').writeFileSync(\'during.txt\', \'x\')"' },
+    }));
+    const result = runScript(PRECOMMIT);
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain('Files changed while the checks ran');
+    expect(runScript(STATE, 'status').stdout).toContain('precommit:  none');
+  });
+
+  it('runs only the changed tests, and lints changed scripts, when no shared infrastructure changed', () => {
+    commitAll('fixture scripts'); // package.json now matches HEAD, though still differs from main
+    git('push', '-q', 'origin', 'HEAD:main'); // so main has it and the branch's diff is only what follows
+    write('src/feature.ts', 'export const a = 2;\n');
+    const result = runPrecommitWithFakeNpx(0);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('precommit passed (changed tests; eslint on 1 file(s))');
+    expect(result.calls).toEqual(['vitest run --changed origin/main', 'eslint src/feature.ts']);
+  });
+
+  it.each([['src/shared/x.ts'], ['src/test-utils/x.ts'], ['migrations/100_x.sql'], ['tsconfig.build.json']])(
+    'runs the full suite when %s changes',
+    (file) => {
+      commitAll('fixture scripts');
+      git('push', '-q', 'origin', 'HEAD:main');
+      write(file, '// x\n');
+      const result = runPrecommitWithFakeNpx(0);
+      expect(result.stdout).toContain('precommit passed (full suite');
+      expect(result.calls.some((c) => c.startsWith('vitest'))).toBe(false);
+    },
+  );
+
+  it('runs the full suite with --full even when nothing shared changed', () => {
+    commitAll('fixture scripts');
+    git('push', '-q', 'origin', 'HEAD:main');
+    write('notes.md', 'two\n');
+    expect(runPrecommitWithFakeNpx(0, '--full').stdout).toContain('precommit passed (full suite');
+  });
+
+  it('fails and records nothing when ESLint fails', () => {
+    commitAll('fixture scripts');
+    git('push', '-q', 'origin', 'HEAD:main');
+    write('src/feature.ts', 'export const a = 2;\n');
+    const result = runPrecommitWithFakeNpx(1);
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain('precommit failed (changed tests): tests (changed), eslint');
+  });
+
   it('records nothing and exits 1 when a check fails', () => {
     fakeScripts(0, 1);
     const result = runScript(PRECOMMIT);
@@ -308,6 +377,31 @@ describe.skipIf(isWindows)('precommit.mjs', () => {
   it('reports every failing check, not just the first', () => {
     fakeScripts(1, 1);
     expect(runScript(PRECOMMIT).stdout).toContain('typecheck, tests (full)');
+  });
+});
+
+describe('.claude/settings.json hook wiring', () => {
+  type HookEntry = { matcher: string; hooks: { command: string }[] };
+  const settings = JSON.parse(fs.readFileSync(path.join(ROOT, '.claude/settings.json'), 'utf8')) as { hooks: Record<string, HookEntry[]> };
+  /** The guard entry for one hook event, found by the script its command runs. */
+  const guardEntry = (event: string) => settings.hooks[event]?.find((h) => h.hooks.some((c) => c.command.includes('workflow-guard.mjs')));
+
+  it('routes Bash and the PR tools to the guard\'s pre mode, and nothing else', () => {
+    const entry = guardEntry('PreToolUse');
+    const matcher = new RegExp(`^(?:${entry?.matcher ?? '(?!)'})$`);
+    for (const tool of ['Bash', 'mcp__github__create_pull_request', 'mcp__github__update_pull_request', 'mcp__github__resolve_review_thread']) {
+      expect(matcher.test(tool)).toBe(true);
+    }
+    for (const tool of ['Edit', 'Write', 'mcp__github__add_reply_to_pull_request_comment', 'ReadNotifications']) {
+      expect(matcher.test(tool)).toBe(false);
+    }
+    expect(entry?.hooks[0]?.command).toMatch(/workflow-guard\.mjs" pre$/);
+  });
+
+  it('routes ReadNotifications to the guard\'s notify mode', () => {
+    const entry = guardEntry('PostToolUse');
+    expect(entry?.matcher).toBe('ReadNotifications');
+    expect(entry?.hooks[0]?.command).toMatch(/workflow-guard\.mjs" notify$/);
   });
 });
 
