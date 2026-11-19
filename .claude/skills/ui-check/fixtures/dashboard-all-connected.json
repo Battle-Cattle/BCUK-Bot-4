@@ -1,0 +1,10 @@
+{
+  "_comment": "Illustrative data for ui-check only. The dashboard fixture with every Twitch channel's bot connected.",
+  "extends": "dashboard.json",
+  "status": {
+    "twitch": {
+      "streamer_one": { "connected": true, "lastDisconnectedAt": null },
+      "streamer_four": { "connected": true, "lastConnectedAt": "2026-11-18T10:00:00.000Z" }
+    }
+  }
+}

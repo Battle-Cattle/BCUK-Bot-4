@@ -1,6 +1,6 @@
 ---
 name: precommit
-description: Runs BCUK Bot 4's "ALWAYS - Before Committing" checks on the current branch - typecheck, the tests for what changed (or the full suite when shared infrastructure changed) and ESLint on changed files. Use before every commit in this repo.
+description: Runs BCUK Bot 4's "ALWAYS - Before Committing" checks on the current branch - typecheck, the tests for what changed (or the full suite when shared infrastructure changed), the self-tests of changed skills and ESLint on changed files. Use before every commit in this repo.
 ---
 
 # Pre-commit checks
@@ -15,8 +15,9 @@ This is the procedure behind `CLAUDE.md`'s "ALWAYS: Before Committing". CI remai
    node .claude/skills/precommit/precommit.mjs          # add --full to force the full suite
    ```
 
-   It fetches `origin/main` and runs `npm run typecheck`, then the tests, then ESLint, reporting every failure rather than stopping at the first:
-   - **Tests:** the full `npm test` when anything the branch changes (committed, staged, unstaged or untracked) is shared infrastructure: `src/db.ts`, `migrations/`, `DATABASE-SCHEMA.md`, `src/shared/`, `src/test-utils/`, `package(-lock).json`, or a `tsconfig*`/`vitest*`/`eslint*` file. That includes test-only changes under those paths. Otherwise `npx vitest run --changed origin/main`.
+   It fetches `origin/main` and runs `npm run typecheck`, then the tests, then any skill self-tests, then ESLint, reporting every failure rather than stopping at the first:
+   - **Tests:** the full `npm test` when anything the branch changes (committed, staged, unstaged or untracked) is shared infrastructure: `src/db.ts`, `migrations/`, `DATABASE-SCHEMA.md`, `src/shared/`, `src/test-utils/`, `package(-lock).json`, a `tsconfig*`/`vitest*`/`eslint*` file, or `.claude/hooks/` or this skill's folder (`src/workflowGuard.test.ts` runs those as child processes, so `--changed` can't link them). That includes test-only changes under those paths. Otherwise `npx vitest run --changed origin/main`.
+   - **Skill self-tests:** `node --test .claude/skills/<name>/selftest.mjs` for each skill folder the branch changes that has one (they're outside Vitest's `src/**` include). One that loads Playwright is skipped, with a note, where the pre-installed Playwright isn't available.
    - **ESLint:** every `.ts`/`.js`/`.mjs`/`.mts` file the branch adds or changes, measured from the merge base so files that only changed on `main` aren't linted.
 
    Don't run these commands by hand instead: only the script records a pass. Not `npx tsc` (`CLAUDE.md` "TypeScript 6 + 7").
