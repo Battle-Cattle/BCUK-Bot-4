@@ -319,4 +319,12 @@ describe('overall health indicator', () => {
     for (const rule of staleRules) expect(rule).not.toMatch(/opacity/);
     expect(css).toMatch(/\.dot--unknown\s*\{[^}]*border:\s*2px dashed/);
   });
+
+  it('mutes every kind of Bot Status value while stale, including the Twitch channel rows and their badges', () => {
+    for (const selector of ['.is-stale .stat-value', '.is-stale .channel-name', '.is-stale .channel-meta']) {
+      expect(css).toContain(selector);
+    }
+    // Badges lose their fill and the LIVE pulse stops, so a stale LIVE neither reads as current nor drops below AA.
+    expect(css).toMatch(/\.is-stale \.badge\s*\{[^}]*background:\s*transparent;[^}]*color:\s*var\(--muted\);[^}]*animation:\s*none;/);
+  });
 });

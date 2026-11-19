@@ -322,3 +322,13 @@ describe('public/dashboard-status.js health indicator and feed staleness', () =>
     expect(el('discord-tag').textContent).toBe('Bot#0001');
   });
 });
+
+describe('public/dashboard-status.js zero Twitch channels', () => {
+  it('stays healthy (zero channels is neutral) and says in words that none are configured', () => {
+    const { el, applyStatus } = runScripts();
+    applyStatus(status(true, { connected: true }, {}));
+
+    expect(el('health-indicator').textContent).toBe('All Systems Operational');
+    expect(el('twitch-channels').descendants().map((e) => e.textContent)).toContain('None configured.');
+  });
+});
