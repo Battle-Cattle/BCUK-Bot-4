@@ -1,4 +1,4 @@
-/* global clearChildren, relativeTime, setClass, setText */
+/* global clearChildren, relativeTime, setStatusDot, setText */
 /* ── Status rendering & polling ──────────────────────────── */
 
 /**
@@ -62,19 +62,35 @@ function renderChannels(container, channelMap) {
 }
 
 /**
+ * Picks the voice dot's state class and accessible name: hollow "Not connected", play-triangle "Playing" or filled "Idle".
+ * @param voice - The `voice` section of an /api/status response (`connected`, `playing`).
+ * @returns The dot's classes and the words that describe its state.
+ */
+function voiceDotState(voice) {
+  if (!voice.connected) return { className: 'dot dot--offline', label: 'Voice: Not connected' };
+  if (voice.playing) return { className: 'dot dot--playing', label: 'Voice: Playing' };
+  return { className: 'dot dot--online', label: 'Voice: Connected, idle' };
+}
+
+/**
  * Updates the dashboard (Discord bot, voice connection, last played sound, channels) from an /api/status response.
  * @param status - The parsed /api/status JSON (`discord`, `voice`, `twitch` sections, plus the last played sound).
  */
 function applyStatus(status) {
   // Discord bot
   const discordOn = status.discord.ready;
-  setClass('dot-discord', discordOn ? 'dot dot--online' : 'dot dot--offline');
+  setStatusDot(
+    'dot-discord',
+    discordOn ? 'dot dot--online' : 'dot dot--offline',
+    discordOn ? 'Discord: Connected' : 'Discord: Disconnected',
+  );
   setText('discord-tag',   status.discord.tag);
   setText('discord-guild', status.discord.guildName);
 
   // Voice
   const voiceOn = status.voice.connected;
-  setClass('dot-voice', voiceOn ? 'dot dot--online' : 'dot dot--offline');
+  const voiceDot = voiceDotState(status.voice);
+  setStatusDot('dot-voice', voiceDot.className, voiceDot.label);
   setText('voice-channel', status.voice.channelName);
 
   const voiceStateEl = document.getElementById('voice-state');
@@ -85,7 +101,6 @@ function applyStatus(status) {
     } else if (status.voice.playing) {
       voiceStateEl.textContent = `▶ Playing…`;
       voiceStateEl.style.color = 'var(--warning)';
-      setClass('dot-voice', 'dot dot--playing');
     } else {
       voiceStateEl.textContent = 'Idle';
       voiceStateEl.style.color = 'var(--success)';

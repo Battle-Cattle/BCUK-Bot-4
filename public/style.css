@@ -194,9 +194,12 @@ a:hover { text-decoration: underline; }
 
 /* ── Online dot ────────────────────────────────────────── */
 .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+/* Each state has its own shape as well as colour, so it reads without colour (greyscale, colour blindness):
+   filled disc = connected, hollow ring = disconnected, play triangle = playing. The dot's role="img" and
+   aria-label (setStatusDot in dashboard-utils.js) give it a name in words. */
 .dot--online  { background: var(--success); box-shadow: 0 0 6px var(--success); }
-.dot--offline { background: var(--danger); }
-.dot--playing { background: var(--warning); box-shadow: 0 0 6px var(--warning); animation: pulse 1s infinite; }
+.dot--offline { background: transparent; border: 2px solid var(--danger); }
+.dot--playing { background: var(--warning); border-radius: 0; clip-path: polygon(10% 0, 100% 50%, 10% 100%); animation: pulse 1s infinite; }
 @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.5; } }
 .overlay-status { display: flex; align-items: center; gap: .5rem; margin-top: .5rem; font-size: .85rem; color: var(--muted); }
 
@@ -206,6 +209,13 @@ a:hover { text-decoration: underline; }
 .channel-name { font-family: var(--mono); font-size: .85rem; }
 .channel-meta { font-size: .8rem; color: var(--muted); margin-top: .15rem; }
 .channel-badges { display: flex; gap: .35rem; align-items: center; flex-shrink: 0; }
+/* An icon on each Twitch channel badge, so Connected / Disconnected / LIVE differ by shape as well as colour.
+   The `/ ""` alt text keeps the icon out of the accessible name (the badge's own text already says it); the
+   plain declaration before it is the fallback for browsers without that syntax. */
+.channel-badges .badge::before { margin-right: .3em; }
+.channel-badges .badge-online::before  { content: "\2713"; content: "\2713" / ""; }
+.channel-badges .badge-offline::before { content: "\2715"; content: "\2715" / ""; }
+.channel-badges .badge-live::before    { content: "\25CF"; content: "\25CF" / ""; }
 
 /* ── Badges ────────────────────────────────────────────── */
 .badge           { display: inline-block; padding: .15em .55em; border-radius: 99px; font-size: .75rem; font-weight: 600; white-space: nowrap; }
@@ -591,6 +601,14 @@ details[open] > .disclosure-toggle::before { transform: rotate(90deg); }
    style-src without 'unsafe-inline'. */
 .badge-user-hue { color: hsl(var(--hue, 0), 65%, 60%); background: hsla(var(--hue, 0), 65%, 60%, 0.12); }
 .badge-user-hue.badge-user-self { color: hsl(var(--hue, 0), 90%, 78%); background: hsla(var(--hue, 0), 90%, 78%, 0.22); }
+
+/* ── Reduced motion ─────────────────────────────────────
+   With the OS "reduce motion" setting on, nothing in the panel animates: no pulsing LIVE badge or voice dot,
+   no transitions (state changes are instant). Every status still reads from its text and icon/shape, so
+   nothing depends on motion. Overlays (OBS browser sources) use their own stylesheets and are unaffected. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}
 
 /* ── Public video library previews (overlay settings) ─── */
 .library-preview { display: block; width: 10rem; max-width: 100%; aspect-ratio: 16 / 9; background: #000; border-radius: var(--radius); }

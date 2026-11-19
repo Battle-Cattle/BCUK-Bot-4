@@ -174,3 +174,36 @@ describe('public/dashboard-layout.js', () => {
     expect(runLayoutScript({ offsetHeight: 59 }, false).props).toEqual({});
   });
 });
+
+describe('dashboard status cues without colour or motion', () => {
+  const css = fs.readFileSync(stylePath, 'utf8');
+
+  it('gives both status dots an image role and a name in words from the first render', async () => {
+    const html = await render();
+
+    expect(html).toMatch(/class="dot dot--offline" id="dot-discord" role="img" aria-label="Discord: Disconnected"/);
+    expect(html).toMatch(/class="dot dot--offline" id="dot-voice" role="img" aria-label="Voice: Not connected"/);
+  });
+
+  it('draws each dot state as a different shape, not only a different colour', () => {
+    // filled disc = connected, hollow ring = disconnected, play triangle = playing
+    expect(css).toMatch(/\.dot--offline\s*\{[^}]*background:\s*transparent;[^}]*border:\s*2px solid/);
+    expect(css).toMatch(/\.dot--playing\s*\{[^}]*clip-path:\s*polygon\(/);
+  });
+
+  it.each([
+    ['badge-online', '\\2713'],
+    ['badge-offline', '\\2715'],
+    ['badge-live', '\\25CF'],
+  ])('puts a decorative icon on the %s channel badge, hidden from screen readers', (cls, icon) => {
+    const rule = new RegExp(`\\.channel-badges \\.${cls}::before\\s*\\{[^}]*content:\\s*"\\${icon}"\\s*/\\s*""`);
+
+    expect(css).toMatch(rule);
+  });
+
+  it('stops every animation and transition when the OS asks for reduced motion', () => {
+    const reduced = /@media \(prefers-reduced-motion: reduce\) \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? '';
+
+    expect(reduced).toMatch(/\*, \*::before, \*::after\s*\{[^}]*animation:\s*none !important;[^}]*transition:\s*none !important;/);
+  });
+});
