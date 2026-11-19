@@ -18,8 +18,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { git, worktreeTree, writeMarker } from '../../hooks/workflow-state.mjs';
 
-/** Changes that need the full suite (CLAUDE.md "ALWAYS: Before Committing"). */
-const FULL_SUITE_PATHS = /^(src\/db\.ts|migrations\/|DATABASE-SCHEMA\.md|src\/shared\/|src\/test-utils\/|package(-lock)?\.json|tsconfig[^/]*|vitest[^/]*|eslint[^/]*)/;
+/**
+ * Changes that need the full suite (CLAUDE.md "ALWAYS: Before Committing"). The hooks and this script
+ * are tested by src/workflowGuard.test.ts, which runs them as child processes rather than importing
+ * them, so `vitest --changed` can't see that it depends on them.
+ */
+const FULL_SUITE_PATHS = /^(src\/db\.ts|migrations\/|DATABASE-SCHEMA\.md|src\/shared\/|src\/test-utils\/|package(-lock)?\.json|tsconfig[^/]*|vitest[^/]*|eslint[^/]*|\.claude\/hooks\/|\.claude\/skills\/precommit\/)/;
 
 const LINTED = /\.(ts|js|mjs|mts)$/;
 

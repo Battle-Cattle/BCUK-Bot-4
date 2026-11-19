@@ -333,11 +333,11 @@ describe.skipIf(isWindows)('precommit.mjs', () => {
     write('src/feature.ts', 'export const a = 2;\n');
     const result = runPrecommitWithFakeNpx(0);
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain('precommit passed (changed tests; eslint on 1 file(s))');
+    expect(result.stdout).toContain('precommit passed (changed tests; 0 skill self-test(s); eslint on 1 file(s))');
     expect(result.calls).toEqual(['vitest run --changed origin/main', 'eslint src/feature.ts']);
   });
 
-  it.each([['src/shared/x.ts'], ['src/test-utils/x.ts'], ['migrations/100_x.sql'], ['tsconfig.build.json']])(
+  it.each([['src/shared/x.ts'], ['src/test-utils/x.ts'], ['migrations/100_x.sql'], ['tsconfig.build.json'], ['.claude/hooks/x.mjs'], ['.claude/skills/precommit/x.md']])(
     'runs the full suite when %s changes',
     (file) => {
       commitAll('fixture scripts');
@@ -348,6 +348,31 @@ describe.skipIf(isWindows)('precommit.mjs', () => {
       expect(result.calls.some((c) => c.startsWith('vitest'))).toBe(false);
     },
   );
+
+  it('runs the self-test of a skill whose folder changed, and fails when it fails', () => {
+    write('.claude/skills/demo/selftest.mjs', "import { it } from 'node:test';\nit('passes', () => {});\n");
+    commitAll('fixture scripts');
+    git('push', '-q', 'origin', 'HEAD:main');
+    write('.claude/skills/demo/SKILL.md', 'changed\n');
+    const passing = runPrecommitWithFakeNpx(0);
+    expect(passing.status).toBe(0);
+    expect(passing.stdout).toContain('skill self-tests: node --test .claude/skills/demo/selftest.mjs');
+    expect(passing.stdout).toContain('precommit passed (changed tests; 1 skill self-test(s); eslint on 0 file(s))');
+
+    write('.claude/skills/demo/selftest.mjs', "import { it } from 'node:test';\nit('fails', () => { throw new Error('no'); });\n");
+    const failing = runPrecommitWithFakeNpx(0);
+    expect(failing.status).toBe(1);
+    expect(failing.stdout).toContain('precommit failed (changed tests): skill self-tests');
+  });
+
+  it('runs no self-test for a skill folder without one', () => {
+    commitAll('fixture scripts');
+    git('push', '-q', 'origin', 'HEAD:main');
+    write('.claude/skills/other/SKILL.md', 'new\n');
+    const result = runPrecommitWithFakeNpx(0);
+    expect(result.status).toBe(0);
+    expect(result.stdout).not.toContain('skill self-tests:');
+  });
 
   it('runs the full suite with --full even when nothing shared changed', () => {
     commitAll('fixture scripts');
