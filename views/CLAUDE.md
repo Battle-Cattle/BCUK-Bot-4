@@ -18,7 +18,7 @@ Loaded when working in `views/`; the root `CLAUDE.md` points here for `public/` 
 - **SSE:** use the existing `EventSource` endpoints and `sseClient.js`; don't add polling where a stream exists.
 
 ## Styling (`public/style.css`)
-One stylesheet, with design tokens in `:root` (`--bg`, `--primary`, `--success`, `--danger`, `--warning`, …): use them, not new hex values. Green/amber/red are for operational states only. Every status needs a text label and a non-colour cue. Every animation must stop under `@media (prefers-reduced-motion: reduce)`; the LIVE badge's `live-pulse` and the playing voice dot's `pulse` don't yet (#1072). An animation must not take text below AA at any frame: animate a background, not the opacity of a badge with text.
+One stylesheet, with design tokens in `:root` (`--bg`, `--primary`, `--success`, `--danger`, `--warning`, …): use them, not new hex values. Green/amber/red are for operational states only. Every status needs a text label and a non-colour cue. Every animation and transition must stop under `@media (prefers-reduced-motion: reduce)`: the global block at the end of `style.css` does this for the panel (overlays have their own stylesheets), so don't add an `!important` animation that would beat it. An animation must not take text below AA at any frame: animate a background, not the opacity of a badge with text. A status dot needs a distinct shape per state plus `role="img"` and an `aria-label` (`setStatusDot` in `dashboard-utils.js`).
 
 ## Tests and checks
 - A view's `src/web/<view>View.test.ts` renders it with `ejs.renderFile` and asserts on the HTML (see `dashboardView.test.ts`); cover every state the page can show (empty, signed out, each access level, each status).
