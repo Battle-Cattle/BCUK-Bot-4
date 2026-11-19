@@ -63,16 +63,16 @@ function runScript(script: string, ...args: string[]) {
  * offline. The fake records each call's arguments to npx.log and exits with `npxExit`.
  */
 function runPrecommitWithFakeNpx(npxExit: number, ...args: string[]) {
-  return runPrecommitWithFakeNpxIn({}, npxExit, ...args);
+  return runPrecommitWithFakeNpxIn({}, PRECOMMIT, npxExit, ...args);
 }
 
-/** Like runPrecommitWithFakeNpx, with extra environment variables for the script. */
-function runPrecommitWithFakeNpxIn(env: NodeJS.ProcessEnv, npxExit: number, ...args: string[]) {
+/** Like runPrecommitWithFakeNpx, running the given copy of precommit.mjs with extra environment variables. */
+function runPrecommitWithFakeNpxIn(env: NodeJS.ProcessEnv, script: string, npxExit: number, ...args: string[]) {
   const bin = path.join(path.dirname(repo), 'bin');
   fs.mkdirSync(bin, { recursive: true });
   const log = path.join(path.dirname(repo), 'npx.log');
   fs.writeFileSync(path.join(bin, 'npx'), `#!/bin/sh\necho "$@" >> "${log}"\nexit ${npxExit}\n`, { mode: 0o755 });
-  const result = spawnSync('node', [PRECOMMIT, ...args], {
+  const result = spawnSync('node', [script, ...args], {
     cwd: repo, encoding: 'utf8', env: { ...process.env, ...env, PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}` },
   });
   const calls = fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n') : [];
@@ -377,8 +377,17 @@ describe.skipIf(isWindows)('precommit.mjs', () => {
     git('push', '-q', 'origin', 'HEAD:main');
     write('.claude/skills/browser/SKILL.md', 'changed\n');
     write('.claude/skills/plain/SKILL.md', 'changed\n');
-    // The pre-installed Playwright is found through NODE_PATH; without it, require.resolve fails.
-    const result = runPrecommitWithFakeNpxIn({ NODE_PATH: '' }, 0);
+    // Run copies of precommit.mjs and the helper it imports from a folder outside any node_modules,
+    // with no NODE_PATH or HOME global folders, so Playwright can't resolve however this machine has it.
+    const tooling = path.join(path.dirname(repo), 'tooling');
+    const copy = (rel: string) => {
+      fs.mkdirSync(path.dirname(path.join(tooling, rel)), { recursive: true });
+      fs.copyFileSync(path.join(ROOT, rel), path.join(tooling, rel));
+    };
+    copy('.claude/skills/precommit/precommit.mjs');
+    copy('.claude/hooks/workflow-state.mjs');
+    const isolated = { NODE_PATH: '', HOME: tooling, USERPROFILE: tooling };
+    const result = runPrecommitWithFakeNpxIn(isolated, path.join(tooling, '.claude/skills/precommit/precommit.mjs'), 0);
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('Skipping .claude/skills/browser/selftest.mjs: it needs the pre-installed Playwright');
     expect(result.stdout).toContain('skill self-tests: node --test .claude/skills/plain/selftest.mjs');
