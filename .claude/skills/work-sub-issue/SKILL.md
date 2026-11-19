@@ -22,7 +22,7 @@ One sub-issue, one branch, one PR. The parent issue holds the full design; the s
 
 ## 3. Before the PR leaves draft
 - Run the `precommit` skill.
-- Run the `acceptance-checker` agent with the issue number. Every row must be **proven**, or listed in the PR description as out of scope with the sub-issue that covers it.
+- Run the `acceptance-checker` agent with the issue number. Every row must be **proven**, or listed in the PR description as out of scope with the sub-issue that covers it. Then run `node .claude/hooks/workflow-state.mjs record acceptance`; the PR can't leave draft until you do.
 - PR title: the sub-issue's title. Body: what changed, the acceptance table, `ui-check` screenshots (before and after) for visible changes, and `Closes #<sub-issue>`.
 - Then follow the `drive-pr` skill until it's green.
 

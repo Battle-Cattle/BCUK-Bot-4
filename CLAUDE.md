@@ -14,9 +14,9 @@ In cloud sessions `node_modules` is already installed; switch Node but skip the 
 
 ## ALWAYS: Before Committing
 
-Run the `precommit` skill: `npm run typecheck`, the tests that import a changed file, and ESLint on every file the branch adds or changes (new untracked files included). Its commands are the reference; don't retype them from memory.
+Run the `precommit` skill, which runs `node .claude/skills/precommit/precommit.mjs`: `npm run typecheck`, the tests that import a changed file, and ESLint on every file the branch adds or changes (new untracked files included). A hook blocks `git commit` unless that script passed on exactly the working tree being committed, so running the commands by hand doesn't count.
 
-**It runs the full `npm test` instead** when the change touches shared infrastructure: `src/db.ts`, `migrations/` or `DATABASE-SCHEMA.md`, `src/shared/`, `src/test-utils/`, `package.json`/`package-lock.json`, or a `tsconfig*`/`vitest*`/`eslint` config. Leave coverage, `build`, `check:circular`, `check:unused` and `test:toolchain` to CI unless you're changing what they check.
+**The script runs the full `npm test` instead** when the change touches shared infrastructure: `src/db.ts`, `migrations/` or `DATABASE-SCHEMA.md`, `src/shared/`, `src/test-utils/`, `package.json`/`package-lock.json`, or a `tsconfig*`/`vitest*`/`eslint` config. Leave coverage, `build`, `check:circular`, `check:unused` and `test:toolchain` to CI unless you're changing what they check.
 
 **CI is the gate, not the local run.** A PR isn't done until CI is green. If it fails, reproduce the failing check locally, fix it, and show it passing before pushing again.
 
@@ -90,6 +90,14 @@ Cheaper subagents in `.claude/agents/` take reading-heavy or mechanical work; gi
 - `coverage-filler`: named uncovered lines. Can only edit `*.test.ts`.
 - `acceptance-checker` (read-only): before an issue's PR leaves draft.
 - `issue-gardener`: bulk issue labels, Priority, sub-issue links and recheck notes.
+
+**Enforced steps.** `.claude/hooks/workflow-guard.mjs` blocks the main session from skipping three steps. Each step leaves a marker in `.git/claude-workflow/` that covers only the content it checked, so a later change needs the step again. `node .claude/hooks/workflow-state.mjs status` shows which markers are current.
+
+- `git commit`: needs a precommit pass on exactly the working tree being committed (above). Run `git commit` and `git push` each in their own Bash call: the hook sees the state from before the command line runs, so only `cd` and `git add`/`status`/`diff`/`log`/`fetch` may come before them.
+- `git push` or opening a PR: when the branch changes `migrations/`, `src/index.ts`, `src/web/middleware.ts`, `src/web/server.ts` or `src/shared/crypto.ts`, consult `advisor` about the change first, then run `node .claude/hooks/workflow-state.mjs record advisor`. Any later change to those files needs a new consult.
+- Leaving draft (opening a non-draft PR, or `draft: false`): run `acceptance-checker` against the issue the PR closes (or the PR's stated scope when there is none), then run `node .claude/hooks/workflow-state.mjs record acceptance`. A new commit needs a new check. If the user marks the PR ready themselves, run it when the `ready_for_review` event arrives.
+
+It also blocks resolving review threads: the reviewer (CodeRabbit, Qlty or a person) closes its own after checking the fix (`drive-pr`). The same hook reminds you to dispatch `pr-triage` whenever `ReadNotifications` returns PR activity. Record a marker only after the step really happened: the hooks catch a forgotten step, not a false record. They see only `git` in Bash and the GitHub MCP tools named above: a `gh` command or a commit made inside a script isn't checked, so don't route around them that way. Only the person running the session can turn the hook off, with `CLAUDE_WORKFLOW_GUARD=off` in Claude Code's own environment.
 
 A PreToolUse hook (`.claude/hooks/agent-guard.mjs`) enforces those scopes and stops every subagent changing git state or writing files from Bash; it catches accidents, so diff review still applies. Keep in the main session: `migrations/`, the auth middleware order, `src/shared/crypto.ts` and token handling, and the single-instance assumptions.
 
