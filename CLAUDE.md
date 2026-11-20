@@ -83,7 +83,7 @@ Every new function or behaviour change **must** include or update a Vitest test,
 
 ## Delegation
 
-Cheaper subagents in `.claude/agents/` take reading-heavy or mechanical work; give them the exact files and findings, and review their diffs:
+Subagents in `.claude/agents/` take reading-heavy or mechanical work. Models: Haiku for `pr-triage`, `issue-gardener`, `lint-docs-fixer` and `coverage-filler` (move `coverage-filler` back to Sonnet if its assertions are weak); Sonnet for `acceptance-checker`; Opus for `advisor`. Give them the exact files and findings, and review their diffs:
 
 - `pr-triage` (read-only): every PR activity event, instead of reading CI logs and review comments here.
 - `lint-docs-fixer`: ESLint/JSDoc findings spread over several files. Edits only; can't touch config, CI, migrations or crypto, or add `eslint-disable`.

@@ -2,7 +2,7 @@
 name: coverage-filler
 description: Writes Vitest tests that cover named uncovered lines in BCUK Bot 4 (e.g. a Qlty diff-coverage gap), following the repo's test conventions. Changes only *.test.ts files. Give it the source file and line ranges.
 tools: Read, Edit, Write, Grep, Glob, Bash
-model: sonnet
+model: haiku
 hooks:
   PreToolUse:
     - matcher: "Edit|Write|MultiEdit"
