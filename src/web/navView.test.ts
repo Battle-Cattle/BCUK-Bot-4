@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import ejs from 'ejs';
 import path from 'path';
-// The shared mirror of AccessLevel (kept in sync by accessLevelMock.test.ts), so this view test doesn't load the DB layer.
+// The shared test mirror of AccessLevel's values, used so this view test doesn't load the DB layer (which needs DISCORD_TOKEN).
+// Note: accessLevelMock.test.ts pins the mirror's values but doesn't compare them with src/db/users.ts.
 import { ACCESS_LEVEL_MOCK as AccessLevel } from '../test-utils/accessLevelMock';
 
 const NAV_PATH = path.join(__dirname, '../../views/partials/nav.ejs');
