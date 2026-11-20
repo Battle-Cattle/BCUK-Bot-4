@@ -15,25 +15,44 @@ export function isCoverable(file) {
 }
 
 /**
+ * Reads the file a `+++` diff header names, when Qlty would count that file's lines.
+ * @param header a `+++ ` line of a unified diff
+ * @returns the repository-relative path, or null for a deleted, non-source or test file
+ */
+function coverableFile(header) {
+  if (!header.startsWith('+++ b/')) return null;
+  const name = header.slice(6);
+  return isCoverable(name) ? name : null;
+}
+
+/**
+ * Lists the line numbers a hunk header adds.
+ * @param header a `@@ -a,b +c,d @@` line of a zero-context diff
+ * @returns the added line numbers, empty when the line isn't a hunk header or adds nothing
+ */
+function hunkLines(header) {
+  const hunk = /^@@ -\S+ \+(\d+)(?:,(\d+))? @@/.exec(header);
+  if (!hunk) return [];
+  const start = Number(hunk[1]);
+  const count = hunk[2] === undefined ? 1 : Number(hunk[2]);
+  return Array.from({ length: count }, (_, i) => start + i);
+}
+
+/**
  * Reads the added line numbers of each coverable file from a zero-context unified diff.
  * @param diff output of `git diff -U0` (paths prefixed `b/`)
  * @returns each coverable file's added line numbers
  */
 export function addedLines(diff) {
   const added = new Map();
-  let file = null;
+  let lines = null;
   for (const line of diff.split('\n')) {
     if (line.startsWith('+++ ')) {
-      const name = line.startsWith('+++ b/') ? line.slice(6) : null;
-      file = name && isCoverable(name) ? name : null;
-      if (file && !added.has(file)) added.set(file, new Set());
-      continue;
+      const file = coverableFile(line);
+      lines = file ? (added.get(file) ?? added.set(file, new Set()).get(file)) : null;
+    } else if (lines) {
+      for (const n of hunkLines(line)) lines.add(n);
     }
-    const hunk = file ? /^@@ -\S+ \+(\d+)(?:,(\d+))? @@/.exec(line) : null;
-    if (!hunk) continue;
-    const start = Number(hunk[1]);
-    const count = hunk[2] === undefined ? 1 : Number(hunk[2]);
-    for (let n = start; n < start + count; n++) added.get(file)?.add(n);
   }
   return added;
 }
