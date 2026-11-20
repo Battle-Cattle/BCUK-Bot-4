@@ -14,7 +14,7 @@ In cloud sessions `node_modules` is already installed; switch Node but skip the 
 
 ## ALWAYS: Before Committing
 
-Run the `precommit` skill, which runs `node .claude/skills/precommit/precommit.mjs`: `npm run typecheck`, the tests that import a changed file, the `selftest.mjs` of any skill whose folder changed, and ESLint on every file the branch adds or changes (new untracked files included). A hook blocks `git commit` unless that script passed on exactly the working tree being committed, so running the commands by hand doesn't count.
+Run the `precommit` skill, which runs `node .claude/skills/precommit/precommit.mjs`: `npm run typecheck`, the tests that import a changed file, the `selftest.mjs` of any skill whose folder changed, and ESLint on every file the branch adds or changes (new untracked files included). A hook blocks `git commit` unless that script passed on exactly the working tree being committed, so running the commands by hand doesn't count. `--quick` (typecheck and ESLint only) is enough for work-in-progress commits, but `git push` needs a full pass on exactly the tree being pushed. The test run also lists added `src/` lines no test ran (Qlty's diff-coverage gap): cover them before pushing.
 
 **The script runs the full `npm test` instead** when the change touches shared infrastructure: `src/db.ts`, `migrations/` or `DATABASE-SCHEMA.md`, `src/shared/`, `src/test-utils/`, `package.json`/`package-lock.json`, a `tsconfig*`/`vitest*`/`eslint` config, or `.claude/hooks/` or `.claude/skills/precommit/`. Leave coverage, `build`, `check:circular`, `check:unused` and `test:toolchain` to CI unless you're changing what they check.
 

@@ -8,6 +8,7 @@
 //
 // pre blocks (exit 2, the reason on stderr):
 //   git commit                     unless precommit.mjs passed on exactly the current working tree
+//   git push                       unless a full (not --quick) precommit run passed on exactly the working tree
 //   git push, create_pull_request  unless the advisor was consulted about the branch's current diff
 //                                  to a migration, startup, auth middleware or token crypto file
 //   leaving draft                  unless acceptance-checker ran on the current HEAD (create_pull_request
@@ -118,6 +119,20 @@ function requirePrecommit(dir) {
 }
 
 /**
+ * Requires a full precommit run (tests included, not --quick) on exactly what would be pushed.
+ * @param dir the repository folder
+ */
+function requireVerified(dir) {
+  const tree = worktreeTree(dir);
+  const marker = readMarker(dir, 'verified');
+  if (marker?.tree === tree) return;
+  const why = marker
+    ? `files changed since the last full precommit run (${marker.at}).`
+    : 'no full precommit run is recorded (a --quick pass covers commits only).';
+  block(`${why} Run \`${PRECOMMIT}\` without --quick and push once it passes.`);
+}
+
+/**
  * Requires an advisor consult covering the branch's current diff to advisor-sensitive files.
  * @param dir the repository folder
  */
@@ -153,11 +168,11 @@ function requireAcceptance(dir) {
 function checkPre(toolName, input, cwd) {
   if (toolName === 'Bash') {
     const command = String(input.command ?? '');
-    for (const [subcommand, require] of [['commit', requirePrecommit], ['push', requireAdvisor]]) {
+    for (const [subcommand, requires] of [['commit', [requirePrecommit]], ['push', [requireVerified, requireAdvisor]]]) {
       const found = findGitCommand(command, subcommand, cwd);
       if (!found) continue;
       requireOwnCommand(found, subcommand);
-      require(found.dir);
+      for (const require of requires) require(found.dir);
     }
     return;
   }

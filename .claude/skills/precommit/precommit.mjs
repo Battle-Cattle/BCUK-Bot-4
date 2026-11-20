@@ -3,6 +3,7 @@
 //
 //   node .claude/skills/precommit/precommit.mjs           pick the test scope from what changed
 //   node .claude/skills/precommit/precommit.mjs --full    always run the full suite
+//   node .claude/skills/precommit/precommit.mjs --quick   typecheck and ESLint only, for work-in-progress commits
 //
 // Runs typecheck, the tests (the full suite when shared infrastructure changed, otherwise the
 // tests that import a changed file), the self-test of each skill whose folder changed, and ESLint
@@ -10,13 +11,20 @@
 // reports every failure rather than stopping at the first. Only when all pass, and nothing changed
 // while they ran, does it record the working tree it checked; the commit hook allows a commit of
 // exactly that content.
+//
+// A full pass also records the tree as verified, which the push hook requires: a --quick pass lets
+// the commit through but not the push. The test run measures coverage, and the lines the branch
+// adds that no test ran are listed (Qlty's diff-coverage gap); that list is advice, not a failure,
+// because lines only the real-MySQL tests reach (`npm run test:db`) show as uncovered here.
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { git, worktreeTree, writeMarker } from '../../hooks/workflow-state.mjs';
+import { addedLines, formatReport, parseLcov, uncoveredAdded } from './diffCoverage.mjs';
 
 /**
  * Changes that need the full suite (CLAUDE.md "ALWAYS: Before Committing"). The hooks and this script
@@ -121,6 +129,51 @@ function runCheck(cwd, label, command, args) {
 }
 
 /**
+ * Builds the vitest flags that write an lcov report outside the working tree.
+ * @param reportsDir folder to write the report to
+ * @returns the extra vitest arguments
+ */
+function coverageArgs(reportsDir) {
+  return ['--coverage', '--coverage.reporter=lcov', `--coverage.reportsDirectory=${reportsDir}`];
+}
+
+/**
+ * Says whether `npm test` runs vitest directly, so coverage flags can be passed through it.
+ * @param cwd the repository folder
+ * @returns true when package.json's test script starts with `vitest run`
+ */
+function npmTestTakesFlags(cwd) {
+  try {
+    return /^vitest run\b/.test(JSON.parse(readFileSync(path.join(cwd, 'package.json'), 'utf8')).scripts?.test ?? '');
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Prints the lines the branch adds that the coverage report shows no test ran.
+ * @param cwd the repository folder
+ * @param base the merge-base with origin/main
+ * @param reportsDir folder the lcov report was written to
+ */
+function reportDiffCoverage(cwd, base, reportsDir) {
+  const lcovPath = path.join(reportsDir, 'lcov.info');
+  if (!existsSync(lcovPath)) return;
+  const diff = git(['diff', '-U0', '--diff-filter=d', base, '--', 'src'], { cwd });
+  const untracked = git(['ls-files', '--others', '--exclude-standard', '--', 'src'], { cwd }).split('\n').filter(Boolean);
+  const added = addedLines(diff);
+  for (const file of untracked) {
+    const total = readFileSync(path.join(cwd, file), 'utf8').split('\n').length;
+    const lines = addedLines(`+++ b/${file}\n@@ -0,0 +1,${total} @@`).get(file);
+    if (lines) added.set(file, lines);
+  }
+  const report = formatReport(uncoveredAdded(added, parseLcov(readFileSync(lcovPath, 'utf8'), cwd)));
+  if (report.length) {
+    process.stdout.write(`\n⚠ Added lines no test ran here (Qlty will flag these unless the MySQL tests cover them):\n${report.join('\n')}\n`);
+  }
+}
+
+/**
  * Runs the checks and records the working tree when they all pass.
  * @param argv the arguments after the script name
  * @param cwd the repository folder
@@ -140,18 +193,28 @@ function main(argv, cwd) {
   const base = git(['merge-base', 'origin/main', 'HEAD'], { cwd });
   const before = worktreeTree(cwd);
   const paths = changedPaths(cwd, base);
+  const quick = argv.includes('--quick') && !argv.includes('--full');
   const full = argv.includes('--full') || needsFullSuite(paths);
   const files = lintTargets(cwd, base);
   const selftests = skillSelftests(cwd, paths);
 
+  const reportsDir = mkdtempSync(path.join(tmpdir(), 'precommit-coverage-'));
+  const flags = coverageArgs(reportsDir);
+  const testCheck = () => (full
+    ? runCheck(cwd, 'tests (full)', 'npm', ['test', ...(npmTestTakesFlags(cwd) ? ['--', ...flags] : [])])
+    : runCheck(cwd, 'tests (changed)', 'npx', ['vitest', 'run', '--changed', 'origin/main', ...flags]));
+
   const failed = [
     runCheck(cwd, 'typecheck', 'npm', ['run', 'typecheck']),
-    full ? runCheck(cwd, 'tests (full)', 'npm', ['test']) : runCheck(cwd, 'tests (changed)', 'npx', ['vitest', 'run', '--changed', 'origin/main']),
-    selftests.length ? runCheck(cwd, 'skill self-tests', 'node', ['--test', ...selftests]) : null,
+    quick ? null : testCheck(),
+    !quick && selftests.length ? runCheck(cwd, 'skill self-tests', 'node', ['--test', ...selftests]) : null,
     files.length ? runCheck(cwd, 'eslint', 'npx', ['eslint', ...files]) : null,
   ].filter(Boolean);
 
-  const scope = full ? 'full suite' : 'changed tests';
+  if (!quick && !failed.includes('tests (full)') && !failed.includes('tests (changed)')) reportDiffCoverage(cwd, base, reportsDir);
+  rmSync(reportsDir, { recursive: true, force: true });
+
+  const scope = quick ? 'quick: typecheck and eslint only' : (full ? 'full suite' : 'changed tests');
   if (failed.length) {
     process.stdout.write(`\n✖ precommit failed (${scope}): ${failed.join(', ')}. Nothing recorded.\n`);
     return 1;
@@ -161,7 +224,12 @@ function main(argv, cwd) {
     return 1;
   }
   writeMarker(cwd, 'precommit', { tree: before, scope });
-  process.stdout.write(`\n✔ precommit passed (${scope}; ${selftests.length} skill self-test(s); eslint on ${files.length} file(s)). Recorded: this exact working tree may be committed.\n`);
+  if (quick) {
+    process.stdout.write(`\n✔ precommit passed (${scope}; eslint on ${files.length} file(s)). Recorded: this exact working tree may be committed, but not pushed: run precommit without --quick before the push.\n`);
+    return 0;
+  }
+  writeMarker(cwd, 'verified', { tree: before, scope });
+  process.stdout.write(`\n✔ precommit passed (${scope}; ${selftests.length} skill self-test(s); eslint on ${files.length} file(s)). Recorded: this exact working tree may be committed and pushed.\n`);
   return 0;
 }
 
