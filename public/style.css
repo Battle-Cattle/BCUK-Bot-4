@@ -27,6 +27,11 @@
   --accent-indigo: #a5b4fc;
   --accent-violet: #d8b4fe;
   --discord:   #5865f2;
+  /* The widest viewport at which the nav collapses behind the menu toggle. public/navbar.js reads this property to build
+     its media query; a media query can't use a variable, so the `@media (max-width: …)` in the Navbar section below
+     repeats it, and navView.test.ts fails if the two differ. Keep it above the width the full nav needs for the longest
+     names the caps on .username/.guild-name allow, with the Owner's menu (the most items). */
+  --nav-collapse-max: 1200px;
   --radius:    10px;
   --font:      system-ui, -apple-system, 'Segoe UI', sans-serif;
   --mono:      'Consolas', 'Menlo', monospace;
@@ -48,6 +53,9 @@ a:hover { text-decoration: underline; }
   display: flex; align-items: center; gap: 1rem;
   background: var(--bg-card); border-bottom: 1px solid var(--border);
   padding: .75rem 1.5rem; position: sticky; top: 0; z-index: 100;
+  /* Safety net above the collapse breakpoint: a menu that still doesn't fit beside the brand (fonts wider than expected,
+     the longest allowed names) drops to a second row instead of being clipped off the right edge. */
+  flex-wrap: wrap; row-gap: .5rem;
 }
 .navbar-brand    { font-size: 1.1rem; font-weight: 700; color: var(--text); gap: .5rem; display:flex; align-items:center; }
 .navbar-collapse { display: flex; flex: 1; align-items: center; }
@@ -58,6 +66,11 @@ a:hover { text-decoration: underline; }
 .nav-item:hover { background: var(--bg-hover); color: var(--text); text-decoration: none; }
 .avatar { width: 28px; height: 28px; border-radius: 50%; }
 .username { color: var(--text); font-weight: 600; }
+/* Long Discord and server names are cut with an ellipsis rather than widening the nav past the viewport: the page clips
+   sideways (overflow-x: clip), so anything that doesn't fit is unreachable. These caps give the full nav a worst-case
+   width, which --nav-collapse-max (below) is set above. */
+.username { max-width: 9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.guild-name, .guild-switcher { max-width: 11rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Nav groups (dropdown) */
 .nav-group { position: relative; }
@@ -81,6 +94,43 @@ a:hover { text-decoration: underline; }
 }
 .nav-group.open .nav-group-items { display: flex; }
 .nav-group-items .nav-item { border-radius: 6px; white-space: nowrap; }
+
+/* Collapsed nav: at and below --nav-collapse-max the menu hides behind the toggle and opens as a full-width dropdown under
+   the navbar. #1109: the full nav is wider than a tablet, and the page clips sideways, so its right end (access badge
+   and Logout) was unreachable between the old 640px breakpoint and about 1056px. */
+@media (max-width: 1200px) {
+  .navbar-toggle {
+    display: flex; align-items: center; justify-content: center;
+    margin-left: auto; background: transparent;
+    border: 1px solid var(--border); color: var(--text);
+    padding: .3rem .6rem; border-radius: 6px; cursor: pointer; font-size: 1.1rem; line-height: 1;
+  }
+  /* Dropdown: absolutely positioned just below the sticky navbar */
+  .navbar-collapse {
+    display: none; position: absolute; top: 100%; left: 0; right: 0;
+    flex-direction: column; gap: .25rem;
+    background: var(--bg-card); border-bottom: 1px solid var(--border);
+    padding: .5rem 1rem;
+  }
+  .navbar.nav-open .navbar-collapse { display: flex; }
+  .navbar-menu { flex-direction: column; gap: 0; width: 100%; align-items: stretch; }
+  .navbar-end {
+    flex-direction: row; flex-wrap: wrap; align-items: center;
+    width: 100%; margin-left: 0; gap: .5rem;
+    padding-top: .5rem; border-top: 1px solid var(--border);
+  }
+  .navbar .nav-item { width: 100%; border-radius: 6px; }
+
+  /* Nav groups: expand inline in the dropdown */
+  .nav-group { width: 100%; }
+  .nav-group-label { width: 100%; justify-content: space-between; }
+  .nav-group-items {
+    position: static; box-shadow: none;
+    background: transparent; border: none; border-left: 2px solid var(--border);
+    margin: .15rem 0 .15rem .75rem; padding: .2rem 0 .2rem .5rem; min-width: 0;
+  }
+  .nav-group-items .nav-item { white-space: normal; }
+}
 
 /* ── Container ─────────────────────────────────────────── */
 .container { max-width: 1280px; margin: 0 auto; padding: 1.5rem; }
@@ -457,39 +507,10 @@ textarea.input, .stream-textarea { width: 100%; resize: vertical; font-family: v
 
 /* ── Mobile / responsive ────────────────────────────────── */
 @media (max-width: 640px) {
-  /* Navbar: show hamburger; desktop links hidden */
+  /* Navbar: the tighter phone padding. The menu itself collapses at --nav-collapse-max (see the Navbar section). */
   .navbar { padding: .6rem 1rem; }
-  .navbar-toggle {
-    display: flex; align-items: center; justify-content: center;
-    margin-left: auto; background: transparent;
-    border: 1px solid var(--border); color: var(--text);
-    padding: .3rem .6rem; border-radius: 6px; cursor: pointer; font-size: 1.1rem; line-height: 1;
-  }
-  /* Dropdown: absolutely positioned just below the sticky navbar */
-  .navbar-collapse {
-    display: none; position: absolute; top: 100%; left: 0; right: 0;
-    flex-direction: column; gap: .25rem;
-    background: var(--bg-card); border-bottom: 1px solid var(--border);
-    padding: .5rem 1rem;
-  }
-  .navbar.nav-open .navbar-collapse { display: flex; }
-  .navbar-menu { flex-direction: column; gap: 0; width: 100%; align-items: stretch; }
-  .navbar-end {
-    flex-direction: row; flex-wrap: wrap; align-items: center;
-    width: 100%; margin-left: 0; gap: .5rem;
-    padding-top: .5rem; border-top: 1px solid var(--border);
-  }
+  /* The footer's links share .nav-item; they stay full-width on phones, as they always have. */
   .nav-item { width: 100%; border-radius: 6px; }
-
-  /* Nav groups: expand inline on mobile */
-  .nav-group { width: 100%; }
-  .nav-group-label { width: 100%; justify-content: space-between; }
-  .nav-group-items {
-    position: static; box-shadow: none;
-    background: transparent; border: none; border-left: 2px solid var(--border);
-    margin: .15rem 0 .15rem .75rem; padding: .2rem 0 .2rem .5rem; min-width: 0;
-  }
-  .nav-group-items .nav-item { white-space: normal; }
 
   /* Tables: allow horizontal scroll within the scroll wrapper */
   .card { overflow: visible; }

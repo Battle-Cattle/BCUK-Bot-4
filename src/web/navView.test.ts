@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import ejs from 'ejs';
+import fs from 'fs';
 import path from 'path';
 // The shared test mirror of AccessLevel's values, used so this view test doesn't load the DB layer (which needs DISCORD_TOKEN).
 // Note: accessLevelMock.test.ts pins the mirror's values but doesn't compare them with src/db/users.ts.
@@ -262,5 +263,47 @@ describe('views/partials/nav.ejs navbar end', () => {
     expect(end).not.toContain('/auth/logout');
     expect(end).not.toContain('class="username"');
     expect(end).not.toContain('class="badge');
+  });
+});
+
+describe('public/style.css nav collapse breakpoint (#1109)', () => {
+  const css = fs.readFileSync(path.join(__dirname, '../../public/style.css'), 'utf8');
+
+  /** The declarations of the `@media (max-width: <px>px)` block with this width, or '' if there is none. */
+  const mediaBlock = (px: number): string => new RegExp(`@media \\(max-width: ${px}px\\) \\{([\\s\\S]*?)\\n\\}`).exec(css)?.[1] ?? '';
+  const collapseMax = Number(/--nav-collapse-max:\s*(\d+)px;/.exec(css)?.[1]);
+
+  it('declares --nav-collapse-max above the 640px phone breakpoint, for navbar.js to read', () => {
+    expect(collapseMax).toBeGreaterThan(640);
+  });
+
+  it('collapses the menu behind the toggle in a media block at exactly that width', () => {
+    const block = mediaBlock(collapseMax);
+
+    // A media query can't use the custom property, so this literal must equal it: if they drift, the script and the CSS
+    // would disagree about when the toggle is shown.
+    expect(block).toMatch(/\.navbar-toggle\s*\{[^}]*display:\s*flex;/);
+    expect(block).toMatch(/\.navbar-collapse\s*\{[^}]*display:\s*none;[^}]*position:\s*absolute;/);
+    expect(block).toContain('.navbar.nav-open .navbar-collapse { display: flex; }');
+    expect(block).toMatch(/\.navbar-menu\s*\{[^}]*flex-direction:\s*column;/);
+    expect(block).toMatch(/\.nav-group-items\s*\{[^}]*position:\s*static;/);
+  });
+
+  it('keeps only the tighter navbar padding and the footer links in the 640px phone block, not the menu collapse', () => {
+    const phone = mediaBlock(640);
+
+    expect(phone).toContain('.navbar { padding: .6rem 1rem; }');
+    for (const selector of ['.navbar-toggle', '.navbar-collapse', '.navbar-menu', '.navbar-end', '.nav-group']) {
+      expect(phone).not.toContain(selector);
+    }
+  });
+
+  it('caps the username and server name with an ellipsis, so the full nav has a worst-case width', () => {
+    expect(css).toMatch(/\.username\s*\{[^}]*max-width:\s*9rem;[^}]*overflow:\s*hidden;[^}]*text-overflow:\s*ellipsis;[^}]*white-space:\s*nowrap;/);
+    expect(css).toMatch(/\.guild-name,\s*\.guild-switcher\s*\{[^}]*max-width:\s*11rem;[^}]*text-overflow:\s*ellipsis;/);
+  });
+
+  it('lets the navbar wrap to a second row rather than clip when the menu does not fit beside the brand', () => {
+    expect(/\.navbar\s*\{[^}]*flex-wrap:\s*wrap;/.test(css)).toBe(true);
   });
 });

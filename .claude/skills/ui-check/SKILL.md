@@ -23,6 +23,7 @@ A fixture is JSON: `{ "view": "dashboard", "locals": {…}, "api": {"/path": jso
   - `dashboard-discord-down.json`: the Discord bot not ready.
   - `dashboard-voice-playing.json`: a sound playing in voice.
   - `dashboard-all-connected.json`: every Twitch channel's bot connected.
+  - `dashboard-owner-long-names.json`: the widest nav the panel renders (the Owner's menu, the server switcher, a 32-character Discord name and a 100-character server name). Its desktop and tablet runs must show no `clippedContent`; the selftest also sweeps its widths from 641 to 1700px.
   - `dashboard-feed-unavailable.json`: no status stubs (`"statusPaths": "$remove"`), so `/api/status` and the stream answer 503; the clock advances past three failed polls to reach "Status unknown". Without the clock this takes 2–3 minutes, because a 503 closes `EventSource` for good.
 
   Add a variant for any other state you need (signed out, no channels, a Manager user with the reconnect modal), and keep fixture data obviously illustrative.
@@ -45,5 +46,4 @@ After changing anything in this folder, run its own tests: `node --test .claude/
 
 ## Known findings on `main` (Nov 2026)
 - A channel that is live while its bot is disconnected shows no LIVE badge (#998, #1077).
-- Between 641px and about 944px the nav is wider than the window and its right end is clipped: `clippedContent` on the tablet run lists the access badge and Logout (#1109).
 - `.disclosure-toggle:focus-visible` uses `--primary` instead of `--focus-ring` (`public/style.css`). The focus audit passes it, since it has an outline; only its colour is off.

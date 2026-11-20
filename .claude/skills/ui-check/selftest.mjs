@@ -165,6 +165,28 @@ describe('in the browser', () => {
     }
   });
 
+  it('keeps the widest nav inside the viewport at every width, collapsing it at and below --nav-collapse-max', async () => {
+    const fixture = await loadFixture(path.join(FIXTURES, 'dashboard-owner-long-names.json'));
+    const { server, baseUrl } = await startServer(await renderPage(fixture), fixture);
+    const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+    try {
+      await page.goto(baseUrl);
+      await settle(page, fixture);
+      const collapseMax = parseInt(await page.evaluate(() => globalThis.getComputedStyle(globalThis.document.documentElement).getPropertyValue('--nav-collapse-max')), 10);
+      assert.ok(collapseMax > 640, `--nav-collapse-max is declared (${collapseMax})`);
+      for (const width of [641, 700, 768, 820, 1024, 1100, collapseMax, collapseMax + 1, 1250, 1300, 1440, 1700]) {
+        await page.setViewportSize({ width, height: 900 });
+        assert.deepEqual(await findClippedContent(page), [], `nothing is clipped at ${width}px`);
+        const toggleShown = await page.locator('.navbar-toggle').isVisible();
+        assert.equal(toggleShown, width <= collapseMax, `the toggle is ${toggleShown ? '' : 'not '}shown at ${width}px`);
+      }
+    } finally {
+      await page.close();
+      server.closeAllConnections();
+      server.close();
+    }
+  });
+
   it('renders each dashboard variant in its intended state', async () => {
     assert.equal((await renderTexts('dashboard.json', ['#discord-state']))['#discord-state'], 'Connected');
     assert.equal((await renderTexts('dashboard-discord-down.json', ['#discord-state']))['#discord-state'], 'Disconnected');

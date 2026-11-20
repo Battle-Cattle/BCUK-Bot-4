@@ -70,9 +70,10 @@ function labelledGroup(parent: FakeElement): LabelledGroup {
 
 /**
  * Runs public/navbar.js against a fake navbar with two dropdown groups, at a mobile or desktop width.
- * `withToggle: false` leaves the toggle out, as on a page without the nav.
+ * `withToggle: false` leaves the toggle out, as on a page without the nav. `collapseMax` is what the stylesheet's
+ * `--nav-collapse-max` custom property reads as on the root element ('' when the stylesheet declares none).
  */
-function runNavbar(options: { mobile?: boolean; withToggle?: boolean } = {}) {
+function runNavbar(options: { mobile?: boolean; withToggle?: boolean; collapseMax?: string } = {}) {
   const document = new FakeElement();
   const nav = new FakeElement();
   const toggle = new FakeElement(nav);
@@ -83,11 +84,18 @@ function runNavbar(options: { mobile?: boolean; withToggle?: boolean } = {}) {
   let query = '';
   const context = {
     document: Object.assign(document, {
+      documentElement: new FakeElement(),
       querySelector: (sel: string) => (sel === '.navbar-toggle' && options.withToggle !== false ? toggle : null),
       getElementById: (id: string) => (id === 'navbar-collapse' ? collapse : null),
       querySelectorAll: (sel: string) => (sel === '.nav-group' ? groups : []),
     }),
-    window: { matchMedia: (q: string) => { query = q; return mql; } },
+    window: {
+      matchMedia: (q: string) => { query = q; return mql; },
+      // Only the root element's `--nav-collapse-max` is declared, like style.css's :root.
+      getComputedStyle: (el: FakeElement) => ({
+        getPropertyValue: (name: string) => (el === context.document.documentElement && name === '--nav-collapse-max' ? ` ${options.collapseMax ?? '1200px'} ` : ''),
+      }),
+    },
   };
   vm.runInNewContext(fs.readFileSync(scriptPath, 'utf8'), context);
   return {
@@ -111,8 +119,14 @@ function runNavbar(options: { mobile?: boolean; withToggle?: boolean } = {}) {
 const isOpen = (el: FakeElement) => el.classes.has('nav-open') || el.classes.has('open');
 
 describe('public/navbar.js', () => {
-  it('watches the 640px mobile breakpoint', () => {
-    expect(runNavbar().query()).toBe('(max-width: 640px)');
+  it("watches the breakpoint the stylesheet declares as --nav-collapse-max, not a number of its own", () => {
+    expect(runNavbar({ collapseMax: '1200px' }).query()).toBe('(max-width: 1200px)');
+    expect(runNavbar({ collapseMax: '900px' }).query()).toBe('(max-width: 900px)');
+  });
+
+  it('never collapses when the stylesheet declares no breakpoint', () => {
+    // `not all` is a valid media query that matches nothing, so the nav stays in its full form.
+    expect(runNavbar({ collapseMax: '' }).query()).toBe('not all');
   });
 
   it.each([
