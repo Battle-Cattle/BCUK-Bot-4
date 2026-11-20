@@ -1,0 +1,7 @@
+{
+  "_comment": "Illustrative data for ui-check only. The signed-in user owns streamer_one, whose channel is live while its chat bot is disconnected: Stream Overview must still say Live, while System Status says the bot is disconnected.",
+  "extends": "dashboard.json",
+  "locals": {
+    "ownChannel": "streamer_one"
+  }
+}

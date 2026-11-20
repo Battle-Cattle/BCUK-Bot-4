@@ -2,5 +2,11 @@
   "_comment": "Illustrative data for ui-check only. The dashboard fixture with the status feed unreachable: no /api/status or status-stream stubs, so both answer 503 and the stream closes. The page's clock is advanced past three failed 60s polls so it reaches Status unknown in seconds, not minutes.",
   "extends": "dashboard.json",
   "statusPaths": "$remove",
-  "clock": { "advanceMs": 200000, "stepMs": 10000 }
+  "clock": {
+    "advanceMs": 200000,
+    "stepMs": 10000
+  },
+  "locals": {
+    "ownChannel": "streamer_one"
+  }
 }

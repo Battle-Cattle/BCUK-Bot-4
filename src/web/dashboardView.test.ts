@@ -19,6 +19,7 @@ function render(locals: Record<string, unknown> = {}): Promise<string> {
     usageStats: { sfxCount: 1, commandCount: 2, counterCount: 3 },
     csrfToken: 'tok',
     needsReconnect: false,
+    ownChannel: null,
     ...locals,
   });
 }
@@ -60,6 +61,67 @@ describe('views/dashboard.ejs layout', () => {
 
     expect(divBlock(status, '<div class="card system-status">')).toContain('id="twitch-channels"');
     expect(html).not.toContain('<h2 class="section-title">Channels</h2>');
+  });
+
+  it('puts Stream Overview first in the right-hand column, apart from System Status, starting Unknown (#1114)', async () => {
+    const html = await render();
+    const side = divBlock(html, '<div class="dashboard-side">');
+    const stream = between(side, '<section class="section dashboard-stream"', '</section>');
+
+    // Source order: the column follows System Status, with Stream Overview ahead of the feed.
+    expect(html.indexOf('id="bot-status"')).toBeLessThan(html.indexOf('<div class="dashboard-side">'));
+    expect(side.indexOf('id="stream-overview"')).toBeLessThan(side.indexOf('<aside class="dashboard-sidebar"'));
+    expect(between(html, '<section class="section dashboard-status" id="bot-status">', '</section>')).not.toContain('stream-overview');
+    // Its own heading, labelled by it, and its own state: it starts Unknown, never Live or Offline.
+    expect(stream).toContain('aria-labelledby="stream-overview-title"');
+    expect(stream).toContain('<h2 class="section-title" id="stream-overview-title">Stream Overview</h2>');
+    expect(stream).toContain('class="stream-state stream-state--unknown" id="stream-own-state" aria-live="polite">Unknown</p>');
+    for (const id of ['stream-own-name', 'stream-own-note', 'stream-own-link']) expect(stream).toContain(`id="${id}"`);
+    // It shares nothing with System Status: no dots, services, state text or stat rows.
+    expect(stream).not.toMatch(/class="[^"]*\b(dot|service|status-text|stat-row|stat-value|badge)\b/);
+  });
+
+  it('uncaps and unsticks the right-hand column on short desktop windows, so the feed keeps its 6rem floor (#1114)', () => {
+    const css = fs.readFileSync(stylePath, 'utf8');
+    const short = /@media \(max-height: (\d+)px\) \{([\s\S]*?)\n\}/.exec(css);
+
+    // Below this the column's cap would leave the feed less than its floor and the card (which clips) would cut it off.
+    expect(Number(short?.[1])).toBeGreaterThanOrEqual(660);
+    expect(short?.[2]).toMatch(/\.dashboard-side\s*\{[^}]*position:\s*static;[^}]*max-height:\s*none;/);
+    expect(short?.[2]).toMatch(/\.dashboard-events-body\s*\{[^}]*max-height:\s*50vh;/);
+  });
+
+  it('is about the user\'s own channel only: no list of other channels, and the Twitch rows keep their LIVE badge (#1114)', async () => {
+    const html = await render();
+    const stream = between(html, '<section class="section dashboard-stream"', '</section>');
+
+    expect(stream).not.toMatch(/Live now|<ul|<li|stream-live/);
+    expect(fs.readFileSync(path.join(__dirname, '../../public/dashboard-status.js'), 'utf8')).toContain("liveBadge.textContent = 'LIVE'");
+  });
+
+  it('loads the Stream Overview script before the status script that calls it (#1114)', async () => {
+    const html = await render();
+
+    expect(html.indexOf('/dashboard-stream.js')).toBeGreaterThan(html.indexOf('/dashboard-health.js'));
+    expect(html.indexOf('/dashboard-stream.js')).toBeLessThan(html.indexOf('/dashboard-status.js'));
+  });
+
+  it('puts the user\'s own channel on the body only when they have one, escaped (#1114)', async () => {
+    expect(await render({ ownChannel: 'streamer_one' })).toMatch(/<body [^>]*data-own-channel="streamer_one">/);
+    expect(await render({ ownChannel: null })).not.toContain('data-own-channel');
+    expect(await render({ ownChannel: '"><script>' })).not.toContain('<script>');
+  });
+
+  it('styles each Stream Overview state with its own icon, hidden from screen readers, and never status red, amber or green (#1114)', () => {
+    const css = fs.readFileSync(stylePath, 'utf8');
+
+    for (const [modifier, icon] of [['live', '\\\\25C9'], ['offline', '\\\\25C7'], ['unknown', '\\?'], ['unavailable', '\\\\2013']]) {
+      expect(css).toMatch(new RegExp(`\\.stream-state--${modifier}::before\\s*\\{[^}]*content:\\s*"${icon}"\\s*/\\s*""`));
+    }
+    const rules = (css.match(/\n\.stream-[a-z-]+[^{]*\{[^}]*\}/g) ?? []).join('\n');
+    expect(rules).not.toMatch(/--danger|--success|--warning/);
+    // Nothing in it moves, so it needs no reduced-motion exception.
+    expect(rules).not.toMatch(/animation|transition/);
   });
 
   it('presents the bot\'s services as one System Status panel, with Last Played beside it and no overall badge (#1076)', async () => {
@@ -213,16 +275,28 @@ describe('views/dashboard.ejs layout', () => {
     expect(css).toMatch(/\.service-header \.stat-value\s*\{[^}]*white-space:\s*normal/);
   });
 
-  it('caps the desktop feed to leave room for the navbar, sidebar chrome and footer', () => {
+  it('caps the right-hand column to leave room for the navbar, the health indicator and the footer, and lets the feed take what the panel leaves (#1114)', () => {
     const css = fs.readFileSync(stylePath, 'utf8');
     const desktopRules = css.slice(0, css.indexOf('@media (max-width: 1100px)'));
-    const cap = /\.dashboard-events-body\s*\{[^}]*max-height:\s*calc\(100vh - var\(--dashboard-nav-offset\) - var\(--dashboard-health-offset\) - ([\d.]+)rem\)/.exec(desktopRules);
+    const cap = /\.dashboard-side\s*\{[^}]*max-height:\s*calc\(100vh - var\(--dashboard-nav-offset\) - var\(--dashboard-health-offset\) - ([\d.]+)rem\)/.exec(desktopRules);
 
-    // A static guard on the stylesheet, not a rendered check (the suite has no browser). The page around the feed
-    // measures ~11.7rem plus the navbar and the health indicator, so a smaller reserve makes the page overflow by a
-    // few pixels (a stray page scrollbar) when the feed is the tallest column. If the footer or sidebar chrome
-    // grows, re-measure in a browser and raise the reserve and this floor.
-    expect(Number(cap?.[1])).toBeGreaterThanOrEqual(11.75);
+    // A static guard on the stylesheet, not a rendered check (the suite has no browser). The column holds Stream
+    // Overview and the feed with its title and card chrome (~2.6rem, inside the column), so its reserve is the old 12rem
+    // feed cap less that chrome: 9.375rem. A smaller reserve makes the page overflow by a few pixels (a stray page
+    // scrollbar) when the feed is the tallest column. If the footer or the feed's chrome grows, re-measure in a browser
+    // and raise the reserve and this floor.
+    expect(Number(cap?.[1])).toBeGreaterThanOrEqual(9.125);
+    // The feed itself has no cap of its own any more: it takes the column's height, down to its 6rem floor, and every
+    // flex link in between has min-height: 0 so the feed's content can't size the column and grow the page.
+    const feed = /\n\.dashboard-events-body\s*\{([^}]*)\}/.exec(desktopRules)?.[1] ?? '';
+    expect(feed).toMatch(/flex:\s*1 1 auto;/);
+    expect(feed).toMatch(/min-height:\s*6rem;/);
+    expect(feed).not.toContain('max-height');
+    for (const rule of ['\\.dashboard-side > \\.dashboard-sidebar', '\\.dashboard-sidebar > \\.dashboard-events', '\\.dashboard-events > \\.card']) {
+      expect(new RegExp(`\\n${rule}\\s*\\{[^}]*min-height:\\s*0;`).test(desktopRules)).toBe(true);
+    }
+    // A squeezed column must not shrink a heading away to nothing.
+    expect(desktopRules).toMatch(/\.dashboard-sidebar \.section-title,\s*\.dashboard-stream \.section-title\s*\{[^}]*flex:\s*none;/);
   });
 
   it('reserves room for the health indicator above the grid in the feed cap (#1130)', () => {

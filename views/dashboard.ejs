@@ -7,7 +7,7 @@ function htmlAttrJson(value) {
 %>
 </head>
 <!-- Unescaped EJS output here is intentional: htmlAttrJson() already HTML-escapes its result via manual character replacement, so the escaping EJS tag would double-escape the attribute value. -->
-<body data-initial-status="<%- htmlAttrJson(status) %>" data-initial-events="<%- htmlAttrJson(recentEvents) %>" data-has-streamer="<%= hasStreamer %>" data-csrf-token="<%= csrfToken %>">
+<body data-initial-status="<%- htmlAttrJson(status) %>" data-initial-events="<%- htmlAttrJson(recentEvents) %>" data-has-streamer="<%= hasStreamer %>" data-csrf-token="<%= csrfToken %>"<% if (ownChannel) { %> data-own-channel="<%= ownChannel %>"<% } %>>
   <%- include('partials/nav') %>
 
   <main class="container container--wide">
@@ -92,24 +92,47 @@ function htmlAttrJson(value) {
         </div>
       </section>
 
-      <!-- Sidebar: the live event feed. Second in source order so screen readers and keyboard users reach it right after System Status; on desktop the grid places it in a sticky right-hand column. -->
-      <aside class="dashboard-sidebar" aria-label="Recent events">
-        <!-- ── Recent Events ── -->
-        <section class="section dashboard-events">
-          <h2 class="section-title">Recent Events</h2>
-          <div class="card">
-            <div class="card-body dashboard-events-body dashboard-scroll" id="recent-events-list" tabindex="0" role="region" aria-label="Recent events feed">
-              <% if (!user) { %>
-              <p class="empty-msg">Sign in to see recent activity.</p>
-              <% } else if (!hasStreamer) { %>
-              <p class="empty-msg">Connect your Twitch account to see recent activity.</p>
-              <% } else { %>
-              <p class="empty-msg">No recent activity yet.</p>
-              <% } %>
+      <!-- Right-hand column: Stream Overview (your own channel), then the live event feed. Both come after System Status in source order,
+           so screen readers and keyboard users reach them right after it; on desktop the grid places the column
+           (sticky, capped to the viewport) beside every row, and the feed takes whatever height the panel leaves. -->
+      <div class="dashboard-side">
+
+        <!-- ── Stream Overview: is my channel broadcasting? About the signed-in user's own channel only (the Twitch
+             Channels list above already shows every channel's LIVE badge, so nothing here repeats it). Built from the
+             channel's isLive flag alone (dashboard-stream.js), never from the bot's connection, and it starts Unknown.
+             It is its own panel, apart from System Status: its own heading, layout and icons, repeating no service state. ── -->
+        <section class="section dashboard-stream" id="stream-overview" aria-labelledby="stream-overview-title">
+          <h2 class="section-title" id="stream-overview-title">Stream Overview</h2>
+          <div class="card stream-card">
+            <div class="stream-own" id="stream-own">
+              <h3 class="stream-heading">Your channel</h3>
+              <p class="stream-state stream-state--unknown" id="stream-own-state" aria-live="polite">Unknown</p>
+              <p class="stream-channel" id="stream-own-name" hidden></p>
+              <p class="stream-note" id="stream-own-note">Waiting for live data.</p>
+              <a class="stream-link" id="stream-own-link" target="_blank" rel="noopener noreferrer" hidden></a>
             </div>
           </div>
         </section>
-      </aside>
+
+        <aside class="dashboard-sidebar" aria-label="Recent events">
+          <!-- ── Recent Events ── -->
+          <section class="section dashboard-events">
+            <h2 class="section-title">Recent Events</h2>
+            <div class="card">
+              <div class="card-body dashboard-events-body dashboard-scroll" id="recent-events-list" tabindex="0" role="region" aria-label="Recent events feed">
+                <% if (!user) { %>
+                <p class="empty-msg">Sign in to see recent activity.</p>
+                <% } else if (!hasStreamer) { %>
+                <p class="empty-msg">Connect your Twitch account to see recent activity.</p>
+                <% } else { %>
+                <p class="empty-msg">No recent activity yet.</p>
+                <% } %>
+              </div>
+            </div>
+          </section>
+        </aside>
+
+      </div>
 
       <!-- ── Quick Links ── -->
       <section class="section dashboard-links">
@@ -145,6 +168,7 @@ function htmlAttrJson(value) {
   <script src="/dashboard-utils.js"></script>
   <script src="/dashboard-layout.js"></script>
   <script src="/dashboard-health.js"></script>
+  <script src="/dashboard-stream.js"></script>
   <script src="/dashboard-status.js"></script>
   <script src="/dashboard-voice.js"></script>
   <script src="/dashboard-events.js"></script>

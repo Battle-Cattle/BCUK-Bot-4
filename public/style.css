@@ -214,7 +214,7 @@ a:hover { text-decoration: underline; }
    needs min-height: 0, so the list scrolls inside it rather than growing the page (#1130). It is also the container
    the panel's width queries read, because the main column's width does not follow the viewport's. */
 .dashboard-status  { grid-area: status; align-self: stretch; display: flex; flex-direction: column; container-type: inline-size; }
-.dashboard-sidebar { grid-area: events; position: sticky; top: calc(var(--dashboard-nav-offset) + 1rem); }
+.dashboard-side    { grid-area: events; position: sticky; top: calc(var(--dashboard-nav-offset) + 1rem); display: flex; flex-direction: column; gap: 1rem; min-height: 0; }
 .dashboard-links   { grid-area: links; }
 .dashboard-usage   { grid-area: usage; }
 .dashboard-sidebar .section { margin-bottom: 0; }
@@ -269,20 +269,68 @@ a:hover { text-decoration: underline; }
 .dashboard-scroll::-webkit-scrollbar-track { background: transparent; }
 .dashboard-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 .dashboard-scroll::-webkit-scrollbar-thumb:hover { background: var(--muted); }
-/* When the feed is the tallest column it sets the page height, so its cap must leave room for everything else
-   in the viewport: the navbar, the health indicator above the grid (--dashboard-health-offset), the container's top
-   padding (1.5rem), the section title and card chrome (~2.6rem) and the container padding + footer below the layout
-   (~7.6rem). Those add up to ~11.7rem plus the navbar and the indicator, so 12rem keeps the page from overflowing (no
-   stray page scrollbar) with a few pixels to spare, and the sidebar's top stays below the navbar at the end of the
-   scroll. The 6rem floor keeps a few rows visible on very short windows, where the cap would otherwise reach zero. */
-.dashboard-events-body { min-height: 6rem; max-height: calc(100vh - var(--dashboard-nav-offset) - var(--dashboard-health-offset) - 12rem); overflow-y: auto; padding-top: .25rem; padding-bottom: .25rem; }
+/* The right-hand column (Stream Overview above the live feed) is sticky and capped to the viewport, and the feed takes
+   whatever height the panel leaves. When the feed is the tallest column it sets the page height, so the column's cap
+   leaves room for everything else in the viewport: the navbar, the health indicator above the grid
+   (--dashboard-health-offset), the container's top padding (1.5rem), the feed's section title and card chrome
+   (~2.6rem, which is inside the column) and the container padding + footer below the layout (~7.6rem). The reserve
+   outside the column is therefore 9.375rem (the old 12rem feed cap less that 2.625rem of chrome): the column's total
+   height is what the feed alone used to be, so the page stays clear of a scrollbar with a few pixels to spare and the
+   column's top stays below the navbar at the end of the scroll. Every flex link down to the feed needs min-height: 0,
+   or the feed's content would size the column and grow the page. The feed's 6rem floor keeps a few rows visible on very
+   short windows, where the cap would otherwise reach zero. */
+.dashboard-side { max-height: calc(100vh - var(--dashboard-nav-offset) - var(--dashboard-health-offset) - 9.375rem); }
+.dashboard-side > .dashboard-sidebar { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.dashboard-sidebar > .dashboard-events { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.dashboard-events > .card { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.dashboard-events-body { flex: 1 1 auto; min-height: 6rem; overflow-y: auto; padding-top: .25rem; padding-bottom: .25rem; }
 /* The reserve above assumes a one-line title, so keep it on one line even with very large text. */
-.dashboard-sidebar .section-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* `flex: none`: the title is a flex item whose overflow: hidden gives it no minimum height, so without it a squeezed
+   column would shrink the heading away to nothing. */
+.dashboard-sidebar .section-title,
+.dashboard-stream .section-title { flex: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-/* Narrower screens: one column in source order, with the event feed straight after Bot Status. */
+/* ── Stream Overview ───────────────────────────────────────
+   "Is my channel broadcasting?", about the signed-in user's own channel only (the Twitch Channels list already marks
+   every channel that is live, so this panel doesn't repeat it). Its own panel, not a variant of System Status: its own
+   heading, a brand-coloured top edge, a state pill (filled, outlined or dashed) instead of coloured text, and its own
+   icons (◉ live, ◇ offline, ? unknown, – unavailable). It never uses status red, amber or green (those mark a service
+   fault or health) and nothing in it moves. Every state also says what it is in words. */
+.dashboard-stream { flex: none; margin: 0; }
+.stream-card { border-top: 3px solid var(--primary); }
+.stream-own { min-width: 0; padding: .65rem 1rem .75rem; }
+.stream-heading { margin: 0 0 .4rem; color: var(--muted); font-size: .75rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.stream-state { display: inline-block; margin: 0; padding: .1em .65em; border: 1px solid transparent; border-radius: 99px; font-size: .85rem; font-weight: 700; }
+.stream-state::before { margin-right: .35em; }
+.stream-state--live        { background: var(--primary); color: #fff; }
+.stream-state--live::before        { content: "\25C9"; content: "\25C9" / ""; }
+.stream-state--offline     { border-color: var(--muted); color: var(--text); }
+.stream-state--offline::before     { content: "\25C7"; content: "\25C7" / ""; }
+.stream-state--unknown     { border: 1px dashed var(--muted); color: var(--muted); }
+.stream-state--unknown::before     { content: "?"; content: "?" / ""; }
+.stream-state--unavailable { border-color: var(--border); color: var(--muted); }
+.stream-state--unavailable::before { content: "\2013"; content: "\2013" / ""; }
+.stream-channel { margin: .4rem 0 0; font-family: var(--mono); font-size: .88rem; overflow-wrap: anywhere; }
+.stream-note { margin: .35rem 0 0; color: var(--muted); font-size: .82rem; }
+/* The light brand indigo: the default link blue is only 3.8:1 on the card, below AA. */
+.stream-link { display: inline-block; margin-top: .3rem; font-size: .82rem; color: var(--accent-indigo); }
+.stream-link[hidden], .stream-note[hidden], .stream-channel[hidden] { display: none; }
+
+/* Narrower screens: one column in source order, with Stream Overview and the event feed straight after System Status. */
 @media (max-width: 1100px) {
   .dashboard-layout  { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; grid-template-areas: "status" "events" "links" "usage"; }
-  .dashboard-sidebar { position: static; }
+  .dashboard-side    { position: static; display: block; max-height: none; }
+  .dashboard-stream  { margin-bottom: 2rem; }
+  .dashboard-sidebar .section { margin-bottom: 2rem; }
+  .dashboard-events-body { max-height: 50vh; }
+}
+
+/* Short desktop windows: the column's cap would leave the feed less than its 6rem floor (the card, which clips, shrinks
+   below its body: about 13px lost at 600px high, the whole feed at 500px). Below 660px high the column is uncapped and
+   not sticky, as on narrow screens, and the feed caps itself at half the window; the page scrolls there anyway (#1132). */
+@media (max-height: 660px) {
+  .dashboard-side    { position: static; display: block; max-height: none; }
+  .dashboard-stream  { margin-bottom: 2rem; }
   .dashboard-sidebar .section { margin-bottom: 2rem; }
   .dashboard-events-body { max-height: 50vh; }
 }

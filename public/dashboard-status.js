@@ -1,4 +1,4 @@
-/* global clearChildren, deriveHealth, relativeTime, renderHealth, setStatusDot, setText, twitchHealth */
+/* global applyStreamOverview, clearChildren, deriveHealth, relativeTime, renderHealth, setStatusDot, setText, twitchHealth */
 /* ── Status rendering & polling ──────────────────────────── */
 
 /**
@@ -135,6 +135,9 @@ function applyStatus(status) {
     applyStatusCards(status);
   } catch (err) {
     renderHealth(deriveHealth(null, true));
+    // Stream Overview is written last in applyStatusCards, so without this it would keep its old Live or Offline for a
+    // payload that couldn't be read. statusGeneration and statusFeedStale stay as they were, so a valid fetch still recovers.
+    applyStreamOverview(null, true);
     throw err;
   }
   // Only a successful apply supersedes an in-flight fetch; a malformed message must not block a pending recovery.
@@ -179,6 +182,11 @@ function applyStatusCards(status) {
   setStatusText('twitch-state', twitchRollupState(status.twitch));
   const twitchEl = document.getElementById('twitch-channels');
   if (twitchEl) renderChannels(twitchEl, status.twitch);
+
+  // Stream Overview: last, so a malformed payload that throws above never updates it. `false` and not
+  // isStatusFeedStale(): applyStatus clears the stale flag only after the cards are written, so a recovering
+  // payload would otherwise leave the panel stuck on Unknown.
+  applyStreamOverview(status.twitch, false);
 }
 
 let consecutiveFailures = 0;
@@ -191,7 +199,7 @@ let statusStreamOpen = false;
 let statusFeedStale = false;
 
 /**
- * Marks the System Status panel as not current (muted, "Unknown" states, a note saying so) or clears that.
+ * Marks the System Status panel and Stream Overview as not current (muted, "Unknown" states, a note saying so) or clears that.
  * Clearing only lifts the styling and note: the next applyStatus has already rewritten every value.
  * @param stale - True while the status feed is unreachable.
  */
@@ -205,6 +213,7 @@ function markStatusStale(stale) {
   setStatusText('discord-state', unknown);
   setStatusText('voice-state', unknown);
   setStatusText('twitch-state', unknown);
+  applyStreamOverview(null, true);
   setStatusDot('dot-discord', 'dot dot--unknown', 'Discord: Status unknown');
   setStatusDot('dot-voice', 'dot dot--unknown', 'Voice: Status unknown');
 }

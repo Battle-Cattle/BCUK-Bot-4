@@ -1,0 +1,7 @@
+{
+  "_comment": "Illustrative data for ui-check only. A busy event feed (so the right-hand column, Stream Overview above the feed, is the tallest column) and the user owns streamer_one, which is live.",
+  "extends": "dashboard-busy-feed.json",
+  "locals": {
+    "ownChannel": "streamer_one"
+  }
+}

@@ -141,6 +141,44 @@ function measureTwitchList() {
   };
 }
 
+/**
+ * Measures the right-hand column (Stream Overview above the feed) in the page (runs in the browser).
+ * @returns The panel's and the column's edges, the feed's heading and body heights, the viewport size and how far
+ *   the page is taller than the viewport.
+ */
+function measureRightColumn() {
+  const doc = globalThis.document;
+  const rect = (sel) => doc.querySelector(sel).getBoundingClientRect();
+  return {
+    streamBottom: rect('.dashboard-stream').bottom,
+    streamRight: rect('.dashboard-stream').right,
+    streamWidth: rect('.dashboard-stream').width,
+    feedTitleTop: rect('.dashboard-events .section-title').top,
+    feedTitleHeight: rect('.dashboard-events .section-title').height,
+    feedBodyHeight: Math.round(rect('#recent-events-list').height),
+    feedClipped: Math.round(rect('#recent-events-list').bottom - rect('.dashboard-events > .card').bottom),
+    sideBottom: rect('.dashboard-side').bottom,
+    viewportHeight: globalThis.innerHeight,
+    viewportWidth: doc.documentElement.clientWidth,
+    pageOver: doc.documentElement.scrollHeight - doc.documentElement.clientHeight,
+  };
+}
+
+/**
+ * Reads the icon each Stream Overview state's style modifier draws, by giving the state element each class in turn
+ * (runs in the browser).
+ * @returns Each tone's `::before` content.
+ */
+function readStateIcons() {
+  const el = globalThis.document.getElementById('stream-own-state');
+  const icons = {};
+  for (const tone of ['live', 'offline', 'unknown', 'unavailable']) {
+    el.className = `stream-state stream-state--${tone}`;
+    icons[tone] = globalThis.getComputedStyle(el, '::before').content;
+  }
+  return icons;
+}
+
 describe('in the browser', () => {
   let browser;
   before(async () => { browser = await chromium.launch(); });
@@ -254,6 +292,81 @@ describe('in the browser', () => {
     }
   }
 
+  it('keeps Stream Overview above the feed in the right-hand column without giving the page a scrollbar (#1114)', async () => {
+    const fixture = await loadFixture(path.join(FIXTURES, 'dashboard-stream-busy-feed.json'));
+    const { server, baseUrl } = await startServer(await renderPage(fixture), fixture);
+    const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+    try {
+      await page.goto(baseUrl);
+      await settle(page, fixture);
+      for (const height of [900, 1000, 1080, 1200]) {
+        await page.setViewportSize({ width: 1440, height });
+        const m = await page.evaluate(measureRightColumn);
+        assert.ok(m.pageOver <= 0, `no page scrollbar at 1440x${height} (${m.pageOver}px over)`);
+        assert.ok(m.streamBottom <= m.feedTitleTop + 1, `Stream Overview sits above the feed's heading at ${height}`);
+        assert.ok(m.feedTitleHeight > 10, `the feed's heading is still there at ${height} (${m.feedTitleHeight}px)`);
+        assert.ok(m.feedBodyHeight >= 90, `the feed keeps a few rows at ${height} (${m.feedBodyHeight}px)`);
+        assert.ok(m.sideBottom <= m.viewportHeight, `the right-hand column ends inside the viewport at ${height}`);
+      }
+      // Short desktop windows: the column is uncapped there, so the feed keeps its floor and the card never clips it.
+      for (const height of [500, 600, 650, 700]) {
+        await page.setViewportSize({ width: 1440, height });
+        const m = await page.evaluate(measureRightColumn);
+        assert.ok(m.feedBodyHeight >= 90, `the feed keeps its floor at 1440x${height} (${m.feedBodyHeight}px)`);
+        assert.ok(m.feedClipped <= 1, `the feed card doesn't clip the feed at 1440x${height} (${m.feedClipped}px cut off)`);
+      }
+      // The column is the tallest one here, so the feed gets taller as the viewport does.
+      await page.setViewportSize({ width: 1440, height: 900 });
+      const short = (await page.evaluate(measureRightColumn)).feedBodyHeight;
+      await page.setViewportSize({ width: 1440, height: 1200 });
+      assert.ok((await page.evaluate(measureRightColumn)).feedBodyHeight > short + 150, 'a taller viewport gives the feed more rows');
+    } finally {
+      await page.close();
+      server.closeAllConnections();
+      server.close();
+    }
+  });
+
+  it('keeps Stream Overview inside the page and unclipped at every width (#1114)', async () => {
+    const fixture = await loadFixture(path.join(FIXTURES, 'dashboard-stream-own-live.json'));
+    const { server, baseUrl } = await startServer(await renderPage(fixture), fixture);
+    const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+    try {
+      await page.goto(baseUrl);
+      await settle(page, fixture);
+      for (const width of [390, 768, 820, 1101, 1250, 1440, 1700]) {
+        await page.setViewportSize({ width, height: 900 });
+        assert.deepEqual(await findClippedContent(page), [], `nothing is clipped at ${width}px`);
+        const m = await page.evaluate(measureRightColumn);
+        assert.ok(m.streamWidth > 0 && m.streamRight <= m.viewportWidth, `Stream Overview sits inside the viewport at ${width}px`);
+      }
+      const contrast = await auditContrast(page);
+      assert.deepEqual(contrast.failures, [], 'Stream Overview text and links meet AA contrast');
+    } finally {
+      await page.close();
+      server.closeAllConnections();
+      server.close();
+    }
+  });
+
+  it('tells the Stream Overview states apart by icon as well as colour, and nothing in it moves (#1114)', async () => {
+    const fixture = await loadFixture(path.join(FIXTURES, 'dashboard-stream-own-live.json'));
+    const { server, baseUrl } = await startServer(await renderPage(fixture), fixture);
+    const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+    try {
+      await page.goto(baseUrl);
+      await settle(page, fixture);
+      const icons = await page.evaluate(readStateIcons);
+      for (const [tone, icon] of Object.entries(icons)) assert.ok(icon && icon !== 'none' && icon !== 'normal', `the ${tone} state has an icon (${icon})`);
+      assert.equal(new Set(Object.values(icons)).size, Object.keys(icons).length, `each state has its own icon (${JSON.stringify(icons)})`);
+      assert.deepEqual(await page.evaluate(() => globalThis.document.getAnimations().map((a) => a.animationName ?? a.transitionProperty).filter((n) => n !== 'live-pulse' && n !== 'pulse')), [], 'no animation in or around Stream Overview');
+    } finally {
+      await page.close();
+      server.closeAllConnections();
+      server.close();
+    }
+  });
+
   it('shows several Twitch channels in the System Status panel, and more when the status row has spare height (#1076)', async () => {
     await withTwitchList('dashboard-six-channels.json', async (at) => {
       const base = await at(1440, 900);
@@ -330,10 +443,18 @@ describe('in the browser', () => {
     const channels = (await renderTexts('dashboard-all-connected.json', ['#twitch-channels']))['#twitch-channels'];
     assert.equal(channels.match(/\bConnected\b/g)?.length, 4, 'all four channels show Connected');
     assert.doesNotMatch(channels, /Disconnected|Never connected/i);
-    const unavailable = await renderTexts('dashboard-feed-unavailable.json', ['#health-indicator', '#status-stale-note', '#twitch-state']);
+    const unavailable = await renderTexts('dashboard-feed-unavailable.json', ['#health-indicator', '#status-stale-note', '#twitch-state', '#stream-own-state']);
     assert.match(unavailable['#health-indicator'], /unknown/i);
     assert.match(unavailable['#status-stale-note'], /not live/);
     assert.equal(unavailable['#twitch-state'], 'Unknown');
+    assert.equal(unavailable['#stream-own-state'], 'Unknown', 'Stream Overview goes Unknown with the rest while the feed is down');
+    // Stream Overview (#1114): the user's own channel only, from isLive and not from the bot's connection.
+    const ownLive = await renderTexts('dashboard-stream-own-live.json', ['#stream-own-state', '#stream-own-name', '#twitch-state']);
+    assert.equal(ownLive['#stream-own-state'], 'Live', 'live with the bot disconnected still reads Live');
+    assert.equal(ownLive['#stream-own-name'], 'streamer_one');
+    assert.equal((await renderTexts('dashboard-stream-own-offline.json', ['#stream-own-state']))['#stream-own-state'], 'Offline');
+    assert.equal((await renderTexts('dashboard-stream-not-monitored.json', ['#stream-own-state']))['#stream-own-state'], 'Not monitored');
+    assert.equal((await renderTexts('dashboard.json', ['#stream-own-state']))['#stream-own-state'], 'No channel');
     // The Twitch card's roll-up (#1074): some, all and no channels connected, and none configured.
     assert.equal((await renderTexts('dashboard.json', ['#twitch-state']))['#twitch-state'], 'Degraded (2 of 4)');
     assert.equal((await renderTexts('dashboard-all-connected.json', ['#twitch-state']))['#twitch-state'], 'Connected');
