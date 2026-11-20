@@ -136,6 +136,19 @@ describe('views/dashboard.ejs layout', () => {
     expect(html).toMatch(/<span class="stat-big">\d+<\/span><span class="stat-big-label">Twitch Channels<\/span>/);
   });
 
+  it.each([
+    ['connected', '\\\\2713'],
+    ['degraded', '\\\\25B2'],
+    ['disconnected', '\\\\2715'],
+    ['inactive', '\\\\25CB'],
+    ['unknown', '\\?'],
+  ])('gives the %s roll-up state an icon, hidden from screen readers, so no state rests on colour alone (#1074)', (modifier, icon) => {
+    const css = fs.readFileSync(stylePath, 'utf8');
+
+    // `icon` is already escaped for a RegExp: the rule reads `content: "\2713" / "";` (an empty alt text hides it).
+    expect(css).toMatch(new RegExp(`\\.status-text--${modifier}::before\\s*\\{[^}]*content:\\s*"${icon}"\\s*/\\s*""`));
+  });
+
   it('styles the Degraded roll-up with its own icon and the warning colour, and lets a long state wrap (#1074)', () => {
     const css = fs.readFileSync(stylePath, 'utf8');
 

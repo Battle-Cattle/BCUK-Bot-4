@@ -395,6 +395,22 @@ describe('public/dashboard-status.js Twitch connection roll-up', () => {
     expect(el('twitch-state').className).toBe('stat-value status-text status-text--unknown');
   });
 
+  it('shows each channel\'s last connected or disconnected time, and LIVE only for a connected live channel', () => {
+    const { el, applyStatus } = runScripts();
+    const minutesAgo = (n: number) => new Date(Date.now() - n * 60_000).toISOString();
+    applyStatus(status(true, { connected: true }, {
+      up_live: { connected: true, isLive: true, lastConnectedAt: minutesAgo(5), lastDisconnectedAt: minutesAgo(90) },
+      down_live: { connected: false, isLive: true, lastConnectedAt: minutesAgo(90), lastDisconnectedAt: minutesAgo(30) },
+    }));
+
+    const items = el('twitch-channels').children;
+    const metaOf = (item: FakeElement) => item.descendants().find((e) => e.className === 'channel-meta')?.textContent;
+    // A connected channel shows when it connected, a disconnected one when it dropped: never "Never seen".
+    expect(items.map(metaOf)).toEqual(['5m ago', '30m ago']);
+    const badgesOf = (item: FakeElement) => item.descendants().filter((e) => e.className.startsWith('badge ')).map((e) => e.textContent);
+    expect(items.map(badgesOf)).toEqual([['LIVE', 'Connected'], ['Disconnected']]);
+  });
+
   it('leaves each channel\'s own connection badge and last-seen time as they were', () => {
     const { el, applyStatus } = runScripts();
     applyStatus(status(true, { connected: true }, { a: up, b: down }));
