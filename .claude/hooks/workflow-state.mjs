@@ -8,7 +8,7 @@
 //   node .claude/hooks/workflow-state.mjs record acceptance   after acceptance-checker reports no gaps
 //   node .claude/hooks/workflow-state.mjs status              what each marker covers and whether it is current
 //
-// The precommit marker is written only by .claude/skills/precommit/precommit.mjs, after its checks
+// The precommit and verified (full run, required to push) markers are written only by .claude/skills/precommit/precommit.mjs, after its checks
 // pass. Markers live in <git dir>/claude-workflow/, so they are never committed. Like
 // agent-guard.mjs, this guards against a step being forgotten, not against a deliberate bypass.
 
@@ -109,7 +109,7 @@ export function advisorScope(cwd) {
 /**
  * Reads a marker.
  * @param cwd the repository folder
- * @param name the marker name: precommit, advisor or acceptance
+ * @param name the marker name: precommit, verified, advisor or acceptance
  * @returns the stored record, or null when there is none or it can't be read
  */
 export function readMarker(cwd, name) {
@@ -123,7 +123,7 @@ export function readMarker(cwd, name) {
 /**
  * Writes a marker, stamped with the time it was recorded.
  * @param cwd the repository folder
- * @param name the marker name: precommit, advisor or acceptance
+ * @param name the marker name: precommit, verified, advisor or acceptance
  * @param record what the marker covers (a tree id, diff hash or commit)
  * @returns the record as written
  */
@@ -163,12 +163,14 @@ function record(cwd, name) {
  */
 function status(cwd) {
   const precommit = readMarker(cwd, 'precommit');
+  const verified = readMarker(cwd, 'verified');
   const advisor = readMarker(cwd, 'advisor');
   const acceptance = readMarker(cwd, 'acceptance');
   const scope = advisorScope(cwd);
   const head = git(['rev-parse', 'HEAD'], { cwd });
   return [
     `precommit:  ${precommit ? (precommit.tree === worktreeTree(cwd) ? 'current' : 'stale') : 'none'}`,
+    `verified:   ${verified ? (verified.tree === worktreeTree(cwd) ? 'current' : 'stale') : 'none'}`,
     `advisor:    ${scope.key ? (advisor?.key === scope.key ? 'current' : 'needed') : 'not needed'}`,
     `acceptance: ${acceptance ? (acceptance.head === head ? 'current' : 'stale') : 'none'}`,
   ].join('\n');

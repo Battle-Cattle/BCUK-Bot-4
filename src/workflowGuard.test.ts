@@ -87,6 +87,11 @@ function fakeScripts(typecheck: number, test: number): void {
   }));
 }
 
+/** Records a full precommit pass on the current tree (fake npx), which a push requires. */
+function verify(): void {
+  expect(runPrecommitWithFakeNpx(0).status).toBe(0);
+}
+
 beforeEach(() => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-guard-'));
   origin = path.join(tmp, 'origin.git');
@@ -196,7 +201,25 @@ describe.skipIf(isWindows)('workflow-guard pre: advisor before push', () => {
   it('allows a push that changes no advisor-sensitive file', () => {
     write('src/feature.ts', 'export const a = 2;\n');
     commitAll('feature');
+    verify();
     expect(bash('git push -u origin feature').status).toBe(0);
+  });
+
+  it('blocks a push when only a --quick precommit passed, or when files changed after the full one', () => {
+    write('src/feature.ts', 'export const a = 2;\n');
+    expect(runPrecommitWithFakeNpx(0, '--quick').stdout).toContain('but not pushed');
+    commitAll('feature');
+    const quick = bash('git push -u origin feature');
+    expect(quick.status).toBe(2);
+    expect(quick.stderr).toContain('no full precommit run is recorded');
+    expect(quick.stderr).toContain('without --quick and push once it passes');
+    verify();
+    expect(bash('git push -u origin feature').status).toBe(0);
+    write('src/feature.ts', 'export const a = 3;\n');
+    commitAll('more');
+    const stale = bash('git push');
+    expect(stale.status).toBe(2);
+    expect(stale.stderr).toContain('files changed since the last full precommit run');
   });
 
   it.each(['src/index.ts', 'migrations/099_x.sql', 'src/web/middleware.ts', 'src/web/server.ts', 'src/shared/crypto.ts'])(
@@ -204,6 +227,7 @@ describe.skipIf(isWindows)('workflow-guard pre: advisor before push', () => {
     (file) => {
       write(file, '// changed\n');
       commitAll('sensitive');
+      verify();
       const blocked = bash('git push -u origin feature');
       expect(blocked.status).toBe(2);
       expect(blocked.stderr).toContain(file);
@@ -219,6 +243,7 @@ describe.skipIf(isWindows)('workflow-guard pre: advisor before push', () => {
     runScript(STATE, 'record', 'advisor');
     write('src/index.ts', 'export const x = 2;\n');
     commitAll('two');
+    verify();
     expect(bash('git push').status).toBe(2);
   });
 
@@ -228,6 +253,7 @@ describe.skipIf(isWindows)('workflow-guard pre: advisor before push', () => {
     runScript(STATE, 'record', 'advisor');
     write('src/feature.ts', 'export const a = 9;\n');
     commitAll('two');
+    verify();
     expect(bash('git push').status).toBe(0);
   });
 
@@ -339,7 +365,7 @@ describe.skipIf(isWindows)('precommit.mjs', () => {
     const result = runPrecommitWithFakeNpx(0);
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('precommit passed (changed tests; 0 skill self-test(s); eslint on 1 file(s))');
-    expect(result.calls).toEqual(['vitest run --changed origin/main', 'eslint src/feature.ts']);
+    expect(result.calls).toEqual([expect.stringMatching(/^vitest run --changed origin\/main --coverage --coverage\.reporter=lcov --coverage\.reportsDirectory=\S+$/), 'eslint src/feature.ts']);
   });
 
   it.each([['src/shared/x.ts'], ['src/test-utils/x.ts'], ['migrations/100_x.sql'], ['tsconfig.build.json'], ['.claude/hooks/x.mjs'], ['.claude/skills/precommit/x.md']])(
@@ -377,7 +403,7 @@ describe.skipIf(isWindows)('precommit.mjs', () => {
     git('push', '-q', 'origin', 'HEAD:main');
     write('.claude/skills/browser/SKILL.md', 'changed\n');
     write('.claude/skills/plain/SKILL.md', 'changed\n');
-    // Run copies of precommit.mjs and the helper it imports from a folder outside any node_modules,
+    // Run copies of precommit.mjs and the helpers it imports from a folder outside any node_modules,
     // with no NODE_PATH or HOME global folders, so Playwright can't resolve however this machine has it.
     const tooling = path.join(path.dirname(repo), 'tooling');
     const copy = (rel: string) => {
@@ -385,6 +411,7 @@ describe.skipIf(isWindows)('precommit.mjs', () => {
       fs.copyFileSync(path.join(ROOT, rel), path.join(tooling, rel));
     };
     copy('.claude/skills/precommit/precommit.mjs');
+    copy('.claude/skills/precommit/diffCoverage.mjs');
     copy('.claude/hooks/workflow-state.mjs');
     const isolated = { NODE_PATH: '', HOME: tooling, USERPROFILE: tooling };
     const result = runPrecommitWithFakeNpxIn(isolated, path.join(tooling, '.claude/skills/precommit/precommit.mjs'), 0);
@@ -403,11 +430,71 @@ describe.skipIf(isWindows)('precommit.mjs', () => {
     expect(result.stdout).not.toContain('skill self-tests:');
   });
 
+  it('--quick runs only typecheck and ESLint, records a commit-only pass and no verified marker', () => {
+    commitAll('fixture scripts');
+    git('push', '-q', 'origin', 'HEAD:main');
+    write('src/feature.ts', 'export const a = 2;\n');
+    const result = runPrecommitWithFakeNpx(0, '--quick');
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('precommit passed (quick: typecheck and eslint only');
+    expect(result.calls).toEqual(['eslint src/feature.ts']);
+    expect(runScript(STATE, 'status').stdout).toContain('precommit:  current\nverified:   none');
+    expect(result.stdout).not.toContain('Added lines no test ran');
+    expect(bash('git add -A && git commit -qm quick').status).toBe(0); // a quick pass lets the commit through
+  });
+
+  it('records a verified marker for the tree after a full pass, and reports it stale after an edit', () => {
+    write('notes.md', 'two\n');
+    expect(runScript(PRECOMMIT).status).toBe(0);
+    expect(runScript(STATE, 'status').stdout).toContain('verified:   current');
+    write('notes.md', 'three\n');
+    expect(runScript(STATE, 'status').stdout).toContain('verified:   stale');
+  });
+
+  it('lists added source lines that the coverage report shows no test ran, without failing', () => {
+    commitAll('fixture scripts');
+    git('push', '-q', 'origin', 'HEAD:main');
+    write('src/feature.ts', 'export const a = 1;\nexport function f() {\n  return 1;\n}\n');
+    // A fake vitest that writes an lcov report marking line 3 unrun, in the folder it was told to use.
+    const bin = path.join(path.dirname(repo), 'bin');
+    fs.mkdirSync(bin, { recursive: true });
+    fs.writeFileSync(path.join(bin, 'npx'), [
+      '#!/bin/sh',
+      'for a in "$@"; do case "$a" in --coverage.reportsDirectory=*) d="$(printf %s "$a" | cut -d= -f2-)";; esac; done',
+      `[ -n "$d" ] && printf 'SF:${repo}/src/feature.ts\\nDA:1,1\\nDA:3,0\\nend_of_record\\n' > "$d/lcov.info"`,
+      'exit 0',
+    ].join('\n'), { mode: 0o755 });
+    const result = spawnSync('node', [PRECOMMIT], {
+      cwd: repo, encoding: 'utf8', env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH ?? ''}` },
+    });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('src/feature.ts: 3');
+  });
+
   it('runs the full suite with --full even when nothing shared changed', () => {
     commitAll('fixture scripts');
     git('push', '-q', 'origin', 'HEAD:main');
     write('notes.md', 'two\n');
     expect(runPrecommitWithFakeNpx(0, '--full').stdout).toContain('precommit passed (full suite');
+  });
+
+  it('writes the coverage report outside the working tree, and passes the flags through a vitest `test` script', () => {
+    write('package.json', JSON.stringify({
+      name: 'fixture',
+      scripts: { typecheck: 'node -e "0"', test: 'vitest run' },
+    }));
+    commitAll('vitest test script');
+    git('push', '-q', 'origin', 'HEAD:main');
+    write('src/feature.ts', 'export const a = 2;\n');
+    // `npm test` runs the script `vitest run`, found on PATH: a fake one records its arguments.
+    const bin = path.join(path.dirname(repo), 'bin');
+    const log = path.join(path.dirname(repo), 'vitest.log');
+    fs.mkdirSync(bin, { recursive: true });
+    fs.writeFileSync(path.join(bin, 'vitest'), `#!/bin/sh\necho "$@" >> "${log}"\n`, { mode: 0o755 });
+    expect(runPrecommitWithFakeNpx(0, '--full').status).toBe(0);
+    const dir = /--coverage\.reportsDirectory=(\S+)/.exec(fs.readFileSync(log, 'utf8'))?.[1];
+    expect(dir).toBeDefined();
+    expect(path.relative(repo, dir ?? '').startsWith('..')).toBe(true);
   });
 
   it('fails and records nothing when ESLint fails', () => {
@@ -467,7 +554,7 @@ describe('.claude/settings.json hook wiring', () => {
 
 describe.skipIf(isWindows)('workflow-state.mjs', () => {
   it('reports what each marker covers', () => {
-    expect(runScript(STATE, 'status').stdout).toBe('precommit:  none\nadvisor:    not needed\nacceptance: none\n');
+    expect(runScript(STATE, 'status').stdout).toBe('precommit:  none\nverified:   none\nadvisor:    not needed\nacceptance: none\n');
   });
 
   it('records nothing for advisor when no sensitive file changed', () => {
