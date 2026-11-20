@@ -93,3 +93,154 @@ describe('views/partials/nav.ejs ordering', () => {
     expect(html).not.toContain('href="/user/settings"');
   });
 });
+
+/** A nav entry: a top-level link `[href, label]`, or a dropdown group with its links in order. */
+type NavEntry = [string, string] | { group: string; items: [string, string][] };
+
+const LINK_RE = /<a href="([^"]+)" class="nav-item">([^<]+)<\/a>/g;
+
+/** Every link `[href, label]` in `html`, in order. */
+function linksIn(html: string): [string, string][] {
+  return [...html.matchAll(LINK_RE)].map((m) => [m[1]!, m[2]!.trim()]);
+}
+
+/**
+ * The whole `.navbar-menu` in render order: plain links, and each dropdown group with every link inside it.
+ * The group alternative is tried first, so a link inside a dropdown is only ever counted inside its group.
+ */
+function menuEntries(html: string): NavEntry[] {
+  const re = /<button class="nav-group-label"[^>]*>([^<]+?)\s*<span[\s\S]*?<div class="nav-group-items">([\s\S]*?)<\/div>|<a href="([^"]+)" class="nav-item">([^<]+)<\/a>/g;
+  return [...menuOf(html).matchAll(re)].map((m) =>
+    m[1] ? { group: m[1].trim(), items: linksIn(m[2]!) } : [m[3]!, m[4]!.trim()],
+  );
+}
+
+const BOT_COMMANDS_SIGNED_IN: [string, string][] = [
+  ['/sfx', 'SFX'], ['/commands', 'Commands'], ['/timers', 'Timers'], ['/advanced-commands', 'Advanced Commands'],
+];
+const DEVICES: NavEntry = { group: 'Devices', items: [['/streamdeck-key', 'Streamdeck Key'], ['/companion-key', 'Companion App']] };
+const VIEWER_REWARDS: NavEntry = { group: 'Viewer Rewards', items: [['/channel-points', 'Channel Points'], ['/loyalty-points', 'Loyalty Points']] };
+const OVERLAYS_BELOW_MANAGER: NavEntry = {
+  group: 'Overlays',
+  items: [['/overlay/settings', 'Video'], ['/alerts/settings', 'Alerts'], ['/overlay/controller/settings', 'Controller']],
+};
+const OVERLAYS_MANAGER_UP: NavEntry = {
+  group: 'Overlays',
+  items: [['/overlay/settings', 'Video'], ['/overlay/shared/settings', 'Shared Video'], ['/alerts/settings', 'Alerts'], ['/overlay/controller/settings', 'Controller']],
+};
+
+/** The full menu for a signed-in user below Manager (access levels 0 and 1 see the same entries). */
+const BELOW_MANAGER_MENU: NavEntry[] = [
+  ['/', 'Dashboard'],
+  { group: 'Bot Commands', items: BOT_COMMANDS_SIGNED_IN },
+  OVERLAYS_BELOW_MANAGER,
+  VIEWER_REWARDS,
+  DEVICES,
+  ['/user/settings', 'Settings'],
+];
+
+/** The full menu for Manager and up, given the Admin group's links. */
+const managerUpMenu = (adminItems: [string, string][]): NavEntry[] => [
+  ['/', 'Dashboard'],
+  { group: 'Bot Commands', items: [...BOT_COMMANDS_SIGNED_IN, ['/counters', 'Counters']] },
+  OVERLAYS_MANAGER_UP,
+  VIEWER_REWARDS,
+  DEVICES,
+  ['/user/settings', 'Settings'],
+  { group: 'Admin', items: adminItems },
+];
+
+describe('views/partials/nav.ejs entries for every access level', () => {
+  // Locks today's nav so the responsive rework (#1080: #1109, #1119, #1121) can't silently add, drop, reorder or
+  // regate an entry: any change to these lists has to be deliberate.
+  it.each([
+    ['signed out', null, [
+      ['/', 'Dashboard'],
+      { group: 'Bot Commands', items: [['/sfx', 'SFX']] },
+      DEVICES,
+    ]],
+    ['a User (0)', makeUser(0), BELOW_MANAGER_MENU],
+    ['a Mod (1)', makeUser(1), BELOW_MANAGER_MENU],
+    ['a Manager (2)', makeUser(2), managerUpMenu([['/admin/streams', 'Streams'], ['/admin/users', 'Users']])],
+    ['an Admin (3), not owner', makeUser(3), managerUpMenu([
+      ['/admin/streams', 'Streams'], ['/admin/users', 'Users'], ['/admin/streamdeck-keys', 'Streamdeck Keys'],
+    ])],
+    ['the owner (Admin, 3)', makeUser(3, true), managerUpMenu([
+      ['/admin/streams', 'Streams'], ['/admin/users', 'Users'], ['/admin/streamdeck-keys', 'Streamdeck Keys'], ['/admin/health', 'Health'],
+    ])],
+  ] as [string, Record<string, unknown> | null, NavEntry[]][])('lists every entry, in order, for %s', async (_who, user, expected) => {
+    expect(menuEntries(await renderNav(user))).toEqual(expected);
+  });
+
+  it('keeps the brand link home and the toggle wired to the collapsible menu', async () => {
+    const html = await renderNav(makeUser(0));
+
+    expect(html).toContain('<a href="/" class="navbar-brand">');
+    expect(html).toContain('<button class="navbar-toggle" aria-label="Toggle navigation" aria-expanded="false" aria-controls="navbar-collapse">');
+    expect(html).toContain('<div class="navbar-collapse" id="navbar-collapse" aria-hidden="false">');
+    expect(html.match(/<button class="nav-group-label" aria-haspopup="true" aria-expanded="false">/g)).toHaveLength(4);
+    expect(html).toContain('<script src="/navbar.js"></script>');
+  });
+});
+
+/** The `.navbar-end` part of the rendered nav. */
+function endOf(html: string): string {
+  return html.slice(html.indexOf('class="navbar-end"'), html.indexOf('</nav>'));
+}
+
+describe('views/partials/nav.ejs navbar end', () => {
+  const guild = (id: string, name: string) => ({ guildId: id, name });
+
+  it('offers a server switcher with several guilds, naming the current one', async () => {
+    const user = { ...makeUser(0), guilds: [guild('1', 'Alpha'), guild('2', 'Beta')], currentGuildId: '2' };
+
+    expect(endOf(await renderNav(user))).toContain('<a href="/guild/select" class="nav-item guild-switcher" title="Switch server">🏠 Beta ▾</a>');
+  });
+
+  it('asks to choose a server when several guilds and none current', async () => {
+    const user = { ...makeUser(0), guilds: [guild('1', 'Alpha'), guild('2', 'Beta')], currentGuildId: null };
+
+    expect(endOf(await renderNav(user))).toContain('🏠 Choose server ▾</a>');
+  });
+
+  it('shows the single guild as plain text, not a switcher', async () => {
+    const end = endOf(await renderNav({ ...makeUser(0), guilds: [guild('1', 'Alpha')], currentGuildId: '1' }));
+
+    expect(end).toContain('<span class="guild-name">🏠 Alpha</span>');
+    expect(end).not.toContain('guild-switcher');
+  });
+
+  it('shows no guild at all with no guilds', async () => {
+    const end = endOf(await renderNav(makeUser(0)));
+
+    expect(end).not.toContain('guild-name');
+    expect(end).not.toContain('guild-switcher');
+  });
+
+  it.each([[0, 'User'], [1, 'Mod'], [2, 'Manager'], [3, 'Admin']])('badges access level %i as %s', async (level, label) => {
+    expect(endOf(await renderNav(makeUser(level)))).toContain(`<span class="badge level-${level}">${label}</span>`);
+  });
+
+  it('shows the avatar only when the user has one', async () => {
+    const withAvatar = endOf(await renderNav({ ...makeUser(0), discordAvatar: 'https://cdn.discordapp.com/a.png' }));
+
+    expect(withAvatar).toContain('<img src="https://cdn.discordapp.com/a.png?size=32" class="avatar" alt="">');
+    expect(endOf(await renderNav(makeUser(0)))).not.toContain('class="avatar"');
+  });
+
+  it('logs out with a CSRF-protected POST form', async () => {
+    const end = endOf(await renderNav(makeUser(0)));
+
+    expect(end).toContain('<form method="POST" action="/auth/logout" class="d-inline m-0">');
+    expect(end).toContain('<input type="hidden" name="_csrf" value="tok">');
+    expect(end).toContain('<button type="submit" class="btn btn-ghost btn-sm">Logout</button>');
+  });
+
+  it('shows no user details or logout when signed out', async () => {
+    const end = endOf(await renderNav(null));
+
+    expect(end).not.toContain('/auth/logout');
+    expect(end).not.toContain('class="username"');
+    expect(end).not.toContain('class="badge');
+  });
+});
