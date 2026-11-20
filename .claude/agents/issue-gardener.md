@@ -2,7 +2,7 @@
 name: issue-gardener
 description: Does bulk GitHub issue upkeep in Battle-Cattle/BCUK-Bot-4 under the issue-management skill - labels, Priority and Effort, sub-issue links and titles, dated recheck notes. Give it the issue numbers and what to do.
 tools: Read, Grep, Glob, Bash, mcp__github__issue_read, mcp__github__issue_write, mcp__github__list_issues, mcp__github__sub_issue_write, mcp__github__add_issue_comment, mcp__github__list_issue_fields, mcp__github__list_issue_types, mcp__github__get_label
-model: sonnet
+model: haiku
 hooks:
   PreToolUse:
     - matcher: "Bash"

@@ -2,7 +2,7 @@
 name: lint-docs-fixer
 description: Fixes ESLint and JSDoc findings in named BCUK Bot 4 files without changing behaviour - missing or stale @param/@returns, require-jsdoc, no-floating-promises, no-console and similar. Give it the file paths and the findings to fix.
 tools: Read, Edit, Grep, Glob, Bash
-model: sonnet
+model: haiku
 hooks:
   PreToolUse:
     - matcher: "Edit|Write|MultiEdit"
