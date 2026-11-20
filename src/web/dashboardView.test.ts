@@ -127,13 +127,26 @@ describe('views/dashboard.ejs layout', () => {
   it('caps the desktop feed to leave room for the navbar, sidebar chrome and footer', () => {
     const css = fs.readFileSync(stylePath, 'utf8');
     const desktopRules = css.slice(0, css.indexOf('@media (max-width: 1100px)'));
-    const cap = /\.dashboard-events-body\s*\{[^}]*max-height:\s*calc\(100vh - var\(--dashboard-nav-offset\) - ([\d.]+)rem\)/.exec(desktopRules);
+    const cap = /\.dashboard-events-body\s*\{[^}]*max-height:\s*calc\(100vh - var\(--dashboard-nav-offset\) - var\(--dashboard-health-offset\) - ([\d.]+)rem\)/.exec(desktopRules);
 
     // A static guard on the stylesheet, not a rendered check (the suite has no browser). The page around the feed
-    // measures ~11.7rem plus the navbar, so a smaller reserve makes the page overflow by a few pixels (a stray page
-    // scrollbar) when the feed is the tallest column. If the footer or sidebar chrome grows, re-measure in a
-    // browser and raise the reserve and this floor.
+    // measures ~11.7rem plus the navbar and the health indicator, so a smaller reserve makes the page overflow by a
+    // few pixels (a stray page scrollbar) when the feed is the tallest column. If the footer or sidebar chrome
+    // grows, re-measure in a browser and raise the reserve and this floor.
     expect(Number(cap?.[1])).toBeGreaterThanOrEqual(11.75);
+  });
+
+  it('reserves room for the health indicator above the grid in the feed cap (#1130)', () => {
+    const css = fs.readFileSync(stylePath, 'utf8');
+    const reserve = /--dashboard-health-offset:\s*([\d.]+)rem/.exec(css);
+    const health = /\n\.health\s*\{[^}]*margin-bottom:\s*([\d.]+)rem;\s*padding:\s*([\d.]+)rem[^}]*\}/.exec(css);
+
+    // The indicator's height is its margin, its top and bottom padding, a 1px border either side (0.125rem) and one
+    // line of text (the body's 14px at line-height 1.5 = 1.3125rem). The reserve must cover all of it, or the feed
+    // grows past the viewport and the page scrolls again. Changing .health's spacing fails this until the reserve follows.
+    const indicator = Number(health?.[1]) + 2 * Number(health?.[2]) + 0.125 + 1.3125;
+    expect(Number(reserve?.[1])).toBeGreaterThanOrEqual(indicator);
+    expect(Number(reserve?.[1])).toBeLessThanOrEqual(indicator + 0.25);
   });
 });
 
