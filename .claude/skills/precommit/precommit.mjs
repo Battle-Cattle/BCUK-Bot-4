@@ -174,45 +174,84 @@ function reportDiffCoverage(cwd, base, reportsDir) {
 }
 
 /**
+ * Fetches origin/main and finds where the branch forked from it.
+ * @param cwd the repository folder
+ * @returns the merge-base of origin/main and HEAD
+ */
+function fetchBase(cwd) {
+  try {
+    git(['fetch', '-q', 'origin', 'main'], { cwd });
+  } catch {
+    process.stderr.write('Couldn\'t fetch origin/main; comparing with the copy already here.\n');
+  }
+  return git(['merge-base', 'origin/main', 'HEAD'], { cwd });
+}
+
+/**
+ * Runs every check, then lists the added lines no test ran, and reports which checks failed.
+ * @param plan what to run: the repository folder `cwd`, the merge-base `base`, whether it is a
+ *   `quick` or `full` run, the ESLint `files` and the skill `selftests`
+ * @returns the labels of the checks that failed
+ */
+function runChecks(plan) {
+  const { cwd, base, quick, full, files, selftests } = plan;
+  const reportsDir = mkdtempSync(path.join(tmpdir(), 'precommit-coverage-'));
+  try {
+    const flags = coverageArgs(reportsDir);
+    const tests = full
+      ? ['tests (full)', 'npm', ['test', ...(npmTestTakesFlags(cwd) ? ['--', ...flags] : [])]]
+      : ['tests (changed)', 'npx', ['vitest', 'run', '--changed', 'origin/main', ...flags]];
+    const failed = [
+      runCheck(cwd, 'typecheck', 'npm', ['run', 'typecheck']),
+      quick ? null : runCheck(cwd, ...tests),
+      !quick && selftests.length ? runCheck(cwd, 'skill self-tests', 'node', ['--test', ...selftests]) : null,
+      files.length ? runCheck(cwd, 'eslint', 'npx', ['eslint', ...files]) : null,
+    ].filter(Boolean);
+    if (!quick && !failed.includes(tests[0])) reportDiffCoverage(cwd, base, reportsDir);
+    return failed;
+  } finally {
+    rmSync(reportsDir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Records what the passing checks covered and says what that allows.
+ * @param cwd the repository folder
+ * @param tree the working tree the checks covered
+ * @param scope what was run, for the marker and the message
+ * @param summary the check counts to print
+ * @returns the process exit code (0)
+ */
+function recordPass(cwd, tree, scope, summary) {
+  writeMarker(cwd, 'precommit', { tree, scope });
+  if (scope.startsWith('quick')) {
+    process.stdout.write(`\n✔ precommit passed (${scope}; ${summary}). Recorded: this exact working tree may be committed, but not pushed: run precommit without --quick before the push.\n`);
+    return 0;
+  }
+  writeMarker(cwd, 'verified', { tree, scope });
+  process.stdout.write(`\n✔ precommit passed (${scope}; ${summary}). Recorded: this exact working tree may be committed and pushed.\n`);
+  return 0;
+}
+
+/**
  * Runs the checks and records the working tree when they all pass.
  * @param argv the arguments after the script name
  * @param cwd the repository folder
  * @returns the process exit code: 0 when everything passed
  */
 function main(argv, cwd) {
-  const major = Number(process.versions.node.split('.')[0]);
-  if (major !== 24) {
+  if (Number(process.versions.node.split('.')[0]) !== 24) {
     process.stderr.write(`Node ${process.versions.node}: switch to Node 24 first (CLAUDE.md "Node/npm version").\n`);
     return 1;
   }
-  try {
-    git(['fetch', '-q', 'origin', 'main'], { cwd });
-  } catch {
-    process.stderr.write('Couldn\'t fetch origin/main; comparing with the copy already here.\n');
-  }
-  const base = git(['merge-base', 'origin/main', 'HEAD'], { cwd });
+  const base = fetchBase(cwd);
   const before = worktreeTree(cwd);
   const paths = changedPaths(cwd, base);
   const quick = argv.includes('--quick') && !argv.includes('--full');
   const full = argv.includes('--full') || needsFullSuite(paths);
   const files = lintTargets(cwd, base);
   const selftests = skillSelftests(cwd, paths);
-
-  const reportsDir = mkdtempSync(path.join(tmpdir(), 'precommit-coverage-'));
-  const flags = coverageArgs(reportsDir);
-  const testCheck = () => (full
-    ? runCheck(cwd, 'tests (full)', 'npm', ['test', ...(npmTestTakesFlags(cwd) ? ['--', ...flags] : [])])
-    : runCheck(cwd, 'tests (changed)', 'npx', ['vitest', 'run', '--changed', 'origin/main', ...flags]));
-
-  const failed = [
-    runCheck(cwd, 'typecheck', 'npm', ['run', 'typecheck']),
-    quick ? null : testCheck(),
-    !quick && selftests.length ? runCheck(cwd, 'skill self-tests', 'node', ['--test', ...selftests]) : null,
-    files.length ? runCheck(cwd, 'eslint', 'npx', ['eslint', ...files]) : null,
-  ].filter(Boolean);
-
-  if (!quick && !failed.includes('tests (full)') && !failed.includes('tests (changed)')) reportDiffCoverage(cwd, base, reportsDir);
-  rmSync(reportsDir, { recursive: true, force: true });
+  const failed = runChecks({ cwd, base, quick, full, files, selftests });
 
   const scope = quick ? 'quick: typecheck and eslint only' : (full ? 'full suite' : 'changed tests');
   if (failed.length) {
@@ -223,14 +262,8 @@ function main(argv, cwd) {
     process.stdout.write('\n✖ Files changed while the checks ran, so they may not have covered them. Run precommit again.\n');
     return 1;
   }
-  writeMarker(cwd, 'precommit', { tree: before, scope });
-  if (quick) {
-    process.stdout.write(`\n✔ precommit passed (${scope}; eslint on ${files.length} file(s)). Recorded: this exact working tree may be committed, but not pushed: run precommit without --quick before the push.\n`);
-    return 0;
-  }
-  writeMarker(cwd, 'verified', { tree: before, scope });
-  process.stdout.write(`\n✔ precommit passed (${scope}; ${selftests.length} skill self-test(s); eslint on ${files.length} file(s)). Recorded: this exact working tree may be committed and pushed.\n`);
-  return 0;
+  const summary = quick ? `eslint on ${files.length} file(s)` : `${selftests.length} skill self-test(s); eslint on ${files.length} file(s)`;
+  return recordPass(cwd, before, scope, summary);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
