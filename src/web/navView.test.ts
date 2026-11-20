@@ -210,6 +210,13 @@ describe('views/partials/nav.ejs navbar end', () => {
     expect(end).not.toContain('guild-switcher');
   });
 
+  it('shows no guild when the only guild is not the current one', async () => {
+    const end = endOf(await renderNav({ ...makeUser(0), guilds: [guild('1', 'Alpha')], currentGuildId: '9' }));
+
+    expect(end).not.toContain('guild-name');
+    expect(end).not.toContain('guild-switcher');
+  });
+
   it('shows no guild at all with no guilds', async () => {
     const end = endOf(await renderNav(makeUser(0)));
 
@@ -219,6 +226,14 @@ describe('views/partials/nav.ejs navbar end', () => {
 
   it.each([[0, 'User'], [1, 'Mod'], [2, 'Manager'], [3, 'Admin']])('badges access level %i as %s', async (level, label) => {
     expect(endOf(await renderNav(makeUser(level)))).toContain(`<span class="badge level-${level}">${label}</span>`);
+  });
+
+  it('badges an access level outside 0-3 as Unknown', async () => {
+    expect(endOf(await renderNav(makeUser(7)))).toContain('<span class="badge level-7">Unknown</span>');
+  });
+
+  it("shows the signed-in user's name", async () => {
+    expect(endOf(await renderNav(makeUser(0)))).toContain('<span class="username">Someone</span>');
   });
 
   it('shows the avatar only when the user has one', async () => {
