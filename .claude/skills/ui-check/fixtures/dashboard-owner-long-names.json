@@ -1,0 +1,16 @@
+{
+  "_comment": "Illustrative data for ui-check only. The widest nav the panel can render: the Owner's menu (most items), the server switcher, and the longest Discord and server names (32 and 100 characters).",
+  "extends": "dashboard.json",
+  "locals": {
+    "user": {
+      "discordName": "WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW",
+      "accessLevel": 3,
+      "isOwner": true,
+      "currentGuildId": "900000000000000001",
+      "guilds": [
+        { "guildId": "900000000000000001", "name": "MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM" },
+        { "guildId": "900000000000000002", "name": "Another Server" }
+      ]
+    }
+  }
+}
