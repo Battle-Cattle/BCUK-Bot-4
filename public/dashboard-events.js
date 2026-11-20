@@ -21,10 +21,23 @@ const EVENT_LABELS = {
   raffle_payout_failed: 'won a raffle',
 };
 
+// Source name for each event type, read out ahead of the description so the source never depends on
+// the icon's colour or shape alone.
+const EVENT_SOURCES = {
+  follow: 'Follow',
+  sub: 'Subscription',
+  resub: 'Resubscription',
+  giftsub: 'Gift sub',
+  raid: 'Raid',
+  redemption: 'Channel point redemption',
+  raffle_payout_failed: 'Raffle',
+};
+
 const MAX_DISPLAYED_EVENTS = 20;
 
 /**
- * Builds one activity-feed row: the event type's icon, who did what (with any detail) and how long ago.
+ * Builds one activity-feed row: one icon for the event type (decorative, with a visually hidden source
+ * name ahead of the description), who did what (with any detail) and a `<time>` saying how long ago.
  * @param ev - One recent event: `eventType`, `displayName`, optional `detail` and ISO `occurredAt`.
  * @returns The `.event-item` element for the feed.
  */
@@ -34,6 +47,7 @@ function renderEventItem(ev) {
 
   const icon = document.createElement('span');
   icon.className = 'event-icon';
+  icon.setAttribute('aria-hidden', 'true');
   icon.textContent = EVENT_ICONS[ev.eventType] || '•';
 
   const body = document.createElement('div');
@@ -41,14 +55,23 @@ function renderEventItem(ev) {
 
   const line = document.createElement('div');
   line.className = 'event-line';
-  line.textContent = `${ev.displayName} ${EVENT_LABELS[ev.eventType] || ev.eventType}`;
+  const source = document.createElement('span');
+  source.className = 'visually-hidden';
+  source.textContent = `${EVENT_SOURCES[ev.eventType] || ev.eventType}: `;
+  const description = document.createElement('span');
+  description.textContent = `${ev.displayName} ${EVENT_LABELS[ev.eventType] || ev.eventType}`;
   if (ev.detail) {
-    line.textContent += ` — ${ev.detail}`;
+    description.textContent += ` — ${ev.detail}`;
   }
+  line.appendChild(source);
+  line.appendChild(description);
 
   const meta = document.createElement('div');
   meta.className = 'event-meta';
-  meta.textContent = relativeTime(ev.occurredAt);
+  const when = document.createElement('time');
+  when.dateTime = ev.occurredAt;
+  when.textContent = relativeTime(ev.occurredAt);
+  meta.appendChild(when);
 
   body.appendChild(line);
   body.appendChild(meta);
