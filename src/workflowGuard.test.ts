@@ -212,6 +212,7 @@ describe.skipIf(isWindows)('workflow-guard pre: advisor before push', () => {
     const quick = bash('git push -u origin feature');
     expect(quick.status).toBe(2);
     expect(quick.stderr).toContain('no full precommit run is recorded');
+    expect(quick.stderr).toContain('without --quick and push once it passes');
     verify();
     expect(bash('git push -u origin feature').status).toBe(0);
     write('src/feature.ts', 'export const a = 3;\n');
@@ -438,6 +439,16 @@ describe.skipIf(isWindows)('precommit.mjs', () => {
     expect(result.stdout).toContain('precommit passed (quick: typecheck and eslint only');
     expect(result.calls).toEqual(['eslint src/feature.ts']);
     expect(runScript(STATE, 'status').stdout).toContain('precommit:  current\nverified:   none');
+    expect(result.stdout).not.toContain('Added lines no test ran');
+    expect(bash('git add -A && git commit -qm quick').status).toBe(0); // a quick pass lets the commit through
+  });
+
+  it('records a verified marker for the tree after a full pass, and reports it stale after an edit', () => {
+    write('notes.md', 'two\n');
+    expect(runScript(PRECOMMIT).status).toBe(0);
+    expect(runScript(STATE, 'status').stdout).toContain('verified:   current');
+    write('notes.md', 'three\n');
+    expect(runScript(STATE, 'status').stdout).toContain('verified:   stale');
   });
 
   it('lists added source lines that the coverage report shows no test ran, without failing', () => {
@@ -465,6 +476,25 @@ describe.skipIf(isWindows)('precommit.mjs', () => {
     git('push', '-q', 'origin', 'HEAD:main');
     write('notes.md', 'two\n');
     expect(runPrecommitWithFakeNpx(0, '--full').stdout).toContain('precommit passed (full suite');
+  });
+
+  it('writes the coverage report outside the working tree, and passes the flags through a vitest `test` script', () => {
+    write('package.json', JSON.stringify({
+      name: 'fixture',
+      scripts: { typecheck: 'node -e "0"', test: 'vitest run' },
+    }));
+    commitAll('vitest test script');
+    git('push', '-q', 'origin', 'HEAD:main');
+    write('src/feature.ts', 'export const a = 2;\n');
+    // `npm test` runs the script `vitest run`, found on PATH: a fake one records its arguments.
+    const bin = path.join(path.dirname(repo), 'bin');
+    const log = path.join(path.dirname(repo), 'vitest.log');
+    fs.mkdirSync(bin, { recursive: true });
+    fs.writeFileSync(path.join(bin, 'vitest'), `#!/bin/sh\necho "$@" >> "${log}"\n`, { mode: 0o755 });
+    expect(runPrecommitWithFakeNpx(0, '--full').status).toBe(0);
+    const dir = /--coverage\.reportsDirectory=(\S+)/.exec(fs.readFileSync(log, 'utf8'))?.[1];
+    expect(dir).toBeDefined();
+    expect(path.relative(repo, dir ?? '').startsWith('..')).toBe(true);
   });
 
   it('fails and records nothing when ESLint fails', () => {
