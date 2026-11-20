@@ -41,8 +41,10 @@ class FakeElement {
   setAttribute(name: string, value: string): void { this.attributes[name] = value; }
   addEventListener(type: string, fn: Listener): void { (this.listeners[type] ??= []).push(fn); }
   focus(): void { this.focusCount++; }
-  closest(): FakeElement | null { return this.parent; }
-  querySelector(): FakeElement | null { return this.label; }
+  /** Like Element.closest, for the one ancestor selector navbar.js asks for: the toggle's `.navbar`. */
+  closest(selector: string): FakeElement | null { return selector === '.navbar' ? this.parent : null; }
+  /** Like Element.querySelector, for the one child selector navbar.js asks for: a group's `.nav-group-label`. */
+  querySelector(selector: string): FakeElement | null { return selector === '.nav-group-label' ? this.label : null; }
 
   /** Whether `el` is this element or inside it. */
   contains(el: FakeElement | undefined): boolean {
@@ -56,6 +58,16 @@ class FakeElement {
   }
 }
 
+/** A dropdown group whose label always exists (the fixture builds one per group). */
+type LabelledGroup = FakeElement & { label: FakeElement };
+
+/** Builds a dropdown group with its label inside `parent`. */
+function labelledGroup(parent: FakeElement): LabelledGroup {
+  const group = new FakeElement(parent);
+  group.label = new FakeElement(group);
+  return group as LabelledGroup;
+}
+
 /**
  * Runs public/navbar.js against a fake navbar with two dropdown groups, at a mobile or desktop width.
  * `withToggle: false` leaves the toggle out, as on a page without the nav.
@@ -65,11 +77,7 @@ function runNavbar(options: { mobile?: boolean; withToggle?: boolean } = {}) {
   const nav = new FakeElement();
   const toggle = new FakeElement(nav);
   const collapse = new FakeElement(nav);
-  const groups = ['Bot Commands', 'Overlays'].map(() => {
-    const group = new FakeElement(collapse);
-    group.label = new FakeElement(group);
-    return group;
-  });
+  const groups: [LabelledGroup, LabelledGroup] = [labelledGroup(collapse), labelledGroup(collapse)];
   const outside = new FakeElement();
   const mql = { matches: options.mobile ?? false, media: '', listeners: [] as Listener[], addEventListener(_t: string, fn: Listener) { this.listeners.push(fn); } };
   let query = '';
@@ -92,7 +100,11 @@ function runNavbar(options: { mobile?: boolean; withToggle?: boolean } = {}) {
       if (!stopped) document.dispatch('click', event);
     },
     pressEscape() { document.dispatch('keydown', { key: 'Escape' }); },
-    resize(mobile: boolean) { for (const fn of mql.listeners) fn({ matches: mobile }); },
+    /** Moves the viewport across the breakpoint: updates the media query, then fires its change event. */
+    resize(mobile: boolean) {
+      mql.matches = mobile;
+      for (const fn of mql.listeners) fn({ matches: mobile });
+    },
   };
 }
 
@@ -135,18 +147,18 @@ describe('public/navbar.js', () => {
   it('closes any open dropdown when the toggle closes the menu', () => {
     const { toggle, groups, click } = runNavbar({ mobile: true });
     click(toggle);
-    click(groups[0]!.label!);
+    click(groups[0].label);
 
     click(toggle);
 
-    expect(isOpen(groups[0]!)).toBe(false);
-    expect(groups[0]!.label!.attributes['aria-expanded']).toBe('false');
+    expect(isOpen(groups[0])).toBe(false);
+    expect(groups[0].label.attributes['aria-expanded']).toBe('false');
   });
 
   it('closes the open menu on Escape and returns focus to the toggle', () => {
     const { nav, toggle, collapse, groups, click, pressEscape } = runNavbar({ mobile: true });
     click(toggle);
-    click(groups[1]!.label!);
+    click(groups[1].label);
 
     pressEscape();
 
@@ -154,67 +166,67 @@ describe('public/navbar.js', () => {
     expect(toggle.attributes['aria-expanded']).toBe('false');
     expect(collapse.attributes['aria-hidden']).toBe('true');
     expect(toggle.focusCount).toBe(1);
-    expect(isOpen(groups[1]!)).toBe(false);
+    expect(isOpen(groups[1])).toBe(false);
   });
 
   it('closes an open dropdown on Escape without moving focus when the menu itself is closed (desktop)', () => {
     const { toggle, groups, click, pressEscape } = runNavbar();
-    click(groups[0]!.label!);
+    click(groups[0].label);
 
     pressEscape();
 
-    expect(isOpen(groups[0]!)).toBe(false);
+    expect(isOpen(groups[0])).toBe(false);
     expect(toggle.focusCount).toBe(0);
   });
 
   it('closes the menu and dropdowns on a click outside the navbar, but not on a click inside it', () => {
     const { nav, collapse, groups, toggle, outside, click } = runNavbar({ mobile: true });
     click(toggle);
-    click(groups[0]!.label!);
+    click(groups[0].label);
 
     click(collapse);
     expect(isOpen(nav)).toBe(true);
-    expect(isOpen(groups[0]!)).toBe(true);
+    expect(isOpen(groups[0])).toBe(true);
 
     click(outside);
     expect(isOpen(nav)).toBe(false);
     expect(collapse.attributes['aria-hidden']).toBe('true');
-    expect(isOpen(groups[0]!)).toBe(false);
+    expect(isOpen(groups[0])).toBe(false);
   });
 
   it('keeps at most one dropdown open, and a second click on a label closes it', () => {
     const { groups, click } = runNavbar();
-    const [a, b] = [groups[0]!, groups[1]!];
+    const [a, b] = groups;
 
-    click(a.label!);
+    click(a.label);
     expect([isOpen(a), isOpen(b)]).toEqual([true, false]);
-    expect(a.label!.attributes['aria-expanded']).toBe('true');
+    expect(a.label.attributes['aria-expanded']).toBe('true');
 
-    click(b.label!);
+    click(b.label);
     expect([isOpen(a), isOpen(b)]).toEqual([false, true]);
-    expect(a.label!.attributes['aria-expanded']).toBe('false');
-    expect(b.label!.attributes['aria-expanded']).toBe('true');
+    expect(a.label.attributes['aria-expanded']).toBe('false');
+    expect(b.label.attributes['aria-expanded']).toBe('true');
 
-    click(b.label!);
+    click(b.label);
     expect(isOpen(b)).toBe(false);
-    expect(b.label!.attributes['aria-expanded']).toBe('false');
+    expect(b.label.attributes['aria-expanded']).toBe('false');
   });
 
   it('leaves the open menu open when a dropdown label inside it is clicked', () => {
     const { nav, toggle, groups, click } = runNavbar({ mobile: true });
     click(toggle);
 
-    click(groups[0]!.label!);
+    click(groups[0].label);
 
     expect(isOpen(nav)).toBe(true);
-    expect(isOpen(groups[0]!)).toBe(true);
+    expect(isOpen(groups[0])).toBe(true);
   });
 
   it.each([
     [false, 'false'],
     [true, 'true'],
   ])('resets to closed when the viewport crosses the breakpoint (now mobile=%s)', (mobile, hidden) => {
-    const { nav, toggle, collapse, click, resize } = runNavbar({ mobile: true });
+    const { nav, toggle, collapse, click, resize } = runNavbar({ mobile: !mobile });
     click(toggle);
 
     resize(mobile);

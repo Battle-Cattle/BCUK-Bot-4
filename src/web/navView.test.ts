@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import ejs from 'ejs';
 import path from 'path';
+// The shared mirror of AccessLevel (kept in sync by accessLevelMock.test.ts), so this view test doesn't load the DB layer.
+import { ACCESS_LEVEL_MOCK as AccessLevel } from '../test-utils/accessLevelMock';
 
 const NAV_PATH = path.join(__dirname, '../../views/partials/nav.ejs');
 
@@ -159,13 +161,13 @@ describe('views/partials/nav.ejs entries for every access level', () => {
       { group: 'Bot Commands', items: [['/sfx', 'SFX']] },
       DEVICES,
     ]],
-    ['a User (0)', makeUser(0), BELOW_MANAGER_MENU],
-    ['a Mod (1)', makeUser(1), BELOW_MANAGER_MENU],
-    ['a Manager (2)', makeUser(2), managerUpMenu([['/admin/streams', 'Streams'], ['/admin/users', 'Users']])],
-    ['an Admin (3), not owner', makeUser(3), managerUpMenu([
+    ['a User (0)', makeUser(AccessLevel.USER), BELOW_MANAGER_MENU],
+    ['a Mod (1)', makeUser(AccessLevel.MOD), BELOW_MANAGER_MENU],
+    ['a Manager (2)', makeUser(AccessLevel.MANAGER), managerUpMenu([['/admin/streams', 'Streams'], ['/admin/users', 'Users']])],
+    ['an Admin (3), not owner', makeUser(AccessLevel.ADMIN), managerUpMenu([
       ['/admin/streams', 'Streams'], ['/admin/users', 'Users'], ['/admin/streamdeck-keys', 'Streamdeck Keys'],
     ])],
-    ['the owner (Admin, 3)', makeUser(3, true), managerUpMenu([
+    ['the owner (Admin, 3)', makeUser(AccessLevel.ADMIN, true), managerUpMenu([
       ['/admin/streams', 'Streams'], ['/admin/users', 'Users'], ['/admin/streamdeck-keys', 'Streamdeck Keys'], ['/admin/health', 'Health'],
     ])],
   ] as [string, Record<string, unknown> | null, NavEntry[]][])('lists every entry, in order, for %s', async (_who, user, expected) => {
@@ -173,7 +175,7 @@ describe('views/partials/nav.ejs entries for every access level', () => {
   });
 
   it('keeps the brand link home and the toggle wired to the collapsible menu', async () => {
-    const html = await renderNav(makeUser(0));
+    const html = await renderNav(makeUser(AccessLevel.USER));
 
     expect(html).toContain('<a href="/" class="navbar-brand">');
     expect(html).toContain('<button class="navbar-toggle" aria-label="Toggle navigation" aria-expanded="false" aria-controls="navbar-collapse">');
@@ -192,39 +194,41 @@ describe('views/partials/nav.ejs navbar end', () => {
   const guild = (id: string, name: string) => ({ guildId: id, name });
 
   it('offers a server switcher with several guilds, naming the current one', async () => {
-    const user = { ...makeUser(0), guilds: [guild('1', 'Alpha'), guild('2', 'Beta')], currentGuildId: '2' };
+    const user = { ...makeUser(AccessLevel.USER), guilds: [guild('1', 'Alpha'), guild('2', 'Beta')], currentGuildId: '2' };
 
     expect(endOf(await renderNav(user))).toContain('<a href="/guild/select" class="nav-item guild-switcher" title="Switch server">🏠 Beta ▾</a>');
   });
 
   it('asks to choose a server when several guilds and none current', async () => {
-    const user = { ...makeUser(0), guilds: [guild('1', 'Alpha'), guild('2', 'Beta')], currentGuildId: null };
+    const user = { ...makeUser(AccessLevel.USER), guilds: [guild('1', 'Alpha'), guild('2', 'Beta')], currentGuildId: null };
 
     expect(endOf(await renderNav(user))).toContain('🏠 Choose server ▾</a>');
   });
 
   it('shows the single guild as plain text, not a switcher', async () => {
-    const end = endOf(await renderNav({ ...makeUser(0), guilds: [guild('1', 'Alpha')], currentGuildId: '1' }));
+    const end = endOf(await renderNav({ ...makeUser(AccessLevel.USER), guilds: [guild('1', 'Alpha')], currentGuildId: '1' }));
 
     expect(end).toContain('<span class="guild-name">🏠 Alpha</span>');
     expect(end).not.toContain('guild-switcher');
   });
 
   it('shows no guild when the only guild is not the current one', async () => {
-    const end = endOf(await renderNav({ ...makeUser(0), guilds: [guild('1', 'Alpha')], currentGuildId: '9' }));
+    const end = endOf(await renderNav({ ...makeUser(AccessLevel.USER), guilds: [guild('1', 'Alpha')], currentGuildId: '9' }));
 
     expect(end).not.toContain('guild-name');
     expect(end).not.toContain('guild-switcher');
   });
 
   it('shows no guild at all with no guilds', async () => {
-    const end = endOf(await renderNav(makeUser(0)));
+    const end = endOf(await renderNav(makeUser(AccessLevel.USER)));
 
     expect(end).not.toContain('guild-name');
     expect(end).not.toContain('guild-switcher');
   });
 
-  it.each([[0, 'User'], [1, 'Mod'], [2, 'Manager'], [3, 'Admin']])('badges access level %i as %s', async (level, label) => {
+  it.each([
+    [AccessLevel.USER, 'User'], [AccessLevel.MOD, 'Mod'], [AccessLevel.MANAGER, 'Manager'], [AccessLevel.ADMIN, 'Admin'],
+  ])('badges access level %i as %s', async (level, label) => {
     expect(endOf(await renderNav(makeUser(level)))).toContain(`<span class="badge level-${level}">${label}</span>`);
   });
 
@@ -233,18 +237,18 @@ describe('views/partials/nav.ejs navbar end', () => {
   });
 
   it("shows the signed-in user's name", async () => {
-    expect(endOf(await renderNav(makeUser(0)))).toContain('<span class="username">Someone</span>');
+    expect(endOf(await renderNav(makeUser(AccessLevel.USER)))).toContain('<span class="username">Someone</span>');
   });
 
   it('shows the avatar only when the user has one', async () => {
-    const withAvatar = endOf(await renderNav({ ...makeUser(0), discordAvatar: 'https://cdn.discordapp.com/a.png' }));
+    const withAvatar = endOf(await renderNav({ ...makeUser(AccessLevel.USER), discordAvatar: 'https://cdn.discordapp.com/a.png' }));
 
     expect(withAvatar).toContain('<img src="https://cdn.discordapp.com/a.png?size=32" class="avatar" alt="">');
-    expect(endOf(await renderNav(makeUser(0)))).not.toContain('class="avatar"');
+    expect(endOf(await renderNav(makeUser(AccessLevel.USER)))).not.toContain('class="avatar"');
   });
 
   it('logs out with a CSRF-protected POST form', async () => {
-    const end = endOf(await renderNav(makeUser(0)));
+    const end = endOf(await renderNav(makeUser(AccessLevel.USER)));
 
     expect(end).toContain('<form method="POST" action="/auth/logout" class="d-inline m-0">');
     expect(end).toContain('<input type="hidden" name="_csrf" value="tok">');
