@@ -1,0 +1,12 @@
+{
+  "_comment": "Illustrative data for ui-check only. The dashboard fixture with no Twitch channels configured: the Twitch roll-up reads as a neutral \"No channels configured\" and the header indicator stays healthy.",
+  "extends": "dashboard.json",
+  "status": {
+    "twitch": {
+      "streamer_one": "$remove",
+      "streamer_two": "$remove",
+      "streamer_three": "$remove",
+      "streamer_four": "$remove"
+    }
+  }
+}

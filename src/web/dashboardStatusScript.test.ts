@@ -57,7 +57,7 @@ class FakeElement {
 const IDS = [
   'dot-discord', 'discord-state', 'discord-tag', 'discord-guild', 'dot-voice', 'voice-channel', 'voice-state',
   'btn-rejoin-voice', 'last-command', 'last-file', 'last-source', 'last-when', 'twitch-channels',
-  'health-indicator', 'bot-status', 'status-stale-note',
+  'health-indicator', 'bot-status', 'status-stale-note', 'twitch-state',
 ];
 
 /**
@@ -333,7 +333,90 @@ describe('public/dashboard-status.js zero Twitch channels', () => {
     applyStatus(status(true, { connected: true }, {}));
 
     expect(el('health-indicator').textContent).toBe('All Systems Operational');
-    expect(el('twitch-channels').descendants().map((e) => e.textContent)).toContain('None configured.');
+    expect(el('twitch-channels').descendants().map((e) => e.textContent)).toContain('No Twitch channels configured.');
+  });
+
+  it('rolls zero channels up as a neutral "No channels configured", not a fault', () => {
+    const { el, applyStatus } = runScripts();
+    applyStatus(status(true, { connected: true }, {}));
+
+    expect(el('twitch-state').textContent).toBe('No channels configured');
+    expect(el('twitch-state').className).toBe('stat-value status-text status-text--inactive');
+  });
+});
+
+describe('public/dashboard-status.js Twitch connection roll-up', () => {
+  const up = { connected: true, isLive: false, lastConnectedAt: null, lastDisconnectedAt: null };
+  const down = { connected: false, isLive: false, lastConnectedAt: null, lastDisconnectedAt: null };
+
+  it.each([
+    ['all channels connected', { a: up, b: up }, 'Connected', 'connected'],
+    ['one channel connected of three', { a: up, b: down, c: down }, 'Degraded (1 of 3)', 'degraded'],
+    ['all but one connected', { a: up, b: up, c: down }, 'Degraded (2 of 3)', 'degraded'],
+    ['no channel connected', { a: down, b: down }, 'Disconnected', 'disconnected'],
+    ['a single connected channel', { a: up }, 'Connected', 'connected'],
+    ['a single disconnected channel', { a: down }, 'Disconnected', 'disconnected'],
+  ])('reads %s as "%s"', (_name, twitch, text, modifier) => {
+    const { el, applyStatus } = runScripts();
+    applyStatus(status(true, { connected: true }, twitch));
+
+    expect(el('twitch-state').textContent).toBe(text);
+    expect(el('twitch-state').className).toBe(`stat-value status-text status-text--${modifier}`);
+  });
+
+  it('agrees with the header indicator about when Twitch is degraded or down', () => {
+    const { el, applyStatus } = runScripts();
+    applyStatus(status(true, { connected: true }, { a: up, b: down }));
+    expect([el('twitch-state').textContent, el('health-indicator').textContent]).toEqual(['Degraded (1 of 2)', 'Degraded']);
+
+    applyStatus(status(true, { connected: true }, { a: down, b: down }));
+    expect([el('twitch-state').textContent, el('health-indicator').textContent]).toEqual(['Disconnected', 'Service down']);
+  });
+
+  it('reads a channel with no connection state as Unknown, never as Connected', () => {
+    const { el, applyStatus } = runScripts();
+    applyStatus(status(true, { connected: true }, { a: { isLive: false } }));
+
+    expect(el('twitch-state').textContent).toBe('Unknown');
+    expect(el('twitch-state').className).toBe('stat-value status-text status-text--unknown');
+  });
+
+  it('follows each applied status, and goes Unknown with the other cards while the feed is unreachable', async () => {
+    const { el, applyStatus, fetchStatus, setStatusStreamOpen } = runScripts([503, 503, 503]);
+    applyStatus(status(true, { connected: true }, { a: up }));
+    expect(el('twitch-state').textContent).toBe('Connected');
+
+    applyStatus(status(true, { connected: true }, { a: down }));
+    expect(el('twitch-state').textContent).toBe('Disconnected');
+
+    setStatusStreamOpen(false);
+    for (let i = 0; i < 3; i++) await fetchStatus();
+    expect(el('twitch-state').textContent).toBe('Unknown');
+    expect(el('twitch-state').className).toBe('stat-value status-text status-text--unknown');
+  });
+
+  it('shows each channel\'s last connected or disconnected time, and LIVE only for a connected live channel', () => {
+    const { el, applyStatus } = runScripts();
+    const minutesAgo = (n: number) => new Date(Date.now() - n * 60_000).toISOString();
+    applyStatus(status(true, { connected: true }, {
+      up_live: { connected: true, isLive: true, lastConnectedAt: minutesAgo(5), lastDisconnectedAt: minutesAgo(90) },
+      down_live: { connected: false, isLive: true, lastConnectedAt: minutesAgo(90), lastDisconnectedAt: minutesAgo(30) },
+    }));
+
+    const items = el('twitch-channels').children;
+    const metaOf = (item: FakeElement) => item.descendants().find((e) => e.className === 'channel-meta')?.textContent;
+    // A connected channel shows when it connected, a disconnected one when it dropped: never "Never seen".
+    expect(items.map(metaOf)).toEqual(['5m ago', '30m ago']);
+    const badgesOf = (item: FakeElement) => item.descendants().filter((e) => e.className.startsWith('badge ')).map((e) => e.textContent);
+    expect(items.map(badgesOf)).toEqual([['LIVE', 'Connected'], ['Disconnected']]);
+  });
+
+  it('leaves each channel\'s own connection badge and last-seen time as they were', () => {
+    const { el, applyStatus } = runScripts();
+    applyStatus(status(true, { connected: true }, { a: up, b: down }));
+
+    const texts = el('twitch-channels').descendants().map((e) => e.textContent);
+    expect(texts).toEqual(expect.arrayContaining(['a', 'b', 'Connected', 'Disconnected', 'Never seen']));
   });
 });
 

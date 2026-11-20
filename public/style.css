@@ -217,9 +217,15 @@ a:hover { text-decoration: underline; }
 .dashboard-layout .status-grid { grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
 /* Long Twitch names wrap inside the narrower status card so the connection badge stays in view. */
 .dashboard-layout .channel-name { overflow-wrap: anywhere; }
-/* Cap the Twitch list at about the height of the other status cards (Last Played is the tallest) and scroll the
-   rest, so a long channel list neither stretches every card in the row nor pushes Quick Links down. */
-.dashboard-twitch-body { max-height: 10rem; overflow-y: auto; }
+/* Cap the Twitch list so a long channel list scrolls instead of stretching every card in the row or pushing Quick
+   Links down. The Voice card, with its channel select and button, is the tallest of the others; the cap leaves room
+   for the card header and the connection roll-up above the list, even when the roll-up wraps to two lines, so this
+   card stays at or under the Voice card's height (the 10rem it was before the roll-up, less 3rem). */
+.dashboard-twitch-body { max-height: 7rem; overflow-y: auto; }
+/* The roll-up's state can be longer than a Discord or Voice state ("No channels configured"), so it wraps rather than
+   truncates. The extra class keeps these rules ahead of .stat-row's, which comes later in this file. */
+.card .twitch-rollup { padding: .45rem 1rem; border-bottom: 1px solid var(--border); }
+.card .twitch-rollup .stat-value { max-width: none; white-space: normal; overflow: visible; text-overflow: clip; }
 /* Dark, thin scrollbars for the dashboard's inner scroll areas (event feed, Twitch list) instead of the
    browser's default light ones. */
 .dashboard-scroll { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
@@ -278,6 +284,8 @@ a:hover { text-decoration: underline; }
 .status-text--idle::before         { content: "\25CF"; content: "\25CF" / ""; }
 .status-text--playing      { color: var(--accent-blue); }
 .status-text--playing::before      { content: "\25B6"; content: "\25B6" / ""; }
+.status-text--degraded     { color: var(--warning); }
+.status-text--degraded::before     { content: "\25B2"; content: "\25B2" / ""; }
 .status-text--unknown      { color: var(--muted); }
 .status-text--unknown::before      { content: "?"; content: "?" / ""; }
 /* Status not known (feed unreachable): a dashed ring, distinct from the solid connected/disconnected shapes. */
