@@ -293,6 +293,8 @@ describe('public/style.css nav collapse breakpoint (#1109)', () => {
     const phone = mediaBlock(640);
 
     expect(phone).toContain('.navbar { padding: .6rem 1rem; }');
+    // The footer's links share .nav-item and have always been full-width on phones: that rule stays here, unscoped.
+    expect(phone).toContain('.nav-item { width: 100%; border-radius: 6px; }');
     for (const selector of ['.navbar-toggle', '.navbar-collapse', '.navbar-menu', '.navbar-end', '.nav-group']) {
       expect(phone).not.toContain(selector);
     }

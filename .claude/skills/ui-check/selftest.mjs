@@ -179,6 +179,24 @@ describe('in the browser', () => {
         assert.deepEqual(await findClippedContent(page), [], `nothing is clipped at ${width}px`);
         const toggleShown = await page.locator('.navbar-toggle').isVisible();
         assert.equal(toggleShown, width <= collapseMax, `the toggle is ${toggleShown ? '' : 'not '}shown at ${width}px`);
+        // Keyboard reach: Tab through the nav (opening the menu first where it's collapsed). Every stop must sit inside
+        // the viewport, and Logout, the last item and the one that used to be clipped away, must be among them. A fresh
+        // load per width, because the browser keeps its focus starting point from the previous run.
+        await page.reload({ waitUntil: 'load' });
+        if (toggleShown) await page.locator('.navbar-toggle').click();
+        const stops = [];
+        for (let i = 0; i < 40; i++) {
+          await page.keyboard.press('Tab');
+          const stop = await page.evaluate(() => {
+            const el = globalThis.document.activeElement;
+            const box = el.getBoundingClientRect();
+            return { inNav: !!el.closest('.navbar'), text: (el.textContent || '').trim().slice(0, 20), left: box.left, right: box.right, width: globalThis.document.documentElement.clientWidth };
+          });
+          if (!stop.inNav) break;
+          stops.push(stop);
+        }
+        assert.ok(stops.some((s) => s.text === 'Logout'), `Tab reaches Logout at ${width}px (got ${stops.map((s) => s.text).join(', ')})`);
+        for (const stop of stops) assert.ok(stop.left >= 0 && stop.right <= stop.width, `"${stop.text}" is inside the viewport at ${width}px (${stop.left}-${stop.right} of ${stop.width})`);
       }
     } finally {
       await page.close();
