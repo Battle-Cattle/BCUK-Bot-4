@@ -190,6 +190,8 @@ async function inspect(browser, baseUrl, run) {
   const metrics = await page.evaluate(() => ({
     scrollWidth: globalThis.document.documentElement.scrollWidth,
     clientWidth: globalThis.document.documentElement.clientWidth,
+    scrollHeight: globalThis.document.documentElement.scrollHeight,
+    clientHeight: globalThis.document.documentElement.clientHeight,
     runningAnimations: globalThis.document.getAnimations()
       .filter((a) => a.playState === 'running')
       .map((a) => {
@@ -208,6 +210,9 @@ async function inspect(browser, baseUrl, run) {
     run: run.label,
     screenshot: path.relative(ROOT, run.screenshot),
     horizontalOverflow: metrics.scrollWidth > metrics.clientWidth ? `${metrics.scrollWidth - metrics.clientWidth}px` : 'none',
+    // How far the page is taller than the viewport ('none' when it fits). Narrow layouts stack and scroll by
+    // design; the desktop run is where a page scrollbar is a finding (the dashboard sizes its feed to avoid one).
+    verticalOverflow: metrics.scrollHeight > metrics.clientHeight ? `${metrics.scrollHeight - metrics.clientHeight}px` : 'none',
     clippedContent,
     runningAnimations: metrics.runningAnimations,
     cspViolations: consoleErrors.filter((e) => e.includes('Content Security Policy')),

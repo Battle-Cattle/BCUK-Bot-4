@@ -205,6 +205,29 @@ describe('in the browser', () => {
     }
   });
 
+  it('keeps a busy event feed from giving the desktop dashboard a page scrollbar (#1130)', async () => {
+    const fixture = await loadFixture(path.join(FIXTURES, 'dashboard-busy-feed.json'));
+    const { server, baseUrl } = await startServer(await renderPage(fixture), fixture);
+    const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+    try {
+      await page.goto(baseUrl);
+      await settle(page, fixture);
+      assert.ok((await page.locator('#recent-events-list > *').count()) >= 20, 'the fixture fills the feed');
+      // The feed is the tallest column here, so the page only fits when its cap leaves room for everything around it,
+      // the health indicator included. Below ~900px the main column (status cards, links, usage) is itself taller
+      // than the viewport, so the page scrolls by design whatever the feed does: sweep the heights above that.
+      for (const height of [900, 1000, 1080, 1200]) {
+        await page.setViewportSize({ width: 1440, height });
+        const over = await page.evaluate(() => globalThis.document.documentElement.scrollHeight - globalThis.document.documentElement.clientHeight);
+        assert.ok(over <= 0, `no page scrollbar at 1440x${height} (page is ${over}px taller than the viewport)`);
+      }
+    } finally {
+      await page.close();
+      server.closeAllConnections();
+      server.close();
+    }
+  });
+
   it('renders each dashboard variant in its intended state', async () => {
     assert.equal((await renderTexts('dashboard.json', ['#discord-state']))['#discord-state'], 'Connected');
     assert.equal((await renderTexts('dashboard-discord-down.json', ['#discord-state']))['#discord-state'], 'Disconnected');
