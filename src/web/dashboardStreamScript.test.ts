@@ -83,6 +83,15 @@ describe('public/dashboard-stream.js deriveStreamOverview', () => {
     expect(derive({}, 'streamer_one')).toEqual({ state: 'not-monitored', login: 'streamer_one' });
   });
 
+  it.each(['constructor', '__proto__', 'toString', 'hasOwnProperty'])('treats the inherited member "%s" as not monitored, not as a channel entry', (login) => {
+    expect(derive({ streamer_two: channel(true) }, login)).toEqual({ state: 'not-monitored', login });
+    expect(derive({}, login)).toEqual({ state: 'not-monitored', login });
+  });
+
+  it('still reads a monitored channel whose login is named like an inherited member', () => {
+    expect(derive({ constructor: channel(true) }, 'constructor')).toEqual({ state: 'live', login: 'constructor' });
+  });
+
   it.each([
     ['before any data has arrived', null, false],
     ['for a payload that isn\'t a map', ['streamer_one'], false],

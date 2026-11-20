@@ -266,11 +266,16 @@ describe('public/dashboard-status.js Stream Overview', () => {
     expect(el('stream-own-state').textContent).toBe('Live');
   });
 
-  it('leaves the panel alone when a malformed payload throws part-way through (#1114)', () => {
+  it('goes Unknown, like the health indicator, when a malformed payload throws part-way through, and recovers on the next good one (#1114)', () => {
     const { el, applyStatus } = runScripts([], 'streamer_one');
     applyStatus(status(true, { connected: true }, { streamer_one: { ...up, isLive: true } }));
+    expect(el('stream-own-state').textContent).toBe('Live');
 
     expect(() => applyStatus({ voice: {} })).toThrow();
+    expect(el('health-indicator').textContent).toBe('Status unknown');
+    expect(el('stream-own-state').textContent).toBe('Unknown');
+
+    applyStatus(status(true, { connected: true }, { streamer_one: { ...up, isLive: true } }));
     expect(el('stream-own-state').textContent).toBe('Live');
   });
 

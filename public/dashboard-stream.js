@@ -42,7 +42,9 @@ function isStreamMap(twitch) {
 function deriveStreamOverview(twitch, ownChannel, feedStale) {
   if (!ownChannel) return { state: 'no-channel', login: null };
   if (feedStale || !isStreamMap(twitch)) return { state: 'unknown', login: ownChannel };
-  const entry = twitch[ownChannel];
+  // An own-property check: a valid login such as `constructor` would otherwise read Object.prototype's inherited
+  // member, which is truthy and would turn Not monitored into Unknown.
+  const entry = Object.prototype.hasOwnProperty.call(twitch, ownChannel) ? twitch[ownChannel] : undefined;
   if (!entry) return { state: 'not-monitored', login: ownChannel };
   if (typeof entry.isLive !== 'boolean') return { state: 'unknown', login: ownChannel };
   return { state: entry.isLive ? 'live' : 'offline', login: ownChannel };

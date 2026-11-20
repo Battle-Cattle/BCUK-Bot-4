@@ -135,6 +135,9 @@ function applyStatus(status) {
     applyStatusCards(status);
   } catch (err) {
     renderHealth(deriveHealth(null, true));
+    // Stream Overview is written last in applyStatusCards, so without this it would keep its old Live or Offline for a
+    // payload that couldn't be read. statusGeneration and statusFeedStale stay as they were, so a valid fetch still recovers.
+    applyStreamOverview(null, true);
     throw err;
   }
   // Only a successful apply supersedes an in-flight fetch; a malformed message must not block a pending recovery.

@@ -156,6 +156,7 @@ function measureRightColumn() {
     feedTitleTop: rect('.dashboard-events .section-title').top,
     feedTitleHeight: rect('.dashboard-events .section-title').height,
     feedBodyHeight: Math.round(rect('#recent-events-list').height),
+    feedClipped: Math.round(rect('#recent-events-list').bottom - rect('.dashboard-events > .card').bottom),
     sideBottom: rect('.dashboard-side').bottom,
     viewportHeight: globalThis.innerHeight,
     viewportWidth: doc.documentElement.clientWidth,
@@ -306,6 +307,13 @@ describe('in the browser', () => {
         assert.ok(m.feedTitleHeight > 10, `the feed's heading is still there at ${height} (${m.feedTitleHeight}px)`);
         assert.ok(m.feedBodyHeight >= 90, `the feed keeps a few rows at ${height} (${m.feedBodyHeight}px)`);
         assert.ok(m.sideBottom <= m.viewportHeight, `the right-hand column ends inside the viewport at ${height}`);
+      }
+      // Short desktop windows: the column is uncapped there, so the feed keeps its floor and the card never clips it.
+      for (const height of [500, 600, 650, 700]) {
+        await page.setViewportSize({ width: 1440, height });
+        const m = await page.evaluate(measureRightColumn);
+        assert.ok(m.feedBodyHeight >= 90, `the feed keeps its floor at 1440x${height} (${m.feedBodyHeight}px)`);
+        assert.ok(m.feedClipped <= 1, `the feed card doesn't clip the feed at 1440x${height} (${m.feedClipped}px cut off)`);
       }
       // The column is the tallest one here, so the feed gets taller as the viewport does.
       await page.setViewportSize({ width: 1440, height: 900 });

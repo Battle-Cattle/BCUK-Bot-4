@@ -325,6 +325,16 @@ a:hover { text-decoration: underline; }
   .dashboard-events-body { max-height: 50vh; }
 }
 
+/* Short desktop windows: the column's cap would leave the feed less than its 6rem floor (the card, which clips, shrinks
+   below its body: about 13px lost at 600px high, the whole feed at 500px). Below 660px high the column is uncapped and
+   not sticky, as on narrow screens, and the feed caps itself at half the window; the page scrolls there anyway (#1132). */
+@media (max-height: 660px) {
+  .dashboard-side    { position: static; display: block; max-height: none; }
+  .dashboard-stream  { margin-bottom: 2rem; }
+  .dashboard-sidebar .section { margin-bottom: 2rem; }
+  .dashboard-events-body { max-height: 50vh; }
+}
+
 /* ── Stat rows ─────────────────────────────────────────── */
 .stat-row   { display: flex; justify-content: space-between; align-items: baseline; padding: .3rem 0; border-bottom: 1px solid var(--border); }
 .stat-row:last-child { border-bottom: none; }

@@ -81,6 +81,16 @@ describe('views/dashboard.ejs layout', () => {
     expect(stream).not.toMatch(/class="[^"]*\b(dot|service|status-text|stat-row|stat-value|badge)\b/);
   });
 
+  it('uncaps and unsticks the right-hand column on short desktop windows, so the feed keeps its 6rem floor (#1114)', () => {
+    const css = fs.readFileSync(stylePath, 'utf8');
+    const short = /@media \(max-height: (\d+)px\) \{([\s\S]*?)\n\}/.exec(css);
+
+    // Below this the column's cap would leave the feed less than its floor and the card (which clips) would cut it off.
+    expect(Number(short?.[1])).toBeGreaterThanOrEqual(660);
+    expect(short?.[2]).toMatch(/\.dashboard-side\s*\{[^}]*position:\s*static;[^}]*max-height:\s*none;/);
+    expect(short?.[2]).toMatch(/\.dashboard-events-body\s*\{[^}]*max-height:\s*50vh;/);
+  });
+
   it('is about the user\'s own channel only: no list of other channels, and the Twitch rows keep their LIVE badge (#1114)', async () => {
     const html = await render();
     const stream = between(html, '<section class="section dashboard-stream"', '</section>');
