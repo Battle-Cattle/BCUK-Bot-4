@@ -1,0 +1,68 @@
+{
+  "_comment": "Illustrative data for ui-check only. A busy event feed (so the feed is the tallest column) and fourteen Twitch channels, more than fit even when the status row grows into the spare height.",
+  "extends": "dashboard-busy-feed.json",
+  "status": {
+    "twitch": {
+      "a_very_long_streamer_name": {
+        "connected": true,
+        "lastConnectedAt": "2026-11-18T06:00:00.000Z",
+        "lastDisconnectedAt": null,
+        "isLive": true
+      },
+      "streamer_six": {
+        "connected": true,
+        "lastConnectedAt": "2026-11-18T06:00:00.000Z",
+        "lastDisconnectedAt": null,
+        "isLive": false
+      },
+      "streamer_07": {
+        "connected": true,
+        "lastConnectedAt": "2026-11-18T06:00:00.000Z",
+        "lastDisconnectedAt": null,
+        "isLive": false
+      },
+      "streamer_08": {
+        "connected": false,
+        "lastConnectedAt": "2026-11-18T06:00:00.000Z",
+        "lastDisconnectedAt": "2026-11-18T10:30:00.000Z",
+        "isLive": false
+      },
+      "streamer_09": {
+        "connected": true,
+        "lastConnectedAt": "2026-11-18T06:00:00.000Z",
+        "lastDisconnectedAt": null,
+        "isLive": true
+      },
+      "streamer_10": {
+        "connected": true,
+        "lastConnectedAt": "2026-11-18T06:00:00.000Z",
+        "lastDisconnectedAt": null,
+        "isLive": false
+      },
+      "streamer_11": {
+        "connected": true,
+        "lastConnectedAt": "2026-11-18T06:00:00.000Z",
+        "lastDisconnectedAt": null,
+        "isLive": false
+      },
+      "streamer_12": {
+        "connected": false,
+        "lastConnectedAt": "2026-11-18T06:00:00.000Z",
+        "lastDisconnectedAt": "2026-11-18T10:30:00.000Z",
+        "isLive": true
+      },
+      "streamer_13": {
+        "connected": true,
+        "lastConnectedAt": "2026-11-18T06:00:00.000Z",
+        "lastDisconnectedAt": null,
+        "isLive": false
+      },
+      "streamer_14": {
+        "connected": true,
+        "lastConnectedAt": "2026-11-18T06:00:00.000Z",
+        "lastDisconnectedAt": null,
+        "isLive": false
+      }
+    }
+  }
+}

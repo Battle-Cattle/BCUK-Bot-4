@@ -99,7 +99,7 @@ async function hasLiveGuildAccess(guildId: string, discordId: string): Promise<b
 
 /**
  * GET /dashboard/status/events — SSE endpoint streaming live `getGuildScopedStatus(guildId)`
- * snapshots for the viewer's current guild, so the dashboard's "Bot Status" cards can update
+ * snapshots for the viewer's current guild, so the dashboard's "System Status" panel can update
  * without polling. Mounted behind the parent router's `requireAuth`, so a session user is always
  * present; the guild is taken from the session (never a request param), matching every other
  * guild-scoped route. Runs `requireGuildContext` first, like those routes, so the session's guild

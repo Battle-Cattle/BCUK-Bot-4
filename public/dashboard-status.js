@@ -47,6 +47,7 @@ function renderChannels(container, channelMap) {
     item.className = 'channel-item';
 
     const left = document.createElement('div');
+    left.className = 'channel-info';
 
     const channelName = document.createElement('div');
     channelName.className = 'channel-name';
@@ -190,7 +191,7 @@ let statusStreamOpen = false;
 let statusFeedStale = false;
 
 /**
- * Marks the Bot Status cards as not current (muted, "Unknown" states, a note saying so) or clears that.
+ * Marks the System Status panel as not current (muted, "Unknown" states, a note saying so) or clears that.
  * Clearing only lifts the styling and note: the next applyStatus has already rewritten every value.
  * @param stale - True while the status feed is unreachable.
  */

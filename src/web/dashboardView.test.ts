@@ -54,15 +54,47 @@ describe('views/dashboard.ejs layout', () => {
     expect(html.match(/id="recent-events-list"/g)).toHaveLength(1);
   });
 
-  it('shows the Twitch channel status as a Bot Status card instead of a separate Channels section', async () => {
+  it('shows the Twitch channels inside the System Status panel instead of a separate Channels section', async () => {
     const html = await render();
     const status = between(html, '<section class="section dashboard-status" id="bot-status">', '</section>');
 
-    expect(divBlock(status, '<div class="status-grid">')).toContain('id="twitch-channels"');
+    expect(divBlock(status, '<div class="card system-status">')).toContain('id="twitch-channels"');
     expect(html).not.toContain('<h2 class="section-title">Channels</h2>');
   });
 
-  it('puts the sections in source order Bot Status, events sidebar, Quick Links, Usage', async () => {
+  it('presents the bot\'s services as one System Status panel, with Last Played beside it and no overall badge (#1076)', async () => {
+    const html = await render();
+    const status = between(html, '<section class="section dashboard-status" id="bot-status">', '</section>');
+    const panel = divBlock(status, '<div class="card system-status">');
+
+    expect(html.match(/<h2 class="section-title">System Status<\/h2>/g)).toHaveLength(1);
+    expect(html).not.toContain('Bot Status');
+    // One panel holding exactly the three services, each with the ids the status script writes to.
+    expect(panel.match(/<div class="service service--/g)).toHaveLength(3);
+    for (const id of ['card-discord', 'card-voice', 'card-twitch', 'dot-discord', 'discord-state', 'discord-tag', 'discord-guild',
+      'dot-voice', 'voice-state', 'voice-channel', 'twitch-state', 'twitch-channels']) {
+      expect(panel).toContain(`id="${id}"`);
+    }
+    // Last Played is playback information, not a service: beside the panel, inside the section (so staleness mutes it).
+    expect(status).toContain('class="card last-played"');
+    expect(panel).not.toContain('last-command');
+    for (const id of ['last-command', 'last-file', 'last-source', 'last-when']) expect(status).toContain(`id="${id}"`);
+    // No second overall status, no Active Services card, no sparklines, no Hytale row.
+    expect(status).not.toMatch(/All Good|All Systems Operational|Active Services|<svg|<canvas|Hytale/i);
+  });
+
+  it('keeps each service\'s state on its header line, beside its dot, so the panel stays compact (#1076)', async () => {
+    const html = await render();
+
+    for (const service of ['discord', 'voice']) {
+      const header = between(divBlock(html, `<div class="service service--${service}"`), '<div class="service-header">', '<div class="service-body">');
+      expect(header).toContain(`id="${service}-state"`);
+      expect(header).toContain(`id="dot-${service}"`);
+    }
+    expect(between(html, '<div class="service service--twitch"', 'id="twitch-channels"')).toContain('id="twitch-state"');
+  });
+
+  it('puts the sections in source order System Status, events sidebar, Quick Links, Usage', async () => {
     const layout = divBlock(await render(), '<div class="dashboard-layout">');
 
     const positions = [
@@ -116,19 +148,43 @@ describe('views/dashboard.ejs layout', () => {
     expect(html).toMatch(/id="recent-events-list" tabindex="0" role="region" aria-label="Recent events feed"/);
   });
 
-  it('caps the Twitch channel list so a long list scrolls instead of stretching the status row', async () => {
+  it('sizes the Twitch channel list from the height its column has, so it grows into spare height and never stretches the row (#1076)', async () => {
     const html = await render();
     const css = fs.readFileSync(stylePath, 'utf8');
+    const list = /\n\.dashboard-twitch-body\s*\{([^}]*)\}/.exec(css)?.[1] ?? '';
 
     expect(html).toMatch(/class="[^"]*\bdashboard-twitch-body\b[^"]*" id="twitch-channels"/);
-    expect(css).toMatch(/\.dashboard-twitch-body\s*\{[^}]*max-height:\s*7rem;[^}]*overflow-y:\s*auto/);
+    // `flex: 1 1 0px`, never `flex: 1`: a 0% basis becomes the content's height when the container's is indefinite,
+    // which would stretch the row and push Quick Links down. The 7rem floor is what shows when nothing is spare.
+    expect(list).toMatch(/flex:\s*1 1 0px;/);
+    expect(list).toMatch(/min-height:\s*7rem;/);
+    expect(list).toMatch(/overflow-y:\s*auto/);
+    expect(list).not.toContain('max-height');
+    // The status row is the 1fr one, stretched, with min-height: 0 down the chain, so the spare height lands there.
+    expect(css).toMatch(/\.dashboard-layout\s*\{[^}]*grid-template-rows:\s*1fr auto auto;/);
+    expect(css).toMatch(/\.dashboard-status\s*\{[^}]*align-self:\s*stretch;[^}]*container-type:\s*inline-size/);
+    for (const rule of ['status-layout', 'system-status', 'service']) {
+      expect(new RegExp(`\\n\\.${rule}\\s*\\{[^}]*min-height:\\s*0;`).test(css)).toBe(true);
+    }
+  });
+
+  it('lays the panel out by its own width: stacked on phones, two columns wider, with Last Played beside it when there is room (#1076)', () => {
+    const css = fs.readFileSync(stylePath, 'utf8');
+
+    expect(css).toMatch(/@container \(min-width: 40rem\) \{[^@]*grid-template-areas:\s*"discord twitch" "voice twitch"/);
+    expect(css).toMatch(/@container \(min-width: 60rem\) \{[^@]*\.status-layout\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) 15rem/);
+    // Phones stack, and there the page scrolls anyway, so the list gets a fixed height instead.
+    expect(css).toMatch(/@container \(max-width: 39\.99rem\) \{[^@]*\.dashboard-twitch-body\s*\{[^}]*max-height:\s*13\.5rem/);
+    // One line per channel: the name, then its time, then its badges.
+    expect(css).toMatch(/\.channel-info\s*\{[^}]*display:\s*flex;/);
+    expect(css).toMatch(/\.channel-meta\s*\{[^}]*white-space:\s*nowrap/);
   });
 
   it('puts a connection roll-up above the Twitch channel list, outside its scroll region (#1074)', async () => {
     const html = await render();
     const rollup = html.indexOf('id="twitch-state"');
 
-    expect(html).toMatch(/class="twitch-rollup stat-row"><span class="stat-label">State<\/span><span class="stat-value status-text" id="twitch-state">/);
+    expect(html).toMatch(/<h3 class="service-label">Twitch Channels<\/h3>\s*<span class="stat-value status-text" id="twitch-state">/);
     expect(rollup).toBeGreaterThan(html.indexOf('id="card-twitch"'));
     expect(rollup).toBeLessThan(html.indexOf('id="twitch-channels"'));
     // The scroll region keeps its label and focus stop, and the Usage tile keeps its count.
@@ -154,7 +210,7 @@ describe('views/dashboard.ejs layout', () => {
 
     expect(css).toMatch(/\.status-text--degraded\s*\{\s*color:\s*var\(--warning\);\s*\}/);
     expect(css).toMatch(/\.status-text--degraded::before\s*\{\s*content:\s*"\\25B2";\s*content:\s*"\\25B2"\s*\/\s*"";/);
-    expect(css).toMatch(/\.card \.twitch-rollup \.stat-value\s*\{[^}]*white-space:\s*normal/);
+    expect(css).toMatch(/\.service-header \.stat-value\s*\{[^}]*white-space:\s*normal/);
   });
 
   it('caps the desktop feed to leave room for the navbar, sidebar chrome and footer', () => {
@@ -258,12 +314,12 @@ describe('dashboard status cues without colour or motion', () => {
 describe('Discord and Voice card text states', () => {
   const css = fs.readFileSync(stylePath, 'utf8');
 
-  it('gives the Discord card a Status row and the Voice card a State row, both neutral until status loads', async () => {
-    const discord = divBlock(await render(), '<div class="card" id="card-discord">');
-    const voice = divBlock(await render(), '<div class="card" id="card-voice">');
+  it('gives the Discord and Voice services a state in words on their header line, both neutral until status loads', async () => {
+    const discord = divBlock(await render(), '<div class="service service--discord" id="card-discord">');
+    const voice = divBlock(await render(), '<div class="service service--voice" id="card-voice">');
 
-    expect(discord).toContain('<span class="stat-label">Status</span><span class="stat-value status-text" id="discord-state">—</span>');
-    expect(voice).toContain('<span class="stat-label">State</span><span class="stat-value status-text" id="voice-state">—</span>');
+    expect(discord).toContain('<span class="stat-value status-text" id="discord-state">—</span>');
+    expect(voice).toContain('<span class="stat-value status-text" id="voice-state">—</span>');
     // Every id the status script writes to is still there.
     for (const id of ['dot-discord', 'discord-tag', 'discord-guild']) expect(discord).toContain(`id="${id}"`);
     for (const id of ['dot-voice', 'voice-channel']) expect(voice).toContain(`id="${id}"`);
@@ -295,7 +351,7 @@ describe('Discord and Voice card text states', () => {
     [1, true],
     [3, true],
   ])('shows the voice channel selector and Join/Leave button only to Mod+ (access level %i)', async (accessLevel, shown) => {
-    const voice = divBlock(await render({ user: { ...USER, accessLevel } }), '<div class="card" id="card-voice">');
+    const voice = divBlock(await render({ user: { ...USER, accessLevel } }), '<div class="service service--voice" id="card-voice">');
 
     expect(voice.includes('id="voice-channel-select"')).toBe(shown);
     expect(voice.includes('id="btn-rejoin-voice"')).toBe(shown);
@@ -329,7 +385,7 @@ describe('overall health indicator', () => {
     expect(html).toContain('>Status unknown</div>');
   });
 
-  it('has a hidden note on Bot Status for when the feed is unreachable', async () => {
+  it('has a hidden note on System Status for when the feed is unreachable', async () => {
     const status = between(await render(), '<section class="section dashboard-status" id="bot-status">', '</section>');
 
     expect(status).toContain('<p id="status-stale-note" class="status-stale-note" hidden>');
@@ -366,7 +422,7 @@ describe('overall health indicator', () => {
     expect(css).toMatch(/\.dot--unknown\s*\{[^}]*border:\s*2px dashed/);
   });
 
-  it('mutes every kind of Bot Status value while stale, including the Twitch channel rows and their badges', () => {
+  it('mutes every kind of System Status value while stale, including the Twitch channel rows and their badges', () => {
     for (const selector of ['.is-stale .stat-value', '.is-stale .channel-name', '.is-stale .channel-meta']) {
       expect(css).toContain(selector);
     }
