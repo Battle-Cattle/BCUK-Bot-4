@@ -221,6 +221,21 @@ describe('in the browser', () => {
         const over = await page.evaluate(() => globalThis.document.documentElement.scrollHeight - globalThis.document.documentElement.clientHeight);
         assert.ok(over <= 0, `no page scrollbar at 1440x${height} (page is ${over}px taller than the viewport)`);
       }
+      // At 768px high the page scrolls by design, but the feed must not be the reason: it scrolls inside itself, ends
+      // above the bottom of the layout (the main column sets that), and the sticky sidebar still clears the navbar
+      // once scrolled to the end.
+      for (const height of [768, 900]) {
+        await page.setViewportSize({ width: 1440, height });
+        await page.evaluate(() => globalThis.scrollTo(0, globalThis.document.documentElement.scrollHeight));
+        const m = await page.evaluate(() => {
+          const rect = (sel) => globalThis.document.querySelector(sel).getBoundingClientRect();
+          const feed = globalThis.document.querySelector('.dashboard-events-body');
+          return { scrolls: feed.scrollHeight > feed.clientHeight, feedBottom: rect('.dashboard-events-body').bottom, usageBottom: rect('.dashboard-usage').bottom, sidebarTop: rect('.dashboard-sidebar').top, navBottom: rect('.navbar').bottom };
+        });
+        assert.ok(m.scrolls, `the feed scrolls inside itself at 1440x${height}`);
+        if (height === 768) assert.ok(m.feedBottom <= m.usageBottom, `the feed doesn't set the page height at 1440x${height} (feed ends ${m.feedBottom}, main column ${m.usageBottom})`);
+        assert.ok(m.sidebarTop >= m.navBottom, `the sidebar stays below the navbar at the end of the scroll at 1440x${height} (${m.sidebarTop} vs ${m.navBottom})`);
+      }
     } finally {
       await page.close();
       server.closeAllConnections();
