@@ -5,6 +5,7 @@ import vm from 'vm';
 
 const utilsPath = path.join(__dirname, '../../public/dashboard-utils.js');
 const healthPath = path.join(__dirname, '../../public/dashboard-health.js');
+const streamPath = path.join(__dirname, '../../public/dashboard-stream.js');
 const statusPath = path.join(__dirname, '../../public/dashboard-status.js');
 
 /** A minimal element: enough of the DOM for dashboard-utils.js and dashboard-status.js. */
@@ -17,6 +18,7 @@ class FakeElement {
   dataset: Record<string, string> = {};
   disabled = false;
   hidden = false;
+  href = '';
   classList = {
     // Like DOMTokenList.add: a class already present isn't added twice.
     add: (cls: string) => {
@@ -48,6 +50,12 @@ class FakeElement {
     this.attributes[name] = value;
   }
 
+  /** Like Element.removeAttribute; the stub's `href` property stands in for the href attribute. */
+  removeAttribute(name: string): void {
+    delete this.attributes[name];
+    if (name === 'href') this.href = '';
+  }
+
   /** Every element under this one, depth first. */
   descendants(): FakeElement[] {
     return this.children.flatMap((c) => [c, ...c.descendants()]);
@@ -58,6 +66,7 @@ const IDS = [
   'dot-discord', 'discord-state', 'discord-tag', 'discord-guild', 'dot-voice', 'voice-channel', 'voice-state',
   'btn-rejoin-voice', 'last-command', 'last-file', 'last-source', 'last-when', 'twitch-channels',
   'health-indicator', 'bot-status', 'status-stale-note', 'twitch-state',
+  'stream-own-state', 'stream-own-name', 'stream-own-note', 'stream-own-link',
 ];
 
 /**
@@ -70,7 +79,7 @@ type FetchResult = null | number | Record<string, unknown> | Promise<Record<stri
  * Runs the dashboard utils, health and status scripts in one fresh context, the way the page loads them.
  * `fetch` answers /api/status from `responses` in order (a 503 once they run out).
  */
-function runScripts(responses: FetchResult[] = []) {
+function runScripts(responses: FetchResult[] = [], ownChannel: string | null = null) {
   const els = new Map(IDS.map((id) => [id, new FakeElement()]));
   /** The fake element with this id; throws if the fixture doesn't define it, so a typo fails here, not later. */
   const el = (id: string): FakeElement => {
@@ -96,12 +105,15 @@ function runScripts(responses: FetchResult[] = []) {
     document: {
       getElementById: (id: string) => els.get(id) ?? null,
       createElement: () => new FakeElement(),
+      // The server puts the signed-in user's own channel on the body as data-own-channel (absent when they have none).
+      body: { dataset: ownChannel ? { ownChannel } : {} },
     },
     fetch,
   };
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(utilsPath, 'utf8'), context);
   vm.runInContext(fs.readFileSync(healthPath, 'utf8'), context);
+  vm.runInContext(fs.readFileSync(streamPath, 'utf8'), context);
   vm.runInContext(fs.readFileSync(statusPath, 'utf8'), context);
   return {
     el,
@@ -220,6 +232,54 @@ describe('public/dashboard-status.js Twitch channel badges', () => {
       ['badge badge-online', 'Connected'],
       ['badge badge-offline', 'Disconnected'],
     ]);
+  });
+});
+
+describe('public/dashboard-status.js Stream Overview', () => {
+  const up = { connected: true, isLive: false, lastConnectedAt: null, lastDisconnectedAt: null };
+  const liveButDisconnected = { connected: false, isLive: true, lastConnectedAt: null, lastDisconnectedAt: null };
+
+  it('follows every applied status for the user\'s own channel, by isLive and not by the bot\'s connection (#1114)', () => {
+    const { el, applyStatus } = runScripts([], 'streamer_one');
+
+    applyStatus(status(true, { connected: true }, { streamer_one: liveButDisconnected }));
+    expect([el('stream-own-state').textContent, el('stream-own-name').textContent]).toEqual(['Live', 'streamer_one']);
+    // System Status says the bot is down while Stream Overview still says Live; the row's own LIVE badge needs the connection.
+    expect(el('twitch-state').textContent).toBe('Disconnected');
+
+    applyStatus(status(true, { connected: true }, { streamer_one: up }));
+    expect(el('stream-own-state').textContent).toBe('Offline');
+  });
+
+  it('goes Unknown with the other cards while the feed is unreachable, and recovers to Live when fresh data arrives (#1114)', async () => {
+    const { el, applyStatus, fetchStatus, setStatusStreamOpen } = runScripts([503, 503, 503], 'streamer_one');
+    applyStatus(status(true, { connected: true }, { streamer_one: { ...up, isLive: true } }));
+    expect(el('stream-own-state').textContent).toBe('Live');
+
+    setStatusStreamOpen(false);
+    for (let i = 0; i < 3; i++) await fetchStatus();
+    expect(el('stream-own-state').textContent).toBe('Unknown');
+    expect(el('stream-own-state').className).toBe('stream-state stream-state--unknown');
+
+    // Recovery: applyStatus writes the cards before it clears the stale flag, so the panel must not read that flag.
+    applyStatus(status(true, { connected: true }, { streamer_one: { ...up, isLive: true } }));
+    expect(el('stream-own-state').textContent).toBe('Live');
+  });
+
+  it('leaves the panel alone when a malformed payload throws part-way through (#1114)', () => {
+    const { el, applyStatus } = runScripts([], 'streamer_one');
+    applyStatus(status(true, { connected: true }, { streamer_one: { ...up, isLive: true } }));
+
+    expect(() => applyStatus({ voice: {} })).toThrow();
+    expect(el('stream-own-state').textContent).toBe('Live');
+  });
+
+  it('says there is no channel when the user has none, whatever the payload (#1114)', () => {
+    const { el, applyStatus } = runScripts([], null);
+    applyStatus(status(true, { connected: true }, { streamer_one: { ...up, isLive: true } }));
+
+    expect(el('stream-own-state').textContent).toBe('No channel');
+    expect(el('stream-own-link').hidden).toBe(true);
   });
 });
 

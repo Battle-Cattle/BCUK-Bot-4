@@ -1,0 +1,7 @@
+{
+  "_comment": "Illustrative data for ui-check only. The signed-in user has a Twitch name that the bot does not monitor for this server (it is not in the status map).",
+  "extends": "dashboard.json",
+  "locals": {
+    "ownChannel": "unmonitored_streamer"
+  }
+}

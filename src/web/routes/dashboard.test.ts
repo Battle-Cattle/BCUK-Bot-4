@@ -21,6 +21,10 @@ vi.mock('../../twitch/eventsub/twitchEventSubCreate', () => ({
   hasAuthFailedSubs: vi.fn(),
 }));
 
+vi.mock('../guildAccess', () => ({
+  getLiveAccessForRequest: vi.fn(),
+}));
+
 vi.mock('../csrf', () => ({
   csrfProtection: (req: any, _res: any, next: any) => {
     req.csrfToken = () => 'test-csrf-token';
@@ -39,6 +43,7 @@ import {
   getStreamerByDiscordId, getSfxTriggerCount, getCustomCommandCount, getCounterCount, getRecentStreamerEvents,
 } from '../../db';
 import { hasAuthFailedSubs } from '../../twitch/eventsub/twitchEventSubCreate';
+import { getLiveAccessForRequest } from '../guildAccess';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
 const STATUS = { discord: { ready: true }, voice: {}, twitch: {} };
@@ -59,6 +64,7 @@ beforeEach(() => {
   vi.mocked(getCustomCommandCount).mockResolvedValue(5);
   vi.mocked(getCounterCount).mockResolvedValue(2);
   vi.mocked(getRecentStreamerEvents).mockResolvedValue([]);
+  vi.mocked(getLiveAccessForRequest).mockResolvedValue({ dbUser: { twitch_name: null } } as any);
 });
 
 describe('GET /', () => {
@@ -73,6 +79,39 @@ describe('GET /', () => {
     expect(getStreamerByDiscordId).not.toHaveBeenCalled();
     expect(getRecentStreamerEvents).not.toHaveBeenCalled();
     expect(getGuildScopedStatus).toHaveBeenCalledWith(null);
+  });
+
+  it.each([
+    ['trims, strips a leading # and lowercases the login', ' #Streamer_One ', 'streamer_one'],
+    ['passes a plain login through', 'streamer_two', 'streamer_two'],
+    ['gives null for a login that is not a valid Twitch name', 'ab', null],
+    ['gives null when the user has no twitch_name', null, null],
+  ])('passes the user\'s own channel to the view: %s (#1114)', async (_case, twitchName, expected) => {
+    vi.mocked(getLiveAccessForRequest).mockResolvedValue({ dbUser: { twitch_name: twitchName } } as any);
+
+    const res = await supertest(buildApp({ discordId: '100', currentGuildId: 'guild-A' })).get('/');
+
+    expect(res.body.ownChannel).toBe(expected);
+    // The per-request lookup requireAuth already made, keyed by the session's Discord id.
+    expect(getLiveAccessForRequest).toHaveBeenCalledWith(expect.anything(), '100');
+  });
+
+  it('gives a null own channel when the live user row no longer exists, and when signed out, without a lookup (#1114)', async () => {
+    vi.mocked(getLiveAccessForRequest).mockResolvedValue(null);
+    expect((await supertest(buildApp({ discordId: '100' })).get('/')).body.ownChannel).toBeNull();
+
+    vi.mocked(getLiveAccessForRequest).mockClear();
+    expect((await supertest(buildApp()).get('/')).body.ownChannel).toBeNull();
+    expect(getLiveAccessForRequest).not.toHaveBeenCalled();
+  });
+
+  it('leaves the status payload exactly as the status store returned it, adding only the own channel (#1114)', async () => {
+    vi.mocked(getLiveAccessForRequest).mockResolvedValue({ dbUser: { twitch_name: 'streamer_one' } } as any);
+
+    const res = await supertest(buildApp({ discordId: '100', currentGuildId: 'guild-A' })).get('/');
+
+    expect(res.body.status).toEqual(STATUS);
+    expect(JSON.stringify(res.body.status)).not.toContain('streamer_one');
   });
 
   it('includes usage-stat counts from the db layer', async () => {
