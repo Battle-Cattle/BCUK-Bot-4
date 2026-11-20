@@ -74,6 +74,8 @@ function htmlAttrJson(value) {
 
           <div class="card" id="card-twitch">
             <div class="card-header"><span class="card-icon">🟣</span><span class="card-label">Twitch Channels</span></div>
+            <!-- The roll-up of every channel's chat connection, as words and an icon; dashboard-status.js fills it from the status feed. -->
+            <div class="twitch-rollup stat-row"><span class="stat-label">State</span><span class="stat-value status-text" id="twitch-state">—</span></div>
             <div class="card-body dashboard-twitch-body dashboard-scroll" id="twitch-channels" tabindex="0" role="region" aria-label="Twitch channels"><p class="empty-msg">No Twitch channels configured.</p></div>
           </div>
 

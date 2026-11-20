@@ -121,7 +121,27 @@ describe('views/dashboard.ejs layout', () => {
     const css = fs.readFileSync(stylePath, 'utf8');
 
     expect(html).toMatch(/class="[^"]*\bdashboard-twitch-body\b[^"]*" id="twitch-channels"/);
-    expect(css).toMatch(/\.dashboard-twitch-body\s*\{[^}]*max-height:\s*10rem;[^}]*overflow-y:\s*auto/);
+    expect(css).toMatch(/\.dashboard-twitch-body\s*\{[^}]*max-height:\s*7rem;[^}]*overflow-y:\s*auto/);
+  });
+
+  it('puts a connection roll-up above the Twitch channel list, outside its scroll region (#1074)', async () => {
+    const html = await render();
+    const rollup = html.indexOf('id="twitch-state"');
+
+    expect(html).toMatch(/class="twitch-rollup stat-row"><span class="stat-label">State<\/span><span class="stat-value status-text" id="twitch-state">/);
+    expect(rollup).toBeGreaterThan(html.indexOf('id="card-twitch"'));
+    expect(rollup).toBeLessThan(html.indexOf('id="twitch-channels"'));
+    // The scroll region keeps its label and focus stop, and the Usage tile keeps its count.
+    expect(html).toMatch(/id="twitch-channels" tabindex="0" role="region" aria-label="Twitch channels"/);
+    expect(html).toMatch(/<span class="stat-big">\d+<\/span><span class="stat-big-label">Twitch Channels<\/span>/);
+  });
+
+  it('styles the Degraded roll-up with its own icon and the warning colour, and lets a long state wrap (#1074)', () => {
+    const css = fs.readFileSync(stylePath, 'utf8');
+
+    expect(css).toMatch(/\.status-text--degraded\s*\{\s*color:\s*var\(--warning\);\s*\}/);
+    expect(css).toMatch(/\.status-text--degraded::before\s*\{\s*content:\s*"\\25B2";\s*content:\s*"\\25B2"\s*\/\s*"";/);
+    expect(css).toMatch(/\.card \.twitch-rollup \.stat-value\s*\{[^}]*white-space:\s*normal/);
   });
 
   it('caps the desktop feed to leave room for the navbar, sidebar chrome and footer', () => {

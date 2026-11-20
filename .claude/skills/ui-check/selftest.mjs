@@ -250,9 +250,16 @@ describe('in the browser', () => {
     const channels = (await renderTexts('dashboard-all-connected.json', ['#twitch-channels']))['#twitch-channels'];
     assert.equal(channels.match(/\bConnected\b/g)?.length, 4, 'all four channels show Connected');
     assert.doesNotMatch(channels, /Disconnected|Never connected/i);
-    const unavailable = await renderTexts('dashboard-feed-unavailable.json', ['#health-indicator', '#status-stale-note']);
+    const unavailable = await renderTexts('dashboard-feed-unavailable.json', ['#health-indicator', '#status-stale-note', '#twitch-state']);
     assert.match(unavailable['#health-indicator'], /unknown/i);
     assert.match(unavailable['#status-stale-note'], /not live/);
+    assert.equal(unavailable['#twitch-state'], 'Unknown');
+    // The Twitch card's roll-up (#1074): some, all and no channels connected, and none configured.
+    assert.equal((await renderTexts('dashboard.json', ['#twitch-state']))['#twitch-state'], 'Degraded (2 of 4)');
+    assert.equal((await renderTexts('dashboard-all-connected.json', ['#twitch-state']))['#twitch-state'], 'Connected');
+    const none = await renderTexts('dashboard-no-channels.json', ['#twitch-state', '#twitch-channels']);
+    assert.equal(none['#twitch-state'], 'No channels configured');
+    assert.equal(none['#twitch-channels'], 'No Twitch channels configured.');
   });
 
   it('reports a link with outline: none and grey-on-grey text, and passes the good cases', async () => {

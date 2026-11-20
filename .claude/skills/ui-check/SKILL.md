@@ -24,6 +24,7 @@ A fixture is JSON: `{ "view": "dashboard", "locals": {…}, "api": {"/path": jso
   - `dashboard-voice-playing.json`: a sound playing in voice.
   - `dashboard-all-connected.json`: every Twitch channel's bot connected.
   - `dashboard-owner-long-names.json`: the widest nav the panel renders (the Owner's menu, the server switcher, a 32-character Discord name and a 100-character server name). Its desktop and tablet runs must show no `clippedContent`; the selftest also sweeps its widths from 641 to 1700px.
+  - `dashboard-no-channels.json`: no Twitch channels configured: the Twitch card's roll-up reads a neutral "No channels configured" and the header indicator stays healthy.
   - `dashboard-busy-feed.json`: 40 recent events, so the event feed is the tallest column and sets the page height. Its desktop run must report `verticalOverflow: "none"`; the selftest sweeps desktop heights from 900 to 1200px. Below about 900px the main column is itself taller than the viewport, so the page scrolls by design.
   - `dashboard-feed-unavailable.json`: no status stubs (`"statusPaths": "$remove"`), so `/api/status` and the stream answer 503; the clock advances past three failed polls to reach "Status unknown". Without the clock this takes 2–3 minutes, because a 503 closes `EventSource` for good.
 

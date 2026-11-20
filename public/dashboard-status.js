@@ -1,8 +1,27 @@
-/* global clearChildren, deriveHealth, relativeTime, renderHealth, setStatusDot, setText */
+/* global clearChildren, deriveHealth, relativeTime, renderHealth, setStatusDot, setText, twitchHealth */
 /* ── Status rendering & polling ──────────────────────────── */
 
 /**
- * Lists each monitored channel with its live/offline dot, or "None configured." when there are none.
+ * Picks the Twitch card's roll-up state across the guild's channels, from the same twitchHealth() the header
+ * indicator uses so the two never disagree. Words and an icon (the `status-text--*` modifier), never colour alone.
+ * No channels configured is neutral, not a fault; a payload that doesn't say is Unknown.
+ * @param twitch - The `twitch` section of an /api/status response: channel login to `{ connected, ... }`.
+ * @returns The visible state `text` (with "n of m", the connected count, when only some channels are connected) and its style `modifier`.
+ */
+function twitchRollupState(twitch) {
+  const health = twitchHealth(twitch);
+  if (health === 'neutral') return { text: 'No channels configured', modifier: 'inactive' };
+  if (health === 'unknown') return { text: 'Unknown', modifier: 'unknown' };
+  if (health === 'healthy') return { text: 'Connected', modifier: 'connected' };
+  if (health === 'unhealthy') return { text: 'Disconnected', modifier: 'disconnected' };
+  const channels = Object.values(twitch);
+  const connected = channels.filter((c) => c && c.connected === true).length;
+  return { text: `Degraded (${connected} of ${channels.length})`, modifier: 'degraded' };
+}
+
+/**
+ * Lists each monitored channel with its connection badge, last connected/disconnected time and LIVE badge, or
+ * "No Twitch channels configured." when there are none.
  * @param container - The element the channel list is rendered into.
  * @param channelMap - Map of Twitch channel name to its live state from /api/status.
  */
@@ -12,7 +31,7 @@ function renderChannels(container, channelMap) {
   if (entries.length === 0) {
     const p = document.createElement('p');
     p.className = 'empty-msg';
-    p.textContent = 'None configured.';
+    p.textContent = 'No Twitch channels configured.';
     container.appendChild(p);
     return;
   }
@@ -156,6 +175,7 @@ function applyStatusCards(status) {
   setText('last-when',    relativeTime(status.voice.lastPlayedAt));
 
   // Channels
+  setStatusText('twitch-state', twitchRollupState(status.twitch));
   const twitchEl = document.getElementById('twitch-channels');
   if (twitchEl) renderChannels(twitchEl, status.twitch);
 }
@@ -183,6 +203,7 @@ function markStatusStale(stale) {
   const unknown = { text: 'Unknown', modifier: 'unknown' };
   setStatusText('discord-state', unknown);
   setStatusText('voice-state', unknown);
+  setStatusText('twitch-state', unknown);
   setStatusDot('dot-discord', 'dot dot--unknown', 'Discord: Status unknown');
   setStatusDot('dot-voice', 'dot dot--unknown', 'Voice: Status unknown');
 }
