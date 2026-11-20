@@ -116,6 +116,31 @@ describe('audit maths', () => {
   });
 });
 
+/**
+ * Measures the System Status panel's Twitch list in the page (runs in the browser).
+ * @returns How many channel rows sit fully inside the list, its height and widths, how many badges poke out of the
+ *   panel's right edge, and the bottoms of the Usage section and the sidebar.
+ */
+function measureTwitchList() {
+  const doc = globalThis.document;
+  const rect = (el) => el.getBoundingClientRect();
+  const list = doc.getElementById('twitch-channels');
+  const listBox = rect(list);
+  const rows = [...list.querySelectorAll('.channel-item')];
+  const panel = rect(doc.querySelector('.system-status'));
+  const badges = [...list.querySelectorAll('.badge')];
+  return {
+    visible: rows.filter((r) => rect(r).top >= listBox.top - 1 && rect(r).bottom <= listBox.bottom + 1).length,
+    listHeight: Math.round(listBox.height),
+    scrollWidth: list.scrollWidth,
+    clientWidth: list.clientWidth,
+    badgesOutside: badges.filter((b) => rect(b).right > panel.right + 1).length,
+    usageBottom: rect(doc.querySelector('.dashboard-usage')).bottom,
+    sidebarBottom: rect(doc.querySelector('.dashboard-sidebar')).bottom,
+    pageOver: doc.documentElement.scrollHeight - doc.documentElement.clientHeight,
+  };
+}
+
 describe('in the browser', () => {
   let browser;
   before(async () => { browser = await chromium.launch(); });
@@ -203,6 +228,61 @@ describe('in the browser', () => {
       server.closeAllConnections();
       server.close();
     }
+  });
+
+  /**
+   * Opens a fixture in a desktop-sized page, runs `fn` with a helper that resizes it and measures the Twitch list,
+   * and cleans up.
+   * @param name - Fixture file name in fixtures/.
+   * @param fn - Receives `at(width, height)`, which resizes the page and returns `measureTwitchList()`.
+   */
+  async function withTwitchList(name, fn) {
+    const fixture = await loadFixture(path.join(FIXTURES, name));
+    const { server, baseUrl } = await startServer(await renderPage(fixture), fixture);
+    const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+    try {
+      await page.goto(baseUrl);
+      await settle(page, fixture);
+      await fn(async (width, height) => {
+        await page.setViewportSize({ width, height });
+        return page.evaluate(measureTwitchList);
+      });
+    } finally {
+      await page.close();
+      server.closeAllConnections();
+      server.close();
+    }
+  }
+
+  it('shows several Twitch channels in the System Status panel, and more when the status row has spare height (#1076)', async () => {
+    await withTwitchList('dashboard-six-channels.json', async (at) => {
+      const base = await at(1440, 900);
+      assert.ok(base.visible >= 4, `at least 4 of the 6 channels show at 1440x900 (${base.visible})`);
+      // With the short 3-event feed the main column sets the page height, so there is no spare height to grow into.
+      assert.ok(Math.abs((await at(1440, 1200)).listHeight - base.listHeight) <= 1, 'the list stays compact when nothing is spare');
+    });
+    await withTwitchList('dashboard-fourteen-channels-busy-feed.json', async (at) => {
+      const base = await at(1440, 900);
+      let previous = base.visible;
+      for (const height of [900, 1000, 1080, 1200]) {
+        const m = await at(1440, height);
+        assert.ok(m.pageOver <= 0, `no page scrollbar at 1440x${height} (${m.pageOver}px over)`);
+        assert.ok(m.visible >= previous, `the visible count never drops as the viewport grows (${m.visible} at ${height})`);
+        assert.ok(m.usageBottom <= m.sidebarBottom, `Usage doesn't extend past the sidebar at ${height} (${m.usageBottom} > ${m.sidebarBottom})`);
+        previous = m.visible;
+      }
+      assert.ok(previous >= base.visible + 3, `the list gains at least 3 rows by 1200px high (${base.visible} to ${previous})`);
+    });
+  });
+
+  it('keeps the Twitch list and its badges inside the panel at every width (#1076)', async () => {
+    await withTwitchList('dashboard-six-channels.json', async (at) => {
+      for (const width of [390, 768, 820, 1101, 1250, 1440, 1700]) {
+        const m = await at(width, 900);
+        assert.ok(m.scrollWidth <= m.clientWidth + 1, `the list doesn't scroll sideways at ${width}px (${m.scrollWidth} > ${m.clientWidth})`);
+        assert.equal(m.badgesOutside, 0, `no badge pokes out of the panel at ${width}px`);
+      }
+    });
   });
 
   it('keeps a busy event feed from giving the desktop dashboard a page scrollbar (#1130)', async () => {

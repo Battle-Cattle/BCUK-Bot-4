@@ -411,6 +411,21 @@ describe('public/dashboard-status.js Twitch connection roll-up', () => {
     expect(items.map(badgesOf)).toEqual([['LIVE', 'Connected'], ['Disconnected']]);
   });
 
+  it('lays each channel out as one row: its name and last-seen time together, then its badges (#1076)', () => {
+    const { el, applyStatus } = runScripts();
+    applyStatus(status(true, { connected: true }, {
+      up_live: { connected: true, isLive: true, lastConnectedAt: null, lastDisconnectedAt: null },
+    }));
+
+    const [item] = el('twitch-channels').children;
+    expect(item?.children.map((c) => c.className)).toEqual(['channel-info', 'channel-badges']);
+    expect(item?.children[0]?.children.map((c) => [c.className, c.textContent])).toEqual([
+      ['channel-name', 'up_live'],
+      ['channel-meta', 'Never seen'],
+    ]);
+    expect(item?.children[1]?.children.map((c) => c.textContent)).toEqual(['LIVE', 'Connected']);
+  });
+
   it('leaves each channel\'s own connection badge and last-seen time as they were', () => {
     const { el, applyStatus } = runScripts();
     applyStatus(status(true, { connected: true }, { a: up, b: down }));

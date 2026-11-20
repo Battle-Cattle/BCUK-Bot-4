@@ -204,28 +204,64 @@ a:hover { text-decoration: underline; }
 :root { --dashboard-health-offset: 3.6rem; }
 .container--wide { max-width: 1600px; }
 .dashboard-layout {
-  display: grid; grid-template-columns: minmax(0, 1fr) 360px; grid-template-rows: auto auto 1fr;
+  display: grid; grid-template-columns: minmax(0, 1fr) 360px; grid-template-rows: 1fr auto auto;
   grid-template-areas: "status events" "links events" "usage events";
   column-gap: 1.5rem; align-items: start;
 }
-.dashboard-status  { grid-area: status; }
+/* The status row is the 1fr one: when the feed is the tallest column, the spare height goes to System Status (which
+   fills it with more Twitch channels) instead of opening a gap under Usage, and when it is not, the row is only as
+   tall as its content. The section stretches to the row and passes the height down a flex/grid chain whose every link
+   needs min-height: 0, so the list scrolls inside it rather than growing the page (#1130). It is also the container
+   the panel's width queries read, because the main column's width does not follow the viewport's. */
+.dashboard-status  { grid-area: status; align-self: stretch; display: flex; flex-direction: column; container-type: inline-size; }
 .dashboard-sidebar { grid-area: events; position: sticky; top: calc(var(--dashboard-nav-offset) + 1rem); }
 .dashboard-links   { grid-area: links; }
 .dashboard-usage   { grid-area: usage; }
 .dashboard-sidebar .section { margin-bottom: 0; }
-/* A lower column floor than .status-grid's 280px so the four status cards and usage tiles stay on one row next to the sidebar; auto-fit stretches them over any spare column on wide screens. */
+/* The Usage tiles use .status-grid: a lower column floor than its 280px keeps the four tiles on one row next to the
+   sidebar, and auto-fit stretches them over any spare column on wide screens. */
 .dashboard-layout .status-grid { grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
-/* Long Twitch names wrap inside the narrower status card so the connection badge stays in view. */
+
+/* ── System Status panel ───────────────────────────────────
+   One card holding the bot's services (Discord, Voice, Twitch chat), each a .service with a header (icon, name, state
+   in words, dot) and a body, with Last Played beside it. The base rules are the stacked layout (phones); wider
+   containers switch to Discord and Voice stacked on the left and Twitch on the right, spanning both. */
+.status-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; flex: 1 1 auto; min-height: 0; }
+.system-status { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto; min-height: 0; }
+.service { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-top: 1px solid var(--border); }
+.service:first-child { border-top: none; }
+.service-header { display: flex; align-items: center; gap: .5rem; padding: .4rem 1rem; border-bottom: 1px solid var(--border); font-weight: 600; }
+.service-label { flex: 1; margin: 0; font-size: .9rem; font-weight: 600; }
+/* A service's state sits on its header line; unlike the stat rows' values it may wrap ("No channels configured"). */
+.service-header .stat-value { max-width: none; white-space: normal; overflow: visible; text-overflow: clip; }
+.service-body { padding: .25rem 1rem .5rem; }
+.service-body .stat-row { padding: .2rem 0; }
+.service-body .stat-row-top-gap { margin-top: .35rem; }
+/* Long Twitch names wrap inside the narrow column so the connection badge stays in view. */
 .dashboard-layout .channel-name { overflow-wrap: anywhere; }
-/* Cap the Twitch list so a long channel list scrolls instead of stretching every card in the row or pushing Quick
-   Links down. The Voice card, with its channel select and button, is the tallest of the others; the cap leaves room
-   for the card header and the connection roll-up above the list, even when the roll-up wraps to two lines, so this
-   card stays at or under the Voice card's height (the 10rem it was before the roll-up, less 3rem). */
-.dashboard-twitch-body { max-height: 7rem; overflow-y: auto; }
-/* The roll-up's state can be longer than a Discord or Voice state ("No channels configured"), so it wraps rather than
-   truncates. The extra class keeps these rules ahead of .stat-row's, which comes later in this file. */
-.card .twitch-rollup { padding: .45rem 1rem; border-bottom: 1px solid var(--border); }
-.card .twitch-rollup .stat-value { max-width: none; white-space: normal; overflow: visible; text-overflow: clip; }
+/* The channel list is a scroll region that takes whatever height its column has. `flex: 1 1 0px` (never `flex: 1`,
+   whose 0% basis turns into the content's height when the container's height is indefinite) and min-height: 0 up the
+   chain keep it from stretching the row; the 7rem floor is how many rows show when there is no spare height. */
+.dashboard-twitch-body { flex: 1 1 0px; min-height: 7rem; overflow-y: auto; }
+/* One line per channel: name, then when it last connected or disconnected, then its badges. */
+.channel-info { display: flex; align-items: baseline; gap: .5rem; flex: 1 1 auto; min-width: 0; }
+.channel-meta { margin: 0 0 0 auto; white-space: nowrap; }
+@container (min-width: 40rem) {
+  .system-status {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); grid-template-rows: auto 1fr;
+    grid-template-areas: "discord twitch" "voice twitch";
+  }
+  .service--discord { grid-area: discord; }
+  .service--voice   { grid-area: voice; }
+  .service--twitch  { grid-area: twitch; border-top: none; border-left: 1px solid var(--border); }
+}
+@container (min-width: 60rem) {
+  .status-layout { grid-template-columns: minmax(0, 1fr) 15rem; }
+  .last-played { align-self: start; }
+}
+@container (max-width: 39.99rem) {
+  .dashboard-twitch-body { flex: none; min-height: 0; max-height: 13.5rem; }
+}
 /* Dark, thin scrollbars for the dashboard's inner scroll areas (event feed, Twitch list) instead of the
    browser's default light ones. */
 .dashboard-scroll { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
@@ -316,10 +352,10 @@ a:hover { text-decoration: underline; }
 .overlay-status { display: flex; align-items: center; gap: .5rem; margin-top: .5rem; font-size: .85rem; color: var(--muted); }
 
 /* ── Channel list (inside card-body) ──────────────────── */
-.channel-item { display: flex; justify-content: space-between; align-items: center; padding: .45rem 0; border-bottom: 1px solid var(--border); }
+.channel-item { display: flex; justify-content: space-between; align-items: center; gap: .5rem; padding: .3rem 0; border-bottom: 1px solid var(--border); }
 .channel-item:last-child { border-bottom: none; }
 .channel-name { font-family: var(--mono); font-size: .85rem; }
-.channel-meta { font-size: .8rem; color: var(--muted); margin-top: .15rem; }
+.channel-meta { font-size: .8rem; color: var(--muted); }
 .channel-badges { display: flex; gap: .35rem; align-items: center; flex-shrink: 0; }
 /* An icon on each Twitch channel badge, so Connected / Disconnected / LIVE differ by shape as well as colour.
    The `/ ""` alt text keeps the icon out of the accessible name (the badge's own text already says it); the
