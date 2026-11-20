@@ -289,6 +289,14 @@ describe('public/style.css nav collapse breakpoint (#1109)', () => {
     expect(block).toMatch(/\.nav-group-items\s*\{[^}]*position:\s*static;/);
   });
 
+  it('bounds the open menu to the space under the pinned navbar and scrolls it inside itself, so Logout stays reachable', () => {
+    const rule = /\.navbar-collapse\s*\{([^}]*)\}/.exec(mediaBlock(collapseMax))?.[1] ?? '';
+
+    expect(rule).toMatch(/max-height:\s*calc\(100vh - 4rem\);/);
+    expect(rule).toMatch(/max-height:\s*calc\(100dvh - 4rem\);/);
+    expect(rule).toMatch(/overflow-y:\s*auto;/);
+  });
+
   it('keeps only the tighter navbar padding and the footer links in the 640px phone block, not the menu collapse', () => {
     const phone = mediaBlock(640);
 

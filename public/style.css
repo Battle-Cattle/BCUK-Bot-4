@@ -105,12 +105,17 @@ a:hover { text-decoration: underline; }
     border: 1px solid var(--border); color: var(--text);
     padding: .3rem .6rem; border-radius: 6px; cursor: pointer; font-size: 1.1rem; line-height: 1;
   }
-  /* Dropdown: absolutely positioned just below the sticky navbar */
+  /* Dropdown: absolutely positioned just below the sticky navbar. The navbar stays pinned, so a menu taller than the
+     space under it (an Owner's, with a group open, on a short viewport) scrolls inside itself, or its last items,
+     Logout among them, could never be reached. 4rem leaves room for the navbar (about 3.5rem tall); the vh line is
+     the fallback for browsers without dvh. */
   .navbar-collapse {
     display: none; position: absolute; top: 100%; left: 0; right: 0;
     flex-direction: column; gap: .25rem;
     background: var(--bg-card); border-bottom: 1px solid var(--border);
     padding: .5rem 1rem;
+    max-height: calc(100vh - 4rem); max-height: calc(100dvh - 4rem);
+    overflow-y: auto; overscroll-behavior: contain;
   }
   .navbar.nav-open .navbar-collapse { display: flex; }
   .navbar-menu { flex-direction: column; gap: 0; width: 100%; align-items: stretch; }
