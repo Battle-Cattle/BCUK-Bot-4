@@ -187,14 +187,16 @@ function sendSseHandshake(res: Response): void {
  * {@link SSE_MAX_PENDING_BYTES} queued, runs `cleanup` (and drops a backlogged socket) so nothing
  * is left running or buffering for a dead or stalled connection.
  * @param res - The SSE response to ping.
- * @param cleanup - Idempotent teardown (clears this interval and evicts the client) to run on a
- *   failed ping write.
+ * @param cleanup - Idempotent teardown (clears this interval and evicts the client), run on a
+ *   failed ping write when no extended teardown is registered for `res` (see {@link chainConnectionCleanup}).
  * @returns The interval handle, so the caller can also clear it on a normal close/error event.
  */
 function startKeepalive(res: Response, cleanup: () => void): NodeJS.Timeout {
   return setInterval(() => {
     if (writeWithinPendingLimit(res, () => res.write(': ping\n\n'))) return;
-    cleanup();
+    // The registered cleanup, not the local one: chainConnectionCleanup may have extended it, and a failed ping can
+    // fire no close/error event for those extras to ride on. It is gone once cleanup has run, hence the fallback.
+    (connectionCleanups.get(res) ?? cleanup)();
     dropBackloggedClient(res);
   }, KEEPALIVE_INTERVAL_MS);
 }

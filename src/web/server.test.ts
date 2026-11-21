@@ -936,6 +936,9 @@ describe('preSessionLimiter (server.ts)', () => {
 });
 
 describe('session store destroy (#1112)', () => {
+  /** Every stream the test opened, so afterEach can end the ones the destroy left open (releasing their keepalive and SSE slot). */
+  const openedResponses: { end: () => void }[] = [];
+
   beforeEach(() => {
     // An earlier test's stopWebPanel() leaves the SSE helper refusing connections (as during shutdown).
     setSseConnectionsAccepted(true);
@@ -943,6 +946,8 @@ describe('session store destroy (#1112)', () => {
 
   afterEach(() => {
     storeGet.mockImplementation((_id, cb) => cb(null, undefined));
+    for (const res of openedResponses.splice(0)) res.end();
+    resetSessionStreamsForTests();
   });
 
   it('closes the destroyed session\'s dashboard streams, and only its', async () => {
@@ -957,6 +962,7 @@ describe('session store destroy (#1112)', () => {
       const req = Object.assign(new EventEmitter(), { destroyed: false, sessionID, session: { user: { discordId: sessionID } } });
       expect(attachSseConnection(req as never, res as never, { connections: new Map(), key: sessionID, maxPerChannel: 5 })).toBe(true);
       expect(registerSessionStream(req as never, res as never, 'status')).toBe(true);
+      openedResponses.push(res);
       return res;
     };
     const destroyed = open('destroy-me');
@@ -967,7 +973,6 @@ describe('session store destroy (#1112)', () => {
     expect(res.text).toBe('destroyed');
     expect(destroyed.end).toHaveBeenCalledTimes(1);
     expect(other.end).not.toHaveBeenCalled();
-    resetSessionStreamsForTests();
   });
 });
 

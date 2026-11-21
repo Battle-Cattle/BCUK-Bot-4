@@ -1156,6 +1156,29 @@ describe('keepalive — pending write buffer cap', () => {
   });
 });
 
+describe('keepalive — chained cleanup', () => {
+  it('runs a chained teardown, once, when a ping write fails', () => {
+    vi.useFakeTimers();
+    try {
+      const connections = new Map<string, Set<any>>();
+      const res = makeRes() as any;
+      attachSseConnection(makeReq('k').req as any, res, { connections, key: 'k', maxPerChannel: 5 });
+      const extra = vi.fn();
+      expect(chainConnectionCleanup(res, extra)).toBe(true);
+      res.write.mockImplementation(() => { throw new Error('socket gone'); });
+
+      vi.advanceTimersByTime(25_000);
+
+      expect(extra).toHaveBeenCalledTimes(1);
+      expect(connections.has('k')).toBe(false);
+      vi.advanceTimersByTime(50_000); // the interval was cleared: no second run
+      expect(extra).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe('chainConnectionCleanup', () => {
   it('returns false and chains nothing for a response that was never attached', () => {
     const extra = vi.fn();

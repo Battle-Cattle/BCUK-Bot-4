@@ -9,6 +9,8 @@ const { chainConnectionCleanup } = vi.hoisted(() => ({ chainConnectionCleanup: v
 vi.mock('./routes/sseChannel', () => ({ chainConnectionCleanup }));
 
 import { EventEmitter } from 'events';
+import http from 'http';
+import type { AddressInfo } from 'net';
 import express from 'express';
 import session from 'express-session';
 import type { Request, Response } from 'express';
@@ -391,5 +393,68 @@ describe('with a real express-session and MemoryStore', () => {
 
     expect(stream.end).toHaveBeenCalledTimes(1);
     expect(otherStream.end).not.toHaveBeenCalled();
+  });
+});
+
+describe('a closed stream never writes its session back (a late save would undo the destroy)', () => {
+  /** A MemoryStore whose `set` lands one tick late, like a pooled MySQL write finishing after a later DELETE. */
+  class LateSetStore extends session.MemoryStore {
+    sets = 0;
+
+    set(sessionId: string, sess: session.SessionData, callback?: (err?: unknown) => void): void {
+      this.sets++;
+      setImmediate(() => super.set(sessionId, sess, callback));
+    }
+  }
+
+  it('leaves no session row behind after the destroy, even though the stream\'s own session was modified', async () => {
+    const store = new LateSetStore();
+    wrapStoreDestroy(store);
+    const app = express();
+    app.set('trust proxy', 1);
+    app.use(session({ secret: 'x'.repeat(32), resave: false, saveUninitialized: false, store, cookie: { secure: true, httpOnly: true, sameSite: 'lax' } }));
+    let sid = '';
+    app.get('/login', (req, res) => {
+      req.session.user = { discordId: '42', discordName: 'u', discordAvatar: null, isOwner: false, accessLevel: 0, currentGuildId: 'g1', guilds: [] };
+      sid = req.sessionID;
+      res.sendStatus(204);
+    });
+    // An open SSE stream on a request whose session changed (as requireGuildContext can change it).
+    app.get('/stream', (req, res) => {
+      req.session.user!.accessLevel = 3;
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.flushHeaders();
+      res.write(': connected\n\n');
+      registerSessionStream(req, res, 'status');
+    });
+    app.get('/destroy', (req, res) => { req.session.destroy(() => res.sendStatus(204)); });
+    const server = http.createServer(app);
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address() as AddressInfo;
+    const https = { 'X-Forwarded-Proto': 'https' };
+    try {
+      const supertest = (await import('supertest')).default;
+      const cookie = (await supertest(server).get('/login').set(https)).headers['set-cookie']?.[0]?.split(';')[0] ?? '';
+      await new Promise((resolve) => setImmediate(resolve)); // let the login's own (late) save land
+      expect(await new Promise((resolve) => store.get(sid, (_e, row) => resolve(row)))).toBeTruthy();
+      const setsBefore = store.sets;
+      const closed = new Promise<void>((resolve) => {
+        http.get({ port, host: '127.0.0.1', path: '/stream', headers: { ...https, Cookie: cookie } }, (res) => {
+          res.on('data', () => {});
+          res.on('end', resolve);
+          res.on('close', resolve);
+        });
+      });
+      await new Promise((resolve) => setTimeout(resolve, 50)); // the stream is open and registered
+
+      await supertest(server).get('/destroy').set({ ...https, Cookie: cookie });
+      await closed;
+      for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve));
+
+      expect(await new Promise((resolve) => store.get(sid, (_e, row) => resolve(row)))).toBeFalsy();
+      expect(store.sets).toBe(setsBefore); // the closing stream did not try to save its session
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 });

@@ -31,6 +31,7 @@ export const MAX_TRACKED_ENTRIES = 10_000;
 
 /** One registered stream. */
 interface StreamEntry {
+  req: Request;
   res: Response;
   sessionId: string;
   discordId: string;
@@ -107,11 +108,16 @@ function unregister(res: Response): void {
 
 /**
  * Ends one stream and forgets it. A failing `end()` is logged and never stops the caller closing
- * the rest.
+ * the rest. The request's session is detached first: express-session saves or touches a session
+ * when its response ends, and a stream closed because its session ended must not write that session
+ * back, which could land after the store's DELETE and bring a logged-out session back (or extend its
+ * row). With no `req.session`, the response ends without touching the store.
  * @param res - The stream's response.
+ * @param req - The stream's request (for a stream not yet registered, since the registry has no entry for it).
  */
-function closeStream(res: Response): void {
+function closeStream(res: Response, req: Request | undefined = streams.get(res)?.req): void {
   unregister(res);
+  if (req) Reflect.deleteProperty(req, 'session');
   try {
     res.end();
   } catch (err) {
@@ -164,11 +170,11 @@ export function registerSessionStream(req: Request, res: Response, _kind: Sessio
   const discordId = req.session.user?.discordId;
   const generation = req.session.sessionGeneration ?? 0;
   if (!sessionId || !discordId || isTombstoned(sessionId) || isBelowMinGeneration(discordId, generation)) {
-    closeStream(res);
+    closeStream(res, req);
     return false;
   }
 
-  const entry: StreamEntry = { res, sessionId, discordId, generation, timer: null };
+  const entry: StreamEntry = { req, res, sessionId, discordId, generation, timer: null };
   streams.set(res, entry);
   indexAdd(bySession, sessionId, res);
   indexAdd(byUser, discordId, res);
@@ -176,12 +182,12 @@ export function registerSessionStream(req: Request, res: Response, _kind: Sessio
   const endsAt = sessionEndsAt(req.session);
   if (endsAt !== undefined) {
     // unref'd: a timer must never keep the process alive at shutdown. Ending early is safe, since the reconnect re-runs auth.
-    entry.timer = setTimeout(() => closeStream(res), Math.max(0, endsAt - Date.now()));
+    entry.timer = setTimeout(() => closeStream(res, req), Math.max(0, endsAt - Date.now()));
     entry.timer.unref();
   }
 
   // attachSseConnection's own listeners run its cleanup; ours cover the same ways a connection ends, and
-  // chaining onto its cleanup covers a failed broadcast or keepalive write, which emits no close event.
+  // chaining onto its cleanup covers a failed broadcast or keepalive write, which can emit no close event.
   const forget = (): void => unregister(res);
   req.once('close', forget);
   res.once('close', forget);
