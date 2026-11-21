@@ -235,6 +235,20 @@ describe('closing at the session\'s own end time', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it('ends the stream at the cookie\'s own expiry when that is the earliest time', () => {
+    vi.useFakeTimers();
+    const now = Date.now();
+    const res = fakeRes();
+    const cookie = { expires: new Date(now + 60_000) };
+    registerSessionStream(fakeReq('s1', '42', 0, { lastSeenAt: now, loginAt: now, cookie }), res, 'status');
+
+    vi.advanceTimersByTime(59_999);
+    expect(res.end).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(2);
+
+    expect(res.end).toHaveBeenCalledTimes(1);
+  });
+
   it('ends the stream at the 7-day cap when that comes first', () => {
     vi.useFakeTimers();
     const now = Date.now();
