@@ -156,13 +156,13 @@ describe('views/dashboard.ejs layout', () => {
     expect(between(html, '<div class="service service--twitch"', 'id="twitch-channels"')).toContain('id="twitch-state"');
   });
 
-  it('puts the sections in source order System Status, events sidebar, Quick Links, Usage', async () => {
+  it('puts the sections in source order welcome hero, System Status, events sidebar, Usage', async () => {
     const layout = divBlock(await render(), '<div class="dashboard-layout">');
 
     const positions = [
+      '<section class="dashboard-hero"',
       '<section class="section dashboard-status" id="bot-status">',
       '<aside class="dashboard-sidebar"',
-      '<section class="section dashboard-links">',
       '<section class="section dashboard-usage">',
     ].map((tag) => layout.indexOf(tag));
     expect(positions[0]).toBeGreaterThanOrEqual(0);
@@ -184,7 +184,14 @@ describe('views/dashboard.ejs layout', () => {
     const narrowRules = /@media \(max-width: 1100px\) \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? '';
 
     expect(narrowRules).toMatch(/\.dashboard-layout\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\);/);
-    expect(narrowRules).toMatch(/grid-template-areas:\s*"status" "events" "links" "usage"/);
+    expect(narrowRules).toMatch(/grid-template-areas:\s*"hero" "status" "events" "usage"/);
+  });
+
+  it('keeps the welcome hero in the left column on desktop, above System Status', () => {
+    const css = fs.readFileSync(stylePath, 'utf8');
+
+    expect(css).toMatch(/grid-template-areas:\s*"hero events" "status events" "usage events"/);
+    expect(css).toMatch(/\.dashboard-hero\s*\{[^}]*grid-area:\s*hero/);
   });
 
   it('lets long Twitch channel names wrap inside the status card', () => {
@@ -217,13 +224,13 @@ describe('views/dashboard.ejs layout', () => {
 
     expect(html).toMatch(/class="[^"]*\bdashboard-twitch-body\b[^"]*" id="twitch-channels"/);
     // `flex: 1 1 0px`, never `flex: 1`: a 0% basis becomes the content's height when the container's is indefinite,
-    // which would stretch the row and push Quick Links down. The 7rem floor is what shows when nothing is spare.
+    // which would stretch the row and push Usage down. The 7rem floor is what shows when nothing is spare.
     expect(list).toMatch(/flex:\s*1 1 0px;/);
     expect(list).toMatch(/min-height:\s*7rem;/);
     expect(list).toMatch(/overflow-y:\s*auto/);
     expect(list).not.toContain('max-height');
-    // The status row is the 1fr one, stretched, with min-height: 0 down the chain, so the spare height lands there.
-    expect(css).toMatch(/\.dashboard-layout\s*\{[^}]*grid-template-rows:\s*1fr auto auto;/);
+    // The status row is the 1fr one (between the hero and Usage), stretched, with min-height: 0 down the chain, so the spare height lands there.
+    expect(css).toMatch(/\.dashboard-layout\s*\{[^}]*grid-template-rows:\s*auto 1fr auto;/);
     expect(css).toMatch(/\.dashboard-status\s*\{[^}]*align-self:\s*stretch;[^}]*container-type:\s*inline-size/);
     for (const rule of ['status-layout', 'system-status', 'service']) {
       expect(new RegExp(`\\n\\.${rule}\\s*\\{[^}]*min-height:\\s*0;`).test(css)).toBe(true);
@@ -502,5 +509,58 @@ describe('overall health indicator', () => {
     }
     // Badges lose their fill and the LIVE pulse stops, so a stale LIVE neither reads as current nor drops below AA.
     expect(css).toMatch(/\.is-stale \.badge\s*\{[^}]*background:\s*transparent;[^}]*color:\s*var\(--muted\);[^}]*animation:\s*none;/);
+  });
+});
+
+describe('views/dashboard.ejs welcome hero', () => {
+  /** The hero's HTML, from its opening tag to its closing `</section>`. */
+  const heroOf = (html: string): string => between(html, '<section class="dashboard-hero"', '</section>');
+  /** The destinations of every quick action in the hero, in order. */
+  const hrefsOf = (hero: string): string[] => [...hero.matchAll(/<a href="([^"]+)" class="hero-action"/g)].map((m) => m[1] as string);
+
+  it('greets the signed-in user by name in the page h1', async () => {
+    const html = await render({ user: { ...USER, discordName: 'user1' } });
+
+    expect(html.match(/<h1\b/g)).toHaveLength(1);
+    expect(heroOf(html)).toContain('<h1 class="hero-title" id="dashboard-welcome">Welcome back, user1!</h1>');
+    expect(heroOf(html)).toContain('aria-labelledby="dashboard-welcome"');
+  });
+
+  it('escapes the display name', async () => {
+    const html = await render({ user: { ...USER, discordName: '<b>x</b>' } });
+
+    expect(heroOf(html)).toContain('Welcome back, &lt;b&gt;x&lt;/b&gt;!');
+    expect(heroOf(html)).not.toContain('<b>x</b>');
+  });
+
+  it('shows a neutral greeting when signed out', async () => {
+    const hero = heroOf(await render({ user: null }));
+
+    expect(hero).toContain('>Welcome to BCUK Bot</h1>');
+    expect(hero).not.toContain('Welcome back');
+  });
+
+  it('lists every existing quick link for a Manager and above', async () => {
+    const hero = heroOf(await render({ user: { ...USER, accessLevel: 2 } }));
+
+    expect(hrefsOf(hero)).toEqual(['/sfx', '/commands', '/counters', '/channel-points', '/loyalty-points', '/alerts/settings']);
+  });
+
+  it.each([[1], [0]])('leaves Commands and Counters out below Manager (access level %i)', async (accessLevel) => {
+    const hero = heroOf(await render({ user: { ...USER, accessLevel } }));
+
+    expect(hrefsOf(hero)).toEqual(['/sfx', '/channel-points', '/loyalty-points', '/alerts/settings']);
+  });
+
+  it('keeps the same four links for a signed-out visitor, as the old Quick Links did', async () => {
+    expect(hrefsOf(heroOf(await render({ user: null })))).toEqual(['/sfx', '/channel-points', '/loyalty-points', '/alerts/settings']);
+  });
+
+  it('hides the emoji from assistive technology and drops the old Quick Links section', async () => {
+    const html = await render();
+
+    expect(heroOf(html).match(/class="hero-action-icon" aria-hidden="true"/g)).toHaveLength(6);
+    expect(html).not.toContain('Quick Links</h2>');
+    expect(html).not.toContain('quick-link-card');
   });
 });
