@@ -18,6 +18,26 @@ function htmlAttrJson(value) {
 
     <div class="dashboard-layout">
 
+      <%# Welcome hero: a short greeting (the page's h1) and the existing Quick Links as compact actions, in the left
+          column so the right-hand column's height budget is unchanged. Nothing here is new: the same destinations at
+          the same access levels (Commands and Counters Manager+ only) the old Quick Links section had. %>
+      <section class="dashboard-hero" aria-labelledby="dashboard-welcome">
+        <div class="hero-text">
+          <h1 class="hero-title" id="dashboard-welcome"><%= user ? 'Welcome back, ' + user.discordName + '!' : 'Welcome to BCUK Bot' %></h1>
+          <p class="hero-subtitle">Your Battle Cattle dashboard at a glance.</p>
+        </div>
+        <nav class="hero-actions" aria-label="Quick links">
+          <a href="/sfx" class="hero-action"><span class="hero-action-icon" aria-hidden="true">🎧</span>SFX</a>
+          <% if (user && user.accessLevel >= 2) { %>
+          <a href="/commands" class="hero-action"><span class="hero-action-icon" aria-hidden="true">💻</span>Commands</a>
+          <a href="/counters" class="hero-action"><span class="hero-action-icon" aria-hidden="true">🔢</span>Counters</a>
+          <% } %>
+          <a href="/channel-points" class="hero-action"><span class="hero-action-icon" aria-hidden="true">🪙</span>Channel Points</a>
+          <a href="/loyalty-points" class="hero-action"><span class="hero-action-icon" aria-hidden="true">🏆</span>Loyalty Points</a>
+          <a href="/alerts/settings" class="hero-action"><span class="hero-action-icon" aria-hidden="true">🔔</span>Alerts</a>
+        </nav>
+      </section>
+
       <!-- ── System Status: one panel for the bot's services (Discord, Voice, Twitch chat), with Last Played beside it.
            Each service keeps its own state text, dot and controls; broadcast state is not part of it. ── -->
       <section class="section dashboard-status" id="bot-status">
@@ -133,21 +153,6 @@ function htmlAttrJson(value) {
         </aside>
 
       </div>
-
-      <!-- ── Quick Links ── -->
-      <section class="section dashboard-links">
-        <h2 class="section-title">Quick Links</h2>
-        <div class="quick-links-grid">
-          <a href="/sfx" class="quick-link-card"><span class="quick-link-icon">🎧</span><span class="quick-link-label">SFX</span></a>
-          <% if (user && user.accessLevel >= 2) { %>
-          <a href="/commands" class="quick-link-card"><span class="quick-link-icon">💻</span><span class="quick-link-label">Commands</span></a>
-          <a href="/counters" class="quick-link-card"><span class="quick-link-icon">🔢</span><span class="quick-link-label">Counters</span></a>
-          <% } %>
-          <a href="/channel-points" class="quick-link-card"><span class="quick-link-icon">🪙</span><span class="quick-link-label">Channel Points</span></a>
-          <a href="/loyalty-points" class="quick-link-card"><span class="quick-link-icon">🏆</span><span class="quick-link-label">Loyalty Points</span></a>
-          <a href="/alerts/settings" class="quick-link-card"><span class="quick-link-icon">🔔</span><span class="quick-link-label">Alerts</span></a>
-        </div>
-      </section>
 
       <!-- ── Usage ── -->
       <section class="section dashboard-usage">
