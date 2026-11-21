@@ -105,6 +105,12 @@ export interface StreamerSseEventsHandlerOptions<K> {
   resolveKey: (streamer: DbStreamerEventSub) => K;
   /** Logger used to report an unexpected streamer lookup failure. */
   log: ReturnType<typeof createLogger>;
+  /**
+   * Called synchronously right after the connection is attached (never for a refused one), so a
+   * caller can tie the stream to something else, e.g. close it when the session ends. Streams that
+   * pass nothing behave exactly as before.
+   */
+  onAttached?: (req: Request, res: Response) => void;
 }
 
 /**
@@ -117,12 +123,12 @@ export interface StreamerSseEventsHandlerOptions<K> {
  * identical. The streamer is re-resolved on every connection attempt (rather than trusting a
  * cached id) so a revoked streamer record takes effect immediately.
  * @param options - See {@link StreamerSseEventsHandlerOptions}.
- * @returns An Express route handler for the logged-in user's own streamer SSE stream.
+ * @returns An Express route handler for the logged-in user's own streamer SSE stream; calls `options.onAttached` once the connection is attached.
  */
 export function createStreamerSseEventsHandler<K>(
   options: StreamerSseEventsHandlerOptions<K>,
 ): (req: Request, res: Response) => Promise<void> {
-  const { connections, maxPerChannel, resolveKey, log } = options;
+  const { connections, maxPerChannel, resolveKey, log, onAttached } = options;
 
   return async (req, res) => {
     let streamer: DbStreamerEventSub | null;
@@ -138,7 +144,7 @@ export function createStreamerSseEventsHandler<K>(
       return;
     }
 
-    attachSseConnection(req, res, { connections, key: resolveKey(streamer), maxPerChannel });
+    if (attachSseConnection(req, res, { connections, key: resolveKey(streamer), maxPerChannel })) onAttached?.(req, res);
   };
 }
 

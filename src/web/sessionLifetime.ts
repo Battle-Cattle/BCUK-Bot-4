@@ -44,6 +44,28 @@ export function isSessionPastLifetime(session: Partial<SessionData>, now: number
 }
 
 /**
+ * When a session ends, whichever comes first: its cookie's expiry, 24 hours after its last page
+ * load, or 7 days after login. The dashboard's live streams close then, since an idle-expired
+ * session's cookie is dropped by the browser and nothing else would end its stream. A page load
+ * in another tab can renew the session after this is read, so the time is a lower bound, and the
+ * stream's reconnect re-checks the session.
+ * @param session - The request's session data.
+ * @returns The earliest end time (ms since the epoch), or undefined when the session records none.
+ */
+export function sessionEndsAt(session: Partial<SessionData>): number | undefined {
+  const times: number[] = [];
+  // Read through a plain shape: express-session's own typing marks `expires` deprecated for setting it, but this reads the expiry it computed.
+  const cookieExpiry = (session.cookie as { expires?: unknown } | undefined)?.expires;
+  if (cookieExpiry instanceof Date || typeof cookieExpiry === 'string' || typeof cookieExpiry === 'number') {
+    const at = new Date(cookieExpiry).getTime();
+    if (!Number.isNaN(at)) times.push(at);
+  }
+  if (session.lastSeenAt !== undefined) times.push(session.lastSeenAt + SESSION_IDLE_MS);
+  if (session.loginAt !== undefined) times.push(session.loginAt + SESSION_ABSOLUTE_MAX_MS);
+  return times.length > 0 ? Math.min(...times) : undefined;
+}
+
+/**
  * Records a fresh login's times on the session, so the absolute cap and idle timeout count from now.
  * @param session - The newly regenerated session.
  * @param now - Login time, ms since the epoch.

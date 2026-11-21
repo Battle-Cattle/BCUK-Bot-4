@@ -6,6 +6,7 @@ import { DASHBOARD_EVENTS_MAX_SSE_PER_STREAMER } from '../../shared/config';
 import { getSessionUser } from '../session';
 import { broadcastToChannel } from './sseChannel';
 import { createStreamerSseEventsHandler } from './sseEventsHandlers';
+import { registerSessionStream } from '../sessionStreams';
 
 const log = createLogger('DashboardEvents');
 const router = Router();
@@ -46,6 +47,8 @@ export function pushDashboardEvent(streamerId: number, event: DashboardEvent): v
  */
 router.get('/events', createStreamerSseEventsHandler({
   connections, maxPerChannel: MAX_SSE_CONNECTIONS_PER_STREAMER, resolveKey: (streamer) => streamer.id, log,
+  // Ending the session closes this stream (#1112).
+  onAttached: (req, res) => { registerSessionStream(req, res, 'events'); },
 }));
 
 /**

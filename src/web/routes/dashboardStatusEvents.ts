@@ -7,6 +7,7 @@ import { getGuildScopedStatus } from '../guildScopedStatus';
 import { attachSseConnection, broadcastToChannel } from './sseChannel';
 import { createLogger } from '../../shared/logger';
 import { createMutationQueue } from '../../shared/mutationQueue';
+import { registerSessionStream } from '../sessionStreams';
 
 const log = createLogger('Web');
 const router = Router();
@@ -109,7 +110,9 @@ async function hasLiveGuildAccess(guildId: string, discordId: string): Promise<b
  * attach would otherwise miss this connection in {@link disconnectGuildStatusConnectionsForMember}
  * (it only closes connections registered when it runs); the connection is ended if access is gone,
  * or if the re-check itself fails (an unconfirmed member shouldn't default to trusted). Until the
- * re-check passes, the connection is skipped by status broadcasts (see `pendingAccessCheck`).
+ * re-check passes, the connection is skipped by status broadcasts (see `pendingAccessCheck`). The
+ * stream is also registered with {@link registerSessionStream}, so it closes when its session ends
+ * (logout, account switch, lost access, sign out other sessions, expiry).
  * @param req - Express request; reads `req.session.user.currentGuildId`.
  * @param res - Express response; upgrades to a `text/event-stream` connection kept alive with
  *   periodic pings and torn down on client disconnect; replies 400 if no guild is selected, or
@@ -127,6 +130,9 @@ router.get('/status/events', requireGuildContext, async (req, res) => {
   pendingAccessCheck.add(res);
   const attached = attachSseConnection(req, res, { connections, key: guildId, maxPerChannel: MAX_SSE_CONNECTIONS_PER_GUILD });
   if (!attached) return;
+  // Straight after attaching, before the access re-check's await: ending the session then closes this stream, and a
+  // session destroyed while this request was in flight refuses it here (#1112).
+  if (!registerSessionStream(req, res, 'status')) return;
   connectionOwners.set(res, user.discordId);
 
   try {

@@ -19,6 +19,7 @@ import streamdeckPluginDownloadRouter from './routes/streamdeckPluginDownload';
 import { mountRoutes } from './routes/index';
 import { ensureSessionCsrfToken } from './csrf';
 import { enforceSessionLifetime, SESSION_IDLE_MS } from './sessionLifetime';
+import { wrapStoreDestroy } from './sessionStreams';
 import { renderView } from './routes/viewHelpers';
 import { trackForGracefulClose, type GracefulClose } from './serverDrain';
 import { setSseConnectionsAccepted } from './routes/sseChannel';
@@ -197,6 +198,8 @@ const sessionStore = new (MySQLStore(session))(
   },
   getSessionPool().pool,
 );
+// Closes a destroyed (or regenerated) session's open dashboard streams before the row is deleted (#1112).
+wrapStoreDestroy(sessionStore);
 const sessionMiddleware = session({
   secret: SESSION_SECRET,
   resave: false,

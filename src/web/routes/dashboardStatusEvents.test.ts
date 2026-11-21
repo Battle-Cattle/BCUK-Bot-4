@@ -25,11 +25,15 @@ vi.mock('../middleware', () => ({
 
 vi.mock('../../shared/logger', () => ({ createLogger: () => ({ error: vi.fn(), warn: vi.fn(), info: vi.fn() }) }));
 
+// The registry itself is tested in sessionStreams.test.ts; here only that this route hands its stream to it.
+vi.mock('../sessionStreams', () => ({ registerSessionStream: vi.fn(() => true) }));
+
 import supertest from 'supertest';
 import router, { MAX_SSE_CONNECTIONS_PER_GUILD, connections, disconnectGuildStatusConnectionsForMember } from './dashboardStatusEvents';
 import { findUser, getMemberAccessLevel } from '../../db';
 import { onStatusChanged } from '../../shared/statusStore';
 import { getGuildScopedStatus } from '../guildScopedStatus';
+import { registerSessionStream } from '../sessionStreams';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
 // Captured immediately after import, before any beforeEach's clearAllMocks() erases the
@@ -154,6 +158,55 @@ describe('GET /status/events — connection lifecycle (direct handler invocation
 
     triggerClose();
     expect(connections.get('guild-A')).toBeUndefined();
+  });
+});
+
+describe('GET /status/events — session end (#1112)', () => {
+  it('registers the attached stream with the session registry before the access re-check runs', async () => {
+    const order: string[] = [];
+    vi.mocked(registerSessionStream).mockImplementationOnce(() => { order.push('register'); return true; });
+    vi.mocked(findUser).mockImplementationOnce(async () => { order.push('access check'); return { discord_id: 'discord1', is_owner: true } as any; });
+    const handler = getRouteHandler('/status/events');
+    const res = makeSseRes();
+    const { req, triggerClose } = makeSseReq('guild-A');
+
+    await handler(req, res, vi.fn());
+
+    expect(registerSessionStream).toHaveBeenCalledWith(req, res, 'status');
+    expect(order).toEqual(['register', 'access check']);
+    triggerClose();
+  });
+
+  it('stops without an access re-check when the registry refuses the stream (its session already ended)', async () => {
+    vi.mocked(registerSessionStream).mockReturnValueOnce(false);
+    const handler = getRouteHandler('/status/events');
+    const res = makeSseRes();
+    const { req, triggerClose } = makeSseReq('guild-A');
+
+    await handler(req, res, vi.fn());
+
+    expect(findUser).not.toHaveBeenCalled();
+    expect(connections.get('guild-A')?.has(res as any)).toBe(true); // the registry ended the response; its close event removes it
+    triggerClose();
+  });
+
+  it('does not register a stream that was refused at attach (over the guild limit)', async () => {
+    const handler = getRouteHandler('/status/events');
+    const open: { triggerClose: () => void }[] = [];
+    for (let i = 0; i < MAX_SSE_CONNECTIONS_PER_GUILD; i++) {
+      const { req, triggerClose } = makeSseReq('guild-A');
+      await handler(req, makeSseRes(), vi.fn());
+      open.push({ triggerClose });
+    }
+    vi.mocked(registerSessionStream).mockClear();
+    const { req } = makeSseReq('guild-A');
+    const res = makeSseRes();
+
+    await handler(req, res, vi.fn());
+
+    expect(res.status).toHaveBeenCalledWith(429);
+    expect(registerSessionStream).not.toHaveBeenCalled();
+    open.forEach((o) => o.triggerClose());
   });
 });
 

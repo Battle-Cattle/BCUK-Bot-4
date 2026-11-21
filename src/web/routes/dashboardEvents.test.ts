@@ -13,11 +13,15 @@ vi.mock('../../shared/config', () => ({
 
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
+// The registry itself is tested in sessionStreams.test.ts; here only that this route hands its stream to it.
+vi.mock('../sessionStreams', () => ({ registerSessionStream: vi.fn(() => true) }));
+
 import express from 'express';
 import supertest from 'supertest';
 import router, { MAX_SSE_CONNECTIONS_PER_STREAMER, RECENT_EVENTS_LIMIT, connections, pushDashboardEvent } from './dashboardEvents';
 import { getStreamerByDiscordId, getRecentStreamerEvents } from '../../db';
 import { buildTestApp } from '../../test-utils/expressTestApp';
+import { registerSessionStream } from '../sessionStreams';
 
 /** Finds a route's handler function directly from the router's internal stack, bypassing HTTP entirely — needed to control fake timers and the request's 'close' event deterministically. */
 function getRouteHandler(routePath: string): (req: any, res: any, next: any) => void {
@@ -154,6 +158,30 @@ describe('GET /events — connection lifecycle (direct handler invocation)', () 
 
     triggerClose();
     expect(connections.get(123)).toBeUndefined();
+  });
+});
+
+describe('GET /events — session end (#1112)', () => {
+  it('registers the attached stream with the session registry', async () => {
+    const handler = getRouteHandler('/events');
+    const res = makeSseRes();
+    const { req, triggerClose } = makeSseReq('discord1');
+
+    await handler(req, res, vi.fn());
+
+    expect(registerSessionStream).toHaveBeenCalledWith(req, res, 'events');
+    triggerClose();
+  });
+
+  it('does not register a stream that was never attached (no streamer row)', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue(null as any);
+    const handler = getRouteHandler('/events');
+    const res = makeSseRes();
+    const { req } = makeSseReq('discord1');
+
+    await handler(req, res, vi.fn());
+
+    expect(registerSessionStream).not.toHaveBeenCalled();
   });
 });
 
