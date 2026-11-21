@@ -1,0 +1,20 @@
+{
+  "_comment": "Illustrative data for ui-check only. Loyalty Points with a streamer, a leaderboard (one long name) and an excluded bot: the Exclude bot and Remove exclusion buttons must stay on screen at phone width.",
+  "view": "loyaltyPoints",
+  "locals": {
+    "user": { "discordId": "1", "discordName": "Streamer", "accessLevel": 0, "isOwner": false, "currentGuildId": null, "guilds": [] },
+    "csrfToken": "tok",
+    "error": null,
+    "isStreamer": true,
+    "prerequisites": { "twitchLinked": true, "chatBotEnabled": true, "isMonitoredStreamer": true },
+    "allPrerequisitesMet": true,
+    "config": { "enabled": true, "pointsPerMessage": 1, "cooldownSeconds": 60, "pointsPerSub": 100, "pointsPerGiftSub": 100 },
+    "leaderboard": [
+      { "twitchUsername": "viewer_one", "balance": "1250" },
+      { "twitchUsername": "a_really_long_twitch_name_25", "balance": "98000" },
+      { "twitchUsername": "viewer_three", "balance": "50" }
+    ],
+    "excludedUsers": ["somebot", "another_long_bot_account_name"]
+  },
+  "waitMs": 300
+}
