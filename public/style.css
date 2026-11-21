@@ -630,6 +630,8 @@ textarea.input, .stream-textarea { width: 100%; resize: vertical; font-family: v
   .table-scroll .table.table-fit { width: 100%; }
   .table-scroll .table.table-fit th,
   .table-scroll .table.table-fit td { padding: .5rem .4rem; }
+  /* Inline forms in a fitted table (SFX categories): let the name input shrink instead of holding the table at 220px+ */
+  .table-scroll .table.table-fit .form-col-grow { min-width: 0; width: 4rem; }
   .table-scroll .table.table-fit td.cell-wrap { white-space: normal; overflow-wrap: anywhere; }
   /* Restore wrapping for long-content cells */
   .table-scroll .table td.command-output-cell {
