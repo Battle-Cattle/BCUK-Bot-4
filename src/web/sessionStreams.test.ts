@@ -342,8 +342,10 @@ describe('with a real express-session and MemoryStore', () => {
     const store = new session.MemoryStore();
     wrapStoreDestroy(store);
     const app = express();
+    app.set('trust proxy', 1);
     const results: { sid?: string } = {};
-    app.use(session({ secret: 'x'.repeat(32), resave: false, saveUninitialized: false, store }));
+    // As in production: a secure, httpOnly cookie behind the proxy (the requests below send X-Forwarded-Proto: https).
+    app.use(session({ secret: 'x'.repeat(32), resave: false, saveUninitialized: false, store, cookie: { secure: true, httpOnly: true, sameSite: 'lax' } }));
     app.get('/login', (req, res) => {
       req.session.user = { discordId: '42', discordName: 'u', discordAvatar: null, isOwner: false, accessLevel: 0, currentGuildId: 'g1', guilds: [] };
       results.sid = req.sessionID;
@@ -359,16 +361,19 @@ describe('with a real express-session and MemoryStore', () => {
     app.get('/destroy', (req, res) => { req.session.destroy(() => res.sendStatus(204)); });
     app.get('/regenerate', (req, res) => { req.session.regenerate(() => res.sendStatus(204)); });
     const supertest = (await import('supertest')).default;
-    const cookie = (await supertest(app).get('/login')).headers['set-cookie']?.[0]?.split(';')[0] ?? '';
-    return { app, cookie, supertest, results };
+    const https = { 'X-Forwarded-Proto': 'https' };
+    const cookie = (await supertest(app).get('/login').set(https)).headers['set-cookie']?.[0]?.split(';')[0] ?? '';
+    /** A GET carrying the signed-in session's cookie. */
+    const get = (path: string) => supertest(app).get(path).set({ ...https, Cookie: cookie });
+    return { get, results };
   }
 
   it('closes the session\'s stream on req.session.destroy and refuses a later attach under that ID', async () => {
-    const { app, cookie, supertest, results } = await boot();
-    await supertest(app).get('/stream').set('Cookie', cookie);
+    const { get, results } = await boot();
+    await get('/stream');
     const stream = (globalThis as unknown as { lastStream: { end: ReturnType<typeof vi.fn> } }).lastStream;
 
-    await supertest(app).get('/destroy').set('Cookie', cookie);
+    await get('/destroy');
 
     expect(stream.end).toHaveBeenCalledTimes(1);
     expect(results.sid).toBeTruthy();
@@ -376,13 +381,13 @@ describe('with a real express-session and MemoryStore', () => {
   });
 
   it('closes the old ID\'s stream on regenerate (account switch) and leaves other sessions alone', async () => {
-    const { app, cookie, supertest } = await boot();
-    await supertest(app).get('/stream').set('Cookie', cookie);
+    const { get } = await boot();
+    await get('/stream');
     const stream = (globalThis as unknown as { lastStream: { end: ReturnType<typeof vi.fn> } }).lastStream;
     const otherStream = fakeRes();
     registerSessionStream(fakeReq('another-session'), otherStream, 'status');
 
-    await supertest(app).get('/regenerate').set('Cookie', cookie);
+    await get('/regenerate');
 
     expect(stream.end).toHaveBeenCalledTimes(1);
     expect(otherStream.end).not.toHaveBeenCalled();
