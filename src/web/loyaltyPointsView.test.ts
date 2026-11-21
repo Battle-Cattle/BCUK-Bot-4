@@ -52,6 +52,13 @@ describe('views/loyaltyPoints.ejs', () => {
     expect(html).toContain('name="twitch_username" value="viewer1"');
   });
 
+  it('wraps both tables in the scroll wrapper and fits them to the phone width', async () => {
+    const html = await render({ leaderboard: [{ twitchUsername: 'viewer1', balance: 50 }], excludedUsers: ['somebot'] });
+    expect(html.match(/<div class="table-scroll">\s*<table class="table table-fit full-width">/g)).toHaveLength(2);
+    expect(html).toContain('<td class="cell-wrap">viewer1</td>');
+    expect(html).toContain('<td class="cell-wrap">somebot</td>');
+  });
+
   it('asks for confirmation before excluding, naming the account', async () => {
     const html = await render({ leaderboard: [{ twitchUsername: 'pokemoncommunitygame', balance: 900 }] });
     expect(html).toContain('class="js-confirm-exclude-bot" data-twitch-username="pokemoncommunitygame"');

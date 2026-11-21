@@ -95,7 +95,8 @@
           <% if (leaderboard.length === 0) { %>
           <p class="muted">No one has earned any points yet.</p>
           <% } else { %>
-          <table class="table full-width">
+          <div class="table-scroll">
+          <table class="table table-fit full-width">
             <thead>
               <tr><th>#</th><th>Viewer</th><th>Points</th><th></th></tr>
             </thead>
@@ -103,7 +104,7 @@
               <% leaderboard.forEach(function (entry, index) { %>
               <tr>
                 <td><%= index + 1 %></td>
-                <td><%= entry.twitchUsername %></td>
+                <td class="cell-wrap"><%= entry.twitchUsername %></td>
                 <td><%= entry.balance %></td>
                 <td>
                   <form method="POST" action="/loyalty-points/exclusions" class="js-confirm-exclude-bot" data-twitch-username="<%= entry.twitchUsername %>">
@@ -116,6 +117,7 @@
               <% }); %>
             </tbody>
           </table>
+          </div>
           <% } %>
         </div>
       </div>
@@ -141,14 +143,15 @@
           <% if (excludedUsers.length === 0) { %>
           <p class="muted">No bots are excluded.</p>
           <% } else { %>
-          <table class="table full-width">
+          <div class="table-scroll">
+          <table class="table table-fit full-width">
             <thead>
               <tr><th>Account</th><th></th></tr>
             </thead>
             <tbody>
               <% excludedUsers.forEach(function (twitchUsername) { %>
               <tr>
-                <td><%= twitchUsername %></td>
+                <td class="cell-wrap"><%= twitchUsername %></td>
                 <td>
                   <form method="POST" action="/loyalty-points/exclusions/remove">
                     <input type="hidden" name="_csrf" value="<%= csrfToken %>">
@@ -160,6 +163,7 @@
               <% }); %>
             </tbody>
           </table>
+          </div>
           <% } %>
         </div>
       </div>

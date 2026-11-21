@@ -626,6 +626,11 @@ textarea.input, .stream-textarea { width: 100%; resize: vertical; font-family: v
   .table-scroll .table { width: max-content; min-width: 100%; }
   .table-scroll .table th,
   .table-scroll .table td { white-space: nowrap; }
+  /* Narrow tables (loyalty points): fit the phone width, wrap the name, tighten padding so the action button stays on screen */
+  .table-scroll .table.table-fit { width: 100%; }
+  .table-scroll .table.table-fit th,
+  .table-scroll .table.table-fit td { padding: .5rem .4rem; }
+  .table-scroll .table.table-fit td.cell-wrap { white-space: normal; overflow-wrap: anywhere; }
   /* Restore wrapping for long-content cells */
   .table-scroll .table td.command-output-cell {
     white-space: normal; overflow-wrap: anywhere; max-width: 180px;
