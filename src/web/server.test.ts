@@ -114,6 +114,10 @@ function errorTriggerRouter() {
     (req.session as unknown as Record<string, unknown>).visited = true;
     res.send('saved');
   });
+  // Destroys the session, as logout does, so the wrapped store's destroy runs.
+  router.get('/__destroy_session', (req, res) => {
+    req.session.destroy(() => res.send('destroyed'));
+  });
   return router;
 }
 
@@ -166,7 +170,8 @@ vi.mock('./routes/health', () => ({ default: markerRouter('health') }));
 vi.mock('./routes/healthStatusEvents', () => ({ default: emptyRouter() }));
 
 import { app, generalLimiter, preSessionLimiter, sessionLimiter, startWebPanel, stopWebPanel } from './server';
-import { attachSseConnection } from './routes/sseChannel';
+import { registerSessionStream, resetSessionStreamsForTests } from './sessionStreams';
+import { attachSseConnection, setSseConnectionsAccepted } from './routes/sseChannel';
 import { overlayTrafficLimiter } from './rateLimits';
 import { createHmac } from 'crypto';
 import { requireAuth, requireAuthJson, requireGuildContext } from './middleware';
@@ -927,6 +932,42 @@ describe('preSessionLimiter (server.ts)', () => {
     // Skipped requests never touch the bucket, so the IP still has its full budget.
     const res = await request(testApp).get('/api/streamdeck/ping');
     expect(res.headers['ratelimit']).toBeUndefined();
+  });
+});
+
+describe('session store destroy (#1112)', () => {
+  beforeEach(() => {
+    // An earlier test's stopWebPanel() leaves the SSE helper refusing connections (as during shutdown).
+    setSseConnectionsAccepted(true);
+  });
+
+  afterEach(() => {
+    storeGet.mockImplementation((_id, cb) => cb(null, undefined));
+  });
+
+  it('closes the destroyed session\'s dashboard streams, and only its', async () => {
+    storeGet.mockImplementation((sid, cb) =>
+      cb(null, { cookie: { originalMaxAge: 60_000, expires: new Date(Date.now() + 60_000).toISOString() }, user: { discordId: sid } }));
+    // A stream attached through the real SSE helper (so the registry's cleanup chain works), on a stand-in socket.
+    const open = (sessionID: string) => {
+      const res = Object.assign(new EventEmitter(), {
+        closed: false, setHeader: vi.fn(), flushHeaders: vi.fn(), write: vi.fn(), writableLength: 0,
+        end: vi.fn(() => { res.emit('close'); }),
+      });
+      const req = Object.assign(new EventEmitter(), { destroyed: false, sessionID, session: { user: { discordId: sessionID } } });
+      expect(attachSseConnection(req as never, res as never, { connections: new Map(), key: sessionID, maxPerChannel: 5 })).toBe(true);
+      expect(registerSessionStream(req as never, res as never, 'status')).toBe(true);
+      return res;
+    };
+    const destroyed = open('destroy-me');
+    const other = open('keep-me');
+
+    const res = await request(app).get('/__destroy_session').set('Cookie', signedSessionCookie('destroy-me')).set('X-Forwarded-For', '198.51.100.21');
+
+    expect(res.text).toBe('destroyed');
+    expect(destroyed.end).toHaveBeenCalledTimes(1);
+    expect(other.end).not.toHaveBeenCalled();
+    resetSessionStreamsForTests();
   });
 });
 

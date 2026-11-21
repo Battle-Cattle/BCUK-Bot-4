@@ -659,6 +659,41 @@ describe('createStreamerSseEventsHandler', () => {
     triggerClose();
   });
 
+  it('calls onAttached once, with the request and response, after the connection is attached (#1112)', async () => {
+    vi.mocked(getStreamerByDiscordId).mockResolvedValue({ id: 42 } as any);
+    const onAttached = vi.fn(() => {
+      // Already attached by then, so a caller can tie the live stream to something else.
+      expect(numericConnections.get(42)?.size).toBe(1);
+    });
+    const handler = createStreamerSseEventsHandler({
+      connections: numericConnections, maxPerChannel: 10, resolveKey: (streamer) => streamer.id, log, onAttached,
+    });
+    const res = makeRes();
+    const { req, triggerClose } = makeReq('unused');
+
+    await handler(req as any, res as any);
+
+    expect(onAttached).toHaveBeenCalledExactlyOnceWith(req, res);
+    triggerClose();
+  });
+
+  it.each([
+    ['no streamer row', () => vi.mocked(getStreamerByDiscordId).mockResolvedValue(null)],
+    ['a streamer lookup error', () => vi.mocked(getStreamerByDiscordId).mockRejectedValue(new Error('db down'))],
+    ['a full connection limit', () => { vi.mocked(getStreamerByDiscordId).mockResolvedValue({ id: 42 } as any); numericConnections.set(42, new Set([{}] as any)); }],
+  ])('does not call onAttached for %s', async (_name, arrange) => {
+    arrange();
+    const onAttached = vi.fn();
+    const handler = createStreamerSseEventsHandler({
+      connections: numericConnections, maxPerChannel: 1, resolveKey: (streamer) => streamer.id, log, onAttached,
+    });
+    const { req } = makeReq('unused');
+
+    await handler(req as any, makeRes() as any);
+
+    expect(onAttached).not.toHaveBeenCalled();
+  });
+
   it('returns 429 when the resolved streamer is already at its connection limit', async () => {
     vi.mocked(getStreamerByDiscordId).mockResolvedValue({ id: 42 } as any);
     numericConnections.set(42, new Set([{}, {}] as any));

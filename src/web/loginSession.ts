@@ -18,6 +18,7 @@ import { fetchMemberDisplayName } from '../discord/discordApi';
 import { runUserMutation } from '../shared/userMutationQueue';
 import type { SessionUser } from '../types/express';
 import { startSessionLifetime } from './sessionLifetime';
+import { closeUserStreams } from './sessionStreams';
 
 const log = createLogger('Web');
 
@@ -182,6 +183,8 @@ export class SessionUserGoneError extends Error {
  * `user.session_generation`, which ends any session holding the old value on its next request,
  * then re-issues this session under a new ID with the new generation, so it stays signed in and a
  * copy of its old cookie doesn't. Login times, the CSRF token and the rest of the session carry over.
+ * Right after the bump it also closes the user's open dashboard streams from older generations
+ * (see `closeUserStreams`), the caller's own old-ID ones included.
  * @param req - Express request with a signed-in session (`requireAuth` ran first).
  * @returns Resolves once the generation is bumped and the re-issued session is saved.
  * @throws {SessionUserGoneError} When the user row no longer exists.
@@ -191,6 +194,9 @@ export async function signOutOtherSessions(req: Request): Promise<void> {
   if (!discordId) throw new Error('signOutOtherSessions: no signed-in session');
   const generation = await bumpSessionGeneration(discordId);
   if (generation === null) throw new SessionUserGoneError(discordId);
+  // Before the regenerate's awaits, so a dashboard stream from a signed-out session closes now and one still on
+  // its way to attaching is refused (#1112). The caller's own old-ID streams close too; their tabs reconnect.
+  closeUserStreams(discordId, generation);
   const { cookie: _cookie, ...carried } = req.session;
   await promisify(req.session.regenerate.bind(req.session))();
   // regenerate() replaces req.session, so write to it only after it has finished.

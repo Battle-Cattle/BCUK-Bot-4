@@ -14,10 +14,12 @@ vi.mock('../discord/discordApi', () => ({
   fetchMemberDisplayName: vi.fn().mockResolvedValue(null),
 }));
 vi.mock('../shared/logger', () => ({ createLogger: mockLogger }));
+vi.mock('./sessionStreams', () => ({ closeUserStreams: vi.fn() }));
 
 import { establishDashboardSession, resolveAccessibleGuilds, signOutOtherSessions, SessionUserGoneError } from './loginSession';
 import { getAllGuilds, getGuildsForMember, getEffectiveAccessLevelForUser, updateDiscordName, bumpSessionGeneration, AccessLevel } from '../db';
 import { fetchMemberDisplayName } from '../discord/discordApi';
+import { closeUserStreams } from './sessionStreams';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -157,6 +159,26 @@ describe('signOutOtherSessions', () => {
     expect(req.session.id).not.toBe(original.id);
     expect(req.session).toMatchObject({ user, sessionGeneration: 5, loginAt: 10, lastSeenAt: 20, csrfToken: 'tok', discordAuthAt: 15 });
     expect(req.session.save).toHaveBeenCalledOnce();
+  });
+
+  it('closes the user\'s older-generation dashboard streams right after the bump, before the session is re-issued (#1112)', async () => {
+    vi.mocked(bumpSessionGeneration).mockResolvedValue(5);
+    const req = makeSessionReq({ user: { discordId: '42' }, sessionGeneration: 4 });
+    vi.mocked(closeUserStreams).mockImplementation(() => {
+      expect(req.session.regenerate).not.toHaveBeenCalled();
+    });
+
+    await signOutOtherSessions(req);
+
+    expect(closeUserStreams).toHaveBeenCalledExactlyOnceWith('42', 5);
+  });
+
+  it('closes no streams when the user row is gone', async () => {
+    vi.mocked(bumpSessionGeneration).mockResolvedValue(null);
+
+    await expect(signOutOtherSessions(makeSessionReq({ user: { discordId: '42' } }))).rejects.toBeInstanceOf(SessionUserGoneError);
+
+    expect(closeUserStreams).not.toHaveBeenCalled();
   });
 
   it('throws SessionUserGoneError, leaving the session alone, when the user row is gone', async () => {
