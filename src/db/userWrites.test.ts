@@ -8,11 +8,13 @@ vi.mock('./users', () => ({
 vi.mock('./customCommandCache', () => ({ invalidateCustomCommandLookupCache: vi.fn() }));
 vi.mock('./advancedCommandCache', () => ({ invalidateAdvancedCommandLookupCache: vi.fn() }));
 vi.mock('./timerCommandCache', () => ({ invalidateTimerCommandCache: vi.fn() }));
+vi.mock('./guildInfoEvents', () => ({ notifyGuildInfoChanged: vi.fn() }));
 
 import { upsertUserRecord, setTwitchBotEnabledRecord, deleteUnlinkedUserRecord } from './users';
 import { invalidateCustomCommandLookupCache } from './customCommandCache';
 import { invalidateAdvancedCommandLookupCache } from './advancedCommandCache';
 import { invalidateTimerCommandCache } from './timerCommandCache';
+import { notifyGuildInfoChanged } from './guildInfoEvents';
 import { upsertUser, updateTwitchBotEnabled, deleteUnlinkedUser } from './userWrites';
 
 beforeEach(() => {
@@ -135,5 +137,42 @@ describe('timer command cache invalidation', () => {
     vi.mocked(setTwitchBotEnabledRecord).mockRejectedValue(new Error('DB error'));
     await expect(updateTwitchBotEnabled('1', false)).rejects.toThrow('DB error');
     expect(invalidateTimerCommandCache).not.toHaveBeenCalled();
+  });
+});
+
+// ─── guild-info notifications ───────────────────────────────────────────────────
+
+describe('guild-info notifications (a user can belong to several guilds, so these name no guild)', () => {
+  it('upsertUser notifies every guild when a twitchName was provided, and not when it was omitted', async () => {
+    vi.mocked(upsertUserRecord).mockResolvedValue(true);
+    await upsertUser('1', 'Alice', 'alice_chan');
+    expect(notifyGuildInfoChanged).toHaveBeenCalledExactlyOnceWith(null);
+
+    vi.clearAllMocks();
+    vi.mocked(upsertUserRecord).mockResolvedValue(false);
+    await upsertUser('1', 'Alice');
+    expect(notifyGuildInfoChanged).not.toHaveBeenCalled();
+  });
+
+  it('upsertUser does not notify when the write fails', async () => {
+    vi.mocked(upsertUserRecord).mockRejectedValue(new Error('DB error'));
+    await expect(upsertUser('1', 'Alice', 'alice')).rejects.toThrow('DB error');
+    expect(notifyGuildInfoChanged).not.toHaveBeenCalled();
+  });
+
+  it('updateTwitchBotEnabled notifies every guild after the write, and not when it fails', async () => {
+    await updateTwitchBotEnabled('1', true);
+    expect(notifyGuildInfoChanged).toHaveBeenCalledExactlyOnceWith(null);
+
+    vi.clearAllMocks();
+    vi.mocked(setTwitchBotEnabledRecord).mockRejectedValue(new Error('DB error'));
+    await expect(updateTwitchBotEnabled('1', false)).rejects.toThrow('DB error');
+    expect(notifyGuildInfoChanged).not.toHaveBeenCalled();
+  });
+
+  it('deleteUnlinkedUser does not notify: the user has no membership, so no guild\'s members change', async () => {
+    vi.mocked(deleteUnlinkedUserRecord).mockResolvedValue(true);
+    await deleteUnlinkedUser('1');
+    expect(notifyGuildInfoChanged).not.toHaveBeenCalled();
   });
 });
