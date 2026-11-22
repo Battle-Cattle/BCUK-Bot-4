@@ -153,7 +153,7 @@ describe('public/dashboard-context.js: the context-changed frame', () => {
     other.fire('context-changed');
     expect(ctx.timers).toHaveLength(1);
     expect(other.close).toHaveBeenCalledTimes(1);
-    ctx.timers.shift()?.fn();
+    runTimer(ctx);
     expect(ctx.reload).toHaveBeenCalledTimes(1);
   });
 
