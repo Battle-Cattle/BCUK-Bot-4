@@ -518,6 +518,24 @@ describe('push after a guild-info change (#1117)', () => {
     expect(resB.write).toHaveBeenCalledWith(`data: ${JSON.stringify({ guildId: 'guild-B' })}\n\n`);
   });
 
+  it('reaches only the two guilds involved when a member moves from one to the other (a remove then an add)', async () => {
+    const resA = { write: vi.fn() };
+    const resB = { write: vi.fn() };
+    const resC = { write: vi.fn() };
+    connections.set('guild-A', new Set([resA] as any));
+    connections.set('guild-B', new Set([resB] as any));
+    connections.set('guild-C', new Set([resC] as any));
+    vi.mocked(getGuildScopedStatus).mockImplementation(async (guildId) => ({ guildId }) as any);
+
+    invalidationListener('guild-A');
+    invalidationListener('guild-B');
+    await settle();
+
+    expect(resA.write).toHaveBeenCalledWith(`data: ${JSON.stringify({ guildId: 'guild-A' })}\n\n`);
+    expect(resB.write).toHaveBeenCalledWith(`data: ${JSON.stringify({ guildId: 'guild-B' })}\n\n`);
+    expect(resC.write).not.toHaveBeenCalled();
+  });
+
   it('does nothing for a guild nobody has a dashboard open on', async () => {
     invalidationListener('guild-A');
     await settle();
