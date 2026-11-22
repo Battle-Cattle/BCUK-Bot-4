@@ -241,6 +241,15 @@ describe('getGuildScopedStatus — invalidation', () => {
     expect(Object.keys(third.twitch)).toEqual(['otherguildstreamer']);
   });
 
+  it('rejects with the lookup\'s own error, and leaves nothing stuck in flight, when a lookup throws before returning a promise', async () => {
+    vi.mocked(getGuildById).mockImplementationOnce(() => { throw new Error('sync failure'); });
+    await expect(getGuildScopedStatus('guild-A')).rejects.toThrow('sync failure');
+
+    // The next call isn't joined to the failed load: it fetches afresh.
+    const result = await getGuildScopedStatus('guild-A');
+    expect(result.discord.guildName).toBe('Our Guild');
+  });
+
   it('keeps coalescing concurrent loads after an invalidation: a stale load finishing does not drop the fresh load\'s in-flight entry', async () => {
     const stale = deferred<any[]>();
     const fresh = deferred<any[]>();

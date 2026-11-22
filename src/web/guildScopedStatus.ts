@@ -68,6 +68,9 @@ export function clearGuildScopedStatusCache(): void {
  * @returns The rows read, with the time they were fetched.
  */
 async function fetchGuildInfo(guildId: string, isCurrent: () => boolean): Promise<CachedGuildInfo> {
+  // Yield first: the caller registers this load only once it returns, and `isCurrent` reads that registration, so
+  // nothing here (a lookup that throws at once, then `finally`) may run before then.
+  await Promise.resolve();
   try {
     const [guild, members] = await Promise.all([
       getGuildById(guildId),
