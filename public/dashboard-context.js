@@ -18,28 +18,34 @@ window.addEventListener('beforeunload', () => { contextPageLeaving = true; });
 
 /**
  * Whether a context reload may happen now: not while the page is already navigating, and not within
- * CONTEXT_RELOAD_MIN_INTERVAL_MS of the last one. A tab whose sessionStorage is unavailable reloads at most once per page load.
+ * CONTEXT_RELOAD_MIN_INTERVAL_MS of the last one. With sessionStorage blocked the rate limit can't be recorded,
+ * so only a reload the server asked for (the frame, which needs a real state change) goes ahead.
+ * @param serverRequested - True for the server's `context-changed` frame, false for the browser giving up on the stream.
  * @returns True when the reload is allowed (and it has been recorded as done).
  */
-function claimContextReload() {
+function claimContextReload(serverRequested) {
   if (contextPageLeaving) return false;
   const now = Date.now();
+  let recorded = false;
   try {
     const last = Number(window.sessionStorage.getItem(CONTEXT_RELOAD_KEY));
     if (last > 0 && now - last < CONTEXT_RELOAD_MIN_INTERVAL_MS) return false;
     window.sessionStorage.setItem(CONTEXT_RELOAD_KEY, String(now));
+    recorded = true;
   } catch {
-    // Storage blocked: the once-per-page guard below still stops a loop.
+    // Storage blocked: recorded stays false.
   }
+  if (!recorded && !serverRequested) return false;
   contextPageLeaving = true;
   return true;
 }
 
 /**
  * Reloads the page so it renders under its new context, unless a navigation is under way or it reloaded a moment ago.
+ * @param serverRequested - True when the server's `context-changed` frame asked for it.
  */
-function reloadForContextChange() {
-  if (claimContextReload()) window.location.reload();
+function reloadForContextChange(serverRequested) {
+  if (claimContextReload(serverRequested)) window.location.reload();
 }
 
 /**
@@ -48,8 +54,8 @@ function reloadForContextChange() {
  * @param source - The dashboard's EventSource.
  */
 function watchStreamContext(source) {
-  source.addEventListener('context-changed', reloadForContextChange);
+  source.addEventListener('context-changed', () => reloadForContextChange(true));
   source.addEventListener('error', () => {
-    if (source.readyState === EVENT_SOURCE_CLOSED) reloadForContextChange();
+    if (source.readyState === EVENT_SOURCE_CLOSED) reloadForContextChange(false);
   });
 }

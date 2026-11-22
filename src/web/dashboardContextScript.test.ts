@@ -124,12 +124,20 @@ describe('public/dashboard-context.js', () => {
     expect(reload).toHaveBeenCalledTimes(1);
   });
 
-  it('still reloads, once per page load, when sessionStorage throws', () => {
+  it('still reloads for the server\'s frame, once per page load, when sessionStorage throws', () => {
     const { watch, reload } = runContext({ stored: 'throw' });
     watch(source);
     source.fire('context-changed');
     source.fire('context-changed');
     expect(reload).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not reload for a closed stream when sessionStorage throws, as it could loop with no rate limit', () => {
+    const { watch, reload } = runContext({ stored: 'throw' });
+    watch(source);
+    source.readyState = 2;
+    source.fire('error');
+    expect(reload).not.toHaveBeenCalled();
   });
 
   it('ignores a garbage stored value', () => {
