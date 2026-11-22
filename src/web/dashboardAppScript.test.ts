@@ -11,6 +11,12 @@ class FakeEventSource {
   onopen: (() => void) | null = null;
   onmessage: ((msg: { data: string }) => void) | null = null;
   onerror: (() => void) | null = null;
+  readyState = 0;
+  listeners = new Map<string, (() => void)[]>();
+
+  addEventListener(name: string, fn: () => void): void {
+    this.listeners.set(name, [...(this.listeners.get(name) ?? []), fn]);
+  }
 
   constructor(public url: string) {
     FakeEventSource.last = this;
@@ -33,6 +39,7 @@ function runApp(options: { initialStatus?: string; stale?: boolean } = {}) {
     loadVoiceChannels: stub('loadVoiceChannels'),
     setStatusStreamOpen: stub('setStatusStreamOpen'),
     isStatusFeedStale: () => options.stale ?? false,
+    watchStreamContext: vi.fn(),
   };
   vm.runInNewContext(fs.readFileSync(scriptPath, 'utf8'), context);
   const source = FakeEventSource.last;
@@ -42,6 +49,13 @@ function runApp(options: { initialStatus?: string; stale?: boolean } = {}) {
 }
 
 describe('public/app.js status stream wiring', () => {
+  it('hands its stream to the context watcher, so a context change reloads the page', () => {
+    const { source, context } = runApp();
+
+    expect(context.watchStreamContext).toHaveBeenCalledTimes(1);
+    expect(context.watchStreamContext).toHaveBeenCalledWith(source);
+  });
+
   it('opens the status stream and keeps the 60s safety-net poll', () => {
     const { source, context } = runApp();
 
@@ -95,6 +109,7 @@ describe('public/app.js status stream wiring', () => {
       loadVoiceChannels: () => calls.push('loadVoiceChannels()'),
       setStatusStreamOpen: () => {},
       isStatusFeedStale: () => false,
+      watchStreamContext: vi.fn(),
     };
     vm.runInNewContext(fs.readFileSync(scriptPath, 'utf8'), context);
 

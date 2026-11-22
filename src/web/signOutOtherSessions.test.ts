@@ -32,7 +32,7 @@ import { EventEmitter } from 'events';
 import { registerSessionStream, resetSessionStreamsForTests } from './sessionStreams';
 
 /** The dashboard streams opened through the test app's `/stream` route, in order. */
-const openStreams: { end: ReturnType<typeof vi.fn> }[] = [];
+const openStreams: { end: ReturnType<typeof vi.fn>; write: ReturnType<typeof vi.fn> }[] = [];
 
 /**
  * An app set up as in production (secure cookie behind the proxy, CSRF-checked writes) with a
@@ -54,7 +54,7 @@ function buildApp(): express.Express {
   });
   // Registers a stand-in dashboard stream for the session (a real request closes when this test's response ends, an open SSE stream's never does).
   app.get('/stream', requireAuth, (req, res) => {
-    const stream = Object.assign(new EventEmitter(), { end: vi.fn() });
+    const stream = Object.assign(new EventEmitter(), { end: vi.fn(), write: vi.fn() });
     const open = Object.assign(new EventEmitter(), { sessionID: req.sessionID, session: req.session });
     const registered = registerSessionStream(open as never, stream as never, 'status');
     openStreams.push(stream);
@@ -166,6 +166,7 @@ describe('sign out other sessions (#1058)', () => {
 
     expect(hereStream?.end).toHaveBeenCalledTimes(1);
     expect(otherStream?.end).toHaveBeenCalledTimes(1);
+    expect(otherStream?.write).toHaveBeenCalledWith('event: context-changed\ndata: {}\n\n');
     expect((await here.get('/stream')).text).toBe('true');
     expect(openStreams[2]?.end).not.toHaveBeenCalled();
   });

@@ -16,13 +16,14 @@ import session from 'express-session';
 import type { Request, Response } from 'express';
 import {
   registerSessionStream, closeSessionStreams, closeUserStreams, closeSessionStreamsForGuild, switchSessionGuild, wrapStoreDestroy,
-  getSessionStreamStats, resetSessionStreamsForTests, TOMBSTONE_TTL_MS, SESSION_GUILD_TTL_MS, MAX_TRACKED_ENTRIES,
+  getSessionStreamStats, resetSessionStreamsForTests, TOMBSTONE_TTL_MS, SESSION_GUILD_TTL_MS, MAX_TRACKED_ENTRIES, CONTEXT_CHANGED_FRAME,
 } from './sessionStreams';
 import { SESSION_IDLE_MS, SESSION_ABSOLUTE_MAX_MS } from './sessionLifetime';
 
 /** A response stand-in: an emitter whose `end()` records the call and emits `close`, as a real one does. */
-function fakeRes(): Response & { end: ReturnType<typeof vi.fn> } {
-  const res = new EventEmitter() as unknown as Response & { end: ReturnType<typeof vi.fn> };
+function fakeRes(): Response & { end: ReturnType<typeof vi.fn>; write: ReturnType<typeof vi.fn> } {
+  const res = new EventEmitter() as unknown as Response & { end: ReturnType<typeof vi.fn>; write: ReturnType<typeof vi.fn> };
+  res.write = vi.fn(() => true);
   res.end = vi.fn(() => { res.emit('close'); return res; });
   return res;
 }
@@ -142,6 +143,97 @@ describe('registerSessionStream and closeSessionStreams', () => {
 function guildReq(sessionID: string, guildId: string | null, discordId = '42'): Request {
   return fakeReq(sessionID, discordId, 0, { user: { discordId, currentGuildId: guildId } });
 }
+
+describe('the context-changed frame', () => {
+  /** Asserts the frame was written exactly once and before the stream ended. */
+  function expectFrameThenEnd(res: ReturnType<typeof fakeRes>): void {
+    expect(res.write).toHaveBeenCalledTimes(1);
+    expect(res.write).toHaveBeenCalledWith(CONTEXT_CHANGED_FRAME);
+    expect(res.write.mock.invocationCallOrder[0]).toBeLessThan(res.end.mock.invocationCallOrder[0]!);
+  }
+
+  it('is a named SSE event with an empty payload', () => {
+    expect(CONTEXT_CHANGED_FRAME).toBe('event: context-changed\ndata: {}\n\n');
+  });
+
+  it('is written before the stream ends when the session is destroyed', () => {
+    const res = fakeRes();
+    registerSessionStream(fakeReq('s1'), res, 'status');
+    closeSessionStreams('s1');
+    expectFrameThenEnd(res);
+  });
+
+  it('is written when the user signs out their other sessions', () => {
+    const res = fakeRes();
+    registerSessionStream(fakeReq('s1', '42', 0), res, 'events');
+    closeUserStreams('42', 1);
+    expectFrameThenEnd(res);
+  });
+
+  it('is written when the session switches guild, to the old guild\'s status stream only', () => {
+    const old = fakeRes();
+    const events = fakeRes();
+    registerSessionStream(fakeReq('s1', '42', undefined, { user: { discordId: '42', currentGuildId: 'g1' } }), old, 'status');
+    registerSessionStream(fakeReq('s1'), events, 'events');
+    switchSessionGuild('s1', 'g2');
+    expectFrameThenEnd(old);
+    expect(events.write).not.toHaveBeenCalled();
+  });
+
+  it('is written when the session loses a guild', () => {
+    const res = fakeRes();
+    registerSessionStream(fakeReq('s1', '42', undefined, { user: { discordId: '42', currentGuildId: 'g1' } }), res, 'status');
+    closeSessionStreamsForGuild('s1', 'g1');
+    expectFrameThenEnd(res);
+  });
+
+  it('is written when the session reaches its end time', () => {
+    vi.useFakeTimers();
+    try {
+      const res = fakeRes();
+      registerSessionStream(fakeReq('s1', '42', 0, { lastSeenAt: Date.now(), loginAt: Date.now() }), res, 'status');
+      vi.advanceTimersByTime(SESSION_IDLE_MS + 1000);
+      expectFrameThenEnd(res);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('is not written to a stream refused at attach, which has no page state to refresh', () => {
+    closeSessionStreams('s1');
+    const late = fakeRes();
+    registerSessionStream(fakeReq('s1'), late, 'status');
+    expect(late.write).not.toHaveBeenCalled();
+    expect(late.end).toHaveBeenCalledTimes(1);
+  });
+
+  it('is not written to a response that has already ended or been destroyed, and the stream still closes', () => {
+    const ended = fakeRes();
+    const destroyed = fakeRes();
+    registerSessionStream(fakeReq('s1'), ended, 'status');
+    registerSessionStream(fakeReq('s1'), destroyed, 'events');
+    Object.assign(ended, { writableEnded: true });
+    Object.assign(destroyed, { destroyed: true });
+    closeSessionStreams('s1');
+    expect(ended.write).not.toHaveBeenCalled();
+    expect(destroyed.write).not.toHaveBeenCalled();
+    expect(ended.end).toHaveBeenCalledTimes(1);
+    expect(destroyed.end).toHaveBeenCalledTimes(1);
+  });
+
+  it('still ends the stream, and keeps closing the rest, when writing the frame throws', () => {
+    const bad = fakeRes();
+    const good = fakeRes();
+    bad.write.mockImplementation(() => { throw new Error('broken pipe'); });
+    registerSessionStream(fakeReq('s1'), bad, 'status');
+    registerSessionStream(fakeReq('s1'), good, 'events');
+    closeSessionStreams('s1');
+    expect(mockLog.warn).toHaveBeenCalled();
+    expect(bad.end).toHaveBeenCalledTimes(1);
+    expect(good.end).toHaveBeenCalledTimes(1);
+    expect(getSessionStreamStats().streams).toBe(0);
+  });
+});
 
 describe('switchSessionGuild (the session picked another guild)', () => {
   it('closes the session\'s status streams for the old guild and keeps the new guild\'s, the events stream and other sessions', () => {

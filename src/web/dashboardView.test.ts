@@ -106,6 +106,14 @@ describe('views/dashboard.ejs layout', () => {
     expect(html.indexOf('/dashboard-stream.js')).toBeLessThan(html.indexOf('/dashboard-status.js'));
   });
 
+  it('loads the context-change script before the two scripts that open the dashboard streams', async () => {
+    const html = await render();
+
+    expect(html.indexOf('/dashboard-context.js')).toBeGreaterThan(-1);
+    expect(html.indexOf('/dashboard-context.js')).toBeLessThan(html.indexOf('/dashboard-events.js'));
+    expect(html.indexOf('/dashboard-context.js')).toBeLessThan(html.indexOf('/app.js'));
+  });
+
   it('puts the user\'s own channel on the body only when they have one, escaped (#1114)', async () => {
     expect(await render({ ownChannel: 'streamer_one' })).toMatch(/<body [^>]*data-own-channel="streamer_one">/);
     expect(await render({ ownChannel: null })).not.toContain('data-own-channel');
