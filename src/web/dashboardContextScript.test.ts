@@ -69,10 +69,18 @@ function runContext({ stored, now = NOW, probe = { status: 200 }, writeThrows = 
   return { watch, reload, store, windowListeners, fetch, timers, clock };
 }
 
-/** Fires the server's frame on a source and runs the settle-delay timer it sets, as the clock reaching it would. */
-function frame(src: FakeSource, ctx: { timers: { fn: () => void; ms: number }[] }): void {
+/** Runs the next scheduled timer after advancing the fake clock by its delay, as the clock reaching it would. */
+function runTimer(ctx: { timers: { fn: () => void; ms: number }[]; clock: { now: number } }): void {
+  const timer = ctx.timers.shift();
+  if (!timer) throw new Error('expected a scheduled timer');
+  ctx.clock.now += timer.ms;
+  timer.fn();
+}
+
+/** Fires the server's frame on a source, then runs the settle-delay timer it sets. */
+function frame(src: FakeSource, ctx: Parameters<typeof runTimer>[0]): void {
   src.fire('context-changed');
-  ctx.timers.shift()?.fn();
+  runTimer(ctx);
 }
 
 /** Lets the probe's promise chain settle. */
@@ -92,7 +100,7 @@ describe('public/dashboard-context.js: the context-changed frame', () => {
     expect(ctx.timers).toHaveLength(1);
     expect(ctx.timers[0]!.ms).toBe(1500);
 
-    ctx.timers[0]!.fn();
+    runTimer(ctx);
     expect(ctx.reload).toHaveBeenCalledTimes(1);
   });
 
@@ -109,7 +117,7 @@ describe('public/dashboard-context.js: the context-changed frame', () => {
     ctx.watch(source);
     source.fire('context-changed');
     ctx.windowListeners.get('beforeunload')?.();
-    ctx.timers[0]!.fn();
+    runTimer(ctx);
     expect(ctx.reload).not.toHaveBeenCalled();
   });
 
@@ -153,42 +161,49 @@ describe('public/dashboard-context.js: the context-changed frame', () => {
     const ctx = runContext();
     ctx.watch(source);
     frame(source, ctx);
-    expect(ctx.store.get('dashboardContextReloadAt')).toBe(String(NOW));
+    expect(ctx.store.get('dashboardContextReloadAt')).toBe(String(NOW + 1500)); // when the reload ran, after the settle delay
   });
 
-  it('holds a frame that arrives within 30 seconds of the last reload until the window ends, instead of losing it', () => {
-    const ctx = runContext({ stored: String(NOW - 29_000) });
+  it('holds a frame that is still inside the 30 s window once the settle delay has passed, instead of losing it', () => {
+    // A reload 28 s old is 29.5 s old when the 1.5 s settle delay ends: 500 ms short of the window.
+    const ctx = runContext({ stored: String(NOW - 28_000) });
     ctx.watch(source);
     frame(source, ctx);
 
     expect(source.close).toHaveBeenCalledTimes(1);
     expect(ctx.reload).not.toHaveBeenCalled();
     expect(ctx.timers).toHaveLength(1);
-    expect(ctx.timers[0]!.ms).toBe(1000);
+    expect(ctx.timers[0]!.ms).toBe(500);
 
     source.fire('context-changed');
     expect(ctx.timers).toHaveLength(1);
   });
 
   it('reloads when the held-back window ends', () => {
-    const ctx = runContext({ stored: String(NOW - 29_000) });
+    const ctx = runContext({ stored: String(NOW - 28_000) });
     ctx.watch(source);
     frame(source, ctx);
-    ctx.clock.now += 1000;
-    ctx.timers[0]!.fn();
+    runTimer(ctx);
     expect(ctx.reload).toHaveBeenCalledTimes(1);
   });
 
   it('drops the held-back reload if the page starts navigating meanwhile, and replays it from the back/forward cache', () => {
-    const ctx = runContext({ stored: String(NOW - 29_000) });
+    const ctx = runContext({ stored: String(NOW - 28_000) });
     ctx.watch(source);
     frame(source, ctx);
     ctx.windowListeners.get('beforeunload')?.();
-    ctx.clock.now += 1000;
-    ctx.timers[0]!.fn();
+    runTimer(ctx);
     expect(ctx.reload).not.toHaveBeenCalled();
     ctx.windowListeners.get('pageshow')?.({ persisted: true });
     expect(ctx.reload).toHaveBeenCalledTimes(1);
+  });
+
+  it('measures the window when the settle delay ends, not when the frame arrived: a reload 29 s old then runs at once', () => {
+    const ctx = runContext({ stored: String(NOW - 29_000) });
+    ctx.watch(source);
+    frame(source, ctx);
+    expect(ctx.reload).toHaveBeenCalledTimes(1);
+    expect(ctx.timers).toHaveLength(0);
   });
 
   it('reloads after the settle delay when 30 seconds have passed since the last reload', () => {
