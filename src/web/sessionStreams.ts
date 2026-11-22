@@ -281,15 +281,25 @@ export function closeUserStreams(discordId: string, belowGeneration: number): vo
 }
 
 /**
- * Records that a session picked another guild and closes its status streams opened under any other one
- * (a status stream is per guild: its snapshot is that guild's). A status stream still on its way to
- * registering under the old guild is refused for a while. The session's `events` stream is per streamer, so
+ * Records that a session picked another guild, so a status stream still on its way to registering under the old guild
+ * is refused for a while, and (unless `closeNow` is false) closes the session's status streams opened under any other
+ * guild (a status stream is per guild: its snapshot is that guild's). The session's `events` stream is per streamer, so
  * it is left open.
  * @param sessionId - ID of the session that switched guild (from `POST /guild/select`).
  * @param guildId - The guild the session switched to.
+ * @param closeNow - False to only record the switch, leaving the caller to run {@link closeStreamsOutsideGuild} once the new guild has been saved to the session (the frame would otherwise reach another tab before the save does).
  */
-export function switchSessionGuild(sessionId: string, guildId: string): void {
+export function switchSessionGuild(sessionId: string, guildId: string, closeNow = true): void {
   remember(sessionGuilds, sessionId, { guildId, expiresAt: Date.now() + SESSION_GUILD_TTL_MS });
+  if (closeNow) closeStreamsOutsideGuild(sessionId, guildId);
+}
+
+/**
+ * Closes a session's status streams opened under any guild other than `guildId`, with the context-changed frame.
+ * @param sessionId - ID of the session that switched guild.
+ * @param guildId - The guild the session is now in; its own streams stay open.
+ */
+export function closeStreamsOutsideGuild(sessionId: string, guildId: string): void {
   for (const res of Array.from(bySession.get(sessionId) ?? [])) {
     const entry = streams.get(res);
     if (entry?.guildId != null && entry.guildId !== guildId) closeStream(res, undefined, true);

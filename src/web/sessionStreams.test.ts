@@ -15,7 +15,7 @@ import express from 'express';
 import session from 'express-session';
 import type { Request, Response } from 'express';
 import {
-  registerSessionStream, closeSessionStreams, closeUserStreams, closeSessionStreamsForGuild, switchSessionGuild, wrapStoreDestroy,
+  registerSessionStream, closeSessionStreams, closeUserStreams, closeSessionStreamsForGuild, switchSessionGuild, closeStreamsOutsideGuild, wrapStoreDestroy,
   getSessionStreamStats, resetSessionStreamsForTests, TOMBSTONE_TTL_MS, SESSION_GUILD_TTL_MS, MAX_TRACKED_ENTRIES, CONTEXT_CHANGED_FRAME,
 } from './sessionStreams';
 import { SESSION_IDLE_MS, SESSION_ABSOLUTE_MAX_MS } from './sessionLifetime';
@@ -309,6 +309,36 @@ describe('switchSessionGuild (the session picked another guild)', () => {
 
     expect(registerSessionStream(guildReq('s1', null), res, 'status')).toBe(true);
     expect(res.end).not.toHaveBeenCalled();
+  });
+});
+
+describe('switchSessionGuild with closeNow false, then closeStreamsOutsideGuild', () => {
+  it('records the switch at once, so an old-guild stream is refused, and closes the old streams only when asked', () => {
+    const old = fakeRes();
+    registerSessionStream(guildReq('s1', 'g1'), old, 'status');
+
+    switchSessionGuild('s1', 'g2', false);
+    expect(old.end).not.toHaveBeenCalled();
+    expect(registerSessionStream(guildReq('s1', 'g1'), fakeRes(), 'status')).toBe(false);
+
+    closeStreamsOutsideGuild('s1', 'g2');
+    expect(old.write).toHaveBeenCalledWith(CONTEXT_CHANGED_FRAME);
+    expect(old.end).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves the new guild\'s streams, the events stream and other sessions open', () => {
+    const current = fakeRes();
+    const events = fakeRes();
+    const other = fakeRes();
+    registerSessionStream(guildReq('s1', 'g2'), current, 'status');
+    registerSessionStream(guildReq('s1', 'g1'), events, 'events');
+    registerSessionStream(guildReq('s2', 'g1'), other, 'status');
+
+    closeStreamsOutsideGuild('s1', 'g2');
+
+    expect(current.end).not.toHaveBeenCalled();
+    expect(events.end).not.toHaveBeenCalled();
+    expect(other.end).not.toHaveBeenCalled();
   });
 });
 
