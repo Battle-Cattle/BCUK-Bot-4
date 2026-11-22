@@ -1,6 +1,9 @@
 import { getStatus, type ChannelStatus } from '../shared/statusStore';
 import { getGuildById, getGuildMemberUsers, onGuildInfoChanged, type DbGuild, type DbUser } from '../db';
 import { normalizeTwitchChannelName } from '../twitch/twitchChannelName';
+import { createLogger } from '../shared/logger';
+
+const log = createLogger('Web');
 
 /** Bot status scoped to a single guild — safe to send to that guild's dashboard viewers. */
 export interface GuildScopedStatus {
@@ -37,19 +40,44 @@ const guildInfoCache = new Map<string, CachedGuildInfo>();
  */
 const guildInfoInFlight = new Map<string, Promise<CachedGuildInfo>>();
 
+/** Listeners told, right after the guild-info cache was dropped, which guild's snapshot may now differ. */
+const invalidationListeners = new Set<(guildId: string | null) => void>();
+
+/**
+ * Registers a listener called each time cached guild info is dropped because a write changed it. By then the cache
+ * entry (and any load still in flight) is gone, so a snapshot built from inside the listener reads the new rows: this
+ * is the point to push a fresh snapshot to open dashboards, rather than subscribing to the db event directly (a
+ * listener of that could run before the cache was dropped).
+ * @param listener - Called with the changed guild's ID, or null when any guild may have changed. Must not throw.
+ * @returns A function that removes the listener again.
+ */
+export function onGuildStatusInvalidated(listener: (guildId: string | null) => void): () => void {
+  invalidationListeners.add(listener);
+  return () => { invalidationListeners.delete(listener); };
+}
+
 /**
  * Drops cached guild info after a write changed it, including a load still in flight: that load read the rows before
- * the write, so it must neither be joined by a later call nor be cached when it finishes.
+ * the write, so it must neither be joined by a later call nor be cached when it finishes. Then tells the
+ * {@link onGuildStatusInvalidated} listeners, so a push that follows always builds on fresh rows. A listener that
+ * throws is logged and never stops the others or fails the write that triggered this.
  * @param guildId - The changed guild, or null when any guild may have changed (a user-level change).
  */
 function invalidateGuildInfo(guildId: string | null): void {
   if (guildId === null) {
     guildInfoCache.clear();
     guildInfoInFlight.clear();
-    return;
+  } else {
+    guildInfoCache.delete(guildId);
+    guildInfoInFlight.delete(guildId);
   }
-  guildInfoCache.delete(guildId);
-  guildInfoInFlight.delete(guildId);
+  for (const listener of Array.from(invalidationListeners)) {
+    try {
+      listener(guildId);
+    } catch (err) {
+      log.error('A guild-status invalidation listener threw:', err);
+    }
+  }
 }
 
 onGuildInfoChanged(invalidateGuildInfo);

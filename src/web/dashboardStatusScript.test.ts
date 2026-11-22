@@ -65,7 +65,7 @@ class FakeElement {
 const IDS = [
   'dot-discord', 'discord-state', 'discord-tag', 'discord-guild', 'dot-voice', 'voice-channel', 'voice-state',
   'btn-rejoin-voice', 'last-command', 'last-file', 'last-source', 'last-when', 'twitch-channels',
-  'health-indicator', 'bot-status', 'status-stale-note', 'twitch-state',
+  'health-indicator', 'bot-status', 'status-stale-note', 'twitch-state', 'twitch-channel-count',
   'stream-own-state', 'stream-own-name', 'stream-own-note', 'stream-own-link',
 ];
 
@@ -407,6 +407,41 @@ describe('public/dashboard-status.js zero Twitch channels', () => {
 
     expect(el('twitch-state').textContent).toBe('No channels configured');
     expect(el('twitch-state').className).toBe('stat-value status-text status-text--inactive');
+  });
+});
+
+describe('public/dashboard-status.js Usage tile Twitch Channels count (#1117)', () => {
+  const channel = { connected: true, isLive: false, lastConnectedAt: null, lastDisconnectedAt: null };
+
+  it('follows the channel list as channels are added, removed and cleared, without a reload', () => {
+    const { el, applyStatus } = runScripts();
+
+    applyStatus(status(true, { connected: true }, { streamer_one: channel }));
+    expect(el('twitch-channel-count').textContent).toBe('1');
+
+    applyStatus(status(true, { connected: true }, { streamer_one: channel, streamer_two: channel, streamer_three: channel }));
+    expect(el('twitch-channel-count').textContent).toBe('3');
+
+    applyStatus(status(true, { connected: true }, { streamer_two: channel }));
+    expect(el('twitch-channel-count').textContent).toBe('1');
+  });
+
+  it('shows 0, not a dash, when the last channel goes', () => {
+    const { el, applyStatus } = runScripts();
+    applyStatus(status(true, { connected: true }, { streamer_one: channel }));
+
+    applyStatus(status(true, { connected: true }, {}));
+
+    expect(el('twitch-channel-count').textContent).toBe('0');
+  });
+
+  it('counts the same channels the list shows', () => {
+    const { el, applyStatus } = runScripts();
+    applyStatus(status(true, { connected: true }, { streamer_one: channel, streamer_two: channel }));
+
+    const rows = el('twitch-channels').descendants().filter((e) => e.className === 'channel-item');
+    expect(rows).toHaveLength(2);
+    expect(el('twitch-channel-count').textContent).toBe(String(rows.length));
   });
 });
 
