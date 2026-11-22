@@ -34,4 +34,4 @@ One sub-issue, one branch, one PR. The parent issue holds the full design; the s
 
 ## 4. After it merges
 - Have `issue-gardener` tick the part off on the parent (strike through or tick, saying when and in which PR) and update any later sub-issue whose premise this part changed.
-- If this was the last open sub-issue, the parent is complete: say so to the user rather than closing it yourself.
+- If this was the last open sub-issue, the parent is complete: close it as completed, with a dated comment naming the PRs that finished it, and tell the user. Leave it open only when what remains is optional or its scope is unclear (e.g. an epic whose last parts are marked optional), and say why.
