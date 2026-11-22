@@ -187,13 +187,14 @@ describe('the context-changed frame', () => {
     expectFrameThenEnd(res);
   });
 
-  it('is written when the session reaches its end time', () => {
+  it('is not written when the session reaches its end time: the reload would be a page load that renews a session that may still be alive', () => {
     vi.useFakeTimers();
     try {
       const res = fakeRes();
       registerSessionStream(fakeReq('s1', '42', 0, { lastSeenAt: Date.now(), loginAt: Date.now() }), res, 'status');
       vi.advanceTimersByTime(SESSION_IDLE_MS + 1000);
-      expectFrameThenEnd(res);
+      expect(res.end).toHaveBeenCalledTimes(1);
+      expect(res.write).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }

@@ -238,7 +238,8 @@ export function registerSessionStream(req: Request, res: Response, kind: Session
   const endsAt = sessionEndsAt(req.session);
   if (endsAt !== undefined) {
     // unref'd: a timer must never keep the process alive at shutdown. Ending early is safe, since the reconnect re-runs auth.
-    entry.timer = setTimeout(() => closeStream(res, req, true), Math.max(0, endsAt - Date.now()));
+    // No context-changed frame here: `sessionEndsAt` is a lower bound, and a reload would be a page load that renews a session that may still be alive.
+    entry.timer = setTimeout(() => closeStream(res, req), Math.max(0, endsAt - Date.now()));
     entry.timer.unref();
   }
 
