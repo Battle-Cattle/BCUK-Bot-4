@@ -8,6 +8,7 @@ import {
 } from '../db';
 import { renderView } from './routes/viewHelpers';
 import { parseBearerToken } from './bearerToken';
+import { closeSessionStreamsForGuild } from './sessionStreams';
 import {
   getLiveAccessForRequest,
   hasPanelAccess,
@@ -87,6 +88,8 @@ export async function requireAuthJson(req: Request, res: Response, next: NextFun
  * through `getLiveAccessForRequest`, so it reuses the one `requireAuth` already made for this
  * request. A session signed out by "Sign out other sessions" is sent to login here too
  * ({@link isCurrentSessionGeneration}), in case a route runs this without `requireAuth`.
+ * A stored guild the user can no longer act in is dropped, and the session's open dashboard
+ * status streams for it are closed (`closeSessionStreamsForGuild`).
  *
  * @param req - Express request; reads and mutates `req.session.user`.
  * @param res - Express response; used to redirect when no guild context can be resolved.
@@ -111,8 +114,10 @@ export async function requireGuildContext(req: Request, res: Response, next: Nex
   user.guilds = liveGuilds.map((g) => ({ guildId: g.guild_id, name: g.name }));
 
   // A stored guild must still be one the user can act in (membership may have been
-  // revoked since login). Drop it and re-pick if not.
+  // revoked since login). Drop it and re-pick if not, and close the session's status streams
+  // for the dropped guild (#1116).
   if (user.currentGuildId && !user.guilds.some((g) => g.guildId === user.currentGuildId)) {
+    closeSessionStreamsForGuild(req.sessionID, user.currentGuildId);
     user.currentGuildId = null;
   }
 

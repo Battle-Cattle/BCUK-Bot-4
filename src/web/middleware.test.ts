@@ -13,9 +13,12 @@ vi.mock('../db', () => ({
 vi.mock('./csrf', () => ({
   ensureSessionCsrfToken: vi.fn().mockReturnValue('csrf-token'),
 }));
+// The registry itself is tested in sessionStreams.test.ts; here only that requireGuildContext hands it a dropped guild.
+vi.mock('./sessionStreams', () => ({ closeSessionStreamsForGuild: vi.fn() }));
 
 import { createHash } from 'crypto';
 import { requireAuth, requireAuthJson, requireManager, requireMod, requireAdmin, requireOwner, requireOwnerJson, requireModJson, requireManagerJson, requireAdminJson, requireApiKey, requireCompanionKey, requireGuildContext } from './middleware';
+import { closeSessionStreamsForGuild } from './sessionStreams';
 import { findKeyByHash, findDiscordIdByTokenHash, getEffectiveAccessLevelForUser, findUser, getAllGuilds, getGuildsForMember, AccessLevel } from '../db';
 
 function makeReq(overrides: object = {}): any {
@@ -749,6 +752,30 @@ describe('requireGuildContext', () => {
     expect(req.session.user.currentGuildId).toBeNull();
     expect(res.redirect).toHaveBeenCalledWith('/guild/select');
     expect(next).not.toHaveBeenCalled();
+  });
+
+  it('closes the session\'s status streams for a guild it drops, before clearing it (#1116)', async () => {
+    vi.mocked(getGuildsForMember).mockResolvedValue([{ guild_id: 'g1', name: 'A', voice_channel_id: null }] as any);
+    const user = { discordId: 'u1', currentGuildId: 'gone', accessLevel: AccessLevel.USER, guilds: [{ guildId: 'g1', name: 'A' }] };
+    const req = makeReq({ sessionID: 'sid-1', session: { user } });
+    vi.mocked(closeSessionStreamsForGuild).mockImplementation(() => {
+      expect(user.currentGuildId).toBe('gone');
+    });
+
+    await requireGuildContext(req, makeRes(), next);
+
+    expect(closeSessionStreamsForGuild).toHaveBeenCalledExactlyOnceWith('sid-1', 'gone');
+  });
+
+  it('closes no streams when the stored guild is still valid, or when none is stored', async () => {
+    vi.mocked(getGuildsForMember).mockResolvedValue([{ guild_id: 'g1', name: 'A', voice_channel_id: null }] as any);
+    const kept = makeReq({ sessionID: 'sid-1', session: { user: { discordId: 'u1', currentGuildId: 'g1', accessLevel: AccessLevel.USER, guilds: [{ guildId: 'g1', name: 'A' }] } } });
+    const none = makeReq({ sessionID: 'sid-2', session: { user: { discordId: 'u1', currentGuildId: null, accessLevel: AccessLevel.USER, guilds: [{ guildId: 'g1', name: 'A' }] } } });
+
+    await requireGuildContext(kept, makeRes(), next);
+    await requireGuildContext(none, makeRes(), next);
+
+    expect(closeSessionStreamsForGuild).not.toHaveBeenCalled();
   });
 
   it('redirects to login when the user has no accessible guilds', async () => {

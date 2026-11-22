@@ -8,6 +8,7 @@ import { filterQueryParam, normalizeDiscordId } from './validation';
 import { renderView } from './viewHelpers';
 import { logAndRedirectError } from './errorHandling';
 import { fetchLiveGuildsForUser, resolveAccessLevelForGuild } from '../guildAccess';
+import { switchSessionGuild } from '../sessionStreams';
 
 const log = createLogger('Web');
 const router = Router();
@@ -60,6 +61,8 @@ router.get('/select', requireAuth, csrfProtection, (req, res) => {
  * `GET /auth/login` would see a still-populated `session.user` and bounce straight to `/`
  * without ever rendering the error.
  *
+ * As soon as the new guild is assigned to the session it also closes the session's open dashboard status
+ * streams opened under any other guild (see `switchSessionGuild`).
  * @param req - Express request; reads `req.session.user` and the `guild_id` form field.
  * @param res - Express response; redirects to `/` on success, or back to `/guild/select` /
  *   `/auth/login` when the selection can't be accepted.
@@ -94,6 +97,9 @@ router.post('/select', requireAuth, csrfProtection, async (req, res) => {
       return res.redirect('/guild/select?error=guild_not_found');
     }
     user.currentGuildId = requestedGuildId;
+    // The session's open status streams belong to the old guild: close them, so none keeps delivering its channels (#1116).
+    // Right after the assignment, before the awaited lookup below: if that fails, express-session still saves the new guild.
+    switchSessionGuild(req.sessionID, requestedGuildId);
     user.accessLevel = await resolveAccessLevelForGuild(dbUser, requestedGuildId, accessLevelByGuildId);
   } catch (err) {
     return logAndRedirectError({

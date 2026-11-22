@@ -7,6 +7,8 @@
 //     change that destroys the session, the 7-day cap): `wrapStoreDestroy` hooks the session store,
 //     because express-session's `destroy` and `regenerate` both end in `store.destroy`;
 //   - the user signs out their other sessions (`closeUserStreams`);
+//   - the session picks another guild, or loses the one it was in: the status stream is per guild (`switchSessionGuild`,
+//     `closeSessionStreamsForGuild`), so one opened under the old guild must not outlive the change;
 //   - the session's own end time passes: an idle-expired session's cookie is dropped by the browser,
 //     so nothing would ever call `destroy` for it (`registerSessionStream` sets one unref'd timer).
 //
@@ -26,6 +28,13 @@ export type SessionStreamKind = 'status' | 'events';
 /** How long a destroyed session ID, or a user's minimum generation, is remembered (longer than any gap between a request loading its session and attaching its stream). */
 export const TOMBSTONE_TTL_MS = 10 * 60 * 1000;
 
+/**
+ * How long a session's last guild switch is remembered. Short: it only covers the race where a status stream's
+ * request loaded the session before the switch, a matter of one request's lookups, and refusing a stream wrongly
+ * (the record and the session disagreeing) costs a live panel, unlike a destroyed session's tombstone.
+ */
+export const SESSION_GUILD_TTL_MS = 60 * 1000;
+
 /** Most destroyed session IDs (and, separately, per-user minimum generations) remembered at once; the oldest are dropped first. */
 export const MAX_TRACKED_ENTRIES = 10_000;
 
@@ -36,6 +45,8 @@ interface StreamEntry {
   sessionId: string;
   discordId: string;
   generation: number;
+  /** The guild the stream was opened under: set for a `status` stream (which is per guild), null for an `events` stream (per streamer). */
+  guildId: string | null;
   timer: NodeJS.Timeout | null;
 }
 
@@ -46,6 +57,9 @@ const byUser = new Map<string, Set<Response>>();
 // Destroyed session IDs (value: when to forget), so a stream whose request loaded its session
 // before the destroy, then awaited a lookup, is refused when it finally registers.
 const tombstones = new Map<string, number>();
+// Per session, the guild it last switched to (value: when to forget), so a status stream whose request loaded the
+// session before the switch, then awaited a lookup, is refused when it registers under the old guild.
+const sessionGuilds = new Map<string, { guildId: string; expiresAt: number }>();
 // Per user, the lowest session generation allowed to register (set by "sign out other sessions"),
 // with when to forget it, for the same reason.
 const minGenerations = new Map<string, { generation: number; expiresAt: number }>();
@@ -155,6 +169,35 @@ function isBelowMinGeneration(discordId: string, generation: number): boolean {
 }
 
 /**
+ * Whether a status stream was opened under a guild the session has since switched away from.
+ * @param sessionId - The stream's session ID.
+ * @param guildId - The guild the stream was opened under, or null for a stream that has none.
+ * @returns True when the session switched to a different guild within {@link SESSION_GUILD_TTL_MS}.
+ */
+function isStaleGuild(sessionId: string, guildId: string | null): boolean {
+  const entry = sessionGuilds.get(sessionId);
+  if (!entry || guildId === null) return false;
+  if (entry.expiresAt <= Date.now()) {
+    sessionGuilds.delete(sessionId);
+    return false;
+  }
+  return guildId !== entry.guildId;
+}
+
+/**
+ * Whether a stream must be refused: its session was destroyed, signed out by "sign out other
+ * sessions", or switched to another guild than the one the stream was opened under.
+ * @param sessionId - The stream's session ID.
+ * @param discordId - Discord snowflake of the session's user.
+ * @param generation - The session's generation.
+ * @param guildId - The guild a status stream was opened under, or null.
+ * @returns True when the stream must not be registered.
+ */
+function isRefused(sessionId: string, discordId: string, generation: number, guildId: string | null): boolean {
+  return isTombstoned(sessionId) || isBelowMinGeneration(discordId, generation) || isStaleGuild(sessionId, guildId);
+}
+
+/**
  * Registers a dashboard stream that was just attached, so ending its session closes it. Must run
  * in the same synchronous turn as a successful `attachSseConnection` (no `await` in between): a
  * destroy then either finds the stream registered and closes it, or has already tombstoned the
@@ -162,19 +205,20 @@ function isBelowMinGeneration(discordId: string, generation: number): boolean {
  * frame beyond the handshake is sent.
  * @param req - The stream's request, carrying the signed-in session.
  * @param res - The attached SSE response.
- * @param _kind - Which dashboard stream this is (kept for diagnostics and future per-kind closing).
- * @returns False when the stream was refused (no signed-in user, a destroyed session, or a session signed out by "sign out other sessions") and has been ended.
+ * @param kind - Which dashboard stream this is: a `status` stream is per guild (it is opened under the session's current guild), an `events` stream is not.
+ * @returns False when the stream was refused (no signed-in user, a destroyed session, a session signed out by "sign out other sessions", or a status stream opened under a guild the session has since left) and has been ended.
  */
-export function registerSessionStream(req: Request, res: Response, _kind: SessionStreamKind): boolean {
+export function registerSessionStream(req: Request, res: Response, kind: SessionStreamKind): boolean {
   const sessionId = req.sessionID;
   const discordId = req.session.user?.discordId;
   const generation = req.session.sessionGeneration ?? 0;
-  if (!sessionId || !discordId || isTombstoned(sessionId) || isBelowMinGeneration(discordId, generation)) {
+  const guildId = kind === 'status' ? (req.session.user?.currentGuildId ?? null) : null;
+  if (!sessionId || !discordId || isRefused(sessionId, discordId, generation, guildId)) {
     closeStream(res, req);
     return false;
   }
 
-  const entry: StreamEntry = { req, res, sessionId, discordId, generation, timer: null };
+  const entry: StreamEntry = { req, res, sessionId, discordId, generation, guildId, timer: null };
   streams.set(res, entry);
   indexAdd(bySession, sessionId, res);
   indexAdd(byUser, discordId, res);
@@ -224,6 +268,38 @@ export function closeUserStreams(discordId: string, belowGeneration: number): vo
 }
 
 /**
+ * Records that a session picked another guild and closes its status streams opened under any other one
+ * (a status stream is per guild: its snapshot is that guild's). A status stream still on its way to
+ * registering under the old guild is refused for a while. The session's `events` stream is per streamer, so
+ * it is left open.
+ * @param sessionId - ID of the session that switched guild (from `POST /guild/select`).
+ * @param guildId - The guild the session switched to.
+ */
+export function switchSessionGuild(sessionId: string, guildId: string): void {
+  remember(sessionGuilds, sessionId, { guildId, expiresAt: Date.now() + SESSION_GUILD_TTL_MS });
+  for (const res of Array.from(bySession.get(sessionId) ?? [])) {
+    const entry = streams.get(res);
+    if (entry?.guildId != null && entry.guildId !== guildId) closeStream(res);
+  }
+}
+
+/**
+ * Closes a session's status streams opened under one guild, for a session that lost access to it
+ * (`requireGuildContext` dropped a guild the user can no longer act in), and forgets a recorded switch to
+ * that guild. Streams under the session's other guilds, its `events` stream and other sessions are left alone.
+ * @param sessionId - ID of the session that lost the guild.
+ * @param guildId - The guild the session lost.
+ */
+export function closeSessionStreamsForGuild(sessionId: string, guildId: string): void {
+  // The session no longer has this guild, so a recorded switch to it is void: `requireGuildContext` may auto-pick the user's
+  // only remaining guild next, and a status stream for that one must not be refused as stale.
+  if (sessionGuilds.get(sessionId)?.guildId === guildId) sessionGuilds.delete(sessionId);
+  for (const res of Array.from(bySession.get(sessionId) ?? [])) {
+    if (streams.get(res)?.guildId === guildId) closeStream(res);
+  }
+}
+
+/**
  * Hooks a session store so destroying a session (which `regenerate` also does) closes that
  * session's dashboard streams first. Closing comes before the real destroy, so a failing destroy
  * still leaves no stream open; a throw while closing is logged and never stops the destroy. The
@@ -245,10 +321,10 @@ export function wrapStoreDestroy(store: Store): void {
 
 /**
  * Counts of what the registry holds, so tests can prove nothing leaks. Exported for tests.
- * @returns The number of registered streams, each index's session and user keys, and the remembered destroyed sessions and minimum generations.
+ * @returns The number of registered streams, each index's session and user keys, and the remembered destroyed sessions, minimum generations and session guild switches.
  */
-export function getSessionStreamStats(): { streams: number; bySession: number; byUser: number; tombstones: number; minGenerations: number } {
-  return { streams: streams.size, bySession: bySession.size, byUser: byUser.size, tombstones: tombstones.size, minGenerations: minGenerations.size };
+export function getSessionStreamStats(): { streams: number; bySession: number; byUser: number; tombstones: number; minGenerations: number; sessionGuilds: number } {
+  return { streams: streams.size, bySession: bySession.size, byUser: byUser.size, tombstones: tombstones.size, minGenerations: minGenerations.size, sessionGuilds: sessionGuilds.size };
 }
 
 /** Empties the registry, the tombstones and their timers. Exported for tests. */
@@ -256,4 +332,5 @@ export function resetSessionStreamsForTests(): void {
   for (const res of Array.from(streams.keys())) unregister(res);
   tombstones.clear();
   minGenerations.clear();
+  sessionGuilds.clear();
 }

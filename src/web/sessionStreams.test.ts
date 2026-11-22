@@ -15,8 +15,8 @@ import express from 'express';
 import session from 'express-session';
 import type { Request, Response } from 'express';
 import {
-  registerSessionStream, closeSessionStreams, closeUserStreams, wrapStoreDestroy,
-  getSessionStreamStats, resetSessionStreamsForTests, TOMBSTONE_TTL_MS, MAX_TRACKED_ENTRIES,
+  registerSessionStream, closeSessionStreams, closeUserStreams, closeSessionStreamsForGuild, switchSessionGuild, wrapStoreDestroy,
+  getSessionStreamStats, resetSessionStreamsForTests, TOMBSTONE_TTL_MS, SESSION_GUILD_TTL_MS, MAX_TRACKED_ENTRIES,
 } from './sessionStreams';
 import { SESSION_IDLE_MS, SESSION_ABSOLUTE_MAX_MS } from './sessionLifetime';
 
@@ -135,6 +135,140 @@ describe('registerSessionStream and closeSessionStreams', () => {
 
     expect(good.end).toHaveBeenCalledTimes(1);
     expect(getSessionStreamStats().streams).toBe(0);
+  });
+});
+
+/** A request for a signed-in session whose current guild is `guildId`. */
+function guildReq(sessionID: string, guildId: string | null, discordId = '42'): Request {
+  return fakeReq(sessionID, discordId, 0, { user: { discordId, currentGuildId: guildId } });
+}
+
+describe('switchSessionGuild (the session picked another guild)', () => {
+  it('closes the session\'s status streams for the old guild and keeps the new guild\'s, the events stream and other sessions', () => {
+    const oldGuild = fakeRes();
+    const newGuild = fakeRes();
+    const events = fakeRes();
+    const otherSession = fakeRes();
+    registerSessionStream(guildReq('s1', 'gX'), oldGuild, 'status');
+    registerSessionStream(guildReq('s1', 'gY'), newGuild, 'status');
+    registerSessionStream(guildReq('s1', 'gX'), events, 'events');
+    registerSessionStream(guildReq('s2', 'gX'), otherSession, 'status');
+
+    switchSessionGuild('s1', 'gY');
+
+    expect(oldGuild.end).toHaveBeenCalledTimes(1);
+    expect(newGuild.end).not.toHaveBeenCalled();
+    expect(events.end).not.toHaveBeenCalled(); // /dashboard/events is per streamer, not per guild
+    expect(otherSession.end).not.toHaveBeenCalled();
+  });
+
+  it('refuses a status stream that registers afterwards under the old guild (its request loaded the session before the switch)', () => {
+    switchSessionGuild('s1', 'gY');
+    const late = fakeRes();
+
+    expect(registerSessionStream(guildReq('s1', 'gX'), late, 'status')).toBe(false);
+    expect(late.end).toHaveBeenCalledTimes(1);
+    expect(registerSessionStream(guildReq('s1', 'gY'), fakeRes(), 'status')).toBe(true);
+    expect(registerSessionStream(guildReq('s2', 'gX'), fakeRes(), 'status')).toBe(true);
+    expect(registerSessionStream(guildReq('s1', 'gX'), fakeRes(), 'events')).toBe(true);
+  });
+
+  it('keeps the latest guild when the session switches again', () => {
+    switchSessionGuild('s1', 'gY');
+    switchSessionGuild('s1', 'gX');
+
+    expect(registerSessionStream(guildReq('s1', 'gX'), fakeRes(), 'status')).toBe(true);
+    expect(registerSessionStream(guildReq('s1', 'gY'), fakeRes(), 'status')).toBe(false);
+  });
+
+  it('forgets the switch after the TTL, and caps what it remembers', () => {
+    vi.useFakeTimers();
+    try {
+      switchSessionGuild('s1', 'gY');
+      vi.advanceTimersByTime(SESSION_GUILD_TTL_MS - 1);
+      expect(registerSessionStream(guildReq('s1', 'gX'), fakeRes(), 'status')).toBe(false);
+      vi.advanceTimersByTime(2);
+      expect(registerSessionStream(guildReq('s1', 'gX'), fakeRes(), 'status')).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+    for (let i = 0; i < MAX_TRACKED_ENTRIES + 5; i++) switchSessionGuild(`sid-${i}`, 'gY');
+    expect(getSessionStreamStats().sessionGuilds).toBe(MAX_TRACKED_ENTRIES);
+  });
+
+  it('closes every status stream the session holds under the old guild, and detaches each request\'s session so none saves it back', () => {
+    const [a, b] = [fakeRes(), fakeRes()];
+    const [reqA, reqB] = [guildReq('s1', 'gX'), guildReq('s1', 'gX')];
+    registerSessionStream(reqA, a, 'status');
+    registerSessionStream(reqB, b, 'status');
+
+    switchSessionGuild('s1', 'gY');
+
+    expect(a.end).toHaveBeenCalledTimes(1);
+    expect(b.end).toHaveBeenCalledTimes(1);
+    expect(reqA.session).toBeUndefined();
+    expect(reqB.session).toBeUndefined();
+  });
+
+  it('closes nothing, and refuses nothing, for a status stream with no guild recorded', () => {
+    switchSessionGuild('s1', 'gY');
+    const res = fakeRes();
+
+    expect(registerSessionStream(guildReq('s1', null), res, 'status')).toBe(true);
+    expect(res.end).not.toHaveBeenCalled();
+  });
+});
+
+describe('closeSessionStreamsForGuild (the session lost a guild)', () => {
+  it('closes only that session\'s status streams for that guild', () => {
+    const lost = fakeRes();
+    const kept = fakeRes();
+    const events = fakeRes();
+    const otherSession = fakeRes();
+    registerSessionStream(guildReq('s1', 'gX'), lost, 'status');
+    registerSessionStream(guildReq('s1', 'gY'), kept, 'status');
+    registerSessionStream(guildReq('s1', 'gX'), events, 'events');
+    registerSessionStream(guildReq('s2', 'gX'), otherSession, 'status');
+
+    closeSessionStreamsForGuild('s1', 'gX');
+
+    expect(lost.end).toHaveBeenCalledTimes(1);
+    expect(kept.end).not.toHaveBeenCalled();
+    expect(events.end).not.toHaveBeenCalled();
+    expect(otherSession.end).not.toHaveBeenCalled();
+    expect(getSessionStreamStats().streams).toBe(3);
+  });
+
+  it('detaches the closed stream\'s session, and leaves the others\' sessions attached', () => {
+    const [lostReq, keptReq] = [guildReq('s1', 'gX'), guildReq('s1', 'gY')];
+    registerSessionStream(lostReq, fakeRes(), 'status');
+    registerSessionStream(keptReq, fakeRes(), 'status');
+
+    closeSessionStreamsForGuild('s1', 'gX');
+
+    expect(lostReq.session).toBeUndefined();
+    expect(keptReq.session).toBeDefined();
+  });
+
+  it('voids a recorded switch to the lost guild, so a stream for the guild auto-picked next is not refused', () => {
+    switchSessionGuild('s1', 'gX');
+
+    closeSessionStreamsForGuild('s1', 'gX'); // gX revoked: requireGuildContext drops it, then auto-picks the only guild left, gY
+
+    expect(registerSessionStream(guildReq('s1', 'gY'), fakeRes(), 'status')).toBe(true);
+    expect(getSessionStreamStats().sessionGuilds).toBe(0);
+  });
+
+  it('keeps a recorded switch to a different guild than the one lost', () => {
+    switchSessionGuild('s1', 'gY');
+
+    closeSessionStreamsForGuild('s1', 'gX');
+
+    expect(registerSessionStream(guildReq('s1', 'gX'), fakeRes(), 'status')).toBe(false);
+  });
+
+  it('does nothing for a session or guild with no open stream', () => {
+    expect(() => closeSessionStreamsForGuild('nope', 'gX')).not.toThrow();
   });
 });
 
