@@ -28,6 +28,13 @@ export type SessionStreamKind = 'status' | 'events';
 /** How long a destroyed session ID, or a user's minimum generation, is remembered (longer than any gap between a request loading its session and attaching its stream). */
 export const TOMBSTONE_TTL_MS = 10 * 60 * 1000;
 
+/**
+ * How long a session's last guild switch is remembered. Short: it only covers the race where a status stream's
+ * request loaded the session before the switch, a matter of one request's lookups, and refusing a stream wrongly
+ * (the record and the session disagreeing) costs a live panel, unlike a destroyed session's tombstone.
+ */
+export const SESSION_GUILD_TTL_MS = 60 * 1000;
+
 /** Most destroyed session IDs (and, separately, per-user minimum generations) remembered at once; the oldest are dropped first. */
 export const MAX_TRACKED_ENTRIES = 10_000;
 
@@ -165,7 +172,7 @@ function isBelowMinGeneration(discordId: string, generation: number): boolean {
  * Whether a status stream was opened under a guild the session has since switched away from.
  * @param sessionId - The stream's session ID.
  * @param guildId - The guild the stream was opened under, or null for a stream that has none.
- * @returns True when the session switched to a different guild within {@link TOMBSTONE_TTL_MS}.
+ * @returns True when the session switched to a different guild within {@link SESSION_GUILD_TTL_MS}.
  */
 function isStaleGuild(sessionId: string, guildId: string | null): boolean {
   const entry = sessionGuilds.get(sessionId);
@@ -269,7 +276,7 @@ export function closeUserStreams(discordId: string, belowGeneration: number): vo
  * @param guildId - The guild the session switched to.
  */
 export function switchSessionGuild(sessionId: string, guildId: string): void {
-  remember(sessionGuilds, sessionId, { guildId, expiresAt: Date.now() + TOMBSTONE_TTL_MS });
+  remember(sessionGuilds, sessionId, { guildId, expiresAt: Date.now() + SESSION_GUILD_TTL_MS });
   for (const res of Array.from(bySession.get(sessionId) ?? [])) {
     const entry = streams.get(res);
     if (entry?.guildId != null && entry.guildId !== guildId) closeStream(res);
@@ -278,12 +285,15 @@ export function switchSessionGuild(sessionId: string, guildId: string): void {
 
 /**
  * Closes a session's status streams opened under one guild, for a session that lost access to it
- * (`requireGuildContext` dropped a guild the user can no longer act in). Streams under the session's
- * other guilds, its `events` stream and other sessions are left alone.
+ * (`requireGuildContext` dropped a guild the user can no longer act in), and forgets a recorded switch to
+ * that guild. Streams under the session's other guilds, its `events` stream and other sessions are left alone.
  * @param sessionId - ID of the session that lost the guild.
  * @param guildId - The guild the session lost.
  */
 export function closeSessionStreamsForGuild(sessionId: string, guildId: string): void {
+  // The session no longer has this guild, so a recorded switch to it is void: `requireGuildContext` may auto-pick the user's
+  // only remaining guild next, and a status stream for that one must not be refused as stale.
+  if (sessionGuilds.get(sessionId)?.guildId === guildId) sessionGuilds.delete(sessionId);
   for (const res of Array.from(bySession.get(sessionId) ?? [])) {
     if (streams.get(res)?.guildId === guildId) closeStream(res);
   }

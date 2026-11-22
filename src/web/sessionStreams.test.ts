@@ -16,7 +16,7 @@ import session from 'express-session';
 import type { Request, Response } from 'express';
 import {
   registerSessionStream, closeSessionStreams, closeUserStreams, closeSessionStreamsForGuild, switchSessionGuild, wrapStoreDestroy,
-  getSessionStreamStats, resetSessionStreamsForTests, TOMBSTONE_TTL_MS, MAX_TRACKED_ENTRIES,
+  getSessionStreamStats, resetSessionStreamsForTests, TOMBSTONE_TTL_MS, SESSION_GUILD_TTL_MS, MAX_TRACKED_ENTRIES,
 } from './sessionStreams';
 import { SESSION_IDLE_MS, SESSION_ABSOLUTE_MAX_MS } from './sessionLifetime';
 
@@ -185,13 +185,29 @@ describe('switchSessionGuild (the session picked another guild)', () => {
     vi.useFakeTimers();
     try {
       switchSessionGuild('s1', 'gY');
-      vi.advanceTimersByTime(TOMBSTONE_TTL_MS + 1);
+      vi.advanceTimersByTime(SESSION_GUILD_TTL_MS - 1);
+      expect(registerSessionStream(guildReq('s1', 'gX'), fakeRes(), 'status')).toBe(false);
+      vi.advanceTimersByTime(2);
       expect(registerSessionStream(guildReq('s1', 'gX'), fakeRes(), 'status')).toBe(true);
     } finally {
       vi.useRealTimers();
     }
     for (let i = 0; i < MAX_TRACKED_ENTRIES + 5; i++) switchSessionGuild(`sid-${i}`, 'gY');
     expect(getSessionStreamStats().sessionGuilds).toBe(MAX_TRACKED_ENTRIES);
+  });
+
+  it('closes every status stream the session holds under the old guild, and detaches each request\'s session so none saves it back', () => {
+    const [a, b] = [fakeRes(), fakeRes()];
+    const [reqA, reqB] = [guildReq('s1', 'gX'), guildReq('s1', 'gX')];
+    registerSessionStream(reqA, a, 'status');
+    registerSessionStream(reqB, b, 'status');
+
+    switchSessionGuild('s1', 'gY');
+
+    expect(a.end).toHaveBeenCalledTimes(1);
+    expect(b.end).toHaveBeenCalledTimes(1);
+    expect(reqA.session).toBeUndefined();
+    expect(reqB.session).toBeUndefined();
   });
 
   it('closes nothing, and refuses nothing, for a status stream with no guild recorded', () => {
@@ -221,6 +237,34 @@ describe('closeSessionStreamsForGuild (the session lost a guild)', () => {
     expect(events.end).not.toHaveBeenCalled();
     expect(otherSession.end).not.toHaveBeenCalled();
     expect(getSessionStreamStats().streams).toBe(3);
+  });
+
+  it('detaches the closed stream\'s session, and leaves the others\' sessions attached', () => {
+    const [lostReq, keptReq] = [guildReq('s1', 'gX'), guildReq('s1', 'gY')];
+    registerSessionStream(lostReq, fakeRes(), 'status');
+    registerSessionStream(keptReq, fakeRes(), 'status');
+
+    closeSessionStreamsForGuild('s1', 'gX');
+
+    expect(lostReq.session).toBeUndefined();
+    expect(keptReq.session).toBeDefined();
+  });
+
+  it('voids a recorded switch to the lost guild, so a stream for the guild auto-picked next is not refused', () => {
+    switchSessionGuild('s1', 'gX');
+
+    closeSessionStreamsForGuild('s1', 'gX'); // gX revoked: requireGuildContext drops it, then auto-picks the only guild left, gY
+
+    expect(registerSessionStream(guildReq('s1', 'gY'), fakeRes(), 'status')).toBe(true);
+    expect(getSessionStreamStats().sessionGuilds).toBe(0);
+  });
+
+  it('keeps a recorded switch to a different guild than the one lost', () => {
+    switchSessionGuild('s1', 'gY');
+
+    closeSessionStreamsForGuild('s1', 'gX');
+
+    expect(registerSessionStream(guildReq('s1', 'gX'), fakeRes(), 'status')).toBe(false);
   });
 
   it('does nothing for a session or guild with no open stream', () => {

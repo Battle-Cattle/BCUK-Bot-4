@@ -99,7 +99,7 @@ function buildSessionApp(user: unknown) {
   const app = express();
   app.use(express.urlencoded({ extended: false }));
   app.use((req: any, _res: any, next: any) => {
-    req.session = { user };
+    req.session = { user, destroy: (cb: () => void) => cb() };
     req.sessionID = 'sid-1';
     req.csrfToken = () => 'csrf-token';
     next();
@@ -118,11 +118,22 @@ describe('POST /guild/select — open dashboard streams (#1116)', () => {
     expect(switchSessionGuild).toHaveBeenCalledExactlyOnceWith('sid-1', '100000000000000002');
   });
 
+  it('closes the old guild\'s streams even when the access-level lookup that follows fails, since the session still moves to the new guild', async () => {
+    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: true } as any);
+    vi.mocked(getEffectiveAccessLevelForUser).mockRejectedValue(new Error('db down'));
+    const user = { discordId: 'u1', currentGuildId: '100000000000000001', accessLevel: AccessLevel.USER, guilds: TWO_GUILDS };
+
+    const res = await supertest(buildSessionApp(user)).post('/guild/select').type('form').send({ guild_id: '100000000000000002' });
+
+    expect(res.headers.location).toBe('/guild/select?error=select_failed');
+    expect(user.currentGuildId).toBe('100000000000000002'); // express-session saves this
+    expect(switchSessionGuild).toHaveBeenCalledExactlyOnceWith('sid-1', '100000000000000002');
+  });
+
   it.each([
     ['a malformed guild ID', async () => ({ guild_id: 'not-a-guild' })],
     ['a guild the user does not belong to', async () => ({ guild_id: '999000999000999000' })],
-    ['an unexpected error', async () => { vi.mocked(findUser).mockRejectedValue(new Error('db down')); return { guild_id: '100000000000000002' }; }],
-    ['a user that no longer exists', async () => { vi.mocked(findUser).mockResolvedValue(null); return { guild_id: '100000000000000002' }; }],
+    ['an unexpected error before the guild is assigned', async () => { vi.mocked(findUser).mockRejectedValue(new Error('db down')); return { guild_id: '100000000000000002' }; }],
   ])('does not touch the streams for %s', async (_name, arrange) => {
     const body = await arrange();
     const user = { discordId: 'u1', currentGuildId: '100000000000000001', accessLevel: AccessLevel.USER, guilds: TWO_GUILDS };
@@ -130,6 +141,17 @@ describe('POST /guild/select — open dashboard streams (#1116)', () => {
 
     await supertest(app).post('/guild/select').type('form').send(body);
 
+    expect(switchSessionGuild).not.toHaveBeenCalled();
+    expect(user.currentGuildId).toBe('100000000000000001');
+  });
+
+  it('does not touch the streams when the session user no longer exists (the session is destroyed instead)', async () => {
+    vi.mocked(findUser).mockResolvedValue(null);
+    const user = { discordId: 'u1', currentGuildId: '100000000000000001', accessLevel: AccessLevel.USER, guilds: TWO_GUILDS };
+
+    const res = await supertest(buildSessionApp(user)).post('/guild/select').type('form').send({ guild_id: '100000000000000002' });
+
+    expect(res.headers.location).toBe('/auth/login?error=user_not_found');
     expect(switchSessionGuild).not.toHaveBeenCalled();
   });
 });

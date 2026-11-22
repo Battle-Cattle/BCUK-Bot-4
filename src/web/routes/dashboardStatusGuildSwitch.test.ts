@@ -18,7 +18,7 @@ import router, { connections } from './dashboardStatusEvents';
 import { findUser, getMemberAccessLevel } from '../../db';
 import { onStatusChanged } from '../../shared/statusStore';
 import { getGuildScopedStatus } from '../guildScopedStatus';
-import { switchSessionGuild, resetSessionStreamsForTests } from '../sessionStreams';
+import { switchSessionGuild, closeSessionStreamsForGuild, resetSessionStreamsForTests } from '../sessionStreams';
 
 const registeredListener = vi.mocked(onStatusChanged).mock.calls[0]?.[0] as (guildId: string | null) => Promise<void>;
 
@@ -103,6 +103,41 @@ describe('the status stream when its session switches guild (#1116)', () => {
     switchSessionGuild('sid-1', 'guild-X');
 
     expect(res.end).not.toHaveBeenCalled();
+    res.emit('close');
+  });
+});
+
+describe('the status stream when its session loses a guild (#1116)', () => {
+  it('closes the session\'s streams for the lost guild, and a stream racing the revoke is ended by the post-attach re-check without a frame', async () => {
+    const handler = statusHandler();
+    const open = makeRes();
+    await handler(makeReq('sid-1', 'guild-X'), open, vi.fn());
+
+    closeSessionStreamsForGuild('sid-1', 'guild-X'); // requireGuildContext dropped guild-X for this session
+    vi.mocked(findUser).mockResolvedValue({ discord_id: 'discord1', is_owner: false } as any);
+    vi.mocked(getMemberAccessLevel).mockResolvedValue(null); // the membership is gone
+    const racing = makeRes();
+    await handler(makeReq('sid-1', 'guild-X'), racing, vi.fn());
+    await registeredListener('guild-X');
+
+    expect(open.end).toHaveBeenCalledTimes(1);
+    expect(racing.end).toHaveBeenCalledTimes(1);
+    expect(frames(open)).toEqual([]);
+    expect(frames(racing)).toEqual([]);
+    expect(connections.get('guild-X')).toBeUndefined();
+  });
+
+  it('accepts a stream for the guild the user is auto-picked into after losing the previous one', async () => {
+    const handler = statusHandler();
+    switchSessionGuild('sid-1', 'guild-X');
+    closeSessionStreamsForGuild('sid-1', 'guild-X');
+    const res = makeRes();
+
+    await handler(makeReq('sid-1', 'guild-Y'), res, vi.fn());
+    await registeredListener('guild-Y');
+
+    expect(res.end).not.toHaveBeenCalled();
+    expect(frames(res)).toEqual([{ guildId: 'guild-Y' }]);
     res.emit('close');
   });
 });
