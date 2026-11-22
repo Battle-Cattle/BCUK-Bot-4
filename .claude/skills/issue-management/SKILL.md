@@ -20,7 +20,7 @@ The three can differ (e.g. a low-impact fix that's wanted soon, a high-impact fe
 
 - Title: `<parent topic> n/N: <what this part does>`, e.g. `Faster test suite 2/4: sub-second, configurable polling in deploy.sh`. Mark optional parts `(optional)`.
 - Body: which parent it's part of and which step of the parent's plan it covers, its scope, tests, and a "Depends on" list of the other parts it needs. The full design stays in the parent.
-- **Priority matches the parent.** Change the parent's and every open sub-issue's together.
+- **Priority is judged per part**: a foundation or core part can be more urgent than an optional or follow-on one. **The parent's Priority is the highest of its open sub-issues'**, so when a sub-issue's Priority changes or it closes, recheck the parent's (a parent whose only open parts are optional drops with them).
 - **Severity is the same as the parent's or lower**, judged on what that part delivers on its own (e.g. a read-only page that's empty until a later part lands is lower than the parts that deliver the feature). **The parent's severity is the highest of its sub-issues'**: when a sub-issue's severity changes, recheck the parent's.
 - **Effort is judged per part**, on that sub-issue's own scope. **The parent's Effort covers the whole plan**, so it is at least the highest of its sub-issues' (normally `High` once it's worth splitting).
 - Closing the last open sub-issue completes the parent. Close a part that turned out not to be needed as "not planned", with a note on the parent.
