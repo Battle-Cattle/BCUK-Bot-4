@@ -1,4 +1,4 @@
-/* global relativeTime, clearChildren */
+/* global relativeTime, clearChildren, watchStreamContext */
 /* ── Recent events rendering & live feed ─────────────────── */
 
 const EVENT_ICONS = {
@@ -141,6 +141,7 @@ async function resyncRecentEvents() {
 
 if (recentEventsList && hasStreamer) {
   const eventsSource = new EventSource('/dashboard/events');
+  watchStreamContext(eventsSource);
   eventsSource.onmessage = (msg) => {
     try {
       prependEvent(recentEventsList, JSON.parse(msg.data));

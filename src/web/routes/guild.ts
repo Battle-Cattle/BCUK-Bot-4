@@ -8,7 +8,8 @@ import { filterQueryParam, normalizeDiscordId } from './validation';
 import { renderView } from './viewHelpers';
 import { logAndRedirectError } from './errorHandling';
 import { fetchLiveGuildsForUser, resolveAccessLevelForGuild } from '../guildAccess';
-import { switchSessionGuild } from '../sessionStreams';
+import { promisify } from 'util';
+import { switchSessionGuild, closeStreamsOutsideGuild } from '../sessionStreams';
 
 const log = createLogger('Web');
 const router = Router();
@@ -61,8 +62,9 @@ router.get('/select', requireAuth, csrfProtection, (req, res) => {
  * `GET /auth/login` would see a still-populated `session.user` and bounce straight to `/`
  * without ever rendering the error.
  *
- * As soon as the new guild is assigned to the session it also closes the session's open dashboard status
- * streams opened under any other guild (see `switchSessionGuild`).
+ * As soon as the new guild is assigned it records the switch, so the session's dashboard status streams opened
+ * under any other guild can't reattach; it closes them (with the context-changed frame) once the session holding the
+ * new guild has been saved, so another tab's reload reads it (see `switchSessionGuild`, `closeStreamsOutsideGuild`).
  * @param req - Express request; reads `req.session.user` and the `guild_id` form field.
  * @param res - Express response; redirects to `/` on success, or back to `/guild/select` /
  *   `/auth/login` when the selection can't be accepted.
@@ -77,6 +79,7 @@ router.post('/select', requireAuth, csrfProtection, async (req, res) => {
     return res.redirect('/guild/select?error=invalid_guild');
   }
 
+  let switched = false;
   try {
     const dbUser = await findUser(user.discordId);
     if (!dbUser) {
@@ -97,11 +100,17 @@ router.post('/select', requireAuth, csrfProtection, async (req, res) => {
       return res.redirect('/guild/select?error=guild_not_found');
     }
     user.currentGuildId = requestedGuildId;
-    // The session's open status streams belong to the old guild: close them, so none keeps delivering its channels (#1116).
-    // Right after the assignment, before the awaited lookup below: if that fails, express-session still saves the new guild.
-    switchSessionGuild(req.sessionID, requestedGuildId);
+    // The session's open status streams belong to the old guild (#1116). Record the switch right after the assignment, before
+    // the awaited lookup below, so none can reattach under the old guild; they close once the new guild is saved.
+    switchSessionGuild(req.sessionID, requestedGuildId, false);
+    switched = true;
     user.accessLevel = await resolveAccessLevelForGuild(dbUser, requestedGuildId, accessLevelByGuildId);
+    // Save now rather than when the redirect ends, so the streams' close frame can't reach another tab before the new guild is stored.
+    await promisify(req.session.save.bind(req.session))();
+    closeStreamsOutsideGuild(req.sessionID, requestedGuildId);
   } catch (err) {
+    // The session still moves to the new guild (express-session saves it as the redirect ends), so the old guild's streams close.
+    if (switched) closeStreamsOutsideGuild(req.sessionID, requestedGuildId);
     return logAndRedirectError({
       res,
       log,

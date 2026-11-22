@@ -25,6 +25,9 @@ const log = createLogger('SessionStreams');
 /** Which dashboard stream a registered connection is. */
 export type SessionStreamKind = 'status' | 'events';
 
+/** The named SSE frame that tells a dashboard page its stream was closed because its context (session, account or guild) changed, so it reloads. It has no payload and is written once, just before the stream ends. */
+export const CONTEXT_CHANGED_FRAME = 'event: context-changed\ndata: {}\n\n';
+
 /** How long a destroyed session ID, or a user's minimum generation, is remembered (longer than any gap between a request loading its session and attaching its stream). */
 export const TOMBSTONE_TTL_MS = 10 * 60 * 1000;
 
@@ -128,10 +131,19 @@ function unregister(res: Response): void {
  * row). With no `req.session`, the response ends without touching the store.
  * @param res - The stream's response.
  * @param req - The stream's request (for a stream not yet registered, since the registry has no entry for it).
+ * @param notify - True to write a `context-changed` frame first, so the page reloads under its new context instead of reconnecting into it. Only for a close the registry triggers after the stream attached; a stream refused at attach has no page state to refresh.
  */
-function closeStream(res: Response, req: Request | undefined = streams.get(res)?.req): void {
+function closeStream(res: Response, req: Request | undefined = streams.get(res)?.req, notify = false): void {
   unregister(res);
   if (req) Reflect.deleteProperty(req, 'session');
+  // The frame is best effort: a write that throws must never stop the stream ending.
+  if (notify && !res.writableEnded && !res.destroyed) {
+    try {
+      res.write(CONTEXT_CHANGED_FRAME);
+    } catch (err) {
+      log.warn('Failed to write the context-changed frame to a dashboard stream:', err);
+    }
+  }
   try {
     res.end();
   } catch (err) {
@@ -226,6 +238,7 @@ export function registerSessionStream(req: Request, res: Response, kind: Session
   const endsAt = sessionEndsAt(req.session);
   if (endsAt !== undefined) {
     // unref'd: a timer must never keep the process alive at shutdown. Ending early is safe, since the reconnect re-runs auth.
+    // No context-changed frame here: `sessionEndsAt` is a lower bound, and a reload would be a page load that renews a session that may still be alive.
     entry.timer = setTimeout(() => closeStream(res, req), Math.max(0, endsAt - Date.now()));
     entry.timer.unref();
   }
@@ -248,7 +261,7 @@ export function registerSessionStream(req: Request, res: Response, kind: Session
  */
 export function closeSessionStreams(sessionId: string): void {
   remember(tombstones, sessionId, Date.now() + TOMBSTONE_TTL_MS);
-  for (const res of Array.from(bySession.get(sessionId) ?? [])) closeStream(res);
+  for (const res of Array.from(bySession.get(sessionId) ?? [])) closeStream(res, undefined, true);
 }
 
 /**
@@ -263,23 +276,33 @@ export function closeUserStreams(discordId: string, belowGeneration: number): vo
   const current = minGenerations.get(discordId)?.generation ?? 0;
   remember(minGenerations, discordId, { generation: Math.max(current, belowGeneration), expiresAt: Date.now() + TOMBSTONE_TTL_MS });
   for (const res of Array.from(byUser.get(discordId) ?? [])) {
-    if ((streams.get(res)?.generation ?? 0) < belowGeneration) closeStream(res);
+    if ((streams.get(res)?.generation ?? 0) < belowGeneration) closeStream(res, undefined, true);
   }
 }
 
 /**
- * Records that a session picked another guild and closes its status streams opened under any other one
- * (a status stream is per guild: its snapshot is that guild's). A status stream still on its way to
- * registering under the old guild is refused for a while. The session's `events` stream is per streamer, so
+ * Records that a session picked another guild, so a status stream still on its way to registering under the old guild
+ * is refused for a while, and (unless `closeNow` is false) closes the session's status streams opened under any other
+ * guild (a status stream is per guild: its snapshot is that guild's). The session's `events` stream is per streamer, so
  * it is left open.
  * @param sessionId - ID of the session that switched guild (from `POST /guild/select`).
  * @param guildId - The guild the session switched to.
+ * @param closeNow - False to only record the switch, leaving the caller to run {@link closeStreamsOutsideGuild} once the new guild has been saved to the session (the frame would otherwise reach another tab before the save does).
  */
-export function switchSessionGuild(sessionId: string, guildId: string): void {
+export function switchSessionGuild(sessionId: string, guildId: string, closeNow = true): void {
   remember(sessionGuilds, sessionId, { guildId, expiresAt: Date.now() + SESSION_GUILD_TTL_MS });
+  if (closeNow) closeStreamsOutsideGuild(sessionId, guildId);
+}
+
+/**
+ * Closes a session's status streams opened under any guild other than `guildId`, with the context-changed frame.
+ * @param sessionId - ID of the session that switched guild.
+ * @param guildId - The guild the session is now in; its own streams stay open.
+ */
+export function closeStreamsOutsideGuild(sessionId: string, guildId: string): void {
   for (const res of Array.from(bySession.get(sessionId) ?? [])) {
     const entry = streams.get(res);
-    if (entry?.guildId != null && entry.guildId !== guildId) closeStream(res);
+    if (entry?.guildId != null && entry.guildId !== guildId) closeStream(res, undefined, true);
   }
 }
 
@@ -295,7 +318,7 @@ export function closeSessionStreamsForGuild(sessionId: string, guildId: string):
   // only remaining guild next, and a status stream for that one must not be refused as stale.
   if (sessionGuilds.get(sessionId)?.guildId === guildId) sessionGuilds.delete(sessionId);
   for (const res of Array.from(bySession.get(sessionId) ?? [])) {
-    if (streams.get(res)?.guildId === guildId) closeStream(res);
+    if (streams.get(res)?.guildId === guildId) closeStream(res, undefined, true);
   }
 }
 

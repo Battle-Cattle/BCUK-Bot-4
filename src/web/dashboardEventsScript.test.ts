@@ -73,6 +73,12 @@ class FakeEventSource {
   static instances: FakeEventSource[] = [];
   onmessage: ((msg: { data: string }) => void) | null = null;
   onerror: (() => void) | null = null;
+  readyState = 0;
+  listeners = new Map<string, (() => void)[]>();
+
+  addEventListener(name: string, fn: () => void): void {
+    this.listeners.set(name, [...(this.listeners.get(name) ?? []), fn]);
+  }
 
   constructor(public url: string) {
     FakeEventSource.instances.push(this);
@@ -95,6 +101,7 @@ function runEvents({ initialEvents, hasStreamer = true, fetchEvents = [] }: RunO
   list.appendChild(empty);
   const dataset: Record<string, string> = { hasStreamer: String(hasStreamer) };
   if (initialEvents) dataset.initialEvents = JSON.stringify(initialEvents);
+  const watchStreamContext = vi.fn();
   const fetch = vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true, events: fetchEvents }) }));
   const context: Record<string, unknown> = {
     document: {
@@ -104,6 +111,7 @@ function runEvents({ initialEvents, hasStreamer = true, fetchEvents = [] }: RunO
     },
     EventSource: FakeEventSource,
     fetch,
+    watchStreamContext,
     // The real helpers live in dashboard-utils.js, loaded before this script.
     relativeTime: (iso: string) => (iso ? `ago:${iso}` : '—'),
     clearChildren: (el: FakeNode) => {
@@ -112,7 +120,7 @@ function runEvents({ initialEvents, hasStreamer = true, fetchEvents = [] }: RunO
   };
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(scriptPath, 'utf8'), context);
-  return { list, fetch, source: FakeEventSource.instances[0] };
+  return { list, fetch, watchStreamContext, source: FakeEventSource.instances[0] };
 }
 
 const ev = (eventType: string, detail: string | null = null) => ({
@@ -165,6 +173,12 @@ describe('public/dashboard-events.js feed behaviour', () => {
     const { list } = runEvents({ initialEvents: [] });
     expect(list.children).toHaveLength(1);
     expect(list.children[0]!.className).toBe('empty-msg');
+  });
+
+  it('hands its stream to the context watcher, and opens none for a viewer with no streamer', () => {
+    const { source, watchStreamContext } = runEvents({ hasStreamer: true });
+    expect(watchStreamContext).toHaveBeenCalledWith(source);
+    expect(runEvents({ hasStreamer: false }).watchStreamContext).not.toHaveBeenCalled();
   });
 
   it('opens the live stream only for a monitored streamer', () => {

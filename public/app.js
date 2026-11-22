@@ -1,4 +1,4 @@
-/* global applyStatus, fetchStatus, isStatusFeedStale, loadVoiceChannels, setStatusStreamOpen */
+/* global applyStatus, fetchStatus, isStatusFeedStale, loadVoiceChannels, setStatusStreamOpen, watchStreamContext */
 /* ── Dashboard initialisation ────────────────────────────── */
 
 // Apply server-provided initial status without inline script execution.
@@ -17,6 +17,7 @@ loadVoiceChannels();
 // Live-push status updates over SSE rather than polling; the browser's built-in
 // EventSource auto-reconnect handles transient disconnects.
 const statusSource = new EventSource('/dashboard/status/events');
+watchStreamContext(statusSource);
 statusSource.onopen = () => {
   setStatusStreamOpen(true);
   // The stream sends no snapshot on connect, so after an outage fetch fresh data rather than trusting the old values.
