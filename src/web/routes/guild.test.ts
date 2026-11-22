@@ -16,12 +16,15 @@ vi.mock('../middleware', () => ({
   requireAuth: (_req: any, _res: any, next: any) => next(),
 }));
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
+// The registry itself is tested in sessionStreams.test.ts; here only that POST /select hands it the new guild.
+vi.mock('../sessionStreams', () => ({ switchSessionGuild: vi.fn() }));
 
 import express from 'express';
 import supertest from 'supertest';
 import router from './guild';
 import { findUser, getAllGuilds, getEffectiveAccessLevelForUser, getGuildsForMember } from '../../db';
 import { AccessLevel } from '../../db';
+import { switchSessionGuild } from '../sessionStreams';
 
 const TWO_GUILDS = [
   { guildId: '100000000000000001', name: 'Alpha' },
@@ -88,6 +91,46 @@ describe('GET /guild/select', () => {
       .get('/guild/select?error=not_a_real_code');
     expect(res.status).toBe(200);
     expect((res.body as any).locals.error).toBeNull();
+  });
+});
+
+/** An app mounting the guild router for a session with ID `sid-1` and the given session user. */
+function buildSessionApp(user: unknown) {
+  const app = express();
+  app.use(express.urlencoded({ extended: false }));
+  app.use((req: any, _res: any, next: any) => {
+    req.session = { user };
+    req.sessionID = 'sid-1';
+    req.csrfToken = () => 'csrf-token';
+    next();
+  });
+  app.use('/guild', router);
+  return app;
+}
+
+describe('POST /guild/select — open dashboard streams (#1116)', () => {
+  it('tells the stream registry the session switched guild, once the selection is accepted', async () => {
+    const user = { discordId: 'u1', currentGuildId: '100000000000000001', accessLevel: AccessLevel.USER, guilds: TWO_GUILDS };
+
+    const res = await supertest(buildSessionApp(user)).post('/guild/select').type('form').send({ guild_id: '100000000000000002' });
+
+    expect(res.headers.location).toBe('/');
+    expect(switchSessionGuild).toHaveBeenCalledExactlyOnceWith('sid-1', '100000000000000002');
+  });
+
+  it.each([
+    ['a malformed guild ID', async () => ({ guild_id: 'not-a-guild' })],
+    ['a guild the user does not belong to', async () => ({ guild_id: '999000999000999000' })],
+    ['an unexpected error', async () => { vi.mocked(findUser).mockRejectedValue(new Error('db down')); return { guild_id: '100000000000000002' }; }],
+    ['a user that no longer exists', async () => { vi.mocked(findUser).mockResolvedValue(null); return { guild_id: '100000000000000002' }; }],
+  ])('does not touch the streams for %s', async (_name, arrange) => {
+    const body = await arrange();
+    const user = { discordId: 'u1', currentGuildId: '100000000000000001', accessLevel: AccessLevel.USER, guilds: TWO_GUILDS };
+    const app = buildSessionApp(user);
+
+    await supertest(app).post('/guild/select').type('form').send(body);
+
+    expect(switchSessionGuild).not.toHaveBeenCalled();
   });
 });
 
