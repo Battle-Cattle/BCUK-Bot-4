@@ -9,18 +9,29 @@
 const CONTEXT_RELOAD_KEY = 'dashboardContextReloadAt';
 /** The shortest gap between two context reloads of one tab, so a stream that keeps failing can't cause a reload loop. */
 const CONTEXT_RELOAD_MIN_INTERVAL_MS = 30000;
+/** How long a reload waits after the server's frame, so the session change that caused it (a new guild, a re-issued session cookie) has been saved and delivered first: the server writes the frame as it closes the stream, before the response that carries the change has reached the browser. */
+const CONTEXT_SETTLE_MS = 1500;
 /** EventSource.readyState once the browser has given up on the stream for good. */
 const EVENT_SOURCE_CLOSED = 2;
 
 /** True once the page has started navigating away (a Logout click or a guild switch), when a reload must not override it. */
 let contextPageLeaving = false;
-/** A reload held back by the rate limit, waiting for its window to end. */
+/** A reload waiting out the settle delay or the rate-limit window. */
 let contextReloadTimer = null;
+/** True when the server asked for a reload while the page was leaving: if the page comes back from the back/forward cache, it still owes that reload. */
+let contextReloadPending = false;
 /** True while the signed-in probe after a closed stream is in flight. */
 let contextProbing = false;
 window.addEventListener('beforeunload', () => { contextPageLeaving = true; });
 // A page restored from the back/forward cache is live again, and a cancelled navigation never unloads it.
-window.addEventListener('pageshow', (event) => { if (event.persisted) contextPageLeaving = false; });
+window.addEventListener('pageshow', (event) => {
+  if (!event.persisted) return;
+  contextPageLeaving = false;
+  if (contextReloadPending) {
+    contextReloadPending = false;
+    reloadForContextChange(true);
+  }
+});
 
 /**
  * How long until a context reload is allowed: the rest of CONTEXT_RELOAD_MIN_INTERVAL_MS since the last one.
@@ -42,7 +53,11 @@ function contextReloadWaitMs() {
  * @param serverRequested - True for the server's `context-changed` frame, false for a closed stream found to be signed out.
  */
 function reloadForContextChange(serverRequested) {
-  if (contextPageLeaving || contextReloadTimer !== null) return;
+  if (contextPageLeaving) {
+    if (serverRequested) contextReloadPending = true;
+    return;
+  }
+  if (contextReloadTimer !== null) return;
   const waitMs = contextReloadWaitMs();
   if (waitMs === null && !serverRequested) return;
   if (waitMs !== null && waitMs > 0) {
@@ -57,7 +72,8 @@ function reloadForContextChange(serverRequested) {
   try {
     window.sessionStorage.setItem(CONTEXT_RELOAD_KEY, String(Date.now()));
   } catch {
-    // Storage blocked: the page is reloaded for the server's frame only, and the page is leaving either way.
+    // The write failed (storage blocked, or full while reads still work): nothing records this reload, so only the server's frame goes ahead.
+    if (!serverRequested) return;
   }
   contextPageLeaving = true;
   window.location.reload();
@@ -83,16 +99,27 @@ async function reloadIfSessionChanged() {
 }
 
 /**
+ * Handles the server's `context-changed` frame: closes the stream, so it can't reconnect into the new context, and
+ * reloads once CONTEXT_SETTLE_MS has passed.
+ * @param source - The dashboard's EventSource that received the frame.
+ */
+function onContextChangedFrame(source) {
+  source.close();
+  if (contextReloadTimer !== null) return;
+  contextReloadTimer = setTimeout(() => {
+    contextReloadTimer = null;
+    reloadForContextChange(true);
+  }, CONTEXT_SETTLE_MS);
+}
+
+/**
  * Reloads the page when a dashboard stream reports a context change, or when the browser gives up on it and the
  * session turns out to have changed. The stream is closed on the frame, so it can't reconnect into the new context
  * while a held-back reload waits. An ordinary error with the stream still reconnecting is left to the caller's own `onerror`.
  * @param source - The dashboard's EventSource.
  */
 function watchStreamContext(source) {
-  source.addEventListener('context-changed', () => {
-    source.close();
-    reloadForContextChange(true);
-  });
+  source.addEventListener('context-changed', () => onContextChangedFrame(source));
   source.addEventListener('error', () => {
     if (source.readyState === EVENT_SOURCE_CLOSED) void reloadIfSessionChanged();
   });
