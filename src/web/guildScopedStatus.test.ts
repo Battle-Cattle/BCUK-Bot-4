@@ -14,7 +14,7 @@ vi.mock('../twitch/twitchChannelName', () => ({
   normalizeTwitchChannelName: vi.fn((s: string) => (s ? s.toLowerCase() : null)),
 }));
 
-import { getGuildScopedStatus, clearGuildScopedStatusCache } from './guildScopedStatus';
+import { getGuildScopedStatus, clearGuildScopedStatusCache, onGuildStatusInvalidated } from './guildScopedStatus';
 import { getStatus } from '../shared/statusStore';
 import { getGuildById, getGuildMemberUsers } from '../db';
 import { notifyGuildInfoChanged } from '../db/guildInfoEvents';
@@ -267,5 +267,54 @@ describe('getGuildScopedStatus — invalidation', () => {
     await Promise.all([second, third]);
 
     expect(getGuildMemberUsers).toHaveBeenCalledTimes(2);
+  });
+});
+
+// ─── invalidation listeners (#1117) ──────────────────────────────────────────────
+
+describe('onGuildStatusInvalidated', () => {
+  it('calls the listener with the changed guild, and with null for a change that can touch any guild', () => {
+    const listener = vi.fn();
+    const off = onGuildStatusInvalidated(listener);
+    notifyGuildInfoChanged('guild-A');
+    notifyGuildInfoChanged(null);
+    expect(listener.mock.calls).toEqual([['guild-A'], [null]]);
+    off();
+  });
+
+  it('runs after the cache was dropped, so a snapshot built inside it reads the new rows', async () => {
+    await getGuildScopedStatus('guild-A');
+    vi.mocked(getGuildMemberUsers).mockResolvedValue([MEMBER('otherguildstreamer')] as any);
+    let seen: string[] = [];
+    let pending: Promise<unknown> = Promise.resolve();
+    const off = onGuildStatusInvalidated((guildId) => {
+      pending = getGuildScopedStatus(guildId).then((status) => { seen = Object.keys(status.twitch); });
+    });
+
+    notifyGuildInfoChanged('guild-A');
+    await pending;
+
+    expect(seen).toEqual(['otherguildstreamer']);
+    off();
+  });
+
+  it('stops calling a listener once it is removed', () => {
+    const listener = vi.fn();
+    const off = onGuildStatusInvalidated(listener);
+    off();
+    notifyGuildInfoChanged('guild-A');
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it('logs a listener that throws and still calls the rest, without failing the write that triggered it', () => {
+    const after = vi.fn();
+    const offBad = onGuildStatusInvalidated(() => { throw new Error('listener broke'); });
+    const offAfter = onGuildStatusInvalidated(after);
+
+    expect(() => notifyGuildInfoChanged('guild-A')).not.toThrow();
+
+    expect(after).toHaveBeenCalledExactlyOnceWith('guild-A');
+    offBad();
+    offAfter();
   });
 });

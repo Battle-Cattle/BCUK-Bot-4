@@ -5,7 +5,7 @@ vi.mock('../../shared/config', () => ({
   SSE_MAX_TOTAL_CONNECTIONS: 1000,
 }));
 vi.mock('../../shared/statusStore', () => ({ onStatusChanged: vi.fn() }));
-vi.mock('../guildScopedStatus', () => ({ getGuildScopedStatus: vi.fn() }));
+vi.mock('../guildScopedStatus', () => ({ getGuildScopedStatus: vi.fn(), onGuildStatusInvalidated: vi.fn() }));
 vi.mock('../../db', () => ({ findUser: vi.fn(), getMemberAccessLevel: vi.fn() }));
 vi.mock('../middleware', () => ({
   requireGuildContext: (_req: any, _res: any, next: any) => next(),

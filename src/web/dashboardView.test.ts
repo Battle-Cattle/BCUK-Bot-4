@@ -266,7 +266,13 @@ describe('views/dashboard.ejs layout', () => {
     expect(rollup).toBeLessThan(html.indexOf('id="twitch-channels"'));
     // The scroll region keeps its label and focus stop, and the Usage tile keeps its count.
     expect(html).toMatch(/id="twitch-channels" tabindex="0" role="region" aria-label="Twitch channels"/);
-    expect(html).toMatch(/<span class="stat-big">\d+<\/span><span class="stat-big-label">Twitch Channels<\/span>/);
+    expect(html).toMatch(/<span class="stat-big" id="twitch-channel-count">\d+<\/span><span class="stat-big-label">Twitch Channels<\/span>/);
+  });
+
+  it('renders the Usage tile\'s Twitch Channels count from the same channels the status carries, so the first paint agrees with later pushes (#1117)', async () => {
+    const html = await render();
+    // The fixture's status carries one channel.
+    expect(html).toMatch(/id="twitch-channel-count">1<\/span>/);
   });
 
   it.each([

@@ -11,6 +11,7 @@ vi.mock('../../shared/statusStore', () => ({
 
 vi.mock('../guildScopedStatus', () => ({
   getGuildScopedStatus: vi.fn(),
+  onGuildStatusInvalidated: vi.fn(),
 }));
 
 vi.mock('../../db', () => ({
@@ -32,7 +33,7 @@ import supertest from 'supertest';
 import router, { MAX_SSE_CONNECTIONS_PER_GUILD, connections, disconnectGuildStatusConnectionsForMember } from './dashboardStatusEvents';
 import { findUser, getMemberAccessLevel } from '../../db';
 import { onStatusChanged } from '../../shared/statusStore';
-import { getGuildScopedStatus } from '../guildScopedStatus';
+import { getGuildScopedStatus, onGuildStatusInvalidated } from '../guildScopedStatus';
 import { registerSessionStream } from '../sessionStreams';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
@@ -40,6 +41,8 @@ import { buildTestApp } from '../../test-utils/expressTestApp';
 // one-time module-load call — dashboardStatusEvents.ts registers this listener as a
 // top-level side effect, not per-request, so it's only ever recorded once.
 const registeredListener = vi.mocked(onStatusChanged).mock.calls[0]?.[0] as (guildId: string | null) => Promise<void>;
+// Same for the guild-info invalidation subscription (#1117): the listener guildScopedStatus calls once it has dropped its cache.
+const invalidationListener = vi.mocked(onGuildStatusInvalidated).mock.calls[0]?.[0] as (guildId: string | null) => void;
 
 /** Finds a route's handler function directly from the router's internal stack, bypassing HTTP entirely — needed to control the request's 'close' event deterministically. */
 function getRouteHandler(routePath: string): (req: any, res: any, next: any) => void {
@@ -474,5 +477,107 @@ describe('status-change push (registered via onStatusChanged)', () => {
     resolveGuildALookup();
     await guildAPush;
     expect(resA.write).toHaveBeenCalledWith(`data: ${JSON.stringify({ guildId: 'guild-A' })}\n\n`);
+  });
+});
+
+describe('push after a guild-info change (#1117)', () => {
+  /** Lets the push the listener started (it returns nothing to await) run to completion. */
+  const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+  it('subscribed to guildScopedStatus at module load, not to the db event directly', () => {
+    expect(typeof invalidationListener).toBe('function');
+  });
+
+  it('pushes a fresh snapshot to only the changed guild\'s dashboards', async () => {
+    const resA = { write: vi.fn() };
+    const resB = { write: vi.fn() };
+    connections.set('guild-A', new Set([resA] as any));
+    connections.set('guild-B', new Set([resB] as any));
+    vi.mocked(getGuildScopedStatus).mockImplementation(async (guildId) => ({ guildId }) as any);
+
+    invalidationListener('guild-A');
+    await settle();
+
+    expect(getGuildScopedStatus).toHaveBeenCalledWith('guild-A');
+    expect(getGuildScopedStatus).not.toHaveBeenCalledWith('guild-B');
+    expect(resA.write).toHaveBeenCalledWith(`data: ${JSON.stringify({ guildId: 'guild-A' })}\n\n`);
+    expect(resB.write).not.toHaveBeenCalled();
+  });
+
+  it('pushes each connected guild its own snapshot for a change that can touch any guild (null)', async () => {
+    const resA = { write: vi.fn() };
+    const resB = { write: vi.fn() };
+    connections.set('guild-A', new Set([resA] as any));
+    connections.set('guild-B', new Set([resB] as any));
+    vi.mocked(getGuildScopedStatus).mockImplementation(async (guildId) => ({ guildId }) as any);
+
+    invalidationListener(null);
+    await settle();
+
+    expect(resA.write).toHaveBeenCalledWith(`data: ${JSON.stringify({ guildId: 'guild-A' })}\n\n`);
+    expect(resB.write).toHaveBeenCalledWith(`data: ${JSON.stringify({ guildId: 'guild-B' })}\n\n`);
+  });
+
+  it('reaches only the two guilds involved when a member moves from one to the other (a remove then an add)', async () => {
+    const resA = { write: vi.fn() };
+    const resB = { write: vi.fn() };
+    const resC = { write: vi.fn() };
+    connections.set('guild-A', new Set([resA] as any));
+    connections.set('guild-B', new Set([resB] as any));
+    connections.set('guild-C', new Set([resC] as any));
+    vi.mocked(getGuildScopedStatus).mockImplementation(async (guildId) => ({ guildId }) as any);
+
+    invalidationListener('guild-A');
+    invalidationListener('guild-B');
+    await settle();
+
+    expect(resA.write).toHaveBeenCalledWith(`data: ${JSON.stringify({ guildId: 'guild-A' })}\n\n`);
+    expect(resB.write).toHaveBeenCalledWith(`data: ${JSON.stringify({ guildId: 'guild-B' })}\n\n`);
+    expect(resC.write).not.toHaveBeenCalled();
+  });
+
+  it('does nothing for a guild nobody has a dashboard open on', async () => {
+    invalidationListener('guild-A');
+    await settle();
+    expect(getGuildScopedStatus).not.toHaveBeenCalled();
+  });
+
+  it('builds the snapshot after the change reached the status cache: it queues behind an earlier push for the same guild', async () => {
+    const resA = { write: vi.fn() };
+    connections.set('guild-A', new Set([resA] as any));
+    let releaseFirst!: (value: unknown) => void;
+    vi.mocked(getGuildScopedStatus)
+      .mockImplementationOnce(() => new Promise((resolve) => { releaseFirst = resolve; }) as any)
+      .mockResolvedValueOnce({ fresh: true } as any);
+
+    const earlier = registeredListener('guild-A');
+    invalidationListener('guild-A');
+    await settle();
+    expect(getGuildScopedStatus).toHaveBeenCalledTimes(1);
+
+    releaseFirst({ stale: true });
+    await earlier;
+    await settle();
+
+    expect(resA.write.mock.calls.map(([chunk]) => chunk)).toEqual([
+      `data: ${JSON.stringify({ stale: true })}\n\n`,
+      `data: ${JSON.stringify({ fresh: true })}\n\n`,
+    ]);
+  });
+
+  it('does not throw to the writer when a lookup fails, and still pushes to the other guilds', async () => {
+    const resA = { write: vi.fn() };
+    const resB = { write: vi.fn() };
+    connections.set('guild-A', new Set([resA] as any));
+    connections.set('guild-B', new Set([resB] as any));
+    vi.mocked(getGuildScopedStatus).mockImplementation(async (guildId) => {
+      if (guildId === 'guild-A') throw new Error('db down');
+      return { guildId } as any;
+    });
+
+    expect(() => invalidationListener(null)).not.toThrow();
+    await settle();
+
+    expect(resB.write).toHaveBeenCalledWith(`data: ${JSON.stringify({ guildId: 'guild-B' })}\n\n`);
   });
 });

@@ -3,7 +3,7 @@ import { findUser, getMemberAccessLevel } from '../../db';
 import { requireGuildContext } from '../middleware';
 import { DASHBOARD_STATUS_MAX_SSE_PER_GUILD } from '../../shared/config';
 import { onStatusChanged } from '../../shared/statusStore';
-import { getGuildScopedStatus } from '../guildScopedStatus';
+import { getGuildScopedStatus, onGuildStatusInvalidated } from '../guildScopedStatus';
 import { attachSseConnection, broadcastToChannel } from './sseChannel';
 import { createLogger } from '../../shared/logger';
 import { createMutationQueue } from '../../shared/mutationQueue';
@@ -51,7 +51,8 @@ const statusPushQueue = createMutationQueue();
  * @param guildId - The guild whose voice status changed, or null for a global change.
  */
 async function pushStatusUpdate(guildId: string | null): Promise<void> {
-  const keys = guildId !== null ? [guildId] : Array.from(connections.keys());
+  // Only guilds with a dashboard open: a lookup for the rest would build a snapshot nobody receives.
+  const keys = (guildId !== null ? [guildId] : Array.from(connections.keys())).filter((key) => connections.has(key));
   await Promise.all(keys.map((key) => statusPushQueue.run(key, async () => {
     try {
       broadcastToChannel(connections, key, await getGuildScopedStatus(key), isVerifiedConnection);
@@ -62,6 +63,14 @@ async function pushStatusUpdate(guildId: string | null): Promise<void> {
 }
 
 onStatusChanged(pushStatusUpdate);
+
+// A write to a guild's members or Twitch settings (src/db's guild-info wrappers) may change what its dashboards show
+// (the channels list and count) without any statusStore mutation. Subscribed through guildScopedStatus, which has dropped
+// its cache by the time it calls this, so the snapshot built here reads the new rows. `null` (a user-level change) pushes
+// to every connected guild, each with its own guild-scoped snapshot.
+onGuildStatusInvalidated((guildId) => {
+  pushStatusUpdate(guildId).catch((err: unknown) => log.error('Failed to push status after a guild-info change:', err));
+});
 
 /**
  * Closes every open status stream `discordId` holds for `guildId`, so a member removed from a

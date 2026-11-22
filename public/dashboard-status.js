@@ -182,6 +182,8 @@ function applyStatusCards(status) {
   setStatusText('twitch-state', twitchRollupState(status.twitch));
   const twitchEl = document.getElementById('twitch-channels');
   if (twitchEl) renderChannels(twitchEl, status.twitch);
+  // The Usage tile's count follows the list: a channel added, removed or moved reaches an open dashboard live. String(), as setText turns 0 into a dash.
+  setText('twitch-channel-count', String(Object.keys(status.twitch).length));
 
   // Stream Overview: last, so a malformed payload that throws above never updates it. `false` and not
   // isStatusFeedStale(): applyStatus clears the stale flag only after the cards are written, so a recovering

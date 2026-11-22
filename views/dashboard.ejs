@@ -161,7 +161,7 @@ function htmlAttrJson(value) {
           <div class="card"><div class="card-body stat-card-body"><span class="stat-big"><%= usageStats.sfxCount %></span><span class="stat-big-label">SFX Triggers</span></div></div>
           <div class="card"><div class="card-body stat-card-body"><span class="stat-big"><%= usageStats.commandCount %></span><span class="stat-big-label">Custom Commands</span></div></div>
           <div class="card"><div class="card-body stat-card-body"><span class="stat-big"><%= usageStats.counterCount %></span><span class="stat-big-label">Counters</span></div></div>
-          <div class="card"><div class="card-body stat-card-body"><span class="stat-big"><%= Object.keys(status.twitch).length %></span><span class="stat-big-label">Twitch Channels</span></div></div>
+          <div class="card"><div class="card-body stat-card-body"><span class="stat-big" id="twitch-channel-count"><%= Object.keys(status.twitch).length %></span><span class="stat-big-label">Twitch Channels</span></div></div>
         </div>
       </section>
 
