@@ -16,14 +16,20 @@ export { pingDb } from './db/health';
 // ─── Guilds ──────────────────────────────────────────────────────────────────
 
 export {
-  getAllGuilds, getProvisionedGuilds, getGuildById, getGuildsForMember, upsertGuild,
+  getAllGuilds, getProvisionedGuilds, getGuildById, getGuildsForMember,
 } from './db/guilds';
 export type { DbGuild } from './db/guilds';
+export { upsertGuild } from './db/guildWrites';
 
 export {
-  getMemberAccessLevel, setMemberAccessLevel, updateMemberAccessLevel,
-  removeGuildMember, getEffectiveAccessLevelForUser,
+  getMemberAccessLevel,
+  // Not wrapped in guildMemberWrites: it only changes the level of an existing member, which no guild-info listener reads.
+  updateMemberAccessLevel,
+  getEffectiveAccessLevelForUser,
 } from './db/guildMembers';
+export { setMemberAccessLevel, removeGuildMember } from './db/guildMemberWrites';
+// Fired by the wrappers above and by userWrites when a guild's name or Twitch-enabled members may have changed.
+export { onGuildInfoChanged } from './db/guildInfoEvents';
 
 export { getOverridesForGuild } from './db/guildCommandOverrides';
 export type { DbGuildCommandOverride } from './db/guildCommandOverrides';

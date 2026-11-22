@@ -4,10 +4,11 @@ vi.mock('../shared/statusStore', () => ({
   getStatus: vi.fn(),
 }));
 
-vi.mock('../db', () => ({
-  getGuildById: vi.fn(),
-  getGuildMemberUsers: vi.fn(),
-}));
+// The real registry, so a test can fire a change as the `src/db` wrappers do.
+vi.mock('../db', async () => {
+  const events = await vi.importActual<typeof import('../db/guildInfoEvents')>('../db/guildInfoEvents');
+  return { getGuildById: vi.fn(), getGuildMemberUsers: vi.fn(), onGuildInfoChanged: events.onGuildInfoChanged };
+});
 
 vi.mock('../twitch/twitchChannelName', () => ({
   normalizeTwitchChannelName: vi.fn((s: string) => (s ? s.toLowerCase() : null)),
@@ -16,6 +17,7 @@ vi.mock('../twitch/twitchChannelName', () => ({
 import { getGuildScopedStatus, clearGuildScopedStatusCache } from './guildScopedStatus';
 import { getStatus } from '../shared/statusStore';
 import { getGuildById, getGuildMemberUsers } from '../db';
+import { notifyGuildInfoChanged } from '../db/guildInfoEvents';
 
 const BASE_STATUS = {
   discord: { ready: true, tag: 'Bot#1234' },
@@ -152,5 +154,118 @@ describe('getGuildScopedStatus — guild-info caching', () => {
     expect(getGuildMemberUsers).toHaveBeenCalledTimes(1);
     expect(firstResult.discord.guildName).toBe('Our Guild');
     expect(secondResult.discord.guildName).toBe('Our Guild');
+  });
+});
+
+// ─── invalidation (#1113) ───────────────────────────────────────────────────────
+
+/** A promise whose resolution a test controls, to hold a DB lookup in flight. */
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((r) => { resolve = r; });
+  return { promise, resolve };
+}
+
+const MEMBER = (twitchName: string) => ({
+  discord_id: '1', discord_name: 'Streamer', is_twitch_bot_enabled: true, twitch_name: twitchName, access_level: 2, is_owner: false, session_generation: 0,
+});
+
+describe('getGuildScopedStatus — invalidation', () => {
+  it('refetches after the guild is reported changed, instead of waiting out the TTL', async () => {
+    await getGuildScopedStatus('guild-A');
+    expect(getGuildById).toHaveBeenCalledTimes(1);
+
+    notifyGuildInfoChanged('guild-A');
+    vi.mocked(getGuildById).mockResolvedValue({ guild_id: 'guild-A', name: 'Renamed', voice_channel_id: null });
+    const result = await getGuildScopedStatus('guild-A');
+
+    expect(getGuildById).toHaveBeenCalledTimes(2);
+    expect(result.discord.guildName).toBe('Renamed');
+  });
+
+  it('keeps serving the cache when nothing changed', async () => {
+    await getGuildScopedStatus('guild-A');
+    await getGuildScopedStatus('guild-A');
+    expect(getGuildById).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves other guilds\' cached entries alone', async () => {
+    await getGuildScopedStatus('guild-A');
+    await getGuildScopedStatus('guild-B');
+    expect(getGuildById).toHaveBeenCalledTimes(2);
+
+    notifyGuildInfoChanged('guild-A');
+    await getGuildScopedStatus('guild-B');
+    expect(getGuildById).toHaveBeenCalledTimes(2);
+    await getGuildScopedStatus('guild-A');
+    expect(getGuildById).toHaveBeenCalledTimes(3);
+  });
+
+  it('drops every guild\'s entry for a change that can touch any guild (null)', async () => {
+    await getGuildScopedStatus('guild-A');
+    await getGuildScopedStatus('guild-B');
+
+    notifyGuildInfoChanged(null);
+    await getGuildScopedStatus('guild-A');
+    await getGuildScopedStatus('guild-B');
+
+    expect(getGuildById).toHaveBeenCalledTimes(4);
+  });
+
+  it('shows a newly enabled channel straight after the write (the join/part push that follows must see fresh members)', async () => {
+    vi.mocked(getGuildMemberUsers).mockResolvedValue([MEMBER('ourstreamer')] as any);
+    expect(Object.keys((await getGuildScopedStatus('guild-A')).twitch)).toEqual(['ourstreamer']);
+
+    vi.mocked(getGuildMemberUsers).mockResolvedValue([MEMBER('ourstreamer'), MEMBER('otherguildstreamer')] as any);
+    notifyGuildInfoChanged(null);
+    expect(Object.keys((await getGuildScopedStatus('guild-A')).twitch).sort()).toEqual(['otherguildstreamer', 'ourstreamer']);
+  });
+
+  it('does not re-cache a load that was still in flight when the guild changed, and a call made after the change runs a fresh load', async () => {
+    const stale = deferred<any[]>();
+    vi.mocked(getGuildMemberUsers).mockReturnValueOnce(stale.promise as any);
+    const first = getGuildScopedStatus('guild-A');
+    await Promise.resolve();
+
+    notifyGuildInfoChanged('guild-A');
+    vi.mocked(getGuildMemberUsers).mockResolvedValue([MEMBER('otherguildstreamer')] as any);
+    const second = await getGuildScopedStatus('guild-A');
+    expect(Object.keys(second.twitch)).toEqual(['otherguildstreamer']);
+
+    stale.resolve([MEMBER('ourstreamer')]);
+    const firstResult = await first;
+    // The stale load still answers the callers that were waiting on it ...
+    expect(Object.keys(firstResult.twitch)).toEqual(['ourstreamer']);
+    // ... but must not overwrite the fresh rows in the cache.
+    const third = await getGuildScopedStatus('guild-A');
+    expect(Object.keys(third.twitch)).toEqual(['otherguildstreamer']);
+  });
+
+  it('rejects with the lookup\'s own error, and leaves nothing stuck in flight, when a lookup throws before returning a promise', async () => {
+    vi.mocked(getGuildById).mockImplementationOnce(() => { throw new Error('sync failure'); });
+    await expect(getGuildScopedStatus('guild-A')).rejects.toThrow('sync failure');
+
+    // The next call isn't joined to the failed load: it fetches afresh.
+    const result = await getGuildScopedStatus('guild-A');
+    expect(result.discord.guildName).toBe('Our Guild');
+  });
+
+  it('keeps coalescing concurrent loads after an invalidation: a stale load finishing does not drop the fresh load\'s in-flight entry', async () => {
+    const stale = deferred<any[]>();
+    const fresh = deferred<any[]>();
+    vi.mocked(getGuildMemberUsers).mockReturnValueOnce(stale.promise as any).mockReturnValueOnce(fresh.promise as any);
+    const first = getGuildScopedStatus('guild-A');
+    await Promise.resolve();
+    notifyGuildInfoChanged('guild-A');
+    const second = getGuildScopedStatus('guild-A');
+    await Promise.resolve();
+
+    stale.resolve([MEMBER('ourstreamer')]);
+    await first;
+    const third = getGuildScopedStatus('guild-A');
+    fresh.resolve([MEMBER('otherguildstreamer')]);
+    await Promise.all([second, third]);
+
+    expect(getGuildMemberUsers).toHaveBeenCalledTimes(2);
   });
 });
