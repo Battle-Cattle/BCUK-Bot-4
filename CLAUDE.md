@@ -44,7 +44,7 @@ Tests run in Vitest's `vmThreads` pool: objects from Node built-ins come from a 
 
 - **TypeScript:** `strict` plus `noUncheckedIndexedAccess`, so `rows[0]` is `T | undefined`: guard it, or use `!` only where a nearby check guarantees it, with a comment saying which.
 - **ESLint errors that shape code:** `no-floating-promises`/`no-misused-promises` (await or `void` everything), `no-console` (use `logger`), and complexity limits on source files: `sonarjs/cognitive-complexity` ≤ 15 (Qlty's metric too), `complexity` ≤ 12, `max-params` 5, `max-depth` 3, `max-nested-callbacks` 3. `public/` browser scripts are linted too: a name used from another script on the same page goes in a `/* global name */` header (`name:writable` if assigned).
-- **Lightweight Discord imports:** `discord.js` costs ~300ms per test file, so take runtime values from the packages it re-exports: `discord-api-types/v10` (`ChannelType`, `Routes`, `RESTJSONErrorCodes`), `@discordjs/rest` (`DiscordAPIError`, `HTTPError`, `makeURLSearchParams`), `@discordjs/builders` (`EmbedBuilder`), `@discordjs/formatters` (`escapeMarkdown`). Types-only uses are `import type { … } from 'discord.js'`. Only `discordBot.ts` imports `discord.js` at runtime.
+- **Lightweight Discord imports:** `discord.js` costs ~300ms per test file, so take runtime values from the packages it re-exports: `discord-api-types/v10` (`ChannelType`, `Routes`, `RESTJSONErrorCodes`), `@discordjs/rest` (`DiscordAPIError`, `HTTPError`, `makeURLSearchParams`), `@discordjs/ws` (`WebSocketShardEvents`), `@discordjs/builders` (`EmbedBuilder`), `@discordjs/formatters` (`escapeMarkdown`; discord.js v15 no longer re-exports builders or formatters at all). On this branch discord.js is a v15 pre-release dev build, pinned exactly, with these `@discordjs/*` packages on the same dev build. Types-only uses are `import type { … } from 'discord.js'`. Only `discordBot.ts` imports `discord.js` at runtime.
 
 ## Critical Invariants
 
@@ -67,7 +67,7 @@ Boot order in `main()`: DB ping → migrations → re-encrypt stored OAuth token
 ## Design Decisions
 
 - **Command matching:** `trigger_string` stores the full prefixed string (e.g. `!clap`). The first word is lowercased and queried directly — **no prefix stripping**.
-- **Voice adapter:** `audioPlayer.ts` uses a custom `DiscordGatewayAdapterCreator` via `client.on('raw', ...)`; `guild.voiceAdapterCreator` is unused (discord.js v14 incompatibility).
+- **Voice adapter:** `audioPlayer.ts` uses a custom `DiscordGatewayAdapterCreator` (`voiceAdapter.ts`) that listens for gateway dispatches on `client.ws` (`WebSocketShardEvents.Dispatch`; discord.js v15 no longer emits `raw`) and sends via `client.ws.send(guild.shardId, …)`; `guild.voiceAdapterCreator` is unused (originally a discord.js v14 incompatibility). Shard lifecycle events likewise come from `client.ws` (`Closed`/`Error`/`SocketError`/`Ready`/`Resumed`), not the removed `shard*` Client events.
 - **New Command Handler Pattern:** export `registerXRuntime(runtime)` from the handler file to store the platform client, avoiding circular imports with `src/index.ts`. Build the slot with `createRuntimeRegistry()` from `src/shared/runtimeRegistry.ts`, and call it from `index.ts` after the client is ready.
 
 ## Tests

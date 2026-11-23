@@ -3,13 +3,18 @@ import type {
   DiscordGatewayAdapterImplementerMethods,
   DiscordGatewayAdapterLibraryMethods,
 } from '@discordjs/voice';
-import type { Client, VoiceBasedChannel } from 'discord.js';
+import { WebSocketShardEvents } from '@discordjs/ws';
+import type { Client, GatewayDispatchPayload, GatewaySendPayload, VoiceBasedChannel } from 'discord.js';
+import { createLogger } from '../shared/logger';
+
+const log = createLogger('VoiceAdapter');
 
 // ─── Voice adapter ────────────────────────────────────────────────────────────
 // Bypasses discord.js's built-in voiceAdapterCreator to avoid type/version
-// incompatibilities with discord.js v14. Listens to raw gateway events instead.
+// incompatibilities between discord.js and @discordjs/voice. Listens to gateway dispatches on
+// `client.ws` (the @discordjs/ws manager; discord.js v15 no longer emits 'raw') instead.
 //
-// Every guild connected to voice shares ONE 'raw' listener per Client (registered
+// Every guild connected to voice shares ONE dispatch listener per Client (registered
 // lazily on first use, tracked in `dispatchers` below) instead of each guild adding
 // its own — with N guilds in voice, every gateway dispatch event (not just voice
 // ones) would otherwise fan out to N separate handlers. The shared listener routes
@@ -18,8 +23,6 @@ import type { Client, VoiceBasedChannel } from 'discord.js';
 //
 // The pieces are kept as flat module-level helpers (rather than closures nested
 // inside the factory) so each stays simple and independently testable.
-
-type RawPacket = { t: string; d: Record<string, unknown> };
 
 /** Tracks the cleanup for a guild's currently-registered adapter methods. */
 interface AdapterCleanupState {
@@ -35,11 +38,11 @@ interface ClientDispatcher {
 const dispatchers = new WeakMap<Client, ClientDispatcher>();
 
 /**
- * Routes one raw gateway packet to its guild's registered methods, if any. No-ops for non-voice packets or unregistered guilds.
+ * Routes one gateway dispatch to its guild's registered methods, if any. No-ops for non-voice packets or unregistered guilds.
  * @param dispatcher - The client's dispatcher holding per-guild adapter methods.
- * @param packet - Raw gateway packet (`t` event name, `d` payload) received from the client.
+ * @param packet - Gateway dispatch payload (`t` event name, `d` payload) received on `client.ws`.
  */
-function dispatchRawPacket(dispatcher: ClientDispatcher, packet: RawPacket): void {
+function dispatchGatewayPacket(dispatcher: ClientDispatcher, packet: GatewayDispatchPayload): void {
   if (packet.t !== 'VOICE_STATE_UPDATE' && packet.t !== 'VOICE_SERVER_UPDATE') return;
 
   const guildId = (packet.d as { guild_id?: string }).guild_id;
@@ -49,15 +52,15 @@ function dispatchRawPacket(dispatcher: ClientDispatcher, packet: RawPacket): voi
   if (!methods) return;
 
   if (packet.t === 'VOICE_STATE_UPDATE') {
-    methods.onVoiceStateUpdate(packet.d as unknown as Parameters<typeof methods.onVoiceStateUpdate>[0]);
+    methods.onVoiceStateUpdate(packet.d);
   } else {
-    methods.onVoiceServerUpdate(packet.d as unknown as Parameters<typeof methods.onVoiceServerUpdate>[0]);
+    methods.onVoiceServerUpdate(packet.d);
   }
 }
 
 /**
- * Returns `client`'s shared dispatcher, registering its single 'raw' listener on first use.
- * @param client - Discord client whose raw gateway events to route.
+ * Returns `client`'s shared dispatcher, registering its single gateway dispatch listener on first use.
+ * @param client - Discord client whose gateway dispatches to route.
  * @returns The client's existing or newly registered dispatcher.
  */
 function getOrCreateDispatcher(client: Client): ClientDispatcher {
@@ -65,21 +68,26 @@ function getOrCreateDispatcher(client: Client): ClientDispatcher {
   if (existing) return existing;
 
   const dispatcher: ClientDispatcher = { guildMethods: new Map() };
-  /** Forwards each raw gateway packet from `client` to this dispatcher's routing logic. */
-  client.on('raw', (packet: RawPacket) => dispatchRawPacket(dispatcher, packet));
+  /** Forwards each gateway dispatch from `client` to this dispatcher's routing logic. */
+  client.ws.on(WebSocketShardEvents.Dispatch, (packet) => dispatchGatewayPacket(dispatcher, packet));
   dispatchers.set(client, dispatcher);
   return dispatcher;
 }
 
 /**
  * Creates the gateway payload sender that routes voice data through the channel's guild shard.
+ * discord.js v15 sends via `client.ws.send(shardId, …)`, which may be async: a synchronous throw
+ * reports failure, and a later rejection is logged rather than left unhandled.
  * @param channel - Voice channel whose guild shard the payloads are sent through.
- * @returns A sender returning true if the payload was sent, false if the shard send threw.
+ * @returns A sender returning true if the payload was handed to the shard, false if the send threw.
  */
 function makeSendPayload(channel: VoiceBasedChannel): (payload: unknown) => boolean {
   return function sendPayload(payload: unknown): boolean {
     try {
-      channel.guild.shard.send(payload);
+      const sent = channel.client.ws.send(channel.guild.shardId, payload as GatewaySendPayload);
+      Promise.resolve(sent).catch((err: unknown) => {
+        log.warn(`Voice gateway payload send failed for guild ${channel.guild.id}:`, err);
+      });
       return true;
     } catch {
       return false;
@@ -88,7 +96,7 @@ function makeSendPayload(channel: VoiceBasedChannel): (payload: unknown) => bool
 }
 
 /**
- * Registers a raw-gateway adapter for one connection, tearing down the guild's
+ * Registers a gateway-dispatch adapter for one connection, tearing down the guild's
  * previous adapter first so registrations do not accumulate across reconnects.
  * @param channel - Voice channel the connection is joining.
  * @param methods - Library methods from @discordjs/voice that receive voice state and server updates.
@@ -138,7 +146,7 @@ export interface VoiceAdapterFactory {
 }
 
 /**
- * Creates a per-guild adapter factory that tracks the active raw-gateway listener
+ * Creates a per-guild adapter factory that tracks the active gateway-dispatch listener
  * and tears down the previous one before registering a new adapter, so listeners
  * never accumulate across that guild's reconnects.
  *
