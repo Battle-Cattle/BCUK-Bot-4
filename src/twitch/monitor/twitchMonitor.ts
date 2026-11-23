@@ -18,7 +18,7 @@ import { performStartupLiveCheck } from './twitchMonitorStartup';
 import { handlePollStreamer, dispatchStreamerPolls } from './twitchMonitorPoll';
 import { withLoginLock } from './twitchMonitorLoginLock';
 import { recordMonitorPoll, normalizeError } from '../../shared/healthStore';
-import { setTwitchChannelLive } from '../../shared/statusStore';
+import { setTwitchChannelLive, markTwitchChannelsLiveChecked } from '../../shared/statusStore';
 
 const log = createLogger('TwitchMonitor');
 
@@ -58,6 +58,9 @@ async function pollStreams(): Promise<void> {
       }
 
       const liveStreams = await getStreams(userIds);
+      // Helix answered for every login in the batch: each is now known live or offline, whether or not that changed. A
+      // failed `getStreams` throws above, so a stalled monitor leaves this time behind (the dashboard can show it as stale).
+      markTwitchChannelsLiveChecked(loginToUserId.keys());
       const liveByUserId = new Map(
         liveStreams.filter((s) => s.type === 'live').map((s) => [s.user_id, s]),
       );

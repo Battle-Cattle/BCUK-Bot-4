@@ -4,7 +4,7 @@ const { logMock } = vi.hoisted(() => ({
   logMock: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 vi.mock('../../shared/logger', () => ({ createLogger: () => logMock }));
-vi.mock('../../shared/statusStore', () => ({ setTwitchChannelLive: vi.fn() }));
+vi.mock('../../shared/statusStore', () => ({ setTwitchChannelLive: vi.fn(), markTwitchChannelsLiveChecked: vi.fn() }));
 vi.mock('../../discord/discordClientStore', () => ({ getDiscordClient: vi.fn() }));
 vi.mock('../../db', () => ({
   getAllStreamersWithGroups: vi.fn(),
@@ -24,7 +24,7 @@ vi.mock('./twitchMonitorOffline', () => ({
 }));
 vi.mock('./twitchMonitorStartup', () => ({ performStartupLiveCheck: vi.fn().mockResolvedValue(undefined) }));
 
-import { setTwitchChannelLive } from '../../shared/statusStore';
+import { setTwitchChannelLive, markTwitchChannelsLiveChecked } from '../../shared/statusStore';
 import {
   startTwitchMonitor, stopTwitchMonitor, triggerImmediateLiveCheck, getLiveStates,
   shutdownTwitchMonitor, restartTwitchMonitor, getMultiTwitchDataForChannel, isChannelLive,
@@ -237,6 +237,25 @@ describe('60s poll interval', () => {
     expect(states[0]!.login).toBe('teststreamer');
   });
 
+  it('records the live-check time for every resolved login after a successful poll, whether the stream is live or not', async () => {
+    vi.mocked(getStreams).mockResolvedValue([makeStream()] as any);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(markTwitchChannelsLiveChecked).toHaveBeenCalledTimes(1);
+    expect([...vi.mocked(markTwitchChannelsLiveChecked).mock.calls[0]![0]]).toEqual(['teststreamer']);
+
+    vi.mocked(getStreams).mockResolvedValue([]);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(markTwitchChannelsLiveChecked).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not record a live-check time when the poll fails, so a stalled monitor leaves it behind', async () => {
+    vi.mocked(getStreams).mockRejectedValueOnce(new Error('API down'));
+
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(markTwitchChannelsLiveChecked).not.toHaveBeenCalled();
+  });
+
   it('logs and recovers when getStreams rejects during a poll tick', async () => {
     vi.mocked(getStreams).mockRejectedValueOnce(new Error('boom'));
 
@@ -274,6 +293,7 @@ describe('60s poll interval with no resolved user IDs', () => {
     await vi.advanceTimersByTimeAsync(60_000);
 
     expect(getStreams).not.toHaveBeenCalled();
+    expect(markTwitchChannelsLiveChecked).not.toHaveBeenCalled();
     const snapshot = getHealthSnapshot();
     expect(snapshot.monitor.lastPollOk).toBe(false);
     expect(snapshot.monitor.lastError).toBe('No Twitch user IDs resolved for any configured streamer.');
