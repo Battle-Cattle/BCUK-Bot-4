@@ -7,52 +7,96 @@ function htmlAttrJson(value) {
 %>
 </head>
 <!-- Unescaped EJS output here is intentional: htmlAttrJson() already HTML-escapes its result via manual character replacement, so the escaping EJS tag would double-escape the attribute value. -->
-<body data-initial-status="<%- htmlAttrJson(status) %>" data-initial-events="<%- htmlAttrJson(recentEvents) %>" data-has-streamer="<%= hasStreamer %>" data-csrf-token="<%= csrfToken %>">
+<body data-initial-status="<%- htmlAttrJson(status) %>" data-initial-events="<%- htmlAttrJson(recentEvents) %>" data-has-streamer="<%= hasStreamer %>" data-csrf-token="<%= csrfToken %>"<% if (ownChannel) { %> data-own-channel="<%= ownChannel %>"<% } %>>
   <%- include('partials/nav') %>
 
   <main class="container container--wide">
+    <!-- The one overall health indicator: a roll-up of the required services (Discord, and the Twitch chat
+         connections when any are configured), never voice or live state. dashboard-health.js derives it from the
+         status feed; it starts Unknown so the page never claims health before data arrives. -->
+    <div id="health-indicator" class="health health--unknown" data-state="unknown" role="status">Status unknown</div>
+
     <div class="dashboard-layout">
 
-      <!-- ── Status Cards ── -->
-      <section class="section dashboard-status">
-        <h2 class="section-title">Bot Status</h2>
-        <div class="status-grid">
+      <%# Welcome hero: a short greeting (the page's h1) and the existing Quick Links as compact actions, in the left
+          column so the right-hand column's height budget is unchanged. Nothing here is new: the same destinations at
+          the same access levels (Commands and Counters Manager+ only) the old Quick Links section had. %>
+      <section class="dashboard-hero" aria-labelledby="dashboard-welcome">
+        <div class="hero-text">
+          <h1 class="hero-title" id="dashboard-welcome"><%= user ? 'Welcome back, ' + user.discordName + '!' : 'Welcome to BCUK Bot' %></h1>
+          <p class="hero-subtitle">Your Battle Cattle dashboard at a glance.</p>
+        </div>
+        <nav class="hero-actions" aria-label="Quick links">
+          <a href="/sfx" class="hero-action"><span class="hero-action-icon" aria-hidden="true">🎧</span>SFX</a>
+          <% if (user && user.accessLevel >= 2) { %>
+          <a href="/commands" class="hero-action"><span class="hero-action-icon" aria-hidden="true">💻</span>Commands</a>
+          <a href="/counters" class="hero-action"><span class="hero-action-icon" aria-hidden="true">🔢</span>Counters</a>
+          <% } %>
+          <a href="/channel-points" class="hero-action"><span class="hero-action-icon" aria-hidden="true">🪙</span>Channel Points</a>
+          <a href="/loyalty-points" class="hero-action"><span class="hero-action-icon" aria-hidden="true">🏆</span>Loyalty Points</a>
+          <a href="/alerts/settings" class="hero-action"><span class="hero-action-icon" aria-hidden="true">🔔</span>Alerts</a>
+        </nav>
+      </section>
 
-          <div class="card" id="card-discord">
-            <div class="card-header">
-              <span class="card-icon">💬</span>
-              <span class="card-label">Discord Bot</span>
-              <span class="dot dot--offline" id="dot-discord"></span>
-            </div>
-            <div class="card-body">
-              <div class="stat-row"><span class="stat-label">Account</span><span class="stat-value" id="discord-tag">—</span></div>
-              <div class="stat-row"><span class="stat-label">Server</span><span class="stat-value" id="discord-guild">—</span></div>
-            </div>
-          </div>
+      <!-- ── System Status: one panel for the bot's services (Discord, Voice, Twitch chat), with Last Played beside it.
+           Each service keeps its own state text, dot and controls; broadcast state is not part of it. ── -->
+      <section class="section dashboard-status" id="bot-status">
+        <h2 class="section-title">System Status</h2>
+        <p id="status-stale-note" class="status-stale-note" hidden>Status unknown: these are the last values received, not live.</p>
+        <div class="status-layout">
 
-          <div class="card" id="card-voice">
-            <div class="card-header">
-              <span class="card-icon">🔊</span>
-              <span class="card-label">Voice Channel</span>
-              <span class="dot dot--offline" id="dot-voice"></span>
-            </div>
-            <div class="card-body">
-              <div class="stat-row"><span class="stat-label">Channel</span><span class="stat-value" id="voice-channel">—</span></div>
-              <div class="stat-row"><span class="stat-label">State</span><span class="stat-value" id="voice-state">Idle</span></div>
-              <% if (user && user.accessLevel >= 1) { %>
-              <div class="stat-row stat-row-top-gap">
-                <div class="d-flex flex-wrap gap-05 items-center">
-                  <select class="btn btn-sm flex-1 min-w-120" id="voice-channel-select">
-                    <option value="">Loading channels...</option>
-                  </select>
-                  <button class="btn btn-sm" id="btn-rejoin-voice"><%= status.voice.connected ? 'Leave Voice' : 'Join Voice' %></button>
-                </div>
+          <div class="card system-status">
+
+            <div class="service service--discord" id="card-discord">
+              <div class="service-header">
+                <span class="card-icon">💬</span>
+                <h3 class="service-label">Discord Bot</h3>
+                <span class="stat-value status-text" id="discord-state">—</span>
+                <span class="dot dot--offline" id="dot-discord" role="img" aria-label="Discord: Disconnected" title="Discord: Disconnected"></span>
               </div>
-              <% } %>
+              <div class="service-body">
+                <div class="stat-row"><span class="stat-label">Account</span><span class="stat-value" id="discord-tag">—</span></div>
+                <div class="stat-row"><span class="stat-label">Server</span><span class="stat-value" id="discord-guild">—</span></div>
+              </div>
             </div>
+
+            <div class="service service--voice" id="card-voice">
+              <div class="service-header">
+                <span class="card-icon">🔊</span>
+                <h3 class="service-label">Voice Channel</h3>
+                <span class="stat-value status-text" id="voice-state">—</span>
+                <span class="dot dot--inactive" id="dot-voice" role="img" aria-label="Voice: Not connected" title="Voice: Not connected"></span>
+              </div>
+              <div class="service-body">
+                <div class="stat-row"><span class="stat-label">Channel</span><span class="stat-value" id="voice-channel">—</span></div>
+                <% if (user && user.accessLevel >= 1) { %>
+                <div class="stat-row stat-row-top-gap">
+                  <div class="d-flex flex-wrap gap-05 items-center">
+                    <select class="btn btn-sm flex-1 min-w-120" id="voice-channel-select" aria-label="Voice channel">
+                      <option value="">Loading channels...</option>
+                    </select>
+                    <button class="btn btn-sm" id="btn-rejoin-voice"><%= status.voice.connected ? 'Leave Voice' : 'Join Voice' %></button>
+                  </div>
+                </div>
+                <% } %>
+              </div>
+            </div>
+
+            <!-- Twitch chat connections: the roll-up of every channel (words and an icon; dashboard-status.js fills it
+                 from the status feed), then one row per channel in a labelled scroll region that fills the column. -->
+            <div class="service service--twitch" id="card-twitch">
+              <div class="service-header">
+                <span class="card-icon">🟣</span>
+                <h3 class="service-label">Twitch Channels</h3>
+                <span class="stat-value status-text" id="twitch-state">—</span>
+              </div>
+              <div class="service-body dashboard-twitch-body dashboard-scroll" id="twitch-channels" tabindex="0" role="region" aria-label="Twitch channels"><p class="empty-msg">No Twitch channels configured.</p></div>
+            </div>
+
           </div>
 
-          <div class="card">
+          <!-- Last Played is playback information, not a service state, so it sits beside the panel. -->
+          <div class="card last-played">
             <div class="card-header">
               <span class="card-icon">🎵</span>
               <span class="card-label">Last Played</span>
@@ -65,47 +109,50 @@ function htmlAttrJson(value) {
             </div>
           </div>
 
-          <div class="card" id="card-twitch">
-            <div class="card-header"><span class="card-icon">🟣</span><span class="card-label">Twitch Channels</span></div>
-            <div class="card-body dashboard-twitch-body dashboard-scroll" id="twitch-channels" tabindex="0" role="region" aria-label="Twitch channels"><p class="empty-msg">No Twitch channels configured.</p></div>
-          </div>
-
         </div>
       </section>
 
-      <!-- Sidebar: the live event feed. Second in source order so screen readers and keyboard users reach it right after Bot Status; on desktop the grid places it in a sticky right-hand column. -->
-      <aside class="dashboard-sidebar" aria-label="Recent events">
-        <!-- ── Recent Events ── -->
-        <section class="section dashboard-events">
-          <h2 class="section-title">Recent Events</h2>
-          <div class="card">
-            <div class="card-body dashboard-events-body dashboard-scroll" id="recent-events-list" tabindex="0" role="region" aria-label="Recent events feed">
-              <% if (!user) { %>
-              <p class="empty-msg">Sign in to see recent activity.</p>
-              <% } else if (!hasStreamer) { %>
-              <p class="empty-msg">Connect your Twitch account to see recent activity.</p>
-              <% } else { %>
-              <p class="empty-msg">No recent activity yet.</p>
-              <% } %>
+      <!-- Right-hand column: Stream Overview (your own channel), then the live event feed. Both come after System Status in source order,
+           so screen readers and keyboard users reach them right after it; on desktop the grid places the column
+           (sticky, capped to the viewport) beside every row, and the feed takes whatever height the panel leaves. -->
+      <div class="dashboard-side">
+
+        <!-- ── Stream Overview: is my channel broadcasting? About the signed-in user's own channel only (the Twitch
+             Channels list above already shows every channel's LIVE badge, so nothing here repeats it). Built from the
+             channel's isLive flag alone (dashboard-stream.js), never from the bot's connection, and it starts Unknown.
+             It is its own panel, apart from System Status: its own heading, layout and icons, repeating no service state. ── -->
+        <section class="section dashboard-stream" id="stream-overview" aria-labelledby="stream-overview-title">
+          <h2 class="section-title" id="stream-overview-title">Stream Overview</h2>
+          <div class="card stream-card">
+            <div class="stream-own" id="stream-own">
+              <h3 class="stream-heading">Your channel</h3>
+              <p class="stream-state stream-state--unknown" id="stream-own-state" aria-live="polite">Unknown</p>
+              <p class="stream-channel" id="stream-own-name" hidden></p>
+              <p class="stream-note" id="stream-own-note">Waiting for live data.</p>
+              <a class="stream-link" id="stream-own-link" target="_blank" rel="noopener noreferrer" hidden></a>
             </div>
           </div>
         </section>
-      </aside>
 
-      <!-- ── Quick Links ── -->
-      <section class="section dashboard-links">
-        <h2 class="section-title">Quick Links</h2>
-        <div class="quick-links-grid">
-          <a href="/sfx" class="quick-link-card"><span class="quick-link-icon">🎧</span><span class="quick-link-label">SFX</span></a>
-          <% if (user && user.accessLevel >= 2) { %>
-          <a href="/commands" class="quick-link-card"><span class="quick-link-icon">💻</span><span class="quick-link-label">Commands</span></a>
-          <a href="/counters" class="quick-link-card"><span class="quick-link-icon">🔢</span><span class="quick-link-label">Counters</span></a>
-          <% } %>
-          <a href="/channel-points" class="quick-link-card"><span class="quick-link-icon">🪙</span><span class="quick-link-label">Channel Points</span></a>
-          <a href="/loyalty-points" class="quick-link-card"><span class="quick-link-icon">🏆</span><span class="quick-link-label">Loyalty Points</span></a>
-          <a href="/alerts/settings" class="quick-link-card"><span class="quick-link-icon">🔔</span><span class="quick-link-label">Alerts</span></a>
-        </div>
-      </section>
+        <aside class="dashboard-sidebar" aria-label="Recent events">
+          <!-- ── Recent Events ── -->
+          <section class="section dashboard-events">
+            <h2 class="section-title">Recent Events</h2>
+            <div class="card">
+              <div class="card-body dashboard-events-body dashboard-scroll" id="recent-events-list" tabindex="0" role="region" aria-label="Recent events feed">
+                <% if (!user) { %>
+                <p class="empty-msg">Sign in to see recent activity.</p>
+                <% } else if (!hasStreamer) { %>
+                <p class="empty-msg">Connect your Twitch account to see recent activity.</p>
+                <% } else { %>
+                <p class="empty-msg">No recent activity yet.</p>
+                <% } %>
+              </div>
+            </div>
+          </section>
+        </aside>
+
+      </div>
 
       <!-- ── Usage ── -->
       <section class="section dashboard-usage">
@@ -114,7 +161,7 @@ function htmlAttrJson(value) {
           <div class="card"><div class="card-body stat-card-body"><span class="stat-big"><%= usageStats.sfxCount %></span><span class="stat-big-label">SFX Triggers</span></div></div>
           <div class="card"><div class="card-body stat-card-body"><span class="stat-big"><%= usageStats.commandCount %></span><span class="stat-big-label">Custom Commands</span></div></div>
           <div class="card"><div class="card-body stat-card-body"><span class="stat-big"><%= usageStats.counterCount %></span><span class="stat-big-label">Counters</span></div></div>
-          <div class="card"><div class="card-body stat-card-body"><span class="stat-big"><%= Object.keys(status.twitch).length %></span><span class="stat-big-label">Twitch Channels</span></div></div>
+          <div class="card"><div class="card-body stat-card-body"><span class="stat-big" id="twitch-channel-count"><%= Object.keys(status.twitch).length %></span><span class="stat-big-label">Twitch Channels</span></div></div>
         </div>
       </section>
 
@@ -124,7 +171,10 @@ function htmlAttrJson(value) {
   <%- include('partials/pwa-register') %>
   <%- include('partials/footer') %>
   <script src="/dashboard-utils.js"></script>
+  <script src="/dashboard-context.js"></script>
   <script src="/dashboard-layout.js"></script>
+  <script src="/dashboard-health.js"></script>
+  <script src="/dashboard-stream.js"></script>
   <script src="/dashboard-status.js"></script>
   <script src="/dashboard-voice.js"></script>
   <script src="/dashboard-events.js"></script>

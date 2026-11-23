@@ -4,6 +4,7 @@ import { upsertUserRecord, setTwitchBotEnabledRecord, deleteUnlinkedUserRecord }
 import { invalidateCustomCommandLookupCache } from './customCommandCache';
 import { invalidateAdvancedCommandLookupCache } from './advancedCommandCache';
 import { invalidateTimerCommandCache } from './timerCommandCache';
+import { notifyGuildInfoChanged } from './guildInfoEvents';
 import { withInvalidation } from './withInvalidation';
 
 /**
@@ -18,8 +19,17 @@ function invalidateTwitchChannelCaches(): void {
 }
 
 /**
- * Upserts a user record and invalidates the custom-command, advanced-command and timer caches when
- * the `twitchName` field is provided (including explicit null to clear it).
+ * Invalidates the Twitch-channel-keyed caches and tells guild-info listeners that any guild's Twitch-enabled
+ * members may have changed: a user can belong to several guilds, so a Twitch-name or bot-enabled change isn't one guild's.
+ */
+function onTwitchSettingsChanged(): void {
+  invalidateTwitchChannelCaches();
+  notifyGuildInfoChanged(null);
+}
+
+/**
+ * Upserts a user record and invalidates the custom-command, advanced-command and timer caches (and tells guild-info
+ * listeners) when the `twitchName` field is provided (including explicit null to clear it).
  * @param discordId - Discord snowflake as a string.
  * @param discordName - Display name to store; blank after trimming is stored as null.
  * @param twitchName - Twitch channel name to set, or null to clear it; omit to leave unchanged.
@@ -32,25 +42,26 @@ export async function upsertUser(
 ): Promise<void> {
   const twitchNameProvided = await upsertUserRecord(discordId, discordName, twitchName);
   if (twitchNameProvided) {
-    invalidateTwitchChannelCaches();
+    onTwitchSettingsChanged();
   }
 }
 
 /**
- * Sets whether a user's Twitch bot integration is enabled and invalidates the
- * custom-command, advanced-command and timer caches.
+ * Sets whether a user's Twitch bot integration is enabled, invalidates the
+ * custom-command, advanced-command and timer caches and tells guild-info listeners.
  * @param discordId - Discord snowflake as a string.
  * @param enabled - True to enable the Twitch bot for this user, false to disable it.
  * @returns Resolves once the update (and cache invalidation) completes.
  */
 export async function updateTwitchBotEnabled(discordId: string, enabled: boolean): Promise<void> {
-  await withInvalidation(() => setTwitchBotEnabledRecord(discordId, enabled), invalidateTwitchChannelCaches);
+  await withInvalidation(() => setTwitchBotEnabledRecord(discordId, enabled), onTwitchSettingsChanged);
 }
 
 /**
  * Deletes a user row that nothing else references — no guild membership, streamer record,
  * command/timer assignment or tokens (see `deleteUnlinkedUserRecord`) — and invalidates the
- * custom-command, advanced-command and timer caches.
+ * custom-command, advanced-command and timer caches. Guild-info listeners are not told: the user has no
+ * membership, so no guild's members change.
  * @param discordId - Discord snowflake as a string.
  * @returns True if the row was deleted; false if it didn't exist or is still referenced.
  */

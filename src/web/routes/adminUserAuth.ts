@@ -4,20 +4,6 @@
 import { findUser, getMemberAccessLevel, getEffectiveAccessLevelForUser, getGuildsForMember, AccessLevel } from '../../db';
 
 /**
- * Thrown by an authorization check run inside a `runUserMutation` callback (see
- * `shared/userMutationQueue.ts`) so the check is evaluated atomically with the write it guards,
- * rather than before the write is even enqueued — see `checkManagerEditAuth`'s and
- * `checkToggleTwitchAuth`'s own doc comments for why that ordering matters. Callers catch this
- * specifically to redirect with `code` instead of falling through to a generic DB-failure redirect.
- */
-export class ManagerEditAuthError extends Error {
-  constructor(public readonly code: string) {
-    super(`Manager edit auth check failed: ${code}`);
-    this.name = 'ManagerEditAuthError';
-  }
-}
-
-/**
  * Authorizes a Manager/Admin editing a user's access level within a guild.
  * Returns an error code string, or null when the edit is permitted.
  *
@@ -26,8 +12,8 @@ export class ManagerEditAuthError extends Error {
  * nor modify a target who already sits at or above their own level **in this
  * guild** (the target's level is read from `guild_member`, not the global column).
  *
- * Callers must run this *inside* the `runUserMutation` callback for `targetDiscordId` (throwing
- * a {@link ManagerEditAuthError} on a non-null result), not before enqueueing it — evaluating it
+ * Callers must run this *inside* the `runUserMutation` callback for `targetDiscordId` (as
+ * `runGuardedUserMutation`'s `authorize` step does), not before enqueueing it — evaluating it
  * beforehand would read the target's level, then let an unrelated concurrent write for the same
  * user land in between the check and this call's own write, so the decision here could be stale
  * by the time it takes effect. Running it as the first thing inside the queued callback means it
@@ -79,7 +65,7 @@ export async function checkManagerEditAuth(
  * could otherwise still have their now-unauthorized removal go through.
  *
  * Callers must run this *inside* the `runUserMutation`/`runUserMutationForActorAndTarget` callback
- * for `targetDiscordId` (throwing a {@link ManagerEditAuthError} on a non-null result) — see
+ * for `targetDiscordId` (as `runGuardedUserMutation`'s `authorize` step does) — see
  * `checkManagerEditAuth`'s doc comment for why evaluating it before the write is enqueued would
  * let it go stale, including why the actor's own access level is re-read from the DB here rather
  * than trusted from `sessionUser`/the `requireAdmin` middleware's session check.
@@ -164,8 +150,8 @@ export async function canEditGlobalUserFields(
  * outrank the target in every other guild the target belongs to (see
  * {@link actorOutranksTargetInAllGuilds}) — authority in the current guild alone isn't enough.
  *
- * Callers must run this *inside* the `runUserMutation` callback for `targetDiscordId` (throwing
- * a {@link ManagerEditAuthError} on a non-null result) — see `checkManagerEditAuth`'s doc comment
+ * Callers must run this *inside* the `runUserMutation` callback for `targetDiscordId` (as
+ * `runGuardedUserMutation`'s `authorize` step does) — see `checkManagerEditAuth`'s doc comment
  * for why evaluating it before the write is enqueued would let it go stale, including why the
  * actor's own access level and owner flag are re-read from the DB here rather than trusted from
  * `sessionUser`.

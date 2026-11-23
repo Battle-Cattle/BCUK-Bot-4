@@ -7,6 +7,16 @@ import path from 'path';
 // typescript-eslint, sonarjs, madge and ts-node load for its JS API, which 7.x doesn't expose.
 // Both ship a `tsc` bin and which one npm links depends on how it installed, so a script that
 // says plain `tsc` would silently run either version. These checks keep that setup intact.
+// A nested `overrides` entry can't give those tools their own 6.x copy, because a peer
+// dependency always resolves to the root `typescript` (typescript-eslint's peer range is
+// `<6.1.0`; ts-node crashes on 7.x, TypeStrong/ts-node#2174).
+//
+// Moving `typescript` itself to 7.x, once typescript-eslint, sonarjs and madge support it: drop
+// the `typescript7` alias, point the scripts back at plain `tsc`, remove the Dependabot ignore,
+// and keep ts-node working by adding `@typescript/typescript6` (the 6.x API package), run with
+// `TS_NODE_COMPILER=@typescript/typescript6` in `dev` and
+// `register({ compiler: require.resolve('@typescript/typescript6') })` in the toolchain test
+// (`require.resolve` also lets knip see the package as used) — or replace ts-node.
 
 const projectRoot = path.resolve(__dirname, '..', '..');
 

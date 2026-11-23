@@ -40,6 +40,12 @@ declare module 'express-session' {
      * set it, so adding a passkey can require a recent Discord login (step-up re-authentication).
      */
     discordAuthAt?: number;
+    /**
+     * The user's `user.session_generation` when this session was signed in (or re-issued after
+     * "Sign out other sessions"). A session whose value is older than the row's is ended; a session
+     * from before #1058 has none and counts as generation 0.
+     */
+    sessionGeneration?: number;
     csrfToken?: string;
     eventsubOAuthState?: { value: string; expiresAt: number };
     eventsubStreamerId?: number;

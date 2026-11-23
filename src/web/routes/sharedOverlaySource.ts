@@ -15,6 +15,7 @@ import { createSseEventsHandler, createLoginValidator } from './sseEventsHandler
 import { SHARED_FOLDER, SHARED_VIDEO_FILENAME_RE } from './sharedOverlayVideoFiles';
 import { servePreloadVideo } from './sharedOverlayPreload';
 import { isStreamerLive, noteLiveSent } from './sharedOverlayLiveState';
+import { REPORT_NONCE_HEADER, isLiveReportNonce, issueReportNonce } from './sharedOverlayReportNonce';
 
 // The shared video overlay (#917): a separate OBS browser source at /overlay/shared/:login that
 // plays the same video on every connected streamer's stream, so it never queues behind
@@ -118,7 +119,8 @@ export function getSharedOverlayConnectionCount(): number {
 
 /**
  * Sends a newly connected overlay its server time (for the clock offset), the late-start limit,
- * the enabled video list and whether its streamer is live. On a failed list lookup the connection is closed so the overlay's
+ * the enabled video list, whether its streamer is live, and the nonce its readiness reports must
+ * carry (#1052). On a failed list lookup the connection is closed so the overlay's
  * reconnect backoff retries, rather than leaving it without a list.
  * @param res - The overlay's SSE response.
  * @param login - Lowercase Twitch login the overlay is connected for, to tell it whether they are live.
@@ -129,6 +131,7 @@ async function sendInit(res: Response, login: string): Promise<void> {
     const live = isStreamerLive(login);
     const init = {
       type: 'init', serverTime: Date.now(), maxLateMs: SHARED_OVERLAY_MAX_LATE_SECONDS * 1000, videos, live,
+      reportNonce: issueReportNonce(res),
     };
     if (!res.writableEnded) {
       noteLiveSent(login, live);
@@ -172,18 +175,28 @@ router.get('/:login', (req, res, next) => {
 /**
  * POST /overlay/shared/:login/report — an overlay reports which shared videos it has stored and its
  * current download, for the admin page's readiness stats. No login (OBS can't log in), so it is
- * rate-limited per overlay, accepts only ids on the current list, and only for a login that has a
- * shared overlay connected right now. The stats are self-reported and only drive what the admin
+ * rate-limited per overlay, accepts only ids on the current list, and only with the nonce an open
+ * shared overlay connection for that login was sent in its `init` frame, so nobody else can fake
+ * an overlay's readiness (#1052). An overlay page loaded before the nonce existed has no script
+ * to send one (reconnecting doesn't reload it), so its reports are refused until its OBS browser
+ * source is refreshed. The stats are self-reported and only drive what the admin
  * page shows, never what plays.
- * @param req - Express request; JSON body `{ stored: number[], downloading: {id, percent} | null }`.
- * @param res - 204 when recorded; 404 for a malformed login or one with no connected overlay; 400
- *   for a malformed report or an id not on the list; 500 if the list can't be read.
+ * @param req - Express request; JSON body `{ stored: number[], downloading: {id, percent} | null }`
+ *   and the connection's nonce in the `X-Shared-Overlay-Nonce` header.
+ * @param res - 204 when recorded; 404 for a malformed login or one with no connected overlay; 403
+ *   for a missing nonce or one not held by an open connection for that login; 400 for a malformed
+ *   report or an id not on the list; 500 if the list can't be read.
  */
 router.post('/:login/report', sharedOverlayReportLimiter, async (req, res) => {
   const login = isValidLogin(String(req.params.login));
-  if (login === null || !sharedConnections.get(login)?.size) { res.status(404).end(); return; }
+  const connections = login === null ? undefined : sharedConnections.get(login);
+  if (login === null || !connections?.size) { res.status(404).end(); return; }
+  const nonce = req.get(REPORT_NONCE_HEADER);
+  if (!isLiveReportNonce(nonce, connections)) { res.status(403).end(); return; }
   try {
     const validIds = new Set((await getSharedVideoEntries()).map((v) => v.id));
+    // Check again: the connection may have closed while the list was read.
+    if (!isLiveReportNonce(nonce, sharedConnections.get(login))) { res.status(403).end(); return; }
     const report = parseReadinessReport(req.body, validIds);
     if (!report) { res.status(400).end(); return; }
     recordReadinessReport(login, report);

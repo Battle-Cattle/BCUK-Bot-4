@@ -29,6 +29,7 @@ vi.mock('../../discord/discordApi', () => ({ fetchDiscordUserProfile: vi.fn(), s
 vi.mock('../loginSession', () => ({
   resolveAccessibleGuilds: vi.fn(),
   establishDashboardSession: vi.fn(),
+  signOutOtherSessions: vi.fn(),
 }));
 vi.mock('../csrf', () => ({
   csrfProtection: (_req: any, _res: any, next: any) => next(),
@@ -63,7 +64,7 @@ import {
 } from '@simplewebauthn/server';
 import { fetchDiscordUserProfile, sendDiscordDirectMessage } from '../../discord/discordApi';
 import { hashEnrollmentCode, generateEnrollmentCode } from './passkeysEnrollmentCode';
-import { resolveAccessibleGuilds, establishDashboardSession } from '../loginSession';
+import { resolveAccessibleGuilds, establishDashboardSession, signOutOtherSessions } from '../loginSession';
 import { makeSessionUser } from '../../test-utils/fixtures';
 
 const USER = makeSessionUser({ discordId: '42', discordName: 'Alice' });
@@ -108,6 +109,7 @@ beforeEach(() => {
   vi.mocked(fetchDiscordUserProfile).mockResolvedValue({ username: 'alice', avatar: 'av' });
   vi.mocked(resolveAccessibleGuilds).mockResolvedValue([{ guild_id: 'g1' }] as any);
   vi.mocked(establishDashboardSession).mockResolvedValue(undefined);
+  vi.mocked(signOutOtherSessions).mockResolvedValue(undefined);
 });
 
 describe('chooseUserHandle', () => {
@@ -498,11 +500,27 @@ describe('POST /delete', () => {
     expect(res.headers.location).toBe('/user/settings?success=passkey_removed');
   });
 
+  it('signs the user out of their other sessions once the passkey is removed (#1058)', async () => {
+    const { app } = buildApp({ user: USER });
+    await supertest(app).post('/delete').type('form').send({ credentialId: 'cred-1' });
+    expect(signOutOtherSessions).toHaveBeenCalledOnce();
+    expect(vi.mocked(deletePasskey).mock.invocationCallOrder[0]!)
+      .toBeLessThan(vi.mocked(signOutOtherSessions).mock.invocationCallOrder[0]!);
+  });
+
+  it('says the passkey was removed but the sign-out failed when only the sign-out throws', async () => {
+    vi.mocked(signOutOtherSessions).mockRejectedValueOnce(new Error('db down'));
+    const { app } = buildApp({ user: USER });
+    const res = await supertest(app).post('/delete').type('form').send({ credentialId: 'cred-1' });
+    expect(res.headers.location).toBe('/user/settings?error=passkey_removed_sign_out_failed');
+  });
+
   it('redirects with an error when no passkey of the user matched', async () => {
     vi.mocked(deletePasskey).mockResolvedValue(false);
     const { app } = buildApp({ user: USER });
     const res = await supertest(app).post('/delete').type('form').send({ credentialId: 'someone-elses' });
     expect(res.headers.location).toBe('/user/settings?error=passkey_delete_failed');
+    expect(signOutOtherSessions).not.toHaveBeenCalled();
   });
 
   it('rejects a malformed credential ID without touching the DB', async () => {
@@ -562,7 +580,7 @@ describe('POST /login/verify', () => {
     signCount: 3,
     transports: ['internal'],
   };
-  const dbUser = { discord_id: '42', discord_name: 'Alice', is_owner: false };
+  const dbUser = { discord_id: '42', discord_name: 'Alice', is_owner: false, session_generation: 0 };
 
   beforeEach(() => {
     vi.mocked(findPasskey).mockResolvedValue(stored);
@@ -715,6 +733,24 @@ describe('POST /login/verify', () => {
     const { app } = buildApp(futureChallenge('login'));
     await supertest(app).post('/login/verify').send({ response: CREDENTIAL });
     expect(vi.mocked(establishDashboardSession).mock.calls[0]![1]).toEqual({ id: '42', username: '42', avatar: null });
+  });
+
+  it('reads the user row (and its session generation) before claiming the counter (#1058)', async () => {
+    // A passkey removal landing between the two must not hand the new session the bumped generation.
+    const { app } = buildApp(futureChallenge('login'));
+    await supertest(app).post('/login/verify').send({ response: CREDENTIAL });
+    expect(vi.mocked(findUser).mock.invocationCallOrder[0]!)
+      .toBeLessThan(vi.mocked(recordPasskeyUse).mock.invocationCallOrder[0]!);
+    expect(vi.mocked(establishDashboardSession).mock.calls[0]![2]).toBe(dbUser);
+  });
+
+  it('creates no session when the passkey was removed before its counter could be claimed', async () => {
+    vi.mocked(recordPasskeyUse).mockResolvedValue(false);
+    const { app } = buildApp(futureChallenge('login'));
+    const res = await supertest(app).post('/login/verify').send({ response: CREDENTIAL });
+    expect(res.status).toBe(401);
+    expect(res.body.error).toBe('passkey_failed');
+    expect(establishDashboardSession).not.toHaveBeenCalled();
   });
 
   it('returns not_whitelisted when the user has since been removed', async () => {

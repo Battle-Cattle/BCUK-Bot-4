@@ -43,6 +43,21 @@ function setClass(id, className) {
 }
 
 /**
+ * Sets a status dot's state class and its accessible name (also shown as a tooltip), so the state
+ * doesn't rest on colour alone; does nothing if the element is missing.
+ * @param id - Id of the status-dot element to update.
+ * @param className - Space-separated classes to add, e.g. "dot dot--online".
+ * @param label - What the dot means in words, e.g. "Discord: Connected".
+ */
+function setStatusDot(id, className, label) {
+  setClass(id, className);
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.setAttribute('aria-label', label);
+  el.setAttribute('title', label);
+}
+
+/**
  * Removes every child of `el`.
  * @param el - The element to empty.
  */

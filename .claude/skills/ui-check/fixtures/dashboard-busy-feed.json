@@ -1,0 +1,491 @@
+{
+  "extends": "dashboard.json",
+  "locals": {
+    "recentEvents": [
+      {
+        "eventType": "follow",
+        "displayName": "viewer_0",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:50:00.000Z"
+      },
+      {
+        "eventType": "cheer",
+        "displayName": "viewer_1",
+        "detail": "100 bits",
+        "occurredAt": "2026-11-18T10:49:00.000Z"
+      },
+      {
+        "eventType": "sub",
+        "displayName": "viewer_2",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:48:00.000Z"
+      },
+      {
+        "eventType": "follow",
+        "displayName": "viewer_3",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:47:00.000Z"
+      },
+      {
+        "eventType": "cheer",
+        "displayName": "viewer_4",
+        "detail": "100 bits",
+        "occurredAt": "2026-11-18T10:46:00.000Z"
+      },
+      {
+        "eventType": "sub",
+        "displayName": "viewer_5",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:45:00.000Z"
+      },
+      {
+        "eventType": "follow",
+        "displayName": "viewer_6",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:44:00.000Z"
+      },
+      {
+        "eventType": "cheer",
+        "displayName": "viewer_7",
+        "detail": "100 bits",
+        "occurredAt": "2026-11-18T10:43:00.000Z"
+      },
+      {
+        "eventType": "sub",
+        "displayName": "viewer_8",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:42:00.000Z"
+      },
+      {
+        "eventType": "follow",
+        "displayName": "viewer_9",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:41:00.000Z"
+      },
+      {
+        "eventType": "cheer",
+        "displayName": "viewer_10",
+        "detail": "100 bits",
+        "occurredAt": "2026-11-18T10:40:00.000Z"
+      },
+      {
+        "eventType": "sub",
+        "displayName": "viewer_11",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:39:00.000Z"
+      },
+      {
+        "eventType": "follow",
+        "displayName": "viewer_12",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:38:00.000Z"
+      },
+      {
+        "eventType": "cheer",
+        "displayName": "viewer_13",
+        "detail": "100 bits",
+        "occurredAt": "2026-11-18T10:37:00.000Z"
+      },
+      {
+        "eventType": "sub",
+        "displayName": "viewer_14",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:36:00.000Z"
+      },
+      {
+        "eventType": "follow",
+        "displayName": "viewer_15",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:35:00.000Z"
+      },
+      {
+        "eventType": "cheer",
+        "displayName": "viewer_16",
+        "detail": "100 bits",
+        "occurredAt": "2026-11-18T10:34:00.000Z"
+      },
+      {
+        "eventType": "sub",
+        "displayName": "viewer_17",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:33:00.000Z"
+      },
+      {
+        "eventType": "follow",
+        "displayName": "viewer_18",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:32:00.000Z"
+      },
+      {
+        "eventType": "cheer",
+        "displayName": "viewer_19",
+        "detail": "100 bits",
+        "occurredAt": "2026-11-18T10:31:00.000Z"
+      },
+      {
+        "eventType": "sub",
+        "displayName": "viewer_20",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:30:00.000Z"
+      },
+      {
+        "eventType": "follow",
+        "displayName": "viewer_21",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:29:00.000Z"
+      },
+      {
+        "eventType": "cheer",
+        "displayName": "viewer_22",
+        "detail": "100 bits",
+        "occurredAt": "2026-11-18T10:28:00.000Z"
+      },
+      {
+        "eventType": "sub",
+        "displayName": "viewer_23",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:27:00.000Z"
+      },
+      {
+        "eventType": "follow",
+        "displayName": "viewer_24",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:26:00.000Z"
+      },
+      {
+        "eventType": "cheer",
+        "displayName": "viewer_25",
+        "detail": "100 bits",
+        "occurredAt": "2026-11-18T10:25:00.000Z"
+      },
+      {
+        "eventType": "sub",
+        "displayName": "viewer_26",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:24:00.000Z"
+      },
+      {
+        "eventType": "follow",
+        "displayName": "viewer_27",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:23:00.000Z"
+      },
+      {
+        "eventType": "cheer",
+        "displayName": "viewer_28",
+        "detail": "100 bits",
+        "occurredAt": "2026-11-18T10:22:00.000Z"
+      },
+      {
+        "eventType": "sub",
+        "displayName": "viewer_29",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:21:00.000Z"
+      },
+      {
+        "eventType": "follow",
+        "displayName": "viewer_30",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:20:00.000Z"
+      },
+      {
+        "eventType": "cheer",
+        "displayName": "viewer_31",
+        "detail": "100 bits",
+        "occurredAt": "2026-11-18T10:19:00.000Z"
+      },
+      {
+        "eventType": "sub",
+        "displayName": "viewer_32",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:18:00.000Z"
+      },
+      {
+        "eventType": "follow",
+        "displayName": "viewer_33",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:17:00.000Z"
+      },
+      {
+        "eventType": "cheer",
+        "displayName": "viewer_34",
+        "detail": "100 bits",
+        "occurredAt": "2026-11-18T10:16:00.000Z"
+      },
+      {
+        "eventType": "sub",
+        "displayName": "viewer_35",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:15:00.000Z"
+      },
+      {
+        "eventType": "follow",
+        "displayName": "viewer_36",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:14:00.000Z"
+      },
+      {
+        "eventType": "cheer",
+        "displayName": "viewer_37",
+        "detail": "100 bits",
+        "occurredAt": "2026-11-18T10:13:00.000Z"
+      },
+      {
+        "eventType": "sub",
+        "displayName": "viewer_38",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:12:00.000Z"
+      },
+      {
+        "eventType": "follow",
+        "displayName": "viewer_39",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:11:00.000Z"
+      }
+    ]
+  },
+  "api": {
+    "/dashboard/events/recent": [
+      {
+        "eventType": "follow",
+        "displayName": "viewer_0",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:50:00.000Z"
+      },
+      {
+        "eventType": "cheer",
+        "displayName": "viewer_1",
+        "detail": "100 bits",
+        "occurredAt": "2026-11-18T10:49:00.000Z"
+      },
+      {
+        "eventType": "sub",
+        "displayName": "viewer_2",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:48:00.000Z"
+      },
+      {
+        "eventType": "follow",
+        "displayName": "viewer_3",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:47:00.000Z"
+      },
+      {
+        "eventType": "cheer",
+        "displayName": "viewer_4",
+        "detail": "100 bits",
+        "occurredAt": "2026-11-18T10:46:00.000Z"
+      },
+      {
+        "eventType": "sub",
+        "displayName": "viewer_5",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:45:00.000Z"
+      },
+      {
+        "eventType": "follow",
+        "displayName": "viewer_6",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:44:00.000Z"
+      },
+      {
+        "eventType": "cheer",
+        "displayName": "viewer_7",
+        "detail": "100 bits",
+        "occurredAt": "2026-11-18T10:43:00.000Z"
+      },
+      {
+        "eventType": "sub",
+        "displayName": "viewer_8",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:42:00.000Z"
+      },
+      {
+        "eventType": "follow",
+        "displayName": "viewer_9",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:41:00.000Z"
+      },
+      {
+        "eventType": "cheer",
+        "displayName": "viewer_10",
+        "detail": "100 bits",
+        "occurredAt": "2026-11-18T10:40:00.000Z"
+      },
+      {
+        "eventType": "sub",
+        "displayName": "viewer_11",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:39:00.000Z"
+      },
+      {
+        "eventType": "follow",
+        "displayName": "viewer_12",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:38:00.000Z"
+      },
+      {
+        "eventType": "cheer",
+        "displayName": "viewer_13",
+        "detail": "100 bits",
+        "occurredAt": "2026-11-18T10:37:00.000Z"
+      },
+      {
+        "eventType": "sub",
+        "displayName": "viewer_14",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:36:00.000Z"
+      },
+      {
+        "eventType": "follow",
+        "displayName": "viewer_15",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:35:00.000Z"
+      },
+      {
+        "eventType": "cheer",
+        "displayName": "viewer_16",
+        "detail": "100 bits",
+        "occurredAt": "2026-11-18T10:34:00.000Z"
+      },
+      {
+        "eventType": "sub",
+        "displayName": "viewer_17",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:33:00.000Z"
+      },
+      {
+        "eventType": "follow",
+        "displayName": "viewer_18",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:32:00.000Z"
+      },
+      {
+        "eventType": "cheer",
+        "displayName": "viewer_19",
+        "detail": "100 bits",
+        "occurredAt": "2026-11-18T10:31:00.000Z"
+      },
+      {
+        "eventType": "sub",
+        "displayName": "viewer_20",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:30:00.000Z"
+      },
+      {
+        "eventType": "follow",
+        "displayName": "viewer_21",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:29:00.000Z"
+      },
+      {
+        "eventType": "cheer",
+        "displayName": "viewer_22",
+        "detail": "100 bits",
+        "occurredAt": "2026-11-18T10:28:00.000Z"
+      },
+      {
+        "eventType": "sub",
+        "displayName": "viewer_23",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:27:00.000Z"
+      },
+      {
+        "eventType": "follow",
+        "displayName": "viewer_24",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:26:00.000Z"
+      },
+      {
+        "eventType": "cheer",
+        "displayName": "viewer_25",
+        "detail": "100 bits",
+        "occurredAt": "2026-11-18T10:25:00.000Z"
+      },
+      {
+        "eventType": "sub",
+        "displayName": "viewer_26",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:24:00.000Z"
+      },
+      {
+        "eventType": "follow",
+        "displayName": "viewer_27",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:23:00.000Z"
+      },
+      {
+        "eventType": "cheer",
+        "displayName": "viewer_28",
+        "detail": "100 bits",
+        "occurredAt": "2026-11-18T10:22:00.000Z"
+      },
+      {
+        "eventType": "sub",
+        "displayName": "viewer_29",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:21:00.000Z"
+      },
+      {
+        "eventType": "follow",
+        "displayName": "viewer_30",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:20:00.000Z"
+      },
+      {
+        "eventType": "cheer",
+        "displayName": "viewer_31",
+        "detail": "100 bits",
+        "occurredAt": "2026-11-18T10:19:00.000Z"
+      },
+      {
+        "eventType": "sub",
+        "displayName": "viewer_32",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:18:00.000Z"
+      },
+      {
+        "eventType": "follow",
+        "displayName": "viewer_33",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:17:00.000Z"
+      },
+      {
+        "eventType": "cheer",
+        "displayName": "viewer_34",
+        "detail": "100 bits",
+        "occurredAt": "2026-11-18T10:16:00.000Z"
+      },
+      {
+        "eventType": "sub",
+        "displayName": "viewer_35",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:15:00.000Z"
+      },
+      {
+        "eventType": "follow",
+        "displayName": "viewer_36",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:14:00.000Z"
+      },
+      {
+        "eventType": "cheer",
+        "displayName": "viewer_37",
+        "detail": "100 bits",
+        "occurredAt": "2026-11-18T10:13:00.000Z"
+      },
+      {
+        "eventType": "sub",
+        "displayName": "viewer_38",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:12:00.000Z"
+      },
+      {
+        "eventType": "follow",
+        "displayName": "viewer_39",
+        "detail": null,
+        "occurredAt": "2026-11-18T10:11:00.000Z"
+      }
+    ]
+  }
+}

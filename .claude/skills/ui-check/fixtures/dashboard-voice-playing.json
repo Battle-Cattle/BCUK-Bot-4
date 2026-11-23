@@ -1,0 +1,5 @@
+{
+  "_comment": "Illustrative data for ui-check only. The dashboard fixture with a sound playing in voice.",
+  "extends": "dashboard.json",
+  "status": { "voice": { "playing": true, "currentFile": "clap.mp3", "lastCommand": "!clap", "lastSource": "discord" } }
+}

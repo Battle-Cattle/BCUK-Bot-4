@@ -520,19 +520,19 @@ describe('GET /admin/streamdeck-keys', () => {
 
 describe('POST /admin/streamdeck-keys/approve', () => {
   it('approves key and redirects to /admin/streamdeck-keys', async () => {
-    const res = await supertest(buildApp()).post('/admin/streamdeck-keys/approve').send(`discord_id=${VALID_DISCORD_ID}`);
+    const res = await supertest(buildApp()).post('/admin/streamdeck-keys/approve').send(`discord_id=${VALID_DISCORD_ID}&guild_id=${GUILD_ID}`);
     expect(res.headers.location).toBe('/admin/streamdeck-keys');
     expect(approveApiKey).toHaveBeenCalledWith(VALID_DISCORD_ID, SESSION_USER.discordId, GUILD_ID);
   });
 
   it('redirects to ?error=invalid_discord_id for invalid ID', async () => {
-    const res = await supertest(buildApp()).post('/admin/streamdeck-keys/approve').send('discord_id=bad');
+    const res = await supertest(buildApp()).post('/admin/streamdeck-keys/approve').send(`discord_id=bad&guild_id=${GUILD_ID}`);
     expect(res.headers.location).toBe('/admin/streamdeck-keys?error=invalid_discord_id');
   });
 
   it('redirects to ?error=approve_failed on DB error', async () => {
     vi.mocked(approveApiKey).mockRejectedValueOnce(new Error('DB error'));
-    const res = await supertest(buildApp()).post('/admin/streamdeck-keys/approve').send(`discord_id=${VALID_DISCORD_ID}`);
+    const res = await supertest(buildApp()).post('/admin/streamdeck-keys/approve').send(`discord_id=${VALID_DISCORD_ID}&guild_id=${GUILD_ID}`);
     expect(res.headers.location).toBe('/admin/streamdeck-keys?error=approve_failed');
   });
 });
@@ -541,19 +541,19 @@ describe('POST /admin/streamdeck-keys/approve', () => {
 
 describe('POST /admin/streamdeck-keys/deny', () => {
   it('denies key and redirects', async () => {
-    const res = await supertest(buildApp()).post('/admin/streamdeck-keys/deny').send(`discord_id=${VALID_DISCORD_ID}`);
+    const res = await supertest(buildApp()).post('/admin/streamdeck-keys/deny').send(`discord_id=${VALID_DISCORD_ID}&guild_id=${GUILD_ID}`);
     expect(res.headers.location).toBe('/admin/streamdeck-keys');
     expect(denyApiKey).toHaveBeenCalledWith(VALID_DISCORD_ID, GUILD_ID);
   });
 
   it('redirects to ?error=invalid_discord_id for invalid ID', async () => {
-    const res = await supertest(buildApp()).post('/admin/streamdeck-keys/deny').send('discord_id=bad');
+    const res = await supertest(buildApp()).post('/admin/streamdeck-keys/deny').send(`discord_id=bad&guild_id=${GUILD_ID}`);
     expect(res.headers.location).toBe('/admin/streamdeck-keys?error=invalid_discord_id');
   });
 
   it('redirects to ?error=deny_failed on DB error', async () => {
     vi.mocked(denyApiKey).mockRejectedValueOnce(new Error('DB error'));
-    const res = await supertest(buildApp()).post('/admin/streamdeck-keys/deny').send(`discord_id=${VALID_DISCORD_ID}`);
+    const res = await supertest(buildApp()).post('/admin/streamdeck-keys/deny').send(`discord_id=${VALID_DISCORD_ID}&guild_id=${GUILD_ID}`);
     expect(res.headers.location).toBe('/admin/streamdeck-keys?error=deny_failed');
   });
 });
@@ -562,19 +562,41 @@ describe('POST /admin/streamdeck-keys/deny', () => {
 
 describe('POST /admin/streamdeck-keys/revoke', () => {
   it('revokes key and redirects', async () => {
-    const res = await supertest(buildApp()).post('/admin/streamdeck-keys/revoke').send(`discord_id=${VALID_DISCORD_ID}`);
+    const res = await supertest(buildApp()).post('/admin/streamdeck-keys/revoke').send(`discord_id=${VALID_DISCORD_ID}&guild_id=${GUILD_ID}`);
     expect(res.headers.location).toBe('/admin/streamdeck-keys');
     expect(revokeApiKey).toHaveBeenCalledWith(VALID_DISCORD_ID, GUILD_ID);
   });
 
   it('redirects to ?error=invalid_discord_id for invalid ID', async () => {
-    const res = await supertest(buildApp()).post('/admin/streamdeck-keys/revoke').send('discord_id=bad');
+    const res = await supertest(buildApp()).post('/admin/streamdeck-keys/revoke').send(`discord_id=bad&guild_id=${GUILD_ID}`);
     expect(res.headers.location).toBe('/admin/streamdeck-keys?error=invalid_discord_id');
   });
 
   it('redirects to ?error=revoke_failed on DB error', async () => {
     vi.mocked(revokeApiKey).mockRejectedValueOnce(new Error('DB error'));
-    const res = await supertest(buildApp()).post('/admin/streamdeck-keys/revoke').send(`discord_id=${VALID_DISCORD_ID}`);
+    const res = await supertest(buildApp()).post('/admin/streamdeck-keys/revoke').send(`discord_id=${VALID_DISCORD_ID}&guild_id=${GUILD_ID}`);
     expect(res.headers.location).toBe('/admin/streamdeck-keys?error=revoke_failed');
+  });
+});
+
+// ─── Stale-tab guard (issue #1051) ───────────────────────────────────────────
+
+describe('admin key forms rendered for a guild the session has since left', () => {
+  const OTHER_GUILD = '900000000000000002';
+
+  it.each(['approve', 'deny', 'revoke'])('POST /admin/streamdeck-keys/%s with another guild\'s guild_id redirects ?error=guild_changed and changes nothing', async (action) => {
+    const res = await supertest(buildApp()).post(`/admin/streamdeck-keys/${action}`).send(`discord_id=${VALID_DISCORD_ID}&guild_id=${OTHER_GUILD}`);
+    expect(res.headers.location).toBe('/admin/streamdeck-keys?error=guild_changed');
+    expect(approveApiKey).not.toHaveBeenCalled();
+    expect(denyApiKey).not.toHaveBeenCalled();
+    expect(revokeApiKey).not.toHaveBeenCalled();
+  });
+
+  it.each(['approve', 'deny', 'revoke'])('POST /admin/streamdeck-keys/%s without a guild_id redirects ?error=guild_changed', async (action) => {
+    const res = await supertest(buildApp()).post(`/admin/streamdeck-keys/${action}`).send(`discord_id=${VALID_DISCORD_ID}`);
+    expect(res.headers.location).toBe('/admin/streamdeck-keys?error=guild_changed');
+    expect(approveApiKey).not.toHaveBeenCalled();
+    expect(denyApiKey).not.toHaveBeenCalled();
+    expect(revokeApiKey).not.toHaveBeenCalled();
   });
 });

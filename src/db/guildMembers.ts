@@ -43,6 +43,29 @@ export async function setMemberAccessLevel(guildId: string, discordId: string, a
 }
 
 /**
+ * Changes an existing member's access level within a guild, without ever creating a membership.
+ * Unlike {@link setMemberAccessLevel}, a user who isn't a member of the guild is left alone, so a
+ * level change can't add anyone to a guild; adding a member stays an explicit upsert.
+ *
+ * @param guildId - Guild snowflake ID.
+ * @param discordId - User snowflake ID.
+ * @param accessLevel - One of the AccessLevel values (0–3); rejects invalid values.
+ * @returns True if the user has a membership row in the guild (now at `accessLevel`), false if
+ *   they have none. mysql2 sets CLIENT_FOUND_ROWS, so `affectedRows` counts a matched row even
+ *   when its level was already `accessLevel`.
+ */
+export async function updateMemberAccessLevel(guildId: string, discordId: string, accessLevel: number): Promise<boolean> {
+  if (!(Object.values(AccessLevel) as number[]).includes(accessLevel)) {
+    throw new Error(`Invalid accessLevel: ${accessLevel}`);
+  }
+  const [result] = await getPool().execute<mysql.ResultSetHeader>(
+    'UPDATE guild_member SET access_level = ? WHERE guild_id = ? AND discord_id = ?',
+    [accessLevel, guildId, discordId],
+  );
+  return result.affectedRows > 0;
+}
+
+/**
  * Removes a user's membership row from a guild. No-op if no row exists.
  *
  * @param guildId - Guild snowflake ID.

@@ -39,8 +39,9 @@ export function registerEventSubOverlayRuntime(runtime: EventSubOverlayRuntime):
  */
 // Payload types for the companion-app SSE stream. They live here, with the runtime that carries
 // them, so the EventSub handler that builds them doesn't import the web route that serves them.
-/** Non-redemption streamer activity types forwarded to the companion app. */
-export type CompanionActivityEventType = Exclude<StreamerEventType, 'redemption'>;
+/** Streamer activity types forwarded to the companion app: everything but redemptions (sent
+ *  separately) and raffle payout failures (a dashboard-only notice). */
+export type CompanionActivityEventType = Exclude<StreamerEventType, 'redemption' | 'raffle_payout_failed'>;
 
 /**
  * A channel-point reward redemption forwarded to a user's companion app. When `ackRequired` is

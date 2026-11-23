@@ -19,6 +19,7 @@ function makeDbUser(overrides: Partial<DbUser> = {}): DbUser {
     is_twitch_bot_enabled: false,
     twitch_name: null,
     is_owner: false,
+    session_generation: 0,
     ...overrides,
   };
 }

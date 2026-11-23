@@ -10,6 +10,9 @@ vi.mock('./db/pool', () => ({ getPool: vi.fn(), closePool: vi.fn() }));
 import * as db from './db';
 import * as userWrites from './db/userWrites';
 import * as guildCommandOverrideWrites from './db/guildCommandOverrideWrites';
+import * as guildMemberWrites from './db/guildMemberWrites';
+import * as guildWrites from './db/guildWrites';
+import { onGuildInfoChanged } from './db/guildInfoEvents';
 import * as customCommandWrites from './db/customCommandWrites';
 import * as counterWrites from './db/counterWrites';
 import * as alertConfigWrites from './db/alertConfigWrites';
@@ -28,6 +31,8 @@ describe('db facade', () => {
   it.each([
     ['userWrites', userWrites],
     ['guildCommandOverrideWrites', guildCommandOverrideWrites],
+    ['guildMemberWrites', guildMemberWrites],
+    ['guildWrites', guildWrites],
     ['customCommandWrites', customCommandWrites],
     ['counterWrites', counterWrites],
     ['alertConfigWrites', alertConfigWrites],
@@ -43,6 +48,10 @@ describe('db facade', () => {
     for (const [exportName, wrapper] of entries) {
       expect(db[exportName as keyof typeof db], exportName).toBe(wrapper);
     }
+  });
+
+  it('re-exports onGuildInfoChanged from db/guildInfoEvents', () => {
+    expect(db.onGuildInfoChanged).toBe(onGuildInfoChanged);
   });
 
   it('re-exports pingDb from db/health', () => {

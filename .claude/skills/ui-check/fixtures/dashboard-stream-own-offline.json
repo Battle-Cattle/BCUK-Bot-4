@@ -1,0 +1,7 @@
+{
+  "_comment": "Illustrative data for ui-check only. The signed-in user owns streamer_three, which is connected but not live (Stream Overview must say Offline).",
+  "extends": "dashboard.json",
+  "locals": {
+    "ownChannel": "streamer_three"
+  }
+}

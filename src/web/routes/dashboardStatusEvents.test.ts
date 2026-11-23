@@ -11,6 +11,7 @@ vi.mock('../../shared/statusStore', () => ({
 
 vi.mock('../guildScopedStatus', () => ({
   getGuildScopedStatus: vi.fn(),
+  onGuildStatusInvalidated: vi.fn(),
 }));
 
 vi.mock('../../db', () => ({
@@ -25,17 +26,23 @@ vi.mock('../middleware', () => ({
 
 vi.mock('../../shared/logger', () => ({ createLogger: () => ({ error: vi.fn(), warn: vi.fn(), info: vi.fn() }) }));
 
+// The registry itself is tested in sessionStreams.test.ts; here only that this route hands its stream to it.
+vi.mock('../sessionStreams', () => ({ registerSessionStream: vi.fn(() => true) }));
+
 import supertest from 'supertest';
 import router, { MAX_SSE_CONNECTIONS_PER_GUILD, connections, disconnectGuildStatusConnectionsForMember } from './dashboardStatusEvents';
 import { findUser, getMemberAccessLevel } from '../../db';
 import { onStatusChanged } from '../../shared/statusStore';
-import { getGuildScopedStatus } from '../guildScopedStatus';
+import { getGuildScopedStatus, onGuildStatusInvalidated } from '../guildScopedStatus';
+import { registerSessionStream } from '../sessionStreams';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
 // Captured immediately after import, before any beforeEach's clearAllMocks() erases the
 // one-time module-load call — dashboardStatusEvents.ts registers this listener as a
 // top-level side effect, not per-request, so it's only ever recorded once.
 const registeredListener = vi.mocked(onStatusChanged).mock.calls[0]?.[0] as (guildId: string | null) => Promise<void>;
+// Same for the guild-info invalidation subscription (#1117): the listener guildScopedStatus calls once it has dropped its cache.
+const invalidationListener = vi.mocked(onGuildStatusInvalidated).mock.calls[0]?.[0] as (guildId: string | null) => void;
 
 /** Finds a route's handler function directly from the router's internal stack, bypassing HTTP entirely — needed to control the request's 'close' event deterministically. */
 function getRouteHandler(routePath: string): (req: any, res: any, next: any) => void {
@@ -154,6 +161,55 @@ describe('GET /status/events — connection lifecycle (direct handler invocation
 
     triggerClose();
     expect(connections.get('guild-A')).toBeUndefined();
+  });
+});
+
+describe('GET /status/events — session end (#1112)', () => {
+  it('registers the attached stream with the session registry before the access re-check runs', async () => {
+    const order: string[] = [];
+    vi.mocked(registerSessionStream).mockImplementationOnce(() => { order.push('register'); return true; });
+    vi.mocked(findUser).mockImplementationOnce(async () => { order.push('access check'); return { discord_id: 'discord1', is_owner: true } as any; });
+    const handler = getRouteHandler('/status/events');
+    const res = makeSseRes();
+    const { req, triggerClose } = makeSseReq('guild-A');
+
+    await handler(req, res, vi.fn());
+
+    expect(registerSessionStream).toHaveBeenCalledWith(req, res, 'status');
+    expect(order).toEqual(['register', 'access check']);
+    triggerClose();
+  });
+
+  it('stops without an access re-check when the registry refuses the stream (its session already ended)', async () => {
+    vi.mocked(registerSessionStream).mockReturnValueOnce(false);
+    const handler = getRouteHandler('/status/events');
+    const res = makeSseRes();
+    const { req, triggerClose } = makeSseReq('guild-A');
+
+    await handler(req, res, vi.fn());
+
+    expect(findUser).not.toHaveBeenCalled();
+    expect(connections.get('guild-A')?.has(res as any)).toBe(true); // the registry ended the response; its close event removes it
+    triggerClose();
+  });
+
+  it('does not register a stream that was refused at attach (over the guild limit)', async () => {
+    const handler = getRouteHandler('/status/events');
+    const open: { triggerClose: () => void }[] = [];
+    for (let i = 0; i < MAX_SSE_CONNECTIONS_PER_GUILD; i++) {
+      const { req, triggerClose } = makeSseReq('guild-A');
+      await handler(req, makeSseRes(), vi.fn());
+      open.push({ triggerClose });
+    }
+    vi.mocked(registerSessionStream).mockClear();
+    const { req } = makeSseReq('guild-A');
+    const res = makeSseRes();
+
+    await handler(req, res, vi.fn());
+
+    expect(res.status).toHaveBeenCalledWith(429);
+    expect(registerSessionStream).not.toHaveBeenCalled();
+    open.forEach((o) => o.triggerClose());
   });
 });
 
@@ -421,5 +477,107 @@ describe('status-change push (registered via onStatusChanged)', () => {
     resolveGuildALookup();
     await guildAPush;
     expect(resA.write).toHaveBeenCalledWith(`data: ${JSON.stringify({ guildId: 'guild-A' })}\n\n`);
+  });
+});
+
+describe('push after a guild-info change (#1117)', () => {
+  /** Lets the push the listener started (it returns nothing to await) run to completion. */
+  const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+  it('subscribed to guildScopedStatus at module load, not to the db event directly', () => {
+    expect(typeof invalidationListener).toBe('function');
+  });
+
+  it('pushes a fresh snapshot to only the changed guild\'s dashboards', async () => {
+    const resA = { write: vi.fn() };
+    const resB = { write: vi.fn() };
+    connections.set('guild-A', new Set([resA] as any));
+    connections.set('guild-B', new Set([resB] as any));
+    vi.mocked(getGuildScopedStatus).mockImplementation(async (guildId) => ({ guildId }) as any);
+
+    invalidationListener('guild-A');
+    await settle();
+
+    expect(getGuildScopedStatus).toHaveBeenCalledWith('guild-A');
+    expect(getGuildScopedStatus).not.toHaveBeenCalledWith('guild-B');
+    expect(resA.write).toHaveBeenCalledWith(`data: ${JSON.stringify({ guildId: 'guild-A' })}\n\n`);
+    expect(resB.write).not.toHaveBeenCalled();
+  });
+
+  it('pushes each connected guild its own snapshot for a change that can touch any guild (null)', async () => {
+    const resA = { write: vi.fn() };
+    const resB = { write: vi.fn() };
+    connections.set('guild-A', new Set([resA] as any));
+    connections.set('guild-B', new Set([resB] as any));
+    vi.mocked(getGuildScopedStatus).mockImplementation(async (guildId) => ({ guildId }) as any);
+
+    invalidationListener(null);
+    await settle();
+
+    expect(resA.write).toHaveBeenCalledWith(`data: ${JSON.stringify({ guildId: 'guild-A' })}\n\n`);
+    expect(resB.write).toHaveBeenCalledWith(`data: ${JSON.stringify({ guildId: 'guild-B' })}\n\n`);
+  });
+
+  it('reaches only the two guilds involved when a member moves from one to the other (a remove then an add)', async () => {
+    const resA = { write: vi.fn() };
+    const resB = { write: vi.fn() };
+    const resC = { write: vi.fn() };
+    connections.set('guild-A', new Set([resA] as any));
+    connections.set('guild-B', new Set([resB] as any));
+    connections.set('guild-C', new Set([resC] as any));
+    vi.mocked(getGuildScopedStatus).mockImplementation(async (guildId) => ({ guildId }) as any);
+
+    invalidationListener('guild-A');
+    invalidationListener('guild-B');
+    await settle();
+
+    expect(resA.write).toHaveBeenCalledWith(`data: ${JSON.stringify({ guildId: 'guild-A' })}\n\n`);
+    expect(resB.write).toHaveBeenCalledWith(`data: ${JSON.stringify({ guildId: 'guild-B' })}\n\n`);
+    expect(resC.write).not.toHaveBeenCalled();
+  });
+
+  it('does nothing for a guild nobody has a dashboard open on', async () => {
+    invalidationListener('guild-A');
+    await settle();
+    expect(getGuildScopedStatus).not.toHaveBeenCalled();
+  });
+
+  it('builds the snapshot after the change reached the status cache: it queues behind an earlier push for the same guild', async () => {
+    const resA = { write: vi.fn() };
+    connections.set('guild-A', new Set([resA] as any));
+    let releaseFirst!: (value: unknown) => void;
+    vi.mocked(getGuildScopedStatus)
+      .mockImplementationOnce(() => new Promise((resolve) => { releaseFirst = resolve; }) as any)
+      .mockResolvedValueOnce({ fresh: true } as any);
+
+    const earlier = registeredListener('guild-A');
+    invalidationListener('guild-A');
+    await settle();
+    expect(getGuildScopedStatus).toHaveBeenCalledTimes(1);
+
+    releaseFirst({ stale: true });
+    await earlier;
+    await settle();
+
+    expect(resA.write.mock.calls.map(([chunk]) => chunk)).toEqual([
+      `data: ${JSON.stringify({ stale: true })}\n\n`,
+      `data: ${JSON.stringify({ fresh: true })}\n\n`,
+    ]);
+  });
+
+  it('does not throw to the writer when a lookup fails, and still pushes to the other guilds', async () => {
+    const resA = { write: vi.fn() };
+    const resB = { write: vi.fn() };
+    connections.set('guild-A', new Set([resA] as any));
+    connections.set('guild-B', new Set([resB] as any));
+    vi.mocked(getGuildScopedStatus).mockImplementation(async (guildId) => {
+      if (guildId === 'guild-A') throw new Error('db down');
+      return { guildId } as any;
+    });
+
+    expect(() => invalidationListener(null)).not.toThrow();
+    await settle();
+
+    expect(resB.write).toHaveBeenCalledWith(`data: ${JSON.stringify({ guildId: 'guild-B' })}\n\n`);
   });
 });

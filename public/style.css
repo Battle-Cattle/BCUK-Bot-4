@@ -7,11 +7,31 @@
   --primary:   #5865f2;
   --primary-h: #4752c4;
   --text:      #e2e8f0;
-  --muted:     #7b87a6;
+  /* Secondary text: at least 6.3:1 on --bg, --bg-card and --bg-hover (WCAG AA needs 4.5:1). */
+  --muted:     #98a2bf;
+  /* Green, amber and red are for operational state only (healthy, warning/degraded, error/offline/live),
+     never for brand, decoration or data series: use --primary and the blues/purples for those. */
   --success:   #22c55e;
   --danger:    #ef4444;
   --warning:   #f59e0b;
+  /* Red text on a red-tinted badge (--danger alone is 4.0:1 there; this is 5.0:1 even on --bg-hover). */
+  --danger-text:  #f87171;
+  /* Solid red fill behind white text, e.g. the LIVE badge (white on --danger is only 3.8:1; this is 5.7:1). */
+  --danger-solid: #c81e1e;
+  /* Darker end of the LIVE badge's pulse: white on it is 8.3:1. */
+  --danger-deep:  #991b1b;
+  /* Keyboard focus ring: brand indigo, at least 8:1 against every background (3:1 needed). */
+  --focus-ring:   #a5b4fc;
+  /* Brand/data accents for text on a 20% tint of themselves: at least 6.4:1 on every background. */
+  --accent-blue:   #93c5fd;
+  --accent-indigo: #a5b4fc;
+  --accent-violet: #d8b4fe;
   --discord:   #5865f2;
+  /* The widest viewport at which the nav collapses behind the menu toggle. public/navbar.js reads this property to build
+     its media query; a media query can't use a variable, so the `@media (max-width: …)` in the Navbar section below
+     repeats it, and navView.test.ts fails if the two differ. Keep it above the width the full nav needs for the longest
+     names the caps on .username/.guild-name allow, with the Owner's menu (the most items). */
+  --nav-collapse-max: 1200px;
   --radius:    10px;
   --font:      system-ui, -apple-system, 'Segoe UI', sans-serif;
   --mono:      'Consolas', 'Menlo', monospace;
@@ -23,12 +43,19 @@ html { overflow-x: clip; }
 body { background: var(--bg); color: var(--text); font-family: var(--font); font-size: 14px; line-height: 1.5; min-height: 100vh; overflow-x: clip; }
 a { color: var(--primary); text-decoration: none; }
 a:hover { text-decoration: underline; }
+/* Visible keyboard focus on every interactive element (links, buttons, selects, focusable scroll regions).
+   :focus-visible keeps it off mouse clicks. Inner scroll regions draw it inset so a card's overflow:hidden can't clip it. */
+:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.dashboard-scroll:focus-visible { outline-offset: -2px; }
 
 /* ── Navbar ────────────────────────────────────────────── */
 .navbar {
   display: flex; align-items: center; gap: 1rem;
   background: var(--bg-card); border-bottom: 1px solid var(--border);
   padding: .75rem 1.5rem; position: sticky; top: 0; z-index: 100;
+  /* Safety net above the collapse breakpoint: a menu that still doesn't fit beside the brand (fonts wider than expected,
+     the longest allowed names) drops to a second row instead of being clipped off the right edge. */
+  flex-wrap: wrap; row-gap: .5rem;
 }
 .navbar-brand    { font-size: 1.1rem; font-weight: 700; color: var(--text); gap: .5rem; display:flex; align-items:center; }
 .navbar-collapse { display: flex; flex: 1; align-items: center; }
@@ -39,6 +66,11 @@ a:hover { text-decoration: underline; }
 .nav-item:hover { background: var(--bg-hover); color: var(--text); text-decoration: none; }
 .avatar { width: 28px; height: 28px; border-radius: 50%; }
 .username { color: var(--text); font-weight: 600; }
+/* Long Discord and server names are cut with an ellipsis rather than widening the nav past the viewport: the page clips
+   sideways (overflow-x: clip), so anything that doesn't fit is unreachable. These caps give the full nav a worst-case
+   width, which --nav-collapse-max (below) is set above. */
+.username { max-width: 9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.guild-name, .guild-switcher { max-width: 11rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Nav groups (dropdown) */
 .nav-group { position: relative; }
@@ -62,6 +94,48 @@ a:hover { text-decoration: underline; }
 }
 .nav-group.open .nav-group-items { display: flex; }
 .nav-group-items .nav-item { border-radius: 6px; white-space: nowrap; }
+
+/* Collapsed nav: at and below --nav-collapse-max the menu hides behind the toggle and opens as a full-width dropdown under
+   the navbar. #1109: the full nav is wider than a tablet, and the page clips sideways, so its right end (access badge
+   and Logout) was unreachable between the old 640px breakpoint and about 1056px. */
+@media (max-width: 1200px) {
+  .navbar-toggle {
+    display: flex; align-items: center; justify-content: center;
+    margin-left: auto; background: transparent;
+    border: 1px solid var(--border); color: var(--text);
+    padding: .3rem .6rem; border-radius: 6px; cursor: pointer; font-size: 1.1rem; line-height: 1;
+  }
+  /* Dropdown: absolutely positioned just below the sticky navbar. The navbar stays pinned, so a menu taller than the
+     space under it (an Owner's, with a group open, on a short viewport) scrolls inside itself, or its last items,
+     Logout among them, could never be reached. 4rem leaves room for the navbar (about 3.5rem tall); the vh line is
+     the fallback for browsers without dvh. */
+  .navbar-collapse {
+    display: none; position: absolute; top: 100%; left: 0; right: 0;
+    flex-direction: column; gap: .25rem;
+    background: var(--bg-card); border-bottom: 1px solid var(--border);
+    padding: .5rem 1rem;
+    max-height: calc(100vh - 4rem); max-height: calc(100dvh - 4rem);
+    overflow-y: auto; overscroll-behavior: contain;
+  }
+  .navbar.nav-open .navbar-collapse { display: flex; }
+  .navbar-menu { flex-direction: column; gap: 0; width: 100%; align-items: stretch; }
+  .navbar-end {
+    flex-direction: row; flex-wrap: wrap; align-items: center;
+    width: 100%; margin-left: 0; gap: .5rem;
+    padding-top: .5rem; border-top: 1px solid var(--border);
+  }
+  .navbar .nav-item { width: 100%; border-radius: 6px; }
+
+  /* Nav groups: expand inline in the dropdown */
+  .nav-group { width: 100%; }
+  .nav-group-label { width: 100%; justify-content: space-between; }
+  .nav-group-items {
+    position: static; box-shadow: none;
+    background: transparent; border: none; border-left: 2px solid var(--border);
+    margin: .15rem 0 .15rem .75rem; padding: .2rem 0 .2rem .5rem; min-width: 0;
+  }
+  .nav-group-items .nav-item { white-space: normal; }
+}
 
 /* ── Container ─────────────────────────────────────────── */
 .container { max-width: 1280px; margin: 0 auto; padding: 1.5rem; }
@@ -91,56 +165,110 @@ a:hover { text-decoration: underline; }
 /* ── Status grid ───────────────────────────────────────── */
 .status-grid  { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; }
 
-/* ── Quick links (dashboard) ──────────────────────────── */
-.quick-links-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: .75rem; }
-.quick-link-card {
-  display: flex; flex-direction: column; align-items: center; gap: .4rem;
-  background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius);
-  padding: 1rem .5rem; color: var(--text); text-align: center; transition: background .15s, border-color .15s;
-}
-.quick-link-card:hover { background: var(--bg-hover); border-color: var(--primary); text-decoration: none; }
-.quick-link-icon  { font-size: 1.5rem; }
-.quick-link-label { font-size: .85rem; font-weight: 600; }
+/* ── Welcome hero (dashboard) ─────────────────────────── */
+/* Slim: a one-line greeting with a subtitle and the Quick Links as compact chips, in the left column only. The text sits
+   on the solid card colour; the gradient is a faint decoration on a separate layer, so contrast is checked on a plain
+   background. The chips are the old Quick Links (same destinations and access levels). */
+.dashboard-hero { grid-area: hero; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .6rem 1.25rem;
+  position: relative; isolation: isolate; overflow: hidden; margin-bottom: 1.25rem; padding: .7rem 1rem;
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-card); }
+/* The decoration is its own layer behind the text, so the hero element itself stays a plain colour for the contrast check. */
+.dashboard-hero::before { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background: linear-gradient(100deg, rgba(88,101,242,.14), rgba(88,101,242,0) 45%); }
+.hero-text { min-width: 0; }
+.hero-title { margin: 0; font-size: 1.15rem; font-weight: 700; line-height: 1.3; overflow-wrap: anywhere; }
+.hero-subtitle { margin: .1rem 0 0; color: var(--muted); font-size: .85rem; }
+.hero-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+.hero-action { display: inline-flex; align-items: center; gap: .4rem; min-height: 2.25rem; padding: .25rem .8rem; border: 1px solid var(--border);
+  border-radius: 99px; background: var(--bg); color: var(--text); font-size: .88rem; font-weight: 600; white-space: nowrap; transition: background .15s, border-color .15s; }
+.hero-action:hover,
+.hero-action:focus-visible { background: var(--bg-hover); border-color: var(--primary); text-decoration: none; }
 
 /* ── Usage stat cards (dashboard) ─────────────────────── */
 .stat-card-body  { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .25rem; padding: 1.25rem 1rem; }
 .stat-big        { font-size: 2rem; font-weight: 800; line-height: 1; }
-.stat-big-label  { color: var(--muted); font-size: .78rem; text-transform: uppercase; letter-spacing: .06em; }
+.stat-big-label  { color: var(--muted); font-size: .82rem; text-transform: uppercase; letter-spacing: .06em; }
 
 /* ── Recent events feed (dashboard) ───────────────────── */
-.event-item  { display: flex; align-items: flex-start; gap: .6rem; padding: .55rem 0; border-bottom: 1px solid var(--border); }
+/* position: relative keeps each row's visually hidden source label inside the feed's scroll box: without it the label's containing block is the page, so it escapes the clip and stretches the page. */
+.event-item  { position: relative; display: flex; align-items: flex-start; gap: .6rem; padding: .55rem 0; border-bottom: 1px solid var(--border); }
 .event-item:last-child { border-bottom: none; }
-.event-icon  { font-size: 1.1rem; flex-shrink: 0; line-height: 1.4; }
+.event-icon  { font-size: 1.1rem; flex-shrink: 0; line-height: 1.4; width: 1.5rem; text-align: center; }
 .event-body  { flex: 1; min-width: 0; }
 .event-line  { font-size: .88rem; overflow-wrap: break-word; }
-.event-meta  { font-size: .75rem; color: var(--muted); margin-top: .1rem; }
+.event-meta  { font-size: .85rem; color: var(--text); margin-top: .1rem; }
 
 /* ── Dashboard layout: main column + live events sidebar ─ */
-/* Source order is Status, events sidebar, Quick Links, Usage, so screen readers and keyboard users
+/* Source order is the welcome hero (with the Quick Links), Status, events sidebar, Usage, so screen readers and keyboard users
    reach the live feed right after Bot Status. On desktop the grid areas put the feed in a sticky
    right-hand column spanning every row, sized to the viewport and scrolling internally. The last row
    is 1fr so the sidebar's height goes there instead of opening gaps between the main-column sections.
    --dashboard-nav-offset is the sticky .navbar's height: this is the fallback, and
    dashboard-layout.js keeps it in step with the rendered navbar (which wraps taller on some widths). */
 :root { --dashboard-nav-offset: 3.75rem; }
+/* The overall health indicator (.health) sits above the dashboard grid, so the event feed's height cap has to leave
+   room for it as well: its height (one line of text, 0.9rem of padding and a border) plus its 1.25rem bottom margin,
+   a little over 3.5rem. If .health's padding, margin or font size changes, change this to match. */
+:root { --dashboard-health-offset: 3.6rem; }
 .container--wide { max-width: 1600px; }
 .dashboard-layout {
-  display: grid; grid-template-columns: minmax(0, 1fr) 360px; grid-template-rows: auto auto 1fr;
-  grid-template-areas: "status events" "links events" "usage events";
+  display: grid; grid-template-columns: minmax(0, 1fr) 360px; grid-template-rows: auto 1fr auto;
+  grid-template-areas: "hero events" "status events" "usage events";
   column-gap: 1.5rem; align-items: start;
 }
-.dashboard-status  { grid-area: status; }
-.dashboard-sidebar { grid-area: events; position: sticky; top: calc(var(--dashboard-nav-offset) + 1rem); }
-.dashboard-links   { grid-area: links; }
+/* The status row is the 1fr one: when the feed is the tallest column, the spare height goes to System Status (which
+   fills it with more Twitch channels) instead of opening a gap under Usage, and when it is not, the row is only as
+   tall as its content. The section stretches to the row and passes the height down a flex/grid chain whose every link
+   needs min-height: 0, so the list scrolls inside it rather than growing the page (#1130). It is also the container
+   the panel's width queries read, because the main column's width does not follow the viewport's. */
+.dashboard-status  { grid-area: status; align-self: stretch; display: flex; flex-direction: column; container-type: inline-size; }
+.dashboard-side    { grid-area: events; position: sticky; top: calc(var(--dashboard-nav-offset) + 1rem); display: flex; flex-direction: column; gap: 1rem; min-height: 0; }
 .dashboard-usage   { grid-area: usage; }
 .dashboard-sidebar .section { margin-bottom: 0; }
-/* A lower column floor than .status-grid's 280px so the four status cards and usage tiles stay on one row next to the sidebar; auto-fit stretches them over any spare column on wide screens. */
+/* The Usage tiles use .status-grid: a lower column floor than its 280px keeps the four tiles on one row next to the
+   sidebar, and auto-fit stretches them over any spare column on wide screens. */
 .dashboard-layout .status-grid { grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
-/* Long Twitch names wrap inside the narrower status card so the connection badge stays in view. */
+
+/* ── System Status panel ───────────────────────────────────
+   One card holding the bot's services (Discord, Voice, Twitch chat), each a .service with a header (icon, name, state
+   in words, dot) and a body, with Last Played beside it. The base rules are the stacked layout (phones); wider
+   containers switch to Discord and Voice stacked on the left and Twitch on the right, spanning both. */
+.status-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; flex: 1 1 auto; min-height: 0; }
+.system-status { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto; min-height: 0; }
+.service { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-top: 1px solid var(--border); }
+.service:first-child { border-top: none; }
+.service-header { display: flex; align-items: center; gap: .5rem; padding: .4rem 1rem; border-bottom: 1px solid var(--border); font-weight: 600; }
+.service-label { flex: 1; margin: 0; font-size: .9rem; font-weight: 600; }
+/* A service's state sits on its header line; unlike the stat rows' values it may wrap ("No channels configured"). */
+.service-header .stat-value { max-width: none; white-space: normal; overflow: visible; text-overflow: clip; }
+.service-body { padding: .25rem 1rem .5rem; }
+.service-body .stat-row { padding: .2rem 0; }
+.service-body .stat-row-top-gap { margin-top: .35rem; }
+/* Long Twitch names wrap inside the narrow column so the connection badge stays in view. */
 .dashboard-layout .channel-name { overflow-wrap: anywhere; }
-/* Cap the Twitch list at about the height of the other status cards (Last Played is the tallest) and scroll the
-   rest, so a long channel list neither stretches every card in the row nor pushes Quick Links down. */
-.dashboard-twitch-body { max-height: 10rem; overflow-y: auto; }
+/* The channel list is a scroll region that takes whatever height its column has. `flex: 1 1 0px` (never `flex: 1`,
+   whose 0% basis turns into the content's height when the container's height is indefinite) and min-height: 0 up the
+   chain keep it from stretching the row; the 7rem floor is how many rows show when there is no spare height. */
+.dashboard-twitch-body { flex: 1 1 0px; min-height: 7rem; overflow-y: auto; }
+/* One line per channel: name, then when it last connected or disconnected, then its badges. */
+.channel-info { display: flex; align-items: baseline; gap: .5rem; flex: 1 1 auto; min-width: 0; }
+.channel-meta { margin: 0 0 0 auto; white-space: nowrap; }
+@container (min-width: 40rem) {
+  .system-status {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); grid-template-rows: auto 1fr;
+    grid-template-areas: "discord twitch" "voice twitch";
+  }
+  .service--discord { grid-area: discord; }
+  .service--voice   { grid-area: voice; }
+  .service--twitch  { grid-area: twitch; border-top: none; border-left: 1px solid var(--border); }
+}
+@container (min-width: 60rem) {
+  .status-layout { grid-template-columns: minmax(0, 1fr) 15rem; }
+  .last-played { align-self: start; }
+}
+@container (max-width: 39.99rem) {
+  .dashboard-twitch-body { flex: none; min-height: 0; max-height: 13.5rem; }
+}
 /* Dark, thin scrollbars for the dashboard's inner scroll areas (event feed, Twitch list) instead of the
    browser's default light ones. */
 .dashboard-scroll { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
@@ -148,20 +276,68 @@ a:hover { text-decoration: underline; }
 .dashboard-scroll::-webkit-scrollbar-track { background: transparent; }
 .dashboard-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
 .dashboard-scroll::-webkit-scrollbar-thumb:hover { background: var(--muted); }
-/* When the feed is the tallest column it sets the page height, so its cap must leave room for everything else
-   in the viewport: the navbar, the container's top padding (1.5rem), the section title and card chrome (~2.6rem)
-   and the container padding + footer below the layout (~7.6rem). Those add up to ~11.7rem plus the navbar, so
-   12rem keeps the page from overflowing (no stray page scrollbar) with a few pixels to spare, and the sidebar's
-   top stays below the navbar at the end of the scroll. The 6rem floor keeps a few rows visible on very short
-   windows, where the cap would otherwise reach zero. */
-.dashboard-events-body { min-height: 6rem; max-height: calc(100vh - var(--dashboard-nav-offset) - 12rem); overflow-y: auto; padding-top: .25rem; padding-bottom: .25rem; }
+/* The right-hand column (Stream Overview above the live feed) is sticky and capped to the viewport, and the feed takes
+   whatever height the panel leaves. When the feed is the tallest column it sets the page height, so the column's cap
+   leaves room for everything else in the viewport: the navbar, the health indicator above the grid
+   (--dashboard-health-offset), the container's top padding (1.5rem), the feed's section title and card chrome
+   (~2.6rem, which is inside the column) and the container padding + footer below the layout (~7.6rem). The reserve
+   outside the column is therefore 9.375rem (the old 12rem feed cap less that 2.625rem of chrome): the column's total
+   height is what the feed alone used to be, so the page stays clear of a scrollbar with a few pixels to spare and the
+   column's top stays below the navbar at the end of the scroll. Every flex link down to the feed needs min-height: 0,
+   or the feed's content would size the column and grow the page. The feed's 6rem floor keeps a few rows visible on very
+   short windows, where the cap would otherwise reach zero. */
+.dashboard-side { max-height: calc(100vh - var(--dashboard-nav-offset) - var(--dashboard-health-offset) - 9.375rem); }
+.dashboard-side > .dashboard-sidebar { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.dashboard-sidebar > .dashboard-events { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.dashboard-events > .card { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.dashboard-events-body { flex: 1 1 auto; min-height: 6rem; overflow-y: auto; padding-top: .25rem; padding-bottom: .25rem; }
 /* The reserve above assumes a one-line title, so keep it on one line even with very large text. */
-.dashboard-sidebar .section-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* `flex: none`: the title is a flex item whose overflow: hidden gives it no minimum height, so without it a squeezed
+   column would shrink the heading away to nothing. */
+.dashboard-sidebar .section-title,
+.dashboard-stream .section-title { flex: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-/* Narrower screens: one column in source order, with the event feed straight after Bot Status. */
+/* ── Stream Overview ───────────────────────────────────────
+   "Is my channel broadcasting?", about the signed-in user's own channel only (the Twitch Channels list already marks
+   every channel that is live, so this panel doesn't repeat it). Its own panel, not a variant of System Status: its own
+   heading, a brand-coloured top edge, a state pill (filled, outlined or dashed) instead of coloured text, and its own
+   icons (◉ live, ◇ offline, ? unknown, – unavailable). It never uses status red, amber or green (those mark a service
+   fault or health) and nothing in it moves. Every state also says what it is in words. */
+.dashboard-stream { flex: none; margin: 0; }
+.stream-card { border-top: 3px solid var(--primary); }
+.stream-own { min-width: 0; padding: .65rem 1rem .75rem; }
+.stream-heading { margin: 0 0 .4rem; color: var(--muted); font-size: .75rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.stream-state { display: inline-block; margin: 0; padding: .1em .65em; border: 1px solid transparent; border-radius: 99px; font-size: .85rem; font-weight: 700; }
+.stream-state::before { margin-right: .35em; }
+.stream-state--live        { background: var(--primary); color: #fff; }
+.stream-state--live::before        { content: "\25C9"; content: "\25C9" / ""; }
+.stream-state--offline     { border-color: var(--muted); color: var(--text); }
+.stream-state--offline::before     { content: "\25C7"; content: "\25C7" / ""; }
+.stream-state--unknown     { border: 1px dashed var(--muted); color: var(--muted); }
+.stream-state--unknown::before     { content: "?"; content: "?" / ""; }
+.stream-state--unavailable { border-color: var(--border); color: var(--muted); }
+.stream-state--unavailable::before { content: "\2013"; content: "\2013" / ""; }
+.stream-channel { margin: .4rem 0 0; font-family: var(--mono); font-size: .88rem; overflow-wrap: anywhere; }
+.stream-note { margin: .35rem 0 0; color: var(--muted); font-size: .82rem; }
+/* The light brand indigo: the default link blue is only 3.8:1 on the card, below AA. */
+.stream-link { display: inline-block; margin-top: .3rem; font-size: .82rem; color: var(--accent-indigo); }
+.stream-link[hidden], .stream-note[hidden], .stream-channel[hidden] { display: none; }
+
+/* Narrower screens: one column in source order, with Stream Overview and the event feed straight after System Status. */
 @media (max-width: 1100px) {
-  .dashboard-layout  { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; grid-template-areas: "status" "events" "links" "usage"; }
-  .dashboard-sidebar { position: static; }
+  .dashboard-layout  { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; grid-template-areas: "hero" "status" "events" "usage"; }
+  .dashboard-side    { position: static; display: block; max-height: none; }
+  .dashboard-stream  { margin-bottom: 2rem; }
+  .dashboard-sidebar .section { margin-bottom: 2rem; }
+  .dashboard-events-body { max-height: 50vh; }
+}
+
+/* Short desktop windows: the column's cap would leave the feed less than its 6rem floor (the card, which clips, shrinks
+   below its body: about 13px lost at 600px high, the whole feed at 500px). Below 660px high the column is uncapped and
+   not sticky, as on narrow screens, and the feed caps itself at half the window; the page scrolls there anyway (#1132). */
+@media (max-height: 660px) {
+  .dashboard-side    { position: static; display: block; max-height: none; }
+  .dashboard-stream  { margin-bottom: 2rem; }
   .dashboard-sidebar .section { margin-bottom: 2rem; }
   .dashboard-events-body { max-height: 50vh; }
 }
@@ -169,35 +345,96 @@ a:hover { text-decoration: underline; }
 /* ── Stat rows ─────────────────────────────────────────── */
 .stat-row   { display: flex; justify-content: space-between; align-items: baseline; padding: .3rem 0; border-bottom: 1px solid var(--border); }
 .stat-row:last-child { border-bottom: none; }
-.stat-label { color: var(--muted); font-size: .82rem; }
+.stat-label { color: var(--muted); font-size: .85rem; }
 .stat-value { font-size: .88rem; text-align: right; max-width: 60%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* ── Online dot ────────────────────────────────────────── */
 .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
-.dot--online  { background: var(--success); box-shadow: 0 0 6px var(--success); }
-.dot--offline { background: var(--danger); }
-.dot--playing { background: var(--warning); box-shadow: 0 0 6px var(--warning); animation: pulse 1s infinite; }
+/* Each state has its own shape as well as colour, so it reads without colour (greyscale, colour blindness):
+   filled disc = connected, hollow ring = disconnected/inactive, play triangle = playing. The dot's role="img" and
+   aria-label (setStatusDot in dashboard-utils.js) give it a name in words. Red is only for a required service
+   being down (Discord); voice is informational, so "not connected" is a neutral grey ring and "playing" uses
+   the brand accent rather than warning amber. */
+.dot--online   { background: var(--success); box-shadow: 0 0 6px var(--success); }
+.dot--offline  { background: transparent; border: 2px solid var(--danger); }
+.dot--inactive { background: transparent; border: 2px solid var(--muted); }
+.dot--playing  { background: var(--accent-blue); border-radius: 0; clip-path: polygon(10% 0, 100% 50%, 10% 100%); animation: pulse 1s infinite; }
 @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.5; } }
+
+/* A card's state in words (#discord-state, #voice-state), set by setStatusText in dashboard-status.js. Each
+   state has its own icon as well as colour; the `/ ""` alt text keeps the icon out of the accessible name. */
+.status-text { font-weight: 600; }
+.status-text::before { margin-right: .35em; }
+.status-text--connected    { color: var(--success); }
+.status-text--connected::before    { content: "\2713"; content: "\2713" / ""; }
+.status-text--disconnected { color: var(--danger-text); }
+.status-text--disconnected::before { content: "\2715"; content: "\2715" / ""; }
+.status-text--inactive     { color: var(--muted); }
+.status-text--inactive::before     { content: "\25CB"; content: "\25CB" / ""; }
+.status-text--idle         { color: var(--text); }
+.status-text--idle::before         { content: "\25CF"; content: "\25CF" / ""; }
+.status-text--playing      { color: var(--accent-blue); }
+.status-text--playing::before      { content: "\25B6"; content: "\25B6" / ""; }
+.status-text--degraded     { color: var(--warning); }
+.status-text--degraded::before     { content: "\25B2"; content: "\25B2" / ""; }
+.status-text--unknown      { color: var(--muted); }
+.status-text--unknown::before      { content: "?"; content: "?" / ""; }
+/* Status not known (feed unreachable): a dashed ring, distinct from the solid connected/disconnected shapes. */
+.dot--unknown  { background: transparent; border: 2px dashed var(--muted); }
+
+/* ── Overall health indicator (dashboard-health.js) ───────
+   One roll-up of the required services. Every state has its own icon and words as well as colour; Unknown is
+   neutral grey and never green. */
+.health { display: inline-flex; align-items: center; gap: .5rem; margin-bottom: 1.25rem; padding: .45rem .9rem; border: 1px solid var(--border); border-radius: 99px; background: var(--bg-card); font-weight: 700; }
+.health--healthy   { color: var(--success); }
+.health--healthy::before   { content: "\2713"; content: "\2713" / ""; }
+.health--degraded  { color: var(--warning); }
+.health--degraded::before  { content: "\25B2"; content: "\25B2" / ""; }
+.health--unhealthy { color: var(--danger-text); }
+.health--unhealthy::before { content: "\2715"; content: "\2715" / ""; }
+.health--unknown   { color: var(--muted); }
+.health--unknown::before   { content: "?"; content: "?" / ""; }
+
+/* Bot Status while the feed is unreachable (markStatusStale in dashboard-status.js): values are muted, not faded,
+   so text stays above AA, and a note says they are the last received, not live. Badges lose their fills so
+   white-on-red LIVE text can't turn grey on red, and the LIVE pulse (which animates the fill) stops: a stale value isn't live. */
+.status-stale-note { margin-bottom: .75rem; padding: .5rem .75rem; border-left: 3px solid var(--muted); background: var(--bg-card); color: var(--text); font-size: .85rem; }
+.status-stale-note::before { content: "?"; content: "?" / ""; margin-right: .4em; color: var(--muted); font-weight: 700; }
+.is-stale .stat-value,
+.is-stale .channel-name,
+.is-stale .channel-meta { color: var(--muted); }
+.is-stale .badge { background: transparent; border: 1px solid var(--border); color: var(--muted); animation: none; }
 .overlay-status { display: flex; align-items: center; gap: .5rem; margin-top: .5rem; font-size: .85rem; color: var(--muted); }
 
 /* ── Channel list (inside card-body) ──────────────────── */
-.channel-item { display: flex; justify-content: space-between; align-items: center; padding: .45rem 0; border-bottom: 1px solid var(--border); }
+.channel-item { display: flex; justify-content: space-between; align-items: center; gap: .5rem; padding: .3rem 0; border-bottom: 1px solid var(--border); }
 .channel-item:last-child { border-bottom: none; }
 .channel-name { font-family: var(--mono); font-size: .85rem; }
-.channel-meta { font-size: .75rem; color: var(--muted); margin-top: .15rem; }
+.channel-meta { font-size: .8rem; color: var(--muted); }
 .channel-badges { display: flex; gap: .35rem; align-items: center; flex-shrink: 0; }
+/* An icon on each Twitch channel badge, so Connected / Disconnected / LIVE differ by shape as well as colour.
+   The `/ ""` alt text keeps the icon out of the accessible name (the badge's own text already says it); the
+   plain declaration before it is the fallback for browsers without that syntax. */
+.channel-badges .badge::before { margin-right: .3em; }
+.channel-badges .badge-online::before  { content: "\2713"; content: "\2713" / ""; }
+.channel-badges .badge-offline::before { content: "\2715"; content: "\2715" / ""; }
+.channel-badges .badge-live::before    { content: "\25CF"; content: "\25CF" / ""; }
 
 /* ── Badges ────────────────────────────────────────────── */
 .badge           { display: inline-block; padding: .15em .55em; border-radius: 99px; font-size: .75rem; font-weight: 600; white-space: nowrap; }
 .badge-active    { background: rgba(34,197,94,.15);  color: var(--success); }
 .badge-hidden    { background: rgba(234,179,8,.15);  color: #ca8a04; }
 .badge-online    { background: rgba(34,197,94,.15);  color: var(--success); }
-.badge-offline   { background: rgba(239,68,68,.15);  color: var(--danger); }
-.badge-live      { background: #ef4444; color: #fff; animation: pulse 1.5s ease-in-out infinite; }
+.badge-offline   { background: rgba(239,68,68,.15);  color: var(--danger-text); }
+/* The LIVE pulse darkens the fill instead of fading the badge, so the white label never drops below
+   5.7:1 (the shared opacity `pulse` took it to about 3.3:1 at its trough). */
+.badge-live      { background: var(--danger-solid); color: #fff; animation: live-pulse 1.5s ease-in-out infinite; }
+@keyframes live-pulse { 0%,100% { background-color: var(--danger-solid); } 50% { background-color: var(--danger-deep); } }
+/* Access levels are identity, not state, so they use brand hues (never status green/amber/red); the label carries the meaning. */
 .level-0 { background: rgba(113,113,122,.2); color: var(--muted); }
-.level-1 { background: rgba(59,130,246,.2);  color: #60a5fa; }
-.level-2 { background: rgba(245,158,11,.2);  color: var(--warning); }
-.level-3 { background: rgba(239,68,68,.2);   color: var(--danger); }
+.level-1 { background: rgba(59,130,246,.2);  color: var(--accent-blue); }
+.level-2 { background: rgba(99,102,241,.2);  color: var(--accent-indigo); }
+.level-3 { background: rgba(168,85,247,.2);  color: var(--accent-violet); }
 
 /* ── Buttons ───────────────────────────────────────────── */
 .btn         { display: inline-flex; align-items: center; gap: .4rem; padding: .45rem 1rem; border-radius: 6px; font-size: .85rem; font-weight: 600; cursor: pointer; border: none; transition: background .15s, opacity .15s; background: var(--primary); color: #fff; }
@@ -266,7 +503,10 @@ a:hover { text-decoration: underline; }
 
 /* ── Forms ─────────────────────────────────────────────── */
 .input { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); padding: .45rem .75rem; font-size: .85rem; transition: border-color .15s; }
+/* Mouse focus keeps just the border colour; keyboard focus also gets the shared ring (the bare
+   :focus outline:none would otherwise override the global :focus-visible rule). */
 .input:focus { outline: none; border-color: var(--primary); }
+.input:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 .input-sm { padding: .28rem .6rem; font-size: .8rem; }
 textarea.input, .stream-textarea { width: 100%; resize: vertical; font-family: var(--mono); font-size: .82rem; line-height: 1.5; }
 .inline-form    { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; padding: .75rem 1rem; }
@@ -276,6 +516,7 @@ textarea.input, .stream-textarea { width: 100%; resize: vertical; font-family: v
 .hint           { font-size: .78rem; color: var(--muted); padding: 0 1rem .75rem; }
 .search-input   { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; color: var(--text); padding: .4rem .75rem; font-size: .85rem; width: 220px; }
 .search-input:focus { outline: none; border-color: var(--primary); }
+.search-input:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 
 /* ── Commands page helpers ────────────────────────────── */
 .card-spaced { margin-bottom: 1.5rem; }
@@ -350,7 +591,7 @@ textarea.input, .stream-textarea { width: 100%; resize: vertical; font-family: v
 /* ── Misc ──────────────────────────────────────────────── */
 .mono       { font-family: var(--mono); font-size: .82rem; }
 .muted      { color: var(--muted); }
-.empty-msg  { color: var(--muted); font-size: .85rem; text-align: center; padding: .75rem; }
+.empty-msg  { color: var(--muted); font-size: .9rem; text-align: center; padding: .75rem; }
 .is-hidden  { display: none; }
 
 /* Upload progress bar (registerUploadFormHandler in utils.js); no `value` = indeterminate. */
@@ -374,39 +615,10 @@ textarea.input, .stream-textarea { width: 100%; resize: vertical; font-family: v
 
 /* ── Mobile / responsive ────────────────────────────────── */
 @media (max-width: 640px) {
-  /* Navbar: show hamburger; desktop links hidden */
+  /* Navbar: the tighter phone padding. The menu itself collapses at --nav-collapse-max (see the Navbar section). */
   .navbar { padding: .6rem 1rem; }
-  .navbar-toggle {
-    display: flex; align-items: center; justify-content: center;
-    margin-left: auto; background: transparent;
-    border: 1px solid var(--border); color: var(--text);
-    padding: .3rem .6rem; border-radius: 6px; cursor: pointer; font-size: 1.1rem; line-height: 1;
-  }
-  /* Dropdown: absolutely positioned just below the sticky navbar */
-  .navbar-collapse {
-    display: none; position: absolute; top: 100%; left: 0; right: 0;
-    flex-direction: column; gap: .25rem;
-    background: var(--bg-card); border-bottom: 1px solid var(--border);
-    padding: .5rem 1rem;
-  }
-  .navbar.nav-open .navbar-collapse { display: flex; }
-  .navbar-menu { flex-direction: column; gap: 0; width: 100%; align-items: stretch; }
-  .navbar-end {
-    flex-direction: row; flex-wrap: wrap; align-items: center;
-    width: 100%; margin-left: 0; gap: .5rem;
-    padding-top: .5rem; border-top: 1px solid var(--border);
-  }
+  /* The footer's links share .nav-item; they stay full-width on phones, as they always have. */
   .nav-item { width: 100%; border-radius: 6px; }
-
-  /* Nav groups: expand inline on mobile */
-  .nav-group { width: 100%; }
-  .nav-group-label { width: 100%; justify-content: space-between; }
-  .nav-group-items {
-    position: static; box-shadow: none;
-    background: transparent; border: none; border-left: 2px solid var(--border);
-    margin: .15rem 0 .15rem .75rem; padding: .2rem 0 .2rem .5rem; min-width: 0;
-  }
-  .nav-group-items .nav-item { white-space: normal; }
 
   /* Tables: allow horizontal scroll within the scroll wrapper */
   .card { overflow: visible; }
@@ -414,6 +626,13 @@ textarea.input, .stream-textarea { width: 100%; resize: vertical; font-family: v
   .table-scroll .table { width: max-content; min-width: 100%; }
   .table-scroll .table th,
   .table-scroll .table td { white-space: nowrap; }
+  /* Narrow tables (loyalty points): fit the phone width, wrap the name, tighten padding so the action button stays on screen */
+  .table-scroll .table.table-fit { width: 100%; }
+  .table-scroll .table.table-fit th,
+  .table-scroll .table.table-fit td { padding: .5rem .4rem; }
+  /* Inline forms in a fitted table (SFX categories): let the name input shrink instead of holding the table at 220px+ */
+  .table-scroll .table.table-fit .form-col-grow { min-width: 0; width: 4rem; }
+  .table-scroll .table.table-fit td.cell-wrap { white-space: normal; overflow-wrap: anywhere; }
   /* Restore wrapping for long-content cells */
   .table-scroll .table td.command-output-cell {
     white-space: normal; overflow-wrap: anywhere; max-width: 180px;
@@ -563,6 +782,14 @@ details[open] > .disclosure-toggle::before { transform: rotate(90deg); }
    style-src without 'unsafe-inline'. */
 .badge-user-hue { color: hsl(var(--hue, 0), 65%, 60%); background: hsla(var(--hue, 0), 65%, 60%, 0.12); }
 .badge-user-hue.badge-user-self { color: hsl(var(--hue, 0), 90%, 78%); background: hsla(var(--hue, 0), 90%, 78%, 0.22); }
+
+/* ── Reduced motion ─────────────────────────────────────
+   With the OS "reduce motion" setting on, nothing in the panel animates: no pulsing LIVE badge or voice dot,
+   no transitions (state changes are instant). Every status still reads from its text and icon/shape, so
+   nothing depends on motion. Overlays (OBS browser sources) use their own stylesheets and are unaffected. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}
 
 /* ── Public video library previews (overlay settings) ─── */
 .library-preview { display: block; width: 10rem; max-width: 100%; aspect-ratio: 16 / 9; background: #000; border-radius: var(--radius); }

@@ -22,6 +22,7 @@ import { normalizeTwitchChannelName } from '../../twitch/twitchChannelName';
 import {
   discordIdError,
   parseAccessLevel,
+  parseAddUserForm,
   parseTwitchEnabled,
   parseTwitchNameInput,
   resolveGuildId,
@@ -225,6 +226,58 @@ describe('resolveValidDiscordId', () => {
     const { res, redirect } = mockRes();
     expect(resolveValidDiscordId(res, 'not-a-snowflake')).toBeNull();
     expect(redirect).toHaveBeenCalledWith('/admin/users?error=invalid_discord_id');
+  });
+});
+
+// ─── parseAddUserForm ────────────────────────────────────────────────────────
+
+describe('parseAddUserForm', () => {
+  const VALID_ID = '12345678901234567';
+
+  beforeEach(() => {
+    vi.mocked(normalizeTwitchChannelName).mockImplementation((name: string) => (/^[a-z0-9_]+$/i.test(name) ? name.toLowerCase() : null));
+  });
+
+  function mockRes() {
+    const redirect = vi.fn();
+    return { res: { redirect } as unknown as Response, redirect };
+  }
+
+  it('returns the validated fields without redirecting', () => {
+    const { res, redirect } = mockRes();
+    const form = parseAddUserForm(res, { discord_id: ` ${VALID_ID} `, discord_name: ' Name ', access_level: '2', twitch_name: 'Chan' });
+    expect(form).toEqual({ discordId: VALID_ID, discordName: 'Name', level: 2, normalizedTwitchName: 'chan', shouldClearTwitchName: false });
+    expect(redirect).not.toHaveBeenCalled();
+  });
+
+  it('honours clear_twitch_name', () => {
+    const { res } = mockRes();
+    expect(parseAddUserForm(res, { discord_id: VALID_ID, access_level: '0', clear_twitch_name: '1' })?.shouldClearTwitchName).toBe(true);
+  });
+
+  it.each([
+    ['discord_id is absent', { access_level: '0' }, '/admin/users'],
+    ['discord_id is malformed', { discord_id: 'bad', access_level: '0' }, '/admin/users?error=invalid_discord_id'],
+    ['access_level is absent', { discord_id: VALID_ID }, '/admin/users'],
+    ['access_level is unknown', { discord_id: VALID_ID, access_level: '9' }, '/admin/users?error=invalid_access_level'],
+  ])('redirects and returns null when %s', (_case, body, location) => {
+    const { res, redirect } = mockRes();
+    expect(parseAddUserForm(res, body)).toBeNull();
+    expect(redirect).toHaveBeenCalledWith(location);
+    expect(redirect).toHaveBeenCalledTimes(1);
+  });
+
+  it('redirects with the Twitch name error and returns null', () => {
+    const { res, redirect } = mockRes();
+    expect(parseAddUserForm(res, { discord_id: VALID_ID, access_level: '0', twitch_name: 'bad name!' })).toBeNull();
+    expect(redirect).toHaveBeenCalledWith('/admin/users?error=invalid_twitch_name');
+  });
+
+  it('checks the Discord ID before the access level', () => {
+    const { res, redirect } = mockRes();
+    parseAddUserForm(res, { discord_id: 'bad', access_level: '9' });
+    expect(redirect).toHaveBeenCalledWith('/admin/users?error=invalid_discord_id');
+    expect(redirect).toHaveBeenCalledTimes(1);
   });
 });
 

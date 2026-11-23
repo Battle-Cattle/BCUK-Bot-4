@@ -281,7 +281,8 @@
           </form>
 
           <% if (categories.length > 0) { %>
-          <table class="table" aria-label="SFX categories">
+          <div class="table-scroll">
+          <table class="table table-fit" aria-label="SFX categories">
             <thead><tr><th scope="col">Name</th><th scope="col">Actions</th></tr></thead>
             <tbody>
               <% categories.forEach(function(c) { %>
@@ -305,6 +306,7 @@
               <% }) %>
             </tbody>
           </table>
+          </div>
           <p class="hint hint-compact">Removing a category leaves its triggers uncategorised — it does not delete them.</p>
           <% } else { %>
           <p class="empty-msg empty-msg-padded">No categories yet.</p>

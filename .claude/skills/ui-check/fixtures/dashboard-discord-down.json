@@ -1,0 +1,5 @@
+{
+  "_comment": "Illustrative data for ui-check only. The dashboard fixture with the Discord bot not ready.",
+  "extends": "dashboard.json",
+  "status": { "discord": { "ready": false, "tag": null, "guildName": null } }
+}

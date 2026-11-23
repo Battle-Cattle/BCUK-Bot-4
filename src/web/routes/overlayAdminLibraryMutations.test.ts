@@ -64,7 +64,7 @@ const LIBRARY_FILE = 'lib.webm';
  * the current guild — so the test sees which one the route trusts.
  */
 function app(dbLevel: number, sessionLevel: number = dbLevel) {
-  vi.mocked(findUser).mockResolvedValue({ discord_id: '100000000000000001', is_owner: false } as any);
+  vi.mocked(findUser).mockResolvedValue({ discord_id: '100000000000000001', is_owner: false, session_generation: 0 } as any);
   vi.mocked(getGuildsForMember).mockResolvedValue([{ guild_id: GUILD, name: 'G', access_level: dbLevel }] as any);
   const user = makeSessionUser({ accessLevel: sessionLevel as any, currentGuildId: GUILD } as any);
   return buildTestApp({ router, session: { user }, mockRender: 'text' });

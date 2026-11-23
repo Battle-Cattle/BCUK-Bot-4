@@ -3,10 +3,11 @@ import { findUser, getMemberAccessLevel } from '../../db';
 import { requireGuildContext } from '../middleware';
 import { DASHBOARD_STATUS_MAX_SSE_PER_GUILD } from '../../shared/config';
 import { onStatusChanged } from '../../shared/statusStore';
-import { getGuildScopedStatus } from '../guildScopedStatus';
+import { getGuildScopedStatus, onGuildStatusInvalidated } from '../guildScopedStatus';
 import { attachSseConnection, broadcastToChannel } from './sseChannel';
 import { createLogger } from '../../shared/logger';
 import { createMutationQueue } from '../../shared/mutationQueue';
+import { registerSessionStream } from '../sessionStreams';
 
 const log = createLogger('Web');
 const router = Router();
@@ -50,7 +51,8 @@ const statusPushQueue = createMutationQueue();
  * @param guildId - The guild whose voice status changed, or null for a global change.
  */
 async function pushStatusUpdate(guildId: string | null): Promise<void> {
-  const keys = guildId !== null ? [guildId] : Array.from(connections.keys());
+  // Only guilds with a dashboard open: a lookup for the rest would build a snapshot nobody receives.
+  const keys = (guildId !== null ? [guildId] : Array.from(connections.keys())).filter((key) => connections.has(key));
   await Promise.all(keys.map((key) => statusPushQueue.run(key, async () => {
     try {
       broadcastToChannel(connections, key, await getGuildScopedStatus(key), isVerifiedConnection);
@@ -61,6 +63,14 @@ async function pushStatusUpdate(guildId: string | null): Promise<void> {
 }
 
 onStatusChanged(pushStatusUpdate);
+
+// A write to a guild's members or Twitch settings (src/db's guild-info wrappers) may change what its dashboards show
+// (the channels list and count) without any statusStore mutation. Subscribed through guildScopedStatus, which has dropped
+// its cache by the time it calls this, so the snapshot built here reads the new rows. `null` (a user-level change) pushes
+// to every connected guild, each with its own guild-scoped snapshot.
+onGuildStatusInvalidated((guildId) => {
+  pushStatusUpdate(guildId).catch((err: unknown) => log.error('Failed to push status after a guild-info change:', err));
+});
 
 /**
  * Closes every open status stream `discordId` holds for `guildId`, so a member removed from a
@@ -99,7 +109,7 @@ async function hasLiveGuildAccess(guildId: string, discordId: string): Promise<b
 
 /**
  * GET /dashboard/status/events — SSE endpoint streaming live `getGuildScopedStatus(guildId)`
- * snapshots for the viewer's current guild, so the dashboard's "Bot Status" cards can update
+ * snapshots for the viewer's current guild, so the dashboard's "System Status" panel can update
  * without polling. Mounted behind the parent router's `requireAuth`, so a session user is always
  * present; the guild is taken from the session (never a request param), matching every other
  * guild-scoped route. Runs `requireGuildContext` first, like those routes, so the session's guild
@@ -109,7 +119,9 @@ async function hasLiveGuildAccess(guildId: string, discordId: string): Promise<b
  * attach would otherwise miss this connection in {@link disconnectGuildStatusConnectionsForMember}
  * (it only closes connections registered when it runs); the connection is ended if access is gone,
  * or if the re-check itself fails (an unconfirmed member shouldn't default to trusted). Until the
- * re-check passes, the connection is skipped by status broadcasts (see `pendingAccessCheck`).
+ * re-check passes, the connection is skipped by status broadcasts (see `pendingAccessCheck`). The
+ * stream is also registered with {@link registerSessionStream}, so it closes when its session ends
+ * (logout, account switch, lost access, sign out other sessions, expiry).
  * @param req - Express request; reads `req.session.user.currentGuildId`.
  * @param res - Express response; upgrades to a `text/event-stream` connection kept alive with
  *   periodic pings and torn down on client disconnect; replies 400 if no guild is selected, or
@@ -127,6 +139,9 @@ router.get('/status/events', requireGuildContext, async (req, res) => {
   pendingAccessCheck.add(res);
   const attached = attachSseConnection(req, res, { connections, key: guildId, maxPerChannel: MAX_SSE_CONNECTIONS_PER_GUILD });
   if (!attached) return;
+  // Straight after attaching, before the access re-check's await: ending the session then closes this stream, and a
+  // session destroyed while this request was in flight refuses it here (#1112).
+  if (!registerSessionStream(req, res, 'status')) return;
   connectionOwners.set(res, user.discordId);
 
   try {

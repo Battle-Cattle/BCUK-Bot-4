@@ -1,6 +1,9 @@
 import { getStatus, type ChannelStatus } from '../shared/statusStore';
-import { getGuildById, getGuildMemberUsers, type DbGuild, type DbUser } from '../db';
+import { getGuildById, getGuildMemberUsers, onGuildInfoChanged, type DbGuild, type DbUser } from '../db';
 import { normalizeTwitchChannelName } from '../twitch/twitchChannelName';
+import { createLogger } from '../shared/logger';
+
+const log = createLogger('Web');
 
 /** Bot status scoped to a single guild — safe to send to that guild's dashboard viewers. */
 export interface GuildScopedStatus {
@@ -21,10 +24,11 @@ interface CachedGuildInfo {
 /**
  * `getGuildScopedStatus` is called on every dashboard status poll (every few seconds) and again
  * on every `pushStatusUpdate` broadcast, but the guild's name and Twitch-enabled member list
- * only change on an admin edit — so this caches that lookup per guild for a short TTL rather
- * than re-querying `guild`/`guild_member` on every call. Deliberately TTL-only (not wired to
- * invalidate on every guild/member write): a few seconds of staleness on a dashboard display is
- * an acceptable tradeoff against touching every guild-name/member-Twitch-settings write path.
+ * only change on an admin edit — so this caches that lookup per guild rather than re-querying
+ * `guild`/`guild_member` on every call. The writes that change it (`src/db`'s `guildMemberWrites`,
+ * `guildWrites` and `userWrites` wrappers) tell `invalidateGuildInfo` via `onGuildInfoChanged`, which drops
+ * the entry (and any load still in flight) so the next call sees the new rows. The short TTL stays as a
+ * backstop for edits made outside those wrappers (direct SQL, e.g. flipping `is_owner`).
  */
 const guildInfoCache = new Map<string, CachedGuildInfo>();
 
@@ -36,10 +40,76 @@ const guildInfoCache = new Map<string, CachedGuildInfo>();
  */
 const guildInfoInFlight = new Map<string, Promise<CachedGuildInfo>>();
 
+/** Listeners told, right after the guild-info cache was dropped, which guild's snapshot may now differ. */
+const invalidationListeners = new Set<(guildId: string | null) => void>();
+
+/**
+ * Registers a listener called each time cached guild info is dropped because a write changed it. By then the cache
+ * entry (and any load still in flight) is gone, so a snapshot built from inside the listener reads the new rows: this
+ * is the point to push a fresh snapshot to open dashboards, rather than subscribing to the db event directly (a
+ * listener of that could run before the cache was dropped).
+ * @param listener - Called with the changed guild's ID, or null when any guild may have changed. Must not throw.
+ * @returns A function that removes the listener again.
+ */
+export function onGuildStatusInvalidated(listener: (guildId: string | null) => void): () => void {
+  invalidationListeners.add(listener);
+  return () => { invalidationListeners.delete(listener); };
+}
+
+/**
+ * Drops cached guild info after a write changed it, including a load still in flight: that load read the rows before
+ * the write, so it must neither be joined by a later call nor be cached when it finishes. Then tells the
+ * {@link onGuildStatusInvalidated} listeners, so a push that follows always builds on fresh rows. A listener that
+ * throws is logged and never stops the others or fails the write that triggered this.
+ * @param guildId - The changed guild, or null when any guild may have changed (a user-level change).
+ */
+function invalidateGuildInfo(guildId: string | null): void {
+  if (guildId === null) {
+    guildInfoCache.clear();
+    guildInfoInFlight.clear();
+  } else {
+    guildInfoCache.delete(guildId);
+    guildInfoInFlight.delete(guildId);
+  }
+  for (const listener of Array.from(invalidationListeners)) {
+    try {
+      listener(guildId);
+    } catch (err) {
+      log.error('A guild-status invalidation listener threw:', err);
+    }
+  }
+}
+
+onGuildInfoChanged(invalidateGuildInfo);
+
 /** Test-only: clears the guild-info cache so DB mocks aren't shadowed across test cases. */
 export function clearGuildScopedStatusCache(): void {
   guildInfoCache.clear();
   guildInfoInFlight.clear();
+}
+
+/**
+ * Reads a guild's name and member list from the database and caches them, unless an invalidation dropped this load
+ * while it was in flight (the rows it read may predate the write that caused it). Its own callers still get the rows.
+ * @param guildId - Guild to look up.
+ * @param isCurrent - True while this load is still the guild's registered in-flight load.
+ * @returns The rows read, with the time they were fetched.
+ */
+async function fetchGuildInfo(guildId: string, isCurrent: () => boolean): Promise<CachedGuildInfo> {
+  // Yield first: the caller registers this load only once it returns, and `isCurrent` reads that registration, so
+  // nothing here (a lookup that throws at once, then `finally`) may run before then.
+  await Promise.resolve();
+  try {
+    const [guild, members] = await Promise.all([
+      getGuildById(guildId),
+      getGuildMemberUsers(guildId),
+    ]);
+    const info: CachedGuildInfo = { guild, members, fetchedAt: Date.now() };
+    if (isCurrent()) guildInfoCache.set(guildId, info);
+    return info;
+  } finally {
+    if (isCurrent()) guildInfoInFlight.delete(guildId);
+  }
 }
 
 /**
@@ -59,19 +129,7 @@ async function getCachedGuildInfo(guildId: string): Promise<CachedGuildInfo> {
   const inFlight = guildInfoInFlight.get(guildId);
   if (inFlight) return inFlight;
 
-  const load = (async (): Promise<CachedGuildInfo> => {
-    try {
-      const [guild, members] = await Promise.all([
-        getGuildById(guildId),
-        getGuildMemberUsers(guildId),
-      ]);
-      const info: CachedGuildInfo = { guild, members, fetchedAt: Date.now() };
-      guildInfoCache.set(guildId, info);
-      return info;
-    } finally {
-      guildInfoInFlight.delete(guildId);
-    }
-  })();
+  const load: Promise<CachedGuildInfo> = fetchGuildInfo(guildId, () => guildInfoInFlight.get(guildId) === load);
   guildInfoInFlight.set(guildId, load);
   return load;
 }

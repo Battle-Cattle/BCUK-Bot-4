@@ -16,12 +16,15 @@ vi.mock('../middleware', () => ({
   requireAuth: (_req: any, _res: any, next: any) => next(),
 }));
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
+// The registry itself is tested in sessionStreams.test.ts; here only that POST /select hands it the new guild.
+vi.mock('../sessionStreams', () => ({ switchSessionGuild: vi.fn(), closeStreamsOutsideGuild: vi.fn() }));
 
 import express from 'express';
 import supertest from 'supertest';
 import router from './guild';
 import { findUser, getAllGuilds, getEffectiveAccessLevelForUser, getGuildsForMember } from '../../db';
 import { AccessLevel } from '../../db';
+import { switchSessionGuild, closeStreamsOutsideGuild } from '../sessionStreams';
 
 const TWO_GUILDS = [
   { guildId: '100000000000000001', name: 'Alpha' },
@@ -37,7 +40,7 @@ function buildApp(sessionUser: unknown) {
   const app = express();
   app.use(express.urlencoded({ extended: false }));
   app.use((req: any, _res: any, next: any) => {
-    req.session = { user: sessionUser };
+    req.session = { user: sessionUser, save: (cb: (err?: Error) => void) => cb() };
     req.csrfToken = () => 'csrf-token';
     next();
   });
@@ -51,6 +54,9 @@ function buildApp(sessionUser: unknown) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  callOrder.length = 0;
+  saveError = undefined;
+  vi.mocked(closeStreamsOutsideGuild).mockImplementation(() => { callOrder.push('close'); });
   vi.mocked(getEffectiveAccessLevelForUser).mockResolvedValue(AccessLevel.USER);
   vi.mocked(getGuildsForMember).mockResolvedValue(TWO_DB_GUILDS as any);
   vi.mocked(getAllGuilds).mockResolvedValue(TWO_DB_GUILDS as any);
@@ -91,13 +97,100 @@ describe('GET /guild/select', () => {
   });
 });
 
+/** Order in which the session's `save` and the registry's close ran in a request, and what `save` fails with (none by default). */
+const callOrder: string[] = [];
+let saveError: Error | undefined;
+
+/** An app mounting the guild router for a session with ID `sid-1` and the given session user. */
+function buildSessionApp(user: unknown) {
+  const app = express();
+  app.use(express.urlencoded({ extended: false }));
+  app.use((req: any, _res: any, next: any) => {
+    req.session = { user, destroy: (cb: () => void) => cb(), save: (cb: (err?: Error) => void) => { callOrder.push('save'); cb(saveError); } };
+    req.sessionID = 'sid-1';
+    req.csrfToken = () => 'csrf-token';
+    next();
+  });
+  app.use('/guild', router);
+  return app;
+}
+
+describe('POST /guild/select — open dashboard streams (#1116)', () => {
+  it('tells the stream registry the session switched guild, once the selection is accepted', async () => {
+    const user = { discordId: 'u1', currentGuildId: '100000000000000001', accessLevel: AccessLevel.USER, guilds: TWO_GUILDS };
+
+    const res = await supertest(buildSessionApp(user)).post('/guild/select').type('form').send({ guild_id: '100000000000000002' });
+
+    expect(res.headers.location).toBe('/');
+    expect(switchSessionGuild).toHaveBeenCalledExactlyOnceWith('sid-1', '100000000000000002', false);
+  });
+
+  it('closes the old guild\'s streams only after the session holding the new guild has been saved, so another tab\'s reload reads it', async () => {
+    const user = { discordId: 'u1', currentGuildId: '100000000000000001', accessLevel: AccessLevel.USER, guilds: TWO_GUILDS };
+
+    await supertest(buildSessionApp(user)).post('/guild/select').type('form').send({ guild_id: '100000000000000002' });
+
+    expect(closeStreamsOutsideGuild).toHaveBeenCalledExactlyOnceWith('sid-1', '100000000000000002');
+    expect(callOrder).toEqual(['save', 'close']);
+  });
+
+  it('still closes them, and sends select_failed, when saving the session fails', async () => {
+    saveError = new Error('store down');
+    const user = { discordId: 'u1', currentGuildId: '100000000000000001', accessLevel: AccessLevel.USER, guilds: TWO_GUILDS };
+
+    const res = await supertest(buildSessionApp(user)).post('/guild/select').type('form').send({ guild_id: '100000000000000002' });
+
+    expect(res.headers.location).toBe('/guild/select?error=select_failed');
+    expect(closeStreamsOutsideGuild).toHaveBeenCalledExactlyOnceWith('sid-1', '100000000000000002');
+  });
+
+  it('closes the old guild\'s streams even when the access-level lookup that follows fails, since the session still moves to the new guild', async () => {
+    vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: true } as any);
+    vi.mocked(getEffectiveAccessLevelForUser).mockRejectedValue(new Error('db down'));
+    const user = { discordId: 'u1', currentGuildId: '100000000000000001', accessLevel: AccessLevel.USER, guilds: TWO_GUILDS };
+
+    const res = await supertest(buildSessionApp(user)).post('/guild/select').type('form').send({ guild_id: '100000000000000002' });
+
+    expect(res.headers.location).toBe('/guild/select?error=select_failed');
+    expect(user.currentGuildId).toBe('100000000000000002'); // express-session saves this
+    expect(switchSessionGuild).toHaveBeenCalledExactlyOnceWith('sid-1', '100000000000000002', false);
+    expect(closeStreamsOutsideGuild).toHaveBeenCalledExactlyOnceWith('sid-1', '100000000000000002');
+  });
+
+  it.each([
+    ['a malformed guild ID', async () => ({ guild_id: 'not-a-guild' })],
+    ['a guild the user does not belong to', async () => ({ guild_id: '999000999000999000' })],
+    ['an unexpected error before the guild is assigned', async () => { vi.mocked(findUser).mockRejectedValue(new Error('db down')); return { guild_id: '100000000000000002' }; }],
+  ])('does not touch the streams for %s', async (_name, arrange) => {
+    const body = await arrange();
+    const user = { discordId: 'u1', currentGuildId: '100000000000000001', accessLevel: AccessLevel.USER, guilds: TWO_GUILDS };
+    const app = buildSessionApp(user);
+
+    await supertest(app).post('/guild/select').type('form').send(body);
+
+    expect(switchSessionGuild).not.toHaveBeenCalled();
+    expect(closeStreamsOutsideGuild).not.toHaveBeenCalled();
+    expect(user.currentGuildId).toBe('100000000000000001');
+  });
+
+  it('does not touch the streams when the session user no longer exists (the session is destroyed instead)', async () => {
+    vi.mocked(findUser).mockResolvedValue(null);
+    const user = { discordId: 'u1', currentGuildId: '100000000000000001', accessLevel: AccessLevel.USER, guilds: TWO_GUILDS };
+
+    const res = await supertest(buildSessionApp(user)).post('/guild/select').type('form').send({ guild_id: '100000000000000002' });
+
+    expect(res.headers.location).toBe('/auth/login?error=user_not_found');
+    expect(switchSessionGuild).not.toHaveBeenCalled();
+  });
+});
+
 describe('POST /guild/select', () => {
   it('selects a guild the user belongs to, taking the access level from the already-fetched membership list', async () => {
     const user: any = { discordId: 'u1', currentGuildId: null, accessLevel: AccessLevel.USER, guilds: TWO_GUILDS };
     const app = express();
     app.use(express.urlencoded({ extended: false }));
     app.use((req: any, _res: any, next: any) => {
-      req.session = { user };
+      req.session = { user, save: (cb: () => void) => cb() };
       req.csrfToken = () => 'csrf-token';
       next();
     });
@@ -122,7 +215,7 @@ describe('POST /guild/select', () => {
     const app = express();
     app.use(express.urlencoded({ extended: false }));
     app.use((req: any, _res: any, next: any) => {
-      req.session = { user };
+      req.session = { user, save: (cb: () => void) => cb() };
       req.csrfToken = () => 'csrf-token';
       next();
     });
@@ -147,7 +240,7 @@ describe('POST /guild/select', () => {
     const app = express();
     app.use(express.urlencoded({ extended: false }));
     app.use((req: any, _res: any, next: any) => {
-      req.session = { user };
+      req.session = { user, save: (cb: () => void) => cb() };
       req.csrfToken = () => 'csrf-token';
       next();
     });
@@ -176,7 +269,7 @@ describe('POST /guild/select', () => {
     const app = express();
     app.use(express.urlencoded({ extended: false }));
     app.use((req: any, _res: any, next: any) => {
-      req.session = { user };
+      req.session = { user, save: (cb: () => void) => cb() };
       req.csrfToken = () => 'csrf-token';
       next();
     });
@@ -209,7 +302,7 @@ describe('POST /guild/select', () => {
     const app = express();
     app.use(express.urlencoded({ extended: false }));
     app.use((req: any, _res: any, next: any) => {
-      req.session = { user };
+      req.session = { user, save: (cb: () => void) => cb() };
       req.csrfToken = () => 'csrf-token';
       next();
     });
@@ -303,7 +396,7 @@ describe('POST /guild/select', () => {
     const app = express();
     app.use(express.urlencoded({ extended: false }));
     app.use((req: any, _res: any, next: any) => {
-      req.session = { user };
+      req.session = { user, save: (cb: () => void) => cb() };
       req.csrfToken = () => 'csrf-token';
       next();
     });

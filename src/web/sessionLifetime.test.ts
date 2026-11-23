@@ -3,7 +3,7 @@ import express from 'express';
 import session from 'express-session';
 import supertest from 'supertest';
 import {
-  enforceSessionLifetime, isPageLoad, isSessionPastLifetime, startSessionLifetime,
+  enforceSessionLifetime, isPageLoad, isSessionPastLifetime, sessionEndsAt, startSessionLifetime,
   SESSION_ABSOLUTE_MAX_MS, SESSION_IDLE_MS, SESSION_RENEW_INTERVAL_MS,
 } from './sessionLifetime';
 import { isSessionStoreBusyError } from './rateLimits';
@@ -198,5 +198,33 @@ describe('with express-session', () => {
     vi.setSystemTime(NOW + SESSION_ABSOLUTE_MAX_MS + 1);
     expect((await agent.get('/api', FETCH)).status).toBe(401);
     expect((await agent.get('/page', NAVIGATE)).status).toBe(401);
+  });
+});
+
+describe('sessionEndsAt', () => {
+  it('is 24 hours after the last page load when that comes first', () => {
+    expect(sessionEndsAt({ loginAt: NOW - 1000, lastSeenAt: NOW })).toBe(NOW + SESSION_IDLE_MS);
+  });
+
+  it('is 7 days after login when the cap comes first', () => {
+    const loginAt = NOW - SESSION_ABSOLUTE_MAX_MS + 5000;
+
+    expect(sessionEndsAt({ loginAt, lastSeenAt: NOW })).toBe(loginAt + SESSION_ABSOLUTE_MAX_MS);
+  });
+
+  it.each([
+    ['a Date', new Date(NOW + 1000)],
+    ['an ISO string, as the MySQL store returns it', new Date(NOW + 1000).toISOString()],
+  ])('is the cookie\'s own expiry, given as %s, when that comes first', (_name, expires) => {
+    expect(sessionEndsAt({ lastSeenAt: NOW, cookie: { expires } as never })).toBe(NOW + 1000);
+  });
+
+  it('ignores a cookie expiry that is not a date', () => {
+    expect(sessionEndsAt({ lastSeenAt: NOW, cookie: { expires: 'soon' } as never })).toBe(NOW + SESSION_IDLE_MS);
+    expect(sessionEndsAt({ lastSeenAt: NOW, cookie: { expires: true } as never })).toBe(NOW + SESSION_IDLE_MS);
+  });
+
+  it('is undefined for a session that records no times and has no cookie expiry (one from before #981)', () => {
+    expect(sessionEndsAt({})).toBeUndefined();
   });
 });

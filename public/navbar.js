@@ -3,11 +3,15 @@
   if (!toggle) return;
   var nav = toggle.closest('.navbar');
   var collapse = document.getElementById('navbar-collapse');
-  var mql = window.matchMedia('(max-width: 640px)');
+  /* The breakpoint lives in style.css as --nav-collapse-max, the widest viewport at which the nav collapses behind the
+     toggle; reading it here keeps the script and the CSS in step. If the stylesheet declares none, `not all` never
+     matches, so the nav stays in its full form. */
+  var collapseMax = window.getComputedStyle(document.documentElement).getPropertyValue('--nav-collapse-max').trim();
+  var mql = window.matchMedia(collapseMax ? '(max-width: ' + collapseMax + ')' : 'not all');
 
   /**
    * Unconditionally sync ARIA + open state to the current viewport.
-   * @param mobile - True when the viewport matches the mobile (max-width: 640px) breakpoint.
+   * @param mobile - True when the viewport is at or below the collapse breakpoint (--nav-collapse-max).
    */
   function syncToViewport(mobile) {
     nav.classList.remove('nav-open');

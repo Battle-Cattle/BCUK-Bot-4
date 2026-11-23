@@ -39,8 +39,8 @@ if [ -z "$SYSTEMCTL_BIN" ]; then
     exit 1
 fi
 
-# env_setting and trim: .env read the way dotenv (and so the bot) reads it, shared with deploy.sh
-# and the backup scripts.
+# env_setting and trim: .env read with the bot's own dotenv, shared with deploy.sh and the backup
+# scripts. Sourcing it checks node ($NODE_BIN, found above) can load dotenv, so run `npm ci` first.
 ENV_FILE="$REPO_DIR/.env"
 # shellcheck source=lib/dotenv.sh
 source "$REPO_DIR/scripts/lib/dotenv.sh"

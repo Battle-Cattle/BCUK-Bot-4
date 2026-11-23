@@ -113,6 +113,17 @@ describe('sampleFilesForSuggestion', () => {
 // ── transcodeToMp3 ──────────────────────────────────────────────────────────────
 
 describe('transcodeToMp3', () => {
+  it('pins the input to the OGG demuxer and stdin before -i', async () => {
+    const proc = makeFakeProcess();
+    vi.mocked(spawn).mockReturnValue(proc);
+    const promise = transcodeToMp3(Buffer.from('input'));
+    proc.emit('close', 0);
+    await promise;
+    expect(spawn).toHaveBeenCalledWith('/usr/bin/ffmpeg', [
+      '-protocol_whitelist', 'pipe', '-f', 'ogg', '-i', 'pipe:0', '-f', 'mp3', 'pipe:1',
+    ]);
+  });
+
   it('resolves with the concatenated stdout on a clean exit', async () => {
     const proc = makeFakeProcess();
     vi.mocked(spawn).mockReturnValue(proc);

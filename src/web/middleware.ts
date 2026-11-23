@@ -8,12 +8,20 @@ import {
 } from '../db';
 import { renderView } from './routes/viewHelpers';
 import { parseBearerToken } from './bearerToken';
-import { getLiveAccessForRequest, hasPanelAccess, resolveAccessLevelForGuild } from './guildAccess';
+import { closeSessionStreamsForGuild } from './sessionStreams';
+import {
+  getLiveAccessForRequest,
+  hasPanelAccess,
+  isCurrentSessionGeneration,
+  resolveAccessLevelForGuild,
+} from './guildAccess';
 
 /**
  * Whether the request's session belongs to a user who may still use the panel. A session whose
  * user has been deleted, or removed from their last guild (and isn't the bot owner), is destroyed
- * here, so removing a member ends their access at once instead of when the session expires.
+ * here, so removing a member ends their access at once instead of when the session expires. So is
+ * a session signed out by "Sign out other sessions" (its generation is older than the user row's,
+ * see {@link isCurrentSessionGeneration}).
  * The DB lookup is shared with any later middleware on the same request
  * ({@link getLiveAccessForRequest}).
  * @param req - Express request; reads `req.session.user`, and destroys the session when access has ended.
@@ -22,7 +30,8 @@ import { getLiveAccessForRequest, hasPanelAccess, resolveAccessLevelForGuild } f
 async function hasLiveSession(req: Request): Promise<boolean> {
   const user = req.session.user;
   if (!user) return false;
-  if (hasPanelAccess(await getLiveAccessForRequest(req, user.discordId))) return true;
+  const access = await getLiveAccessForRequest(req, user.discordId);
+  if (hasPanelAccess(access) && isCurrentSessionGeneration(req.session.sessionGeneration, access)) return true;
   await new Promise<void>((resolve) => { req.session.destroy(() => { resolve(); }); });
   return false;
 }
@@ -77,7 +86,10 @@ export async function requireAuthJson(req: Request, res: Response, next: NextFun
  * `fetchLiveGuildsForUser`/`resolveAccessLevelForGuild` (`./guildAccess`) — see those for
  * why a non-owner's access level never needs a second `guild_member` query. The lookup goes
  * through `getLiveAccessForRequest`, so it reuses the one `requireAuth` already made for this
- * request.
+ * request. A session signed out by "Sign out other sessions" is sent to login here too
+ * ({@link isCurrentSessionGeneration}), in case a route runs this without `requireAuth`.
+ * A stored guild the user can no longer act in is dropped, and the session's open dashboard
+ * status streams for it are closed (`closeSessionStreamsForGuild`).
  *
  * @param req - Express request; reads and mutates `req.session.user`.
  * @param res - Express response; used to redirect when no guild context can be resolved.
@@ -92,7 +104,7 @@ export async function requireGuildContext(req: Request, res: Response, next: Nex
   }
 
   const access = await getLiveAccessForRequest(req, user.discordId);
-  if (!access) {
+  if (!access || !isCurrentSessionGeneration(req.session.sessionGeneration, access)) {
     res.redirect('/auth/login');
     return;
   }
@@ -102,8 +114,10 @@ export async function requireGuildContext(req: Request, res: Response, next: Nex
   user.guilds = liveGuilds.map((g) => ({ guildId: g.guild_id, name: g.name }));
 
   // A stored guild must still be one the user can act in (membership may have been
-  // revoked since login). Drop it and re-pick if not.
+  // revoked since login). Drop it and re-pick if not, and close the session's status streams
+  // for the dropped guild (#1116).
   if (user.currentGuildId && !user.guilds.some((g) => g.guildId === user.currentGuildId)) {
+    closeSessionStreamsForGuild(req.sessionID, user.currentGuildId);
     user.currentGuildId = null;
   }
 

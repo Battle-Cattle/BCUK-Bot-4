@@ -132,7 +132,7 @@ router.get('/events/recent', requireCompanionKey, async (req, res) => {
   try {
     const events = await getRecentStreamerEvents(streamer.id, RECENT_EVENTS_LIMIT);
     const companionEvents: CompanionActivityEvent[] = events
-      .filter((e) => e.eventType !== 'redemption')
+      .filter((e) => e.eventType !== 'redemption' && e.eventType !== 'raffle_payout_failed')
       .map((e) => ({
         type: e.eventType as CompanionActivityEventType, id: e.id, displayName: e.displayName, detail: e.detail, occurredAt: e.occurredAt.toISOString(),
       }));

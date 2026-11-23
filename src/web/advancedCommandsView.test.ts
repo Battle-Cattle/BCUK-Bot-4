@@ -46,6 +46,11 @@ function render(locals: Record<string, unknown> = {}): Promise<string> {
 }
 
 describe('views/advancedCommands.ejs', () => {
+  it('wraps the recent uses table in the scroll wrapper so its columns stay reachable on phones', async () => {
+    const html = await render();
+    expect(html).toMatch(/<div class="table-scroll">\s*<table class="table full-width">\s*<thead><tr><th>When<\/th>/);
+  });
+
   it('renders each command\'s settings, effects and actions', async () => {
     const html = await render();
     expect(html).toContain('action="/advanced-commands/add"');

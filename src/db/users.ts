@@ -1,10 +1,9 @@
 import mysql from 'mysql2/promise';
 import { normalizeTwitchChannelName } from '../twitch/twitchChannelName';
 import { getPool } from './pool';
-import { createLogger } from '../shared/logger';
+import { withShortLockTimeout } from './shortLockTimeout';
 import { fromBit, buildInClausePlaceholders } from './utils';
 
-const log = createLogger('DB');
 
 export const AccessLevel = {
   USER: 0,
@@ -29,9 +28,14 @@ export interface DbUser {
   twitch_name: string | null;
   /** Bot-owner flag (global super-admin). Set only via direct DB access, never the web panel. */
   is_owner: boolean;
+  /**
+   * Web panel session generation: copied into a session at login, and a session holding an older
+   * value is signed out (see {@link bumpSessionGeneration}).
+   */
+  session_generation: number;
 }
 
-const USER_SELECT = 'discord_id, discord_name, is_twitch_bot_enabled, twitch_name, is_owner';
+const USER_SELECT = 'discord_id, discord_name, is_twitch_bot_enabled, twitch_name, is_owner, session_generation';
 
 /**
  * Maps a raw `user` table row to a {@link DbUser}.
@@ -45,6 +49,8 @@ function mapUser(r: mysql.RowDataPacket): DbUser {
     is_twitch_bot_enabled: fromBit(r.is_twitch_bot_enabled),
     twitch_name: r.twitch_name,
     is_owner: fromBit(r.is_owner),
+    // INT UNSIGNED, not BIGINT, so mysql2 already returns a number.
+    session_generation: (r.session_generation as number | undefined) ?? 0,
   };
 }
 
@@ -137,7 +143,7 @@ export interface DbGuildMemberUser extends DbUser {
 export async function getGuildMemberUsers(guildId: string): Promise<DbGuildMemberUser[]> {
   const [rows] = await getPool().execute<mysql.RowDataPacket[]>(
     `SELECT u.discord_id, u.discord_name, u.is_twitch_bot_enabled, u.twitch_name,
-            gm.access_level AS access_level, u.is_owner
+            gm.access_level AS access_level, u.is_owner, u.session_generation
      FROM guild_member gm
      JOIN \`user\` u ON u.discord_id = gm.discord_id
      WHERE gm.guild_id = ?
@@ -145,32 +151,6 @@ export async function getGuildMemberUsers(guildId: string): Promise<DbGuildMembe
     [guildId],
   );
   return rows.map((r) => ({ ...mapUser(r), access_level: r.access_level as number }));
-}
-
-/**
- * Runs `fn` on a dedicated connection with a short (5s) `innodb_lock_wait_timeout`, so callers
- * fail fast instead of hanging up to the default 50s under lock contention. The timeout is reset
- * to the session default and the connection released before returning; if that reset fails, the
- * connection is destroyed instead of being returned to the pool.
- * @param fn Callback that receives the connection and performs the work.
- * @returns The value returned by `fn`.
- */
-async function withShortLockTimeout<T>(fn: (conn: mysql.PoolConnection) => Promise<T>): Promise<T> {
-  const connection = await getPool().getConnection();
-  try {
-    await connection.execute('SET SESSION innodb_lock_wait_timeout = 5');
-    return await fn(connection);
-  } finally {
-    try {
-      await connection.execute('SET SESSION innodb_lock_wait_timeout = DEFAULT');
-      connection.release();
-    } catch (e) {
-      // Don't hand a connection still carrying the 5s timeout back to the shared pool, or an
-      // unrelated transaction that later picks it up would fail fast under normal contention.
-      log.warn('connection.execute: failed to reset innodb_lock_wait_timeout to DEFAULT; destroying connection:', e);
-      connection.destroy();
-    }
-  }
 }
 
 /**
@@ -272,6 +252,22 @@ export async function updateDiscordName(discordId: string, name: string): Promis
     'UPDATE `user` SET discord_name = ? WHERE discord_id = ?',
     [trimmed || null, discordId],
   );
+}
+
+/**
+ * Bumps a user's web panel session generation, so every session that was given the old value at
+ * login is signed out on its next request. `LAST_INSERT_ID(expr)` hands the new value back from the
+ * same atomic `UPDATE`, so two concurrent bumps each see their own result.
+ * @param discordId - Discord snowflake of the user whose sessions are being signed out.
+ * @returns The new generation, or null when the user row doesn't exist.
+ */
+export async function bumpSessionGeneration(discordId: string): Promise<number | null> {
+  const [result] = await getPool().execute<mysql.ResultSetHeader>(
+    'UPDATE `user` SET session_generation = LAST_INSERT_ID(session_generation + 1) WHERE discord_id = ?',
+    [discordId],
+  );
+  // insertId is the new INT UNSIGNED generation (at most 2^32 - 1), so Number() can't lose precision.
+  return result.affectedRows > 0 ? Number(result.insertId) : null;
 }
 
 /**

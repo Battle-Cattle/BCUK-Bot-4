@@ -1,7 +1,7 @@
 import type { Request, Response, NextFunction } from 'express';
 import { getStreamerByDiscordId, type DbStreamerEventSub } from '../../db';
 import { getSessionUser } from '../session';
-import { isKnownStreamerLogin, unauthenticatedOverlayPool } from './sseOverlayAccess';
+import { isKnownStreamerLogin, unauthenticatedOverlayPool, OVERLAY_SSE_MAX_PER_CHANNEL_PER_IP } from './sseOverlayAccess';
 import type { SseConnectionPool } from './sseConnectionPool';
 import { attachSseConnection, broadcastToChannel, chainConnectionCleanup, onConnectionCountChange } from './sseChannel';
 import type { createLogger } from '../../shared/logger';
@@ -36,6 +36,8 @@ export interface SseEventsHandlerOptions {
   isValidLogin: (login: string) => string | null;
   /** Maximum concurrent SSE connections permitted per channel. */
   maxPerChannel: number;
+  /** Most of one channel's connections a single client IP may hold. Defaults to {@link OVERLAY_SSE_MAX_PER_CHANNEL_PER_IP}. */
+  maxPerChannelPerIp?: number;
   /** Whether a normalized login belongs to a registered streamer. Defaults to {@link isKnownStreamerLogin}. */
   isKnownLogin?: (login: string) => Promise<boolean>;
   /** Unauthenticated sub-pool these connections count against. Defaults to {@link unauthenticatedOverlayPool}. */
@@ -53,18 +55,21 @@ export interface SseEventsHandlerOptions {
  * payload shape — this only factors out the identical connection lifecycle via
  * {@link attachSseConnection}). These endpoints are opened unauthenticated by OBS, so a login
  * must belong to a registered streamer, and every connection counts against the shared
- * unauthenticated `pool` (total and per-IP limits) rather than only the process-wide cap.
+ * unauthenticated `pool` (total and per-IP limits) rather than only the process-wide cap. One
+ * client IP may also hold at most `maxPerChannelPerIp` of a channel's connections, so a single
+ * machine can't take every slot and lock the streamer's own OBS out.
  * @param options - See {@link SseEventsHandlerOptions}.
  * @returns An Express route handler: on a valid, non-reserved login of a registered streamer,
  *   upgrades the response to `text/event-stream`; replies 404 for a well-formed login that isn't a
- *   registered streamer, 503 if that lookup fails, 429 if `maxPerChannel` or a pool limit is
- *   exceeded; calls `next()` if the login is malformed or reserved.
+ *   registered streamer, 503 if that lookup fails, 429 if `maxPerChannel`, `maxPerChannelPerIp`
+ *   or a pool limit is exceeded; calls `next()` if the login is malformed or reserved.
  */
 export function createSseEventsHandler(
   options: SseEventsHandlerOptions,
 ): (req: Request<{ login: string }>, res: Response, next: NextFunction) => Promise<void> {
   const {
     connections, isValidLogin, maxPerChannel,
+    maxPerChannelPerIp = OVERLAY_SSE_MAX_PER_CHANNEL_PER_IP,
     isKnownLogin = isKnownStreamerLogin,
     pool = unauthenticatedOverlayPool,
     onConnected,
@@ -86,7 +91,7 @@ export function createSseEventsHandler(
     }
     // attachSseConnection skips a client that went away while the lookup above was awaited (a
     // cold cache load hits the DB).
-    if (attachSseConnection(req, res, { connections, key, maxPerChannel, pool })) await onConnected?.(res, key);
+    if (attachSseConnection(req, res, { connections, key, maxPerChannel, maxPerChannelPerIp, pool })) await onConnected?.(res, key);
   };
 }
 
@@ -100,6 +105,12 @@ export interface StreamerSseEventsHandlerOptions<K> {
   resolveKey: (streamer: DbStreamerEventSub) => K;
   /** Logger used to report an unexpected streamer lookup failure. */
   log: ReturnType<typeof createLogger>;
+  /**
+   * Called synchronously right after the connection is attached (never for a refused one), so a
+   * caller can tie the stream to something else, e.g. close it when the session ends. Streams that
+   * pass nothing behave exactly as before.
+   */
+  onAttached?: (req: Request, res: Response) => void;
 }
 
 /**
@@ -112,12 +123,12 @@ export interface StreamerSseEventsHandlerOptions<K> {
  * identical. The streamer is re-resolved on every connection attempt (rather than trusting a
  * cached id) so a revoked streamer record takes effect immediately.
  * @param options - See {@link StreamerSseEventsHandlerOptions}.
- * @returns An Express route handler for the logged-in user's own streamer SSE stream.
+ * @returns An Express route handler for the logged-in user's own streamer SSE stream; calls `options.onAttached` once the connection is attached.
  */
 export function createStreamerSseEventsHandler<K>(
   options: StreamerSseEventsHandlerOptions<K>,
 ): (req: Request, res: Response) => Promise<void> {
-  const { connections, maxPerChannel, resolveKey, log } = options;
+  const { connections, maxPerChannel, resolveKey, log, onAttached } = options;
 
   return async (req, res) => {
     let streamer: DbStreamerEventSub | null;
@@ -133,7 +144,7 @@ export function createStreamerSseEventsHandler<K>(
       return;
     }
 
-    attachSseConnection(req, res, { connections, key: resolveKey(streamer), maxPerChannel });
+    if (attachSseConnection(req, res, { connections, key: resolveKey(streamer), maxPerChannel })) onAttached?.(req, res);
   };
 }
 

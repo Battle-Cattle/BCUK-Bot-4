@@ -13,6 +13,7 @@ import { findUser, AccessLevel } from './users';
 import {
   getMemberAccessLevel,
   setMemberAccessLevel,
+  updateMemberAccessLevel,
   removeGuildMember,
   getEffectiveAccessLevel,
   getEffectiveAccessLevelForUser,
@@ -54,6 +55,26 @@ describe('setMemberAccessLevel', () => {
   });
 });
 
+describe('updateMemberAccessLevel', () => {
+  it('updates only an existing membership row and reports that it matched', async () => {
+    pool.execute.mockResolvedValueOnce([{ affectedRows: 1 }, []]);
+    expect(await updateMemberAccessLevel('111', '222', 2)).toBe(true);
+    const [sql, params] = pool.execute.mock.calls[0]!;
+    expect(sql).toBe('UPDATE guild_member SET access_level = ? WHERE guild_id = ? AND discord_id = ?');
+    expect(params).toEqual([2, '111', '222']);
+  });
+
+  it('returns false when the user has no membership row in the guild', async () => {
+    pool.execute.mockResolvedValueOnce([{ affectedRows: 0 }, []]);
+    expect(await updateMemberAccessLevel('111', '999', 1)).toBe(false);
+  });
+
+  it('rejects an invalid access level', async () => {
+    await expect(updateMemberAccessLevel('111', '222', 7)).rejects.toThrow('Invalid accessLevel');
+    expect(pool.execute).not.toHaveBeenCalled();
+  });
+});
+
 describe('removeGuildMember', () => {
   it('deletes the membership row', async () => {
     await removeGuildMember('111', '222');
@@ -72,6 +93,7 @@ describe('getEffectiveAccessLevel', () => {
     twitch_name: null,
     access_level: 0,
     is_owner: false,
+    session_generation: 0,
   };
 
   it('defaults to USER (0) when the user is not whitelisted', async () => {
@@ -112,6 +134,7 @@ describe('getEffectiveAccessLevelForUser', () => {
     twitch_name: null,
     access_level: 0,
     is_owner: false,
+    session_generation: 0,
   };
 
   it('returns ADMIN (3) for a bot owner regardless of membership, without a DB call', async () => {

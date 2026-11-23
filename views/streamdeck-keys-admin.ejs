@@ -9,7 +9,7 @@
 
       <% if (error) { %>
       <div class="card card-alert-danger" role="alert" aria-live="polite">
-        <span class="text-danger">&#9888; Operation failed. Please try again.</span>
+        <span class="text-danger">&#9888; <%= error === 'guild_changed' ? 'Nothing was changed: you switched server in another tab after this page loaded. Check the server and try again.' : 'Operation failed. Please try again.' %></span>
       </div>
       <% } %>
 
@@ -41,7 +41,7 @@
                 </td>
                 <td><%= row.requested_at.toLocaleString() %></td>
                 <td>
-                  <%- include('partials/streamdeckKeyApproveDeny', { discordId: row.discord_id }) %>
+                  <%- include('partials/streamdeckKeyApproveDeny', { discordId: row.discord_id, guildId: user.currentGuildId }) %>
                 </td>
               </tr>
               <% }); %>
@@ -101,11 +101,12 @@
                 </td>
                 <td>
                   <% if (row.status === 'pending') { %>
-                  <%- include('partials/streamdeckKeyApproveDeny', { discordId: row.discord_id }) %>
+                  <%- include('partials/streamdeckKeyApproveDeny', { discordId: row.discord_id, guildId: user.currentGuildId }) %>
                   <% } else if (row.status === 'approved') { %>
                   <form method="POST" action="/admin/streamdeck-keys/revoke" class="inline-form-sm js-confirm-revoke-key-admin">
                     <input type="hidden" name="_csrf" value="<%= csrfToken %>">
                     <input type="hidden" name="discord_id" value="<%= row.discord_id %>">
+                    <input type="hidden" name="guild_id" value="<%= user.currentGuildId %>">
                     <button type="submit" class="btn btn-sm btn-ghost">Revoke</button>
                   </form>
                   <% } else { %>

@@ -615,19 +615,23 @@ mv "$BUILD_DIR" dist
 # dist.old (and node_modules.old, if the dependencies changed) stay until the new build has proved
 # healthy, so a failed restart can roll straight back to them.
 
-# Reads WEB_PORT and WEB_HOST from .env (the bot's own source of truth for them) the way dotenv
-# does, with the same parser as the backup scripts (an `export ` prefix, spaces around `=` and
-# quoting included): a setting read differently from the bot's would fail the health check and roll
-# back a healthy build. Blank or missing values fall back to the same defaults as config.ts, which
+# Reads WEB_PORT and WEB_HOST from .env (the bot's own source of truth for them) with the bot's own
+# dotenv, like the backup scripts (see env_setting): a setting read differently from the bot's
+# would fail the health check and roll back a healthy build. Blank or missing values fall back to the same defaults as config.ts, which
 # also trims both (spaces inside quotes survive env_setting, but not the bot's own reading of them).
 ENV_FILE=.env
 # shellcheck source=scripts/lib/dotenv.sh
-source scripts/lib/dotenv.sh
+if ! DOTENV_RETURN_ON_FAILURE=1 source scripts/lib/dotenv.sh; then
+    FAILURE_REASON="couldn't read .env with the checkout's dotenv (see the error above)"
+    rollback
+fi
 # A restored backup or re-created .env can come back readable by every user on the host.
 warn_if_env_readable_by_others
-WEB_PORT_SETTING="$(trim "$(env_setting WEB_PORT)")"
+# Read and trimmed in two steps, so a failed read stops the deploy (set -e) rather than being lost
+# inside a nested $(...) and read as unset.
+WEB_PORT_SETTING="$(env_setting WEB_PORT)"; WEB_PORT_SETTING="$(trim "$WEB_PORT_SETTING")"
 WEB_PORT="${WEB_PORT_SETTING:-3000}"
-WEB_HOST_SETTING="$(trim "$(env_setting WEB_HOST)")"
+WEB_HOST_SETTING="$(env_setting WEB_HOST)"; WEB_HOST_SETTING="$(trim "$WEB_HOST_SETTING")"
 WEB_HOST="${WEB_HOST_SETTING:-127.0.0.1}"
 # A wildcard bind is reachable on loopback; an IPv6 literal needs brackets in a URL.
 case "$WEB_HOST" in

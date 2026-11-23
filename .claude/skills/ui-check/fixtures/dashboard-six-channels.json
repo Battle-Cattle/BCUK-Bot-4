@@ -1,0 +1,20 @@
+{
+  "_comment": "Illustrative data for ui-check only. Six Twitch channels, as a real guild can have: the four of dashboard.json plus a connected live channel with a 25-character name (the longest Twitch allows) and another offline one.",
+  "extends": "dashboard.json",
+  "status": {
+    "twitch": {
+      "a_very_long_streamer_name": {
+        "connected": true,
+        "lastConnectedAt": "2026-11-18T06:00:00.000Z",
+        "lastDisconnectedAt": null,
+        "isLive": true
+      },
+      "streamer_six": {
+        "connected": true,
+        "lastConnectedAt": "2026-11-18T06:00:00.000Z",
+        "lastDisconnectedAt": null,
+        "isLive": false
+      }
+    }
+  }
+}

@@ -1,13 +1,15 @@
-<%# Approve/Deny buttons for a pending Streamdeck API key request. Locals: csrfToken, discordId — the requester's Discord snowflake. -%>
+<%# Approve/Deny buttons for a pending Streamdeck API key request. Locals: csrfToken, discordId — the requester's Discord snowflake, guildId — snowflake of the guild the page was rendered for. -%>
 <div class="d-flex gap-04 flex-wrap">
   <form method="POST" action="/admin/streamdeck-keys/approve" class="inline-form-sm">
     <input type="hidden" name="_csrf" value="<%= csrfToken %>">
     <input type="hidden" name="discord_id" value="<%= discordId %>">
+    <input type="hidden" name="guild_id" value="<%= guildId %>">
     <button type="submit" class="btn btn-sm">Approve</button>
   </form>
   <form method="POST" action="/admin/streamdeck-keys/deny" class="inline-form-sm js-confirm-deny-key">
     <input type="hidden" name="_csrf" value="<%= csrfToken %>">
     <input type="hidden" name="discord_id" value="<%= discordId %>">
+    <input type="hidden" name="guild_id" value="<%= guildId %>">
     <button type="submit" class="btn btn-sm btn-ghost">Deny</button>
   </form>
 </div>

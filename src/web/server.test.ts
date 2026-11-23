@@ -18,6 +18,7 @@ vi.mock('../shared/config', () => ({
   DB_NAME: 'db',
   SFX_FOLDER: './sfx',
   SFX_MAX_FILE_MB: 10,
+  SSE_MAX_TOTAL_CONNECTIONS: 100,
 }));
 
 // The session pool server.ts hands the session store, and the store's constructor args/close calls.
@@ -113,6 +114,10 @@ function errorTriggerRouter() {
     (req.session as unknown as Record<string, unknown>).visited = true;
     res.send('saved');
   });
+  // Destroys the session, as logout does, so the wrapped store's destroy runs.
+  router.get('/__destroy_session', (req, res) => {
+    req.session.destroy(() => res.send('destroyed'));
+  });
   return router;
 }
 
@@ -165,6 +170,8 @@ vi.mock('./routes/health', () => ({ default: markerRouter('health') }));
 vi.mock('./routes/healthStatusEvents', () => ({ default: emptyRouter() }));
 
 import { app, generalLimiter, preSessionLimiter, sessionLimiter, startWebPanel, stopWebPanel } from './server';
+import { registerSessionStream, resetSessionStreamsForTests } from './sessionStreams';
+import { attachSseConnection, setSseConnectionsAccepted } from './routes/sseChannel';
 import { overlayTrafficLimiter } from './rateLimits';
 import { createHmac } from 'crypto';
 import { requireAuth, requireAuthJson, requireGuildContext } from './middleware';
@@ -616,22 +623,68 @@ describe('sessionLimiter wiring (server.ts)', () => {
   });
 });
 
+/**
+ * Runs `fn` with a port already taken on 127.0.0.1 — the address the panel binds by default.
+ * Windows lets a specific-address bind share a port with a wildcard listener, so a wildcard
+ * blocker wouldn't make the panel's listen fail there.
+ */
+async function withOccupiedPort(fn: (port: number) => Promise<void>): Promise<void> {
+  const blocker = http.createServer();
+  await new Promise<void>((resolve) => blocker.listen(0, '127.0.0.1', resolve));
+  const { port } = blocker.address() as AddressInfo;
+  try {
+    await fn(port);
+  } finally {
+    await new Promise<void>((resolve) => blocker.close(() => resolve()));
+  }
+}
+
 describe('startWebPanel / stopWebPanel', () => {
   afterEach(async () => {
     await stopWebPanel();
   });
 
+  it('resolves with a server that is listening', async () => {
+    const server = await startWebPanel(0);
+    expect(server.listening).toBe(true);
+    const res = await request(server).get('/healthz');
+    expect(res.status).toBe(200);
+  });
+
   it('rejects with the listen error instead of reporting success when the port is taken', async () => {
-    const blocker = http.createServer();
-    // Same address the panel binds by default: Windows lets a specific-address bind share a port
-    // with a wildcard listener, so a wildcard blocker wouldn't make the panel's listen fail there.
-    await new Promise<void>((resolve) => blocker.listen(0, '127.0.0.1', resolve));
-    const { port } = blocker.address() as AddressInfo;
-    try {
+    mockLog.info.mockClear();
+    await withOccupiedPort(async (port) => {
       await expect(startWebPanel(port)).rejects.toMatchObject({ code: 'EADDRINUSE' });
-    } finally {
-      await new Promise<void>((resolve) => blocker.close(() => resolve()));
-    }
+    });
+    expect(mockLog.info).not.toHaveBeenCalledWith(expect.stringContaining('Panel listening'));
+  });
+
+  it('leaves the panel stopped after a failed start, so stop is a no-op', async () => {
+    await withOccupiedPort(async (port) => {
+      await expect(startWebPanel(port)).rejects.toMatchObject({ code: 'EADDRINUSE' });
+    });
+    storeClose.mockClear();
+    await expect(stopWebPanel()).resolves.toBeUndefined();
+    expect(storeClose).not.toHaveBeenCalled();
+  });
+
+  it('starts normally after an earlier start failed', async () => {
+    await withOccupiedPort(async (port) => {
+      await expect(startWebPanel(port)).rejects.toMatchObject({ code: 'EADDRINUSE' });
+    });
+    const server = await startWebPanel(0);
+    expect(server.listening).toBe(true);
+    storeClose.mockClear();
+    await stopWebPanel();
+    expect(server.listening).toBe(false);
+    expect(storeClose).toHaveBeenCalledOnce();
+  });
+
+  it('does not keep a startup error handler that would swallow later server errors', async () => {
+    const server = await startWebPanel(0);
+    // With no listener left, Node throws an emitted 'error' (reaching the process-level
+    // uncaughtException handler) rather than a spent startup handler silently absorbing it.
+    expect(() => server.emit('error', new Error('late server error'))).toThrow('late server error');
   });
 
   it("keeps Node's default request and header deadlines, since uploads arrive in short pieces", async () => {
@@ -641,7 +694,7 @@ describe('startWebPanel / stopWebPanel', () => {
     await stopWebPanel();
   });
 
-  it('closes the server and drops in-flight connections on stop', async () => {
+  it('closes the server and drops connections still in progress at the drain limit, with a warning', async () => {
     const server = await startWebPanel(0);
     const { port } = server.address() as AddressInfo;
     const accepted = new Promise<net.Socket>((resolve) => server.once('connection', resolve));
@@ -656,10 +709,42 @@ describe('startWebPanel / stopWebPanel', () => {
     const serverSocket = await accepted;
     await waitFor(() => expect(serverSocket.bytesRead).toBeGreaterThan(0));
 
-    await stopWebPanel();
+    // A request still in progress is given up to the drain limit to finish before it's dropped.
+    mockLog.warn.mockClear();
+    await stopWebPanel(50);
 
     await socketClosed;
     expect(server.listening).toBe(false);
+    expect(mockLog.warn).toHaveBeenCalledWith(expect.stringContaining('still running 50ms after shutdown began'));
+  });
+
+  it('waits for a request still in progress instead of dropping it, then closes the session store', async () => {
+    const server = await startWebPanel(0);
+    const { port } = server.address() as AddressInfo;
+    const accepted = new Promise<net.Socket>((resolve) => server.once('connection', resolve));
+    const socket = net.connect(port, '127.0.0.1');
+    socket.on('error', () => {});
+    const socketClosed = new Promise<void>((resolve) => socket.once('close', () => resolve()));
+    let response = '';
+    socket.on('data', (chunk) => { response += chunk.toString('utf8'); });
+    await new Promise<void>((resolve) => socket.once('connect', () => resolve()));
+    socket.write('GET /healthz HTTP/1.1\r\nHost: localhost\r\n');
+    const serverSocket = await accepted;
+    await waitFor(() => expect(serverSocket.bytesRead).toBeGreaterThan(0));
+    storeClose.mockClear();
+    mockLog.warn.mockClear();
+
+    const stopping = stopWebPanel(5_000);
+    // The client finishes its request after shutdown began; it's still answered.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(storeClose).not.toHaveBeenCalled();
+    socket.write('\r\n');
+    await stopping;
+    await socketClosed;
+
+    expect(response).toMatch(/^HTTP\/1\.1 200/);
+    expect(storeClose).toHaveBeenCalledOnce();
+    expect(mockLog.warn).not.toHaveBeenCalledWith(expect.stringContaining('Dropped the web connections'));
   });
 
   it('binds the configured host, loopback by default', async () => {
@@ -675,6 +760,30 @@ describe('startWebPanel / stopWebPanel', () => {
   it('is a no-op when the panel is not running', async () => {
     await expect(stopWebPanel()).resolves.toBeUndefined();
     expect(storeClose).not.toHaveBeenCalled();
+  });
+
+  it('refuses new SSE connections once stopping begins, and accepts them again after a restart', async () => {
+    /** A minimal SSE request/response pair, enough for attachSseConnection. */
+    const sseExchange = () => {
+      const req = Object.assign(new EventEmitter(), { destroyed: false, ip: '10.0.0.1', socket: {} });
+      const res = Object.assign(new EventEmitter(), {
+        closed: false, writableLength: 0, destroy: vi.fn(), setHeader: vi.fn(), flushHeaders: vi.fn(), write: vi.fn(),
+        status: vi.fn().mockReturnThis(), end: vi.fn(),
+      });
+      return { req, res };
+    };
+    const connections = new Map<string, Set<any>>();
+
+    await startWebPanel(0);
+    await stopWebPanel();
+    const late = sseExchange();
+    expect(attachSseConnection(late.req as any, late.res as any, { connections, key: 'k', maxPerChannel: 5 })).toBe(false);
+    expect(late.res.destroy).toHaveBeenCalledOnce();
+
+    await startWebPanel(0);
+    const next = sseExchange();
+    expect(attachSseConnection(next.req as any, next.res as any, { connections, key: 'k', maxPerChannel: 5 })).toBe(true);
+    next.req.emit('close');
   });
 
   it('closes the session store after the server on stop', async () => {
@@ -716,6 +825,14 @@ describe('expired-session cleanup', () => {
     await startWebPanel(0);
     await vi.advanceTimersByTimeAsync(FIFTEEN_MINUTES);
     expect(mockLog.warn).toHaveBeenCalledWith(expect.stringContaining('Failed to clear expired sessions'), failure);
+  });
+
+  it('does not start after a failed panel start', async () => {
+    await withOccupiedPort(async (port) => {
+      await expect(startWebPanel(port)).rejects.toMatchObject({ code: 'EADDRINUSE' });
+    });
+    await vi.advanceTimersByTimeAsync(FIFTEEN_MINUTES * 2);
+    expect(storeClearExpired).not.toHaveBeenCalled();
   });
 
   it('stops when the panel stops', async () => {
@@ -815,6 +932,47 @@ describe('preSessionLimiter (server.ts)', () => {
     // Skipped requests never touch the bucket, so the IP still has its full budget.
     const res = await request(testApp).get('/api/streamdeck/ping');
     expect(res.headers['ratelimit']).toBeUndefined();
+  });
+});
+
+describe('session store destroy (#1112)', () => {
+  /** Every stream the test opened, so afterEach can end the ones the destroy left open (releasing their keepalive and SSE slot). */
+  const openedResponses: { end: () => void }[] = [];
+
+  beforeEach(() => {
+    // An earlier test's stopWebPanel() leaves the SSE helper refusing connections (as during shutdown).
+    setSseConnectionsAccepted(true);
+  });
+
+  afterEach(() => {
+    storeGet.mockImplementation((_id, cb) => cb(null, undefined));
+    for (const res of openedResponses.splice(0)) res.end();
+    resetSessionStreamsForTests();
+  });
+
+  it('closes the destroyed session\'s dashboard streams, and only its', async () => {
+    storeGet.mockImplementation((sid, cb) =>
+      cb(null, { cookie: { originalMaxAge: 60_000, expires: new Date(Date.now() + 60_000).toISOString() }, user: { discordId: sid } }));
+    // A stream attached through the real SSE helper (so the registry's cleanup chain works), on a stand-in socket.
+    const open = (sessionID: string) => {
+      const res = Object.assign(new EventEmitter(), {
+        closed: false, setHeader: vi.fn(), flushHeaders: vi.fn(), write: vi.fn(), writableLength: 0,
+        end: vi.fn(() => { res.emit('close'); }),
+      });
+      const req = Object.assign(new EventEmitter(), { destroyed: false, sessionID, session: { user: { discordId: sessionID } } });
+      expect(attachSseConnection(req as never, res as never, { connections: new Map(), key: sessionID, maxPerChannel: 5 })).toBe(true);
+      expect(registerSessionStream(req as never, res as never, 'status')).toBe(true);
+      openedResponses.push(res);
+      return res;
+    };
+    const destroyed = open('destroy-me');
+    const other = open('keep-me');
+
+    const res = await request(app).get('/__destroy_session').set('Cookie', signedSessionCookie('destroy-me')).set('X-Forwarded-For', '198.51.100.21');
+
+    expect(res.text).toBe('destroyed');
+    expect(destroyed.end).toHaveBeenCalledTimes(1);
+    expect(other.end).not.toHaveBeenCalled();
   });
 });
 

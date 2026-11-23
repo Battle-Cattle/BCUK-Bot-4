@@ -9,6 +9,7 @@ import {
   getAllGuilds,
   getGuildsForMember,
   getEffectiveAccessLevelForUser,
+  bumpSessionGeneration,
   AccessLevel,
   type DbGuild,
   type DbUser,
@@ -17,6 +18,7 @@ import { fetchMemberDisplayName } from '../discord/discordApi';
 import { runUserMutation } from '../shared/userMutationQueue';
 import type { SessionUser } from '../types/express';
 import { startSessionLifetime } from './sessionLifetime';
+import { closeUserStreams } from './sessionStreams';
 
 const log = createLogger('Web');
 
@@ -117,14 +119,22 @@ function buildSessionUser(
  * given user payload onto the fresh session, starting its lifetime (see `sessionLifetime.ts`).
  * @param req - Express request whose session is regenerated and saved.
  * @param userData - The `SessionUser` payload to store.
+ * @param sessionGeneration - The user's current `user.session_generation`, so a later
+ *   "Sign out other sessions" can end this session.
  * @param discordAuthAt - When the user completed Discord OAuth, for a Discord login; omitted for
  *   a passkey sign-in, so the new session carries no recent-Discord-login timestamp.
  * @returns Resolves once the regenerated session has been saved.
  */
-async function saveSessionUser(req: Request, userData: SessionUser, discordAuthAt: number | undefined): Promise<void> {
+async function saveSessionUser(
+  req: Request,
+  userData: SessionUser,
+  sessionGeneration: number,
+  discordAuthAt: number | undefined,
+): Promise<void> {
   await promisify(req.session.regenerate.bind(req.session))();
   // regenerate() replaces req.session, so read it again only after it has finished.
   req.session.user = userData;
+  req.session.sessionGeneration = sessionGeneration;
   startSessionLifetime(req.session, Date.now());
   if (discordAuthAt !== undefined) req.session.discordAuthAt = discordAuthAt;
   await promisify(req.session.save.bind(req.session))();
@@ -156,5 +166,40 @@ export async function establishDashboardSession(
   const syncedDiscordName = await syncDiscordName(profile, dbUser, firstGuild.guild_id);
   const guildAndAccessLevel = await resolveInitialGuildAndAccessLevel(accessibleGuilds, dbUser);
   const userData = buildSessionUser(profile, dbUser, syncedDiscordName, accessibleGuilds, guildAndAccessLevel);
-  await saveSessionUser(req, userData, options.discordAuthAt);
+  await saveSessionUser(req, userData, dbUser.session_generation, options.discordAuthAt);
+}
+
+/** Thrown by {@link signOutOtherSessions} when the session's user row no longer exists. */
+export class SessionUserGoneError extends Error {
+  /** @param discordId - Discord snowflake of the user whose row was missing. */
+  constructor(discordId: string) {
+    super(`No user row for ${discordId}`);
+    this.name = 'SessionUserGoneError';
+  }
+}
+
+/**
+ * Signs the request's user out of every other web panel session (#1058): bumps their
+ * `user.session_generation`, which ends any session holding the old value on its next request,
+ * then re-issues this session under a new ID with the new generation, so it stays signed in and a
+ * copy of its old cookie doesn't. Login times, the CSRF token and the rest of the session carry over.
+ * Right after the bump it also closes the user's open dashboard streams from older generations
+ * (see `closeUserStreams`), the caller's own old-ID ones included.
+ * @param req - Express request with a signed-in session (`requireAuth` ran first).
+ * @returns Resolves once the generation is bumped and the re-issued session is saved.
+ * @throws {SessionUserGoneError} When the user row no longer exists.
+ */
+export async function signOutOtherSessions(req: Request): Promise<void> {
+  const discordId = req.session.user?.discordId;
+  if (!discordId) throw new Error('signOutOtherSessions: no signed-in session');
+  const generation = await bumpSessionGeneration(discordId);
+  if (generation === null) throw new SessionUserGoneError(discordId);
+  // Before the regenerate's awaits, so a dashboard stream from a signed-out session closes now and one still on
+  // its way to attaching is refused (#1112). The caller's own old-ID streams close too; their tabs reconnect.
+  closeUserStreams(discordId, generation);
+  const { cookie: _cookie, ...carried } = req.session;
+  await promisify(req.session.regenerate.bind(req.session))();
+  // regenerate() replaces req.session, so write to it only after it has finished.
+  Object.assign(req.session, carried, { sessionGeneration: generation });
+  await promisify(req.session.save.bind(req.session))();
 }

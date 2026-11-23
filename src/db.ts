@@ -16,14 +16,20 @@ export { pingDb } from './db/health';
 // ─── Guilds ──────────────────────────────────────────────────────────────────
 
 export {
-  getAllGuilds, getProvisionedGuilds, getGuildById, getGuildsForMember, upsertGuild,
+  getAllGuilds, getProvisionedGuilds, getGuildById, getGuildsForMember,
 } from './db/guilds';
 export type { DbGuild } from './db/guilds';
+export { upsertGuild } from './db/guildWrites';
 
 export {
-  getMemberAccessLevel, setMemberAccessLevel,
-  removeGuildMember, getEffectiveAccessLevelForUser,
+  getMemberAccessLevel,
+  // Not wrapped in guildMemberWrites: it only changes the level of an existing member, which no guild-info listener reads.
+  updateMemberAccessLevel,
+  getEffectiveAccessLevelForUser,
 } from './db/guildMembers';
+export { setMemberAccessLevel, removeGuildMember } from './db/guildMemberWrites';
+// Fired by the wrappers above and by userWrites when a guild's name or Twitch-enabled members may have changed.
+export { onGuildInfoChanged } from './db/guildInfoEvents';
 
 export { getOverridesForGuild } from './db/guildCommandOverrides';
 export type { DbGuildCommandOverride } from './db/guildCommandOverrides';
@@ -34,7 +40,7 @@ export { upsertOverride, removeOverride } from './db/guildCommandOverrideWrites'
 export {
   AccessLevel, ACCESS_LEVEL_LABELS,
   findUser, findUsersByIds, findUserByTwitchName, findOwnerUser, getGuildMemberUsers,
-  updateDiscordName, getTwitchEnabledChannels, getAllTwitchLinkedUsers,
+  updateDiscordName, getTwitchEnabledChannels, getAllTwitchLinkedUsers, bumpSessionGeneration,
 } from './db/users';
 export type { AccessLevelValue, DbUser, DbGuildMemberUser } from './db/users';
 export { upsertUser, updateTwitchBotEnabled, deleteUnlinkedUser } from './db/userWrites';
@@ -190,6 +196,8 @@ export { setLoyaltyPointsConfig } from './db/loyaltyPointsWrites';
 export { getExclusions as getLoyaltyPointsExclusions } from './db/loyaltyPointsExclusions';
 export { isExcludedFromLoyaltyPoints } from './db/loyaltyPointsExclusionCache';
 export { addLoyaltyPointsExclusion, removeLoyaltyPointsExclusion } from './db/loyaltyPointsExclusionWrites';
+export type { RafflePayout, RafflePayoutResult } from './db/rafflePayouts';
+export { createRafflePayouts, isRafflePayoutPaid, payRafflePayout } from './db/rafflePayouts';
 
 // ─── Advanced commands ──────────────────────────────────────────────────────
 // Per-streamer commands with a loyalty-point cost, free Stream Deck triggers, and overlay and

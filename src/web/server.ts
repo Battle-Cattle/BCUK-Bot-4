@@ -6,6 +6,7 @@ import MySQLStore from 'express-mysql-session';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import path from 'path';
+import { createServer } from 'http';
 import type { Server } from 'http';
 import { WEB_HOST, WEB_PORT, SESSION_SECRET } from '../shared/config';
 import { getSessionPool } from '../db';
@@ -18,7 +19,10 @@ import streamdeckPluginDownloadRouter from './routes/streamdeckPluginDownload';
 import { mountRoutes } from './routes/index';
 import { ensureSessionCsrfToken } from './csrf';
 import { enforceSessionLifetime, SESSION_IDLE_MS } from './sessionLifetime';
+import { wrapStoreDestroy } from './sessionStreams';
 import { renderView } from './routes/viewHelpers';
+import { trackForGracefulClose, type GracefulClose } from './serverDrain';
+import { setSseConnectionsAccepted } from './routes/sseChannel';
 import {
   ipKey,
   generalLimiterSkip,
@@ -194,6 +198,8 @@ const sessionStore = new (MySQLStore(session))(
   },
   getSessionPool().pool,
 );
+// Closes a destroyed (or regenerated) session's open dashboard streams before the row is deleted (#1112).
+wrapStoreDestroy(sessionStore);
 const sessionMiddleware = session({
   secret: SESSION_SECRET,
   resave: false,
@@ -359,8 +365,18 @@ export { app };
 // entire app to reach the 100/600 thresholds via every other mounted route.
 export { generalLimiter, preSessionLimiter, sessionLimiter };
 
-/** The panel's listening server, kept so {@link stopWebPanel} can close it on shutdown. */
-let webServer: Server | null = null;
+/**
+ * How long {@link stopWebPanel} waits for in-flight requests (an upload's last step, a video
+ * conversion, an admin change) to finish before dropping them. Well inside the systemd unit's
+ * `TimeoutStopSec=30` (deploy/bcuk-bot.service), which also has to cover the rest of shutdown.
+ */
+const WEB_DRAIN_TIMEOUT_MS = 10_000;
+
+/**
+ * The panel's listening server and its graceful close, kept so {@link stopWebPanel} can close it
+ * on shutdown.
+ */
+let webServer: { server: Server; closeGracefully: GracefulClose } | null = null;
 
 /** How often expired rows are deleted from the `sessions` table (the store's own default). */
 const SESSION_CLEANUP_INTERVAL_MS = 15 * 60 * 1000;
@@ -403,40 +419,55 @@ function stopSessionCleanup(): void {
  * hop of.
  * @param port - Port to listen on; defaults to {@link WEB_PORT} (tests pass 0 for a free port).
  * @param host - Interface to bind; defaults to {@link WEB_HOST}.
- * @returns Resolves with the listening server. Rejects with the listen error (e.g.
- *   `EADDRINUSE`) instead — Express 5 hands that error to the listen callback, so ignoring the
- *   callback's argument would log "Panel listening" for a panel that never came up.
+ * @returns Resolves with the listening server. Rejects with the listen error (e.g. `EADDRINUSE`)
+ *   instead, which Node emits as the server's `error` event, not through a listen callback. A failed
+ *   start leaves nothing running: the panel isn't recorded as up and the session cleanup isn't started.
  */
 export function startWebPanel(port: number = WEB_PORT, host: string = WEB_HOST): Promise<Server> {
+  const server = createServer(app);
+  const closeGracefully = trackForGracefulClose(server);
   return new Promise((resolve, reject) => {
-    const server = app.listen(port, host, (err?: Error) => {
-      if (err) {
-        reject(err);
-        return;
-      }
-      webServer = server;
+    /**
+     * Rejects with a listen failure, dropping the now-pointless `listening` handler.
+     * @param err - The bind error, e.g. `EADDRINUSE` or `EACCES`.
+     */
+    const onError = (err: Error): void => {
+      server.off('listening', onListening);
+      reject(err);
+    };
+    /** Records the panel as up, starts the session cleanup and resolves; the startup error handler goes. */
+    const onListening = (): void => {
+      server.off('error', onError);
+      webServer = { server, closeGracefully };
+      setSseConnectionsAccepted(true);
       startSessionCleanup();
       log.info(`Panel listening on ${host}:${port}`);
       resolve(server);
-    });
+    };
+    server.once('error', onError);
+    server.once('listening', onListening);
+    server.listen(port, host);
   });
 }
 
 /**
- * Stops the web panel: stops the expired-session cleanup timer, stops accepting connections and
- * drops the open ones — long-lived SSE streams would otherwise hold `server.close()` open
- * indefinitely — then closes the session store. The store leaves its DB pool open; shutdown's
- * closePool() ends it last. No-op if the panel isn't running.
+ * Stops the web panel: stops the expired-session cleanup timer, stops accepting connections, ends
+ * the long-lived SSE streams (and refuses new ones, via `setSseConnectionsAccepted`), and lets requests still in progress finish — for up to `drainTimeoutMs`,
+ * after which they're dropped (see {@link trackForGracefulClose}) — then closes the session store.
+ * Shutdown stops the transcodes and closes the DB pool only after this resolves, so a request that
+ * finishes in time never sees a killed ffmpeg or a closed pool. The store leaves its DB pool open;
+ * shutdown's closePool() ends it last. No-op if the panel isn't running.
+ * @param drainTimeoutMs - How long to wait for in-flight requests; defaults to {@link WEB_DRAIN_TIMEOUT_MS}.
  * @returns Resolves once the server and the session store have closed.
  */
-export async function stopWebPanel(): Promise<void> {
-  const server = webServer;
-  if (!server) return;
+export async function stopWebPanel(drainTimeoutMs: number = WEB_DRAIN_TIMEOUT_MS): Promise<void> {
+  const panel = webServer;
+  if (!panel) return;
   webServer = null;
   stopSessionCleanup();
-  await new Promise<void>((resolve, reject) => {
-    server.close((err) => (err ? reject(err) : resolve()));
-    server.closeAllConnections();
-  });
+  setSseConnectionsAccepted(false);
+  if (await panel.closeGracefully(drainTimeoutMs)) {
+    log.warn(`Dropped the web connections still running ${drainTimeoutMs}ms after shutdown began.`);
+  }
   await sessionStore.close();
 }

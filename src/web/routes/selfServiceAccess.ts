@@ -4,7 +4,7 @@ import { parseDiscordIdList } from './validation';
 import { getCurrentGuildId } from '../session';
 
 // Streamer self-service rules shared by the Custom Commands and Timers pages (see "Access Levels"
-// in CLAUDE.md): Mod+ manage the whole catalog; anyone else with a linked Twitch account manages
+// in src/web/CLAUDE.md): Mod+ manage the whole catalog; anyone else with a linked Twitch account manages
 // only what is on their own channel. The per-entity "may this streamer edit it alone" rules stay
 // in commandPermissions.ts / timerPermissions.ts, because they differ.
 

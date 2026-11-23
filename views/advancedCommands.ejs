@@ -205,6 +205,7 @@
           <% if (usage.length === 0) { %>
           <p class="muted">No commands have been used yet.</p>
           <% } else { %>
+          <div class="table-scroll">
           <table class="table full-width">
             <thead><tr><th>When</th><th>Command</th><th>By</th><th>Points</th><th>Result</th></tr></thead>
             <tbody>
@@ -222,6 +223,7 @@
               <% }); %>
             </tbody>
           </table>
+          </div>
           <% } %>
         </div>
       </div>

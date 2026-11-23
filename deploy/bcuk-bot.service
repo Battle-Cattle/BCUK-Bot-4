@@ -28,7 +28,10 @@ RestartSec=10
 RestartSteps=5
 RestartMaxDelaySec=300
 KillSignal=SIGTERM
-# shutdown() announces itself to the owner and closes Discord/Twitch/DB cleanly first.
+# shutdown() announces itself to the owner (up to 5s), lets in-flight web requests finish (up to 10s,
+# WEB_DRAIN_TIMEOUT_MS in src/web/server.ts) and closes Discord/Twitch/DB cleanly first, then
+# flushes the log files (up to 2s). If teardown is still running at 25s (SHUTDOWN_DEADLINE_MS in
+# src/index.ts) it logs that and exits 1, so a hang is explained in the logs rather than ended by SIGKILL.
 TimeoutStopSec=30
 
 # Sandboxing (defence in depth): limits what a compromised Node process (a dependency, or ffmpeg
