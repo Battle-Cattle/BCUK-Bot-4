@@ -20,6 +20,65 @@ function twitchRollupState(twitch) {
 }
 
 /**
+ * Builds the left side of a channel row: its name, its last connected/disconnected time and, when its live status
+ * hasn't been re-checked for about 3 polls, how long ago it was last checked.
+ * @param name - The channel's login.
+ * @param info - The channel's entry from /api/status.
+ * @param liveStale - True when the channel's live state is stale (shown as last known, not current).
+ * @returns The `channel-info` element.
+ */
+function buildChannelInfo(name, info, liveStale) {
+  const ts = info.connected ? info.lastConnectedAt : info.lastDisconnectedAt;
+
+  const left = document.createElement('div');
+  left.className = 'channel-info';
+
+  const channelName = document.createElement('div');
+  channelName.className = 'channel-name';
+  channelName.textContent = name;
+
+  const channelMeta = document.createElement('div');
+  channelMeta.className = 'channel-meta';
+  channelMeta.textContent = ts ? relativeTime(ts) : 'Never seen';
+
+  left.appendChild(channelName);
+  left.appendChild(channelMeta);
+  if (liveStale) {
+    const checked = document.createElement('div');
+    checked.className = 'channel-meta channel-meta--stale';
+    checked.textContent = `Live status last checked ${formatLiveCheckAge(liveCheckAgeMs(info, Date.now()))}`;
+    left.appendChild(checked);
+  }
+  return left;
+}
+
+/**
+ * Builds the right side of a channel row: the LIVE badge (a dashed "WAS LIVE" one when the live state is stale, so
+ * it never reads as current) and the Connected/Disconnected badge.
+ * @param info - The channel's entry from /api/status.
+ * @param liveStale - True when the channel's live state is stale.
+ * @returns The `channel-badges` element.
+ */
+function buildChannelBadges(info, liveStale) {
+  const online = info.connected;
+  const right = document.createElement('div');
+  right.className = 'channel-badges';
+
+  if (online && info.isLive) {
+    const liveBadge = document.createElement('span');
+    liveBadge.className = liveStale ? 'badge badge-live-stale' : 'badge badge-live';
+    liveBadge.textContent = liveStale ? 'WAS LIVE' : 'LIVE';
+    right.appendChild(liveBadge);
+  }
+
+  const badge = document.createElement('span');
+  badge.className = `badge ${online ? 'badge-online' : 'badge-offline'}`;
+  badge.textContent = online ? 'Connected' : 'Disconnected';
+  right.appendChild(badge);
+  return right;
+}
+
+/**
  * Lists each monitored channel with its connection badge, last connected/disconnected time and LIVE badge, or
  * "No Twitch channels configured." when there are none.
  * @param container - The element the channel list is rendered into.
@@ -37,54 +96,13 @@ function renderChannels(container, channelMap) {
   }
 
   for (const [name, info] of entries) {
-    const online = info.connected;
-    const ts = online ? info.lastConnectedAt : info.lastDisconnectedAt;
-    const label = online ? 'Connected' : 'Disconnected';
-    const cls = online ? 'badge-online' : 'badge-offline';
-    const meta = ts ? relativeTime(ts) : 'Never seen';
     // Live status not re-checked for about 3 polls: show it as last known, with its age, not as current.
-    const liveStale = online && typeof info.isLive === 'boolean' && isLiveCheckStale(info, Date.now());
+    const liveStale = Boolean(info.connected) && typeof info.isLive === 'boolean' && isLiveCheckStale(info, Date.now());
 
     const item = document.createElement('div');
     item.className = 'channel-item';
-
-    const left = document.createElement('div');
-    left.className = 'channel-info';
-
-    const channelName = document.createElement('div');
-    channelName.className = 'channel-name';
-    channelName.textContent = name;
-
-    const channelMeta = document.createElement('div');
-    channelMeta.className = 'channel-meta';
-    channelMeta.textContent = meta;
-
-    left.appendChild(channelName);
-    left.appendChild(channelMeta);
-    if (liveStale) {
-      const checked = document.createElement('div');
-      checked.className = 'channel-meta channel-meta--stale';
-      checked.textContent = `Live status last checked ${formatLiveCheckAge(liveCheckAgeMs(info, Date.now()))}`;
-      left.appendChild(checked);
-    }
-
-    const right = document.createElement('div');
-    right.className = 'channel-badges';
-
-    if (online && info.isLive) {
-      const liveBadge = document.createElement('span');
-      liveBadge.className = liveStale ? 'badge badge-live-stale' : 'badge badge-live';
-      liveBadge.textContent = liveStale ? 'WAS LIVE' : 'LIVE';
-      right.appendChild(liveBadge);
-    }
-
-    const badge = document.createElement('span');
-    badge.className = `badge ${cls}`;
-    badge.textContent = label;
-    right.appendChild(badge);
-
-    item.appendChild(left);
-    item.appendChild(right);
+    item.appendChild(buildChannelInfo(name, info, liveStale));
+    item.appendChild(buildChannelBadges(info, liveStale));
     container.appendChild(item);
   }
 }
