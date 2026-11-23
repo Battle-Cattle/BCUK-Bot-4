@@ -127,15 +127,78 @@ if (recentEventsList && initialEventsRaw) {
   }
 }
 
-/** Re-fetches and re-renders the full recent-events list, used to resync after a reconnect. */
-async function resyncRecentEvents() {
+/** `EventSource.readyState` once the browser has given up reconnecting (the constant, kept local to this script). */
+const EVENTS_STREAM_CLOSED = 2;
+/** How long one snapshot request (headers and body) may take before it is abandoned, so a stalled one can't block every later resync. */
+const RESYNC_TIMEOUT_MS = 15000;
+/** How many times one resync re-fetches because a live event arrived while its request was in flight. */
+const RESYNC_MAX_ATTEMPTS = 3;
+
+/** Live events prepended so far; a changed count during a fetch means that snapshot may predate an event. */
+let liveEventsSeen = 0;
+/** True after the stream dropped: the next `open` (the reconnect) takes a snapshot, not the error itself. */
+let needsResync = false;
+/** True while a resync is running, so errors never start overlapping requests. */
+let resyncInFlight = false;
+/** True when a resync was requested during another: exactly one more runs after it settles. */
+let resyncQueued = false;
+
+/**
+ * Fetches the recent events snapshot, giving up after RESYNC_TIMEOUT_MS: the deadline aborts the request and the
+ * reading of its body, so the resync is released and a queued one can run.
+ * @returns The events, newest first, or null when the request failed, timed out, wasn't OK or had a malformed body.
+ */
+async function fetchRecentEvents() {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), RESYNC_TIMEOUT_MS);
   try {
-    const res = await fetch('/dashboard/events/recent');
-    if (!res.ok) return;
+    const res = await fetch('/dashboard/events/recent', { signal: controller.signal });
+    if (!res.ok) return null;
     const data = await res.json();
-    if (data.ok) renderEvents(recentEventsList, data.events);
+    return data.ok && Array.isArray(data.events) ? data.events : null;
   } catch {
-    // EventSource itself keeps retrying the stream; ignore fetch failures here.
+    // EventSource itself keeps retrying the stream; ignore fetch failures (and timeouts) here.
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Takes one snapshot and shows it, unless a live event arrived while it was in flight: that snapshot may have been
+ * read before the event was stored, so it is dropped and fetched again (a request that starts after the push includes
+ * the event). Gives up after RESYNC_MAX_ATTEMPTS and keeps the live-built feed until the next resync.
+ */
+async function runResync() {
+  for (let attempt = 0; attempt < RESYNC_MAX_ATTEMPTS; attempt++) {
+    const seenBefore = liveEventsSeen;
+    const events = await fetchRecentEvents();
+    if (events === null) return;
+    if (liveEventsSeen === seenBefore) {
+      renderEvents(recentEventsList, events);
+      return;
+    }
+  }
+}
+
+/**
+ * Re-fetches and re-renders the full recent-events list, used to resync after a reconnect. One request runs at a
+ * time, so an older answer can never overwrite a newer one; a request made during a run queues one more run.
+ */
+async function resyncRecentEvents() {
+  if (resyncInFlight) {
+    resyncQueued = true;
+    return;
+  }
+  resyncInFlight = true;
+  try {
+    await runResync();
+  } finally {
+    resyncInFlight = false;
+  }
+  if (resyncQueued) {
+    resyncQueued = false;
+    await resyncRecentEvents();
   }
 }
 
@@ -145,12 +208,29 @@ if (recentEventsList && hasStreamer) {
   eventsSource.onmessage = (msg) => {
     try {
       prependEvent(recentEventsList, JSON.parse(msg.data));
+      liveEventsSeen += 1;
     } catch {
       // Ignore malformed payloads.
     }
   };
-  // The SSE handshake sends no state, only a live push on the next new event, so a dropped
-  // connection (network blip, server restart) would otherwise leave this feed stale after
-  // the browser's built-in auto-reconnect until the next real event happens to occur.
-  eventsSource.onerror = () => { resyncRecentEvents(); };
+  // The SSE handshake sends no state, only a live push on the next new event, so a dropped connection (network blip,
+  // server restart) would otherwise leave this feed stale until the next real event. Subscribe first, then snapshot:
+  // `error` only flags the drop, and the resync runs on the reconnect's `open`, so nothing between the snapshot and
+  // the reconnect is missed. A stream the browser has closed for good will not reopen, so it resyncs once at once.
+  // Known limitation: an event already in the snapshot whose live push arrives afterwards shows twice, because the
+  // dashboard payloads carry no id to match them on. An `id` on the dashboard payloads (an additive change, as #664 did for
+  // the companion payloads, needing the owner's approval) would fix it; see #1139.
+  eventsSource.onopen = () => {
+    if (!needsResync) return;
+    needsResync = false;
+    resyncRecentEvents();
+  };
+  eventsSource.onerror = () => {
+    if (eventsSource.readyState === EVENTS_STREAM_CLOSED) {
+      needsResync = false;
+      resyncRecentEvents();
+      return;
+    }
+    needsResync = true;
+  };
 }

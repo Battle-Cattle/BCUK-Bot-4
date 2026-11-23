@@ -77,7 +77,7 @@ export function applyStatus(fixture) {
 
 /**
  * Reads and validates a fixture file, resolving `extends` and the `status` shorthand.
- * @param fixturePath - Path to the fixture JSON: `{ view, locals?, api?, sse?, waitMs?, extends?, status?, statusPaths?, clock? }`.
+ * @param fixturePath - Path to the fixture JSON: `{ view, locals?, api?, sse?, waitMs?, extends?, status?, statusPaths?, clock?, sessionStorage? }`.
  * @returns The fixture as the renderer uses it, with defaults filled in.
  */
 export async function loadFixture(fixturePath) {
@@ -85,5 +85,5 @@ export async function loadFixture(fixturePath) {
   if (typeof fixture.view !== 'string' || !/^[\w-]+$/.test(fixture.view)) {
     throw new Error('fixture.view must be the name of a file in views/ (e.g. "dashboard")');
   }
-  return { locals: {}, api: {}, sse: {}, waitMs: 500, clock: null, ...fixture };
+  return { locals: {}, api: {}, sse: {}, waitMs: 500, clock: null, sessionStorage: null, ...fixture };
 }

@@ -132,6 +132,21 @@ describe('views/dashboard.ejs layout', () => {
     expect(rules).not.toMatch(/animation|transition/);
   });
 
+  it('draws the LIVE dot as a shape centred on its label, not a text glyph, and drops the Stream Overview\'s purple edge (#1148, #1140)', () => {
+    const css = fs.readFileSync(stylePath, 'utf8');
+    const dot = /\.channel-badges \.badge-live::before,\s*\.channel-badges \.badge-live-stale::before\s*\{([^}]*)\}/.exec(css)?.[1] ?? '';
+
+    expect(dot).toMatch(/content:\s*"";/);
+    // Filled when live, an outlined ring when the check is stale ("was live"): two shapes, not just two colours.
+    expect(css).toMatch(/\.channel-badges \.badge-live::before\s*\{\s*background:\s*currentColor;/);
+    expect(css).toMatch(/\.channel-badges \.badge-live-stale::before\s*\{\s*border:\s*1\.5px solid currentColor;/);
+    expect(dot).toMatch(/width:\s*\.5em;\s*height:\s*\.5em;\s*border-radius:\s*50%/);
+    expect(css).toMatch(/\.channel-badges \.badge\s*\{[^}]*display:\s*inline-flex;\s*align-items:\s*center;/);
+    // No text glyph for the dot any more (the Connected and Disconnected ticks and crosses stay).
+    expect(css).not.toMatch(/\.badge-live(-stale)?::before\s*\{[^}]*"\\25(CF|CB)"/);
+    expect(css).not.toMatch(/\.stream-card\s*\{[^}]*border/);
+  });
+
   it('presents the bot\'s services as one System Status panel, with Last Played beside it and no overall badge (#1076)', async () => {
     const html = await render();
     const status = between(html, '<section class="section dashboard-status" id="bot-status">', '</section>');
@@ -257,6 +272,37 @@ describe('views/dashboard.ejs layout', () => {
     expect(css).toMatch(/\.channel-meta\s*\{[^}]*white-space:\s*nowrap/);
   });
 
+  it('gives the Twitch service a status dot in its header like Discord and Voice, with a role and a name (#1137)', async () => {
+    const html = await render();
+    const header = between(html, '<div class="service service--twitch"', 'id="twitch-channels"');
+
+    expect(header).toMatch(/<span class="dot dot--unknown" id="dot-twitch" role="img" aria-label="Twitch: Status unknown" title="Twitch: Status unknown"><\/span>/);
+    expect(header.indexOf('id="twitch-state"')).toBeLessThan(header.indexOf('id="dot-twitch"'));
+  });
+
+  it('gives each Twitch dot state a shape of its own, the degraded one a triangle (#1137)', () => {
+    const css = fs.readFileSync(stylePath, 'utf8');
+
+    expect(css).toMatch(/\.dot--degraded\s*\{[^}]*clip-path:\s*polygon\(50% 0, 100% 100%, 0 100%\)/);
+    expect(css).not.toMatch(/\.dot--degraded\s*\{[^}]*animation/);
+  });
+
+  it('keeps a Reconnect link in the Twitch service only while the viewer\'s Twitch token needs reconnecting (#1136)', async () => {
+    const needs = await render({ needsReconnect: true });
+    const card = divBlock(needs, '<div class="service service--twitch"');
+
+    expect(card).toMatch(/<a href="\/user\/settings\/twitch-connect" class="btn btn-sm" id="twitch-reconnect-link">Reconnect your Twitch account<\/a>/);
+    // It sits outside the scroll region, so the list's own scrolling never hides it.
+    expect(card.indexOf('id="twitch-reconnect-link"')).toBeGreaterThan(card.indexOf('id="twitch-channels"'));
+    expect(divBlock(card, '<div class="service-body dashboard-twitch-body dashboard-scroll" id="twitch-channels"')).not.toContain('twitch-reconnect-link');
+    // The modal is unchanged.
+    expect(needs).toContain('id="reconnect-modal"');
+
+    const fine = await render({ needsReconnect: false });
+    expect(fine).not.toContain('twitch-reconnect-link');
+    expect(fine).not.toContain('Reconnect your Twitch account');
+  });
+
   it('puts a connection roll-up above the Twitch channel list, outside its scroll region (#1074)', async () => {
     const html = await render();
     const rollup = html.indexOf('id="twitch-state"');
@@ -332,6 +378,21 @@ describe('views/dashboard.ejs layout', () => {
     expect(Number(reserve?.[1])).toBeGreaterThanOrEqual(indicator);
     expect(Number(reserve?.[1])).toBeLessThanOrEqual(indicator + 0.25);
   });
+
+  it('gives the feed cap the stale note\'s height while the note shows, so the page keeps no scrollbar when the feed is down (#1134)', () => {
+    const css = fs.readFileSync(stylePath, 'utf8');
+    const reserve = /--dashboard-stale-note-offset:\s*([\d.]+)rem/.exec(css);
+    const note = /\n\.status-stale-note\s*\{[^}]*margin-bottom:\s*([\d.]+)rem;\s*padding:\s*([\d.]+)rem[^}]*font-size:\s*([\d.]+)rem/.exec(css);
+    const capRule = /\.dashboard-layout:has\(> \.dashboard-status\.is-stale\) > \.dashboard-side\s*\{([^}]*)\}/.exec(css)?.[1] ?? '';
+
+    // The note's height is its bottom margin, both paddings and one line of text at the body's 1.5 line height. The
+    // reserve must cover it, or the page scrolls again just when the feed is unreachable.
+    const height = Number(note?.[1]) + 2 * Number(note?.[2]) + 1.5 * Number(note?.[3]);
+    expect(Number(reserve?.[1])).toBeGreaterThanOrEqual(height);
+    expect(Number(reserve?.[1])).toBeLessThanOrEqual(height + 0.25);
+    // It is taken off the same cap as the normal reserve, and only while the status section is marked stale.
+    expect(capRule).toMatch(/max-height:\s*calc\(100vh - var\(--dashboard-nav-offset\) - var\(--dashboard-health-offset\) - 9\.375rem - var\(--dashboard-stale-note-offset\)\)/);
+  });
 });
 
 /** Runs public/dashboard-layout.js against a stub DOM with the given navbar and ResizeObserver. */
@@ -392,7 +453,6 @@ describe('dashboard status cues without colour or motion', () => {
   it.each([
     ['badge-online', '\\2713'],
     ['badge-offline', '\\2715'],
-    ['badge-live', '\\25CF'],
   ])('puts a decorative icon on the %s channel badge, hidden from screen readers', (cls, icon) => {
     const rule = new RegExp(`\\.channel-badges \\.${cls}::before\\s*\\{[^}]*content:\\s*"\\${icon}"\\s*/\\s*""`);
 

@@ -78,6 +78,29 @@ function buildChannelBadges(info, liveStale) {
   return right;
 }
 
+/** The Twitch dot's class for each roll-up state: a shape of its own per state, so it reads without colour. */
+const TWITCH_DOT_CLASSES = {
+  neutral: 'dot dot--inactive',
+  unknown: 'dot dot--unknown',
+  healthy: 'dot dot--online',
+  degraded: 'dot dot--degraded',
+  unhealthy: 'dot dot--offline',
+};
+
+/**
+ * Picks the Twitch service's status dot from the same twitchHealth() roll-up as the state text and the header
+ * indicator: filled disc connected, hollow red ring disconnected, up triangle degraded, grey ring no channels, dashed
+ * ring unknown. Its accessible name repeats the state in words.
+ * @param twitch - The `twitch` section of an /api/status response: channel login to `{ connected, ... }`.
+ * @returns The dot's classes and its accessible name.
+ */
+function twitchDotState(twitch) {
+  return {
+    dotClass: TWITCH_DOT_CLASSES[twitchHealth(twitch)] || TWITCH_DOT_CLASSES.unknown,
+    label: `Twitch: ${twitchRollupState(twitch).text}`,
+  };
+}
+
 /**
  * Lists each monitored channel with its connection badge, last connected/disconnected time and LIVE badge, or
  * "No Twitch channels configured." when there are none.
@@ -206,6 +229,8 @@ function applyStatusCards(status) {
 
   // Channels
   setStatusText('twitch-state', twitchRollupState(status.twitch));
+  const twitchDot = twitchDotState(status.twitch);
+  setStatusDot('dot-twitch', twitchDot.dotClass, twitchDot.label);
   const twitchEl = document.getElementById('twitch-channels');
   if (twitchEl) renderChannels(twitchEl, status.twitch);
   // The Usage tile's count follows the list: a channel added, removed or moved reaches an open dashboard live. String(), as setText turns 0 into a dash.
@@ -244,6 +269,7 @@ function markStatusStale(stale) {
   applyStreamOverview(null, true);
   setStatusDot('dot-discord', 'dot dot--unknown', 'Discord: Status unknown');
   setStatusDot('dot-voice', 'dot dot--unknown', 'Voice: Status unknown');
+  setStatusDot('dot-twitch', 'dot dot--unknown', 'Twitch: Status unknown');
 }
 
 /**

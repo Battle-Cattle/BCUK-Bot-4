@@ -228,6 +228,11 @@ a:hover { text-decoration: underline; }
 /* The Usage tiles use .status-grid: a lower column floor than its 280px keeps the four tiles on one row next to the
    sidebar, and auto-fit stretches them over any spare column on wide screens. */
 .dashboard-layout .status-grid { grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
+/* Denser Usage tiles on the dashboard (#1132, #1134): the main column's own height decides whether the page scrolls
+   when the feed is not the tallest column, and with the "status unknown" note showing it needs ~25px more room than
+   the page has at 900px. Tighter tile padding and a slightly smaller number give it that without moving anything else. */
+.dashboard-layout .stat-card-body { padding: .6rem 1rem; }
+.dashboard-layout .stat-big { font-size: 1.75rem; }
 
 /* ── System Status panel ───────────────────────────────────
    One card holding the bot's services (Discord, Voice, Twitch chat), each a .service with a header (icon, name, state
@@ -237,6 +242,7 @@ a:hover { text-decoration: underline; }
 .system-status { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto; min-height: 0; }
 .service { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-top: 1px solid var(--border); }
 .service:first-child { border-top: none; }
+.service-foot { flex: none; padding: .4rem 1rem; border-top: 1px solid var(--border); }
 .service-header { display: flex; align-items: center; gap: .5rem; padding: .4rem 1rem; border-bottom: 1px solid var(--border); font-weight: 600; }
 .service-label { flex: 1; margin: 0; font-size: .9rem; font-weight: 600; }
 /* A service's state sits on its header line; unlike the stat rows' values it may wrap ("No channels configured"). */
@@ -291,6 +297,12 @@ a:hover { text-decoration: underline; }
 .dashboard-sidebar > .dashboard-events { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 .dashboard-events > .card { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 .dashboard-events-body { flex: 1 1 auto; min-height: 6rem; overflow-y: auto; padding-top: .25rem; padding-bottom: .25rem; }
+/* While the status feed is unreachable, #status-stale-note appears above the status panel and pushes the main column
+   down by its own height: its two paddings (.5rem each), one line of text (.85rem at line-height 1.5 = 1.275rem) and
+   its .75rem bottom margin, 3.025rem. The column's cap gives that up for as long as the note shows (#1134), so the
+   page doesn't gain a scrollbar just when it is already degraded. dashboardView.test.ts ties this to the note's CSS. */
+:root { --dashboard-stale-note-offset: 3.05rem; }
+.dashboard-layout:has(> .dashboard-status.is-stale) > .dashboard-side { max-height: calc(100vh - var(--dashboard-nav-offset) - var(--dashboard-health-offset) - 9.375rem - var(--dashboard-stale-note-offset)); }
 /* The reserve above assumes a one-line title, so keep it on one line even with very large text. */
 /* `flex: none`: the title is a flex item whose overflow: hidden gives it no minimum height, so without it a squeezed
    column would shrink the heading away to nothing. */
@@ -300,11 +312,10 @@ a:hover { text-decoration: underline; }
 /* ── Stream Overview ───────────────────────────────────────
    "Is my channel broadcasting?", about the signed-in user's own channel only (the Twitch Channels list already marks
    every channel that is live, so this panel doesn't repeat it). Its own panel, not a variant of System Status: its own
-   heading, a brand-coloured top edge, a state pill (filled, outlined or dashed) instead of coloured text, and its own
+   heading, a state pill (filled, outlined or dashed) instead of coloured text, and its own
    icons (◉ live, ◇ offline, ? unknown, – unavailable). It never uses status red, amber or green (those mark a service
    fault or health) and nothing in it moves. Every state also says what it is in words. */
 .dashboard-stream { flex: none; margin: 0; }
-.stream-card { border-top: 3px solid var(--primary); }
 .stream-own { min-width: 0; padding: .65rem 1rem .75rem; }
 .stream-heading { margin: 0 0 .4rem; color: var(--muted); font-size: .75rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
 .stream-state { display: inline-block; margin: 0; padding: .1em .65em; border: 1px solid transparent; border-radius: 99px; font-size: .85rem; font-weight: 700; }
@@ -351,13 +362,14 @@ a:hover { text-decoration: underline; }
 /* ── Online dot ────────────────────────────────────────── */
 .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
 /* Each state has its own shape as well as colour, so it reads without colour (greyscale, colour blindness):
-   filled disc = connected, hollow ring = disconnected/inactive, play triangle = playing. The dot's role="img" and
+   filled disc = connected, hollow ring = disconnected/inactive, play triangle = playing, up triangle = degraded. The dot's role="img" and
    aria-label (setStatusDot in dashboard-utils.js) give it a name in words. Red is only for a required service
    being down (Discord); voice is informational, so "not connected" is a neutral grey ring and "playing" uses
    the brand accent rather than warning amber. */
 .dot--online   { background: var(--success); box-shadow: 0 0 6px var(--success); }
 .dot--offline  { background: transparent; border: 2px solid var(--danger); }
 .dot--inactive { background: transparent; border: 2px solid var(--muted); }
+.dot--degraded { background: var(--warning); border-radius: 0; clip-path: polygon(50% 0, 100% 100%, 0 100%); }
 .dot--playing  { background: var(--accent-blue); border-radius: 0; clip-path: polygon(10% 0, 100% 50%, 10% 100%); animation: pulse 1s infinite; }
 @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.5; } }
 
@@ -417,11 +429,17 @@ a:hover { text-decoration: underline; }
 /* An icon on each Twitch channel badge, so Connected / Disconnected / LIVE differ by shape as well as colour.
    The `/ ""` alt text keeps the icon out of the accessible name (the badge's own text already says it); the
    plain declaration before it is the fallback for browsers without that syntax. */
+.channel-badges .badge { display: inline-flex; align-items: center; }
 .channel-badges .badge::before { margin-right: .3em; }
 .channel-badges .badge-online::before  { content: "\2713"; content: "\2713" / ""; }
 .channel-badges .badge-offline::before { content: "\2715"; content: "\2715" / ""; }
-.channel-badges .badge-live::before    { content: "\25CF"; content: "\25CF" / ""; }
-.channel-badges .badge-live-stale::before { content: "\25CB"; content: "\25CB" / ""; }
+/* The LIVE dot is a drawn circle, not a text glyph: a glyph sits on the text baseline and its size depends on the
+   font, so it looked off-centre. As a flex item the circle centres on the label at any zoom or font. Filled = live,
+   outlined = was live (stale). Neither has a name of its own: the badge's text says what it is. */
+.channel-badges .badge-live::before,
+.channel-badges .badge-live-stale::before { content: ""; box-sizing: border-box; width: .5em; height: .5em; border-radius: 50%; margin-right: .4em; flex: none; }
+.channel-badges .badge-live::before       { background: currentColor; }
+.channel-badges .badge-live-stale::before { border: 1.5px solid currentColor; }
 
 /* ── Badges ────────────────────────────────────────────── */
 .badge           { display: inline-block; padding: .15em .55em; border-radius: 99px; font-size: .75rem; font-weight: 600; white-space: nowrap; }
