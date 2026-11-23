@@ -318,3 +318,39 @@ describe('onGuildStatusInvalidated', () => {
     offAfter();
   });
 });
+
+// ─── live-check time in the snapshot (#1083) ─────────────────────────────────────
+
+describe('getGuildScopedStatus — liveCheckedAt', () => {
+  it('carries each channel\'s liveCheckedAt through, as a time that serialises to ISO and as null before the first check', async () => {
+    const checked = new Date('2026-11-23T10:00:00Z');
+    vi.mocked(getGuildMemberUsers).mockResolvedValue([MEMBER('ourstreamer'), MEMBER('otherguildstreamer')] as any);
+    vi.mocked(getStatus).mockReturnValue({
+      ...BASE_STATUS,
+      twitch: {
+        ourstreamer: { connected: true, lastConnectedAt: null, lastDisconnectedAt: null, isLive: true, liveCheckedAt: checked },
+        otherguildstreamer: { connected: true, lastConnectedAt: null, lastDisconnectedAt: null, isLive: false, liveCheckedAt: null },
+      },
+    } as any);
+
+    const result = await getGuildScopedStatus('guild-A');
+
+    expect(result.twitch['ourstreamer']!.liveCheckedAt).toBe(checked);
+    expect(JSON.parse(JSON.stringify(result)).twitch.ourstreamer.liveCheckedAt).toBe('2026-11-23T10:00:00.000Z');
+    expect(result.twitch['otherguildstreamer']!.liveCheckedAt).toBeNull();
+  });
+
+  it('still scopes by guild: another guild\'s channel and its time are not included', async () => {
+    vi.mocked(getStatus).mockReturnValue({
+      ...BASE_STATUS,
+      twitch: {
+        ourstreamer: { connected: true, lastConnectedAt: null, lastDisconnectedAt: null, isLive: false, liveCheckedAt: new Date() },
+        stranger: { connected: true, lastConnectedAt: null, lastDisconnectedAt: null, isLive: false, liveCheckedAt: new Date() },
+      },
+    } as any);
+
+    const result = await getGuildScopedStatus('guild-A');
+
+    expect(Object.keys(result.twitch)).toEqual(['ourstreamer']);
+  });
+});

@@ -166,6 +166,81 @@ describe('Twitch channel status', () => {
   });
 });
 
+describe('Twitch live-check time (liveCheckedAt)', () => {
+  it('is null for a new channel, until the monitor has checked it', () => {
+    mod.setTwitchChannel('mychan', true);
+    expect(mod.getStatus(null).twitch['mychan']!.liveCheckedAt).toBeNull();
+  });
+
+  it('markTwitchChannelsLiveChecked stamps every tracked channel it is given, and leaves the others null', () => {
+    mod.setTwitchChannel('chan_one', true);
+    mod.setTwitchChannel('chan_two', true);
+    mod.setTwitchChannel('chan_three', true);
+
+    mod.markTwitchChannelsLiveChecked(['chan_one', 'chan_two']);
+
+    const { twitch } = mod.getStatus(null);
+    expect(twitch['chan_one']!.liveCheckedAt).toBeInstanceOf(Date);
+    expect(twitch['chan_two']!.liveCheckedAt).toBeInstanceOf(Date);
+    expect(twitch['chan_three']!.liveCheckedAt).toBeNull();
+  });
+
+  it('advances on every check, whether or not isLive changed', () => {
+    vi.useFakeTimers();
+    try {
+      mod.setTwitchChannel('mychan', true);
+      mod.setTwitchChannelLive('mychan', true);
+      vi.setSystemTime(new Date('2026-11-23T10:00:00Z'));
+      mod.markTwitchChannelsLiveChecked(['mychan']);
+      expect(mod.getStatus(null).twitch['mychan']!.liveCheckedAt).toEqual(new Date('2026-11-23T10:00:00Z'));
+
+      vi.setSystemTime(new Date('2026-11-23T10:01:00Z'));
+      mod.markTwitchChannelsLiveChecked(['mychan']);
+      expect(mod.getStatus(null).twitch['mychan']!.liveCheckedAt).toEqual(new Date('2026-11-23T10:01:00Z'));
+      expect(mod.getStatus(null).twitch['mychan']!.isLive).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('normalizes logins, and skips unknown channels and names that fail Twitch login validation', () => {
+    mod.setTwitchChannel('mychan', true);
+
+    mod.markTwitchChannelsLiveChecked(['#MyChan', 'unknown', 'a']);
+
+    const { twitch } = mod.getStatus(null);
+    expect(twitch['mychan']!.liveCheckedAt).toBeInstanceOf(Date);
+    expect(twitch['unknown']).toBeUndefined();
+    expect(twitch['a']).toBeUndefined();
+  });
+
+  it('notifies once with null for a batch, and not at all when no tracked channel was updated', () => {
+    mod.setTwitchChannel('chan_one', true);
+    mod.setTwitchChannel('chan_two', true);
+    const listener = vi.fn();
+    mod.onStatusChanged(listener);
+
+    mod.markTwitchChannelsLiveChecked(['chan_one', 'chan_two']);
+    expect(listener).toHaveBeenCalledExactlyOnceWith(null);
+
+    listener.mockClear();
+    mod.markTwitchChannelsLiveChecked(['unknown']);
+    mod.markTwitchChannelsLiveChecked([]);
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it('does not change any other field of the channel', () => {
+    mod.setTwitchChannel('mychan', true);
+    const before = { ...mod.getStatus(null).twitch['mychan']! };
+
+    mod.markTwitchChannelsLiveChecked(['mychan']);
+
+    const { liveCheckedAt: _checked, ...rest } = mod.getStatus(null).twitch['mychan']!;
+    const { liveCheckedAt: _was, ...beforeRest } = before;
+    expect(rest).toEqual(beforeRest);
+  });
+});
+
 describe('onStatusChanged', () => {
   it('is not called before any mutator runs', () => {
     const listener = vi.fn();

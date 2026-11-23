@@ -35,6 +35,8 @@ export interface ChannelStatus {
   lastConnectedAt: Date | null;
   lastDisconnectedAt: Date | null;
   isLive: boolean;
+  /** When the Twitch monitor last successfully checked this channel's live state (live or offline, changed or not); null before the first check. A stalled monitor leaves this behind while `isLive` keeps its last value. */
+  liveCheckedAt: Date | null;
 }
 
 /** Live voice-connection and playback status for a single guild. */
@@ -165,7 +167,7 @@ export function setVoiceIdle(guildId: string): void {
  * @returns A new channel status that is disconnected and not live.
  */
 function defaultChannelStatus(): ChannelStatus {
-  return { connected: false, lastConnectedAt: null, lastDisconnectedAt: null, isLive: false };
+  return { connected: false, lastConnectedAt: null, lastDisconnectedAt: null, isLive: false, liveCheckedAt: null };
 }
 
 /**
@@ -215,6 +217,27 @@ export function setTwitchChannelLive(login: string, isLive: boolean): void {
     existing.isLive = isLive;
     notifyStatusChanged(null);
   }
+}
+
+/**
+ * Records that the Twitch monitor just successfully checked these channels' live state, whether or not it changed. Tracked
+ * channels only, like {@link setTwitchChannelLive}: a login that doesn't normalize, or isn't tracked yet, is skipped. Notifies the
+ * registered status-change listener (see {@link onStatusChanged}) once with `null`, since channel state isn't scoped to one
+ * guild, and only if at least one channel was updated. Called once per successful poll, not per channel.
+ * @param logins - Twitch logins the poll covered; each is normalized before use.
+ */
+export function markTwitchChannelsLiveChecked(logins: Iterable<string>): void {
+  const checkedAt = new Date();
+  let updated = false;
+  for (const login of logins) {
+    const key = normalizeTwitchChannelName(login);
+    const existing = key === null ? undefined : state.twitch.get(key);
+    if (existing) {
+      existing.liveCheckedAt = checkedAt;
+      updated = true;
+    }
+  }
+  if (updated) notifyStatusChanged(null);
 }
 
 /**
