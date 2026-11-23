@@ -407,6 +407,8 @@ a:hover { text-decoration: underline; }
 .overlay-status { display: flex; align-items: center; gap: .5rem; margin-top: .5rem; font-size: .85rem; color: var(--muted); }
 
 /* ── Channel list (inside card-body) ──────────────────── */
+.channel-meta--stale { flex-basis: 100%; }
+.channel-info:has(.channel-meta--stale) { flex-wrap: wrap; }
 .channel-item { display: flex; justify-content: space-between; align-items: center; gap: .5rem; padding: .3rem 0; border-bottom: 1px solid var(--border); }
 .channel-item:last-child { border-bottom: none; }
 .channel-name { font-family: var(--mono); font-size: .85rem; }
@@ -419,6 +421,7 @@ a:hover { text-decoration: underline; }
 .channel-badges .badge-online::before  { content: "\2713"; content: "\2713" / ""; }
 .channel-badges .badge-offline::before { content: "\2715"; content: "\2715" / ""; }
 .channel-badges .badge-live::before    { content: "\25CF"; content: "\25CF" / ""; }
+.channel-badges .badge-live-stale::before { content: "\25CB"; content: "\25CB" / ""; }
 
 /* ── Badges ────────────────────────────────────────────── */
 .badge           { display: inline-block; padding: .15em .55em; border-radius: 99px; font-size: .75rem; font-weight: 600; white-space: nowrap; }
@@ -429,6 +432,8 @@ a:hover { text-decoration: underline; }
 /* The LIVE pulse darkens the fill instead of fading the badge, so the white label never drops below
    5.7:1 (the shared opacity `pulse` took it to about 3.3:1 at its trough). */
 .badge-live      { background: var(--danger-solid); color: #fff; animation: live-pulse 1.5s ease-in-out infinite; }
+/* A LIVE state whose last check is old: an outline, no pulse, so it never reads as current. */
+.badge-live-stale { background: transparent; border: 1px dashed var(--muted); color: var(--muted); }
 @keyframes live-pulse { 0%,100% { background-color: var(--danger-solid); } 50% { background-color: var(--danger-deep); } }
 /* Access levels are identity, not state, so they use brand hues (never status green/amber/red); the label carries the meaning. */
 .level-0 { background: rgba(113,113,122,.2); color: var(--muted); }

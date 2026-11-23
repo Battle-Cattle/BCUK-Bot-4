@@ -1,4 +1,4 @@
-/* global applyStreamOverview, clearChildren, deriveHealth, relativeTime, renderHealth, setStatusDot, setText, twitchHealth */
+/* global applyStreamOverview, clearChildren, deriveHealth, formatLiveCheckAge, isLiveCheckStale, liveCheckAgeMs, relativeTime, renderHealth, setStatusDot, setText, twitchHealth */
 /* ── Status rendering & polling ──────────────────────────── */
 
 /**
@@ -42,6 +42,8 @@ function renderChannels(container, channelMap) {
     const label = online ? 'Connected' : 'Disconnected';
     const cls = online ? 'badge-online' : 'badge-offline';
     const meta = ts ? relativeTime(ts) : 'Never seen';
+    // Live status not re-checked for about 3 polls: show it as last known, with its age, not as current.
+    const liveStale = online && typeof info.isLive === 'boolean' && isLiveCheckStale(info, Date.now());
 
     const item = document.createElement('div');
     item.className = 'channel-item';
@@ -59,14 +61,20 @@ function renderChannels(container, channelMap) {
 
     left.appendChild(channelName);
     left.appendChild(channelMeta);
+    if (liveStale) {
+      const checked = document.createElement('div');
+      checked.className = 'channel-meta channel-meta--stale';
+      checked.textContent = `Live status last checked ${formatLiveCheckAge(liveCheckAgeMs(info, Date.now()))}`;
+      left.appendChild(checked);
+    }
 
     const right = document.createElement('div');
     right.className = 'channel-badges';
 
     if (online && info.isLive) {
       const liveBadge = document.createElement('span');
-      liveBadge.className = 'badge badge-live';
-      liveBadge.textContent = 'LIVE';
+      liveBadge.className = liveStale ? 'badge badge-live-stale' : 'badge badge-live';
+      liveBadge.textContent = liveStale ? 'WAS LIVE' : 'LIVE';
       right.appendChild(liveBadge);
     }
 

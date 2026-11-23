@@ -43,6 +43,7 @@ function runStream(ownChannel: string | null = null) {
   vm.runInContext(fs.readFileSync(streamPath, 'utf8'), context);
   const derive = context.deriveStreamOverview as (twitch: unknown, own: string | null, stale: boolean) => Derived;
   return {
+    context,
     el,
     // JSON round trip: the context's objects come from another realm, which toEqual would compare by prototype.
     derive: (twitch: unknown, own: string | null, stale = false): Derived => JSON.parse(JSON.stringify(derive(twitch, own, stale))),
@@ -60,7 +61,7 @@ describe('public/dashboard-stream.js deriveStreamOverview', () => {
     ['live', channel(true), 'live'],
     ['offline', channel(false), 'offline'],
   ])('reads the user\'s own channel as %s from isLive', (_name, entry, state) => {
-    expect(derive({ streamer_one: entry }, 'streamer_one')).toEqual({ state, login: 'streamer_one' });
+    expect(derive({ streamer_one: entry }, 'streamer_one')).toEqual({ state, login: 'streamer_one', checkedAgo: null });
   });
 
   it('never lets the bot\'s connection decide: live with the bot disconnected is Live, connected but offline is Offline', () => {
@@ -71,7 +72,7 @@ describe('public/dashboard-stream.js deriveStreamOverview', () => {
   it('ignores every other channel, live or not', () => {
     const twitch = { streamer_one: channel(false), streamer_two: channel(true), streamer_three: channel(true) };
 
-    expect(derive(twitch, 'streamer_one')).toEqual({ state: 'offline', login: 'streamer_one' });
+    expect(derive(twitch, 'streamer_one')).toEqual({ state: 'offline', login: 'streamer_one', checkedAgo: null });
   });
 
   it('says there is no channel when the user has none, even with live channels around', () => {
@@ -89,7 +90,7 @@ describe('public/dashboard-stream.js deriveStreamOverview', () => {
   });
 
   it('still reads a monitored channel whose login is named like an inherited member', () => {
-    expect(derive({ constructor: channel(true) }, 'constructor')).toEqual({ state: 'live', login: 'constructor' });
+    expect(derive({ constructor: channel(true) }, 'constructor')).toEqual({ state: 'live', login: 'constructor', checkedAgo: null });
   });
 
   it.each([
@@ -104,6 +105,43 @@ describe('public/dashboard-stream.js deriveStreamOverview', () => {
   it('is Unknown for a channel entry with no live flag, never Offline', () => {
     expect(derive({ streamer_one: channel(undefined) }, 'streamer_one').state).toBe('unknown');
     expect(derive({ streamer_one: { connected: true } }, 'streamer_one').state).toBe('unknown');
+  });
+
+  describe('stale live check (#1118)', () => {
+    const NOW = Date.parse('2026-11-23T12:00:00.000Z');
+    const checked = (minutesAgo: number, isLive = true) => ({ ...channel(isLive), liveCheckedAt: new Date(NOW - minutesAgo * 60_000).toISOString() });
+    const run = (entry: unknown, now = NOW) => {
+      const { context } = runStream('streamer_one');
+      const fn = context.deriveStreamOverview as (t: unknown, o: string, f: boolean, n: number) => Derived & { checkedAgo: string | null };
+      return JSON.parse(JSON.stringify(fn({ streamer_one: entry }, 'streamer_one', false, now)));
+    };
+
+    it('is current for a recent check, with no age shown', () => {
+      expect(run(checked(2)).checkedAgo).toBeNull();
+    });
+
+    it('keeps the last-known state but reports its age from 3 minutes on', () => {
+      expect(run(checked(3))).toEqual({ state: 'live', login: 'streamer_one', checkedAgo: '3 minutes ago' });
+      expect(run(checked(5, false))).toEqual({ state: 'offline', login: 'streamer_one', checkedAgo: '5 minutes ago' });
+      expect(run(checked(120)).checkedAgo).toBe('2 hours ago');
+      expect(run(checked(60 * 24 * 3)).checkedAgo).toBe('3 days ago');
+    });
+
+    it.each([['absent', channel(true)], ['null', { ...channel(true), liveCheckedAt: null }], ['not a date', { ...channel(true), liveCheckedAt: 'nope' }]])(
+      'is unchanged when liveCheckedAt is %s',
+      (_name, entry) => {
+        expect(run(entry)).toEqual({ state: 'live', login: 'streamer_one', checkedAgo: null });
+      },
+    );
+
+    it('shows the stale state and its age in words on the panel', () => {
+      const { apply, el } = runStream('streamer_one');
+      // The script runs in its own realm with its own clock, so age the stamp against the real time.
+      const stamp = new Date(Date.now() - 7 * 60_000 - 5_000).toISOString();
+      apply({ streamer_one: { ...channel(true), liveCheckedAt: stamp } }, false);
+      expect(el('stream-own-state').textContent).toBe('Live (last known)');
+      expect(el('stream-own-note').textContent).toBe('Last known state; live status last checked 7 minutes ago.');
+    });
   });
 
   it('is deterministic and reads nothing but its arguments', () => {
