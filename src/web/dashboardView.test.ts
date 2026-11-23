@@ -137,6 +137,9 @@ describe('views/dashboard.ejs layout', () => {
     const dot = /\.channel-badges \.badge-live::before,\s*\.channel-badges \.badge-live-stale::before\s*\{([^}]*)\}/.exec(css)?.[1] ?? '';
 
     expect(dot).toMatch(/content:\s*"";/);
+    // Filled when live, an outlined ring when the check is stale ("was live"): two shapes, not just two colours.
+    expect(css).toMatch(/\.channel-badges \.badge-live::before\s*\{\s*background:\s*currentColor;/);
+    expect(css).toMatch(/\.channel-badges \.badge-live-stale::before\s*\{\s*border:\s*1\.5px solid currentColor;/);
     expect(dot).toMatch(/width:\s*\.5em;\s*height:\s*\.5em;\s*border-radius:\s*50%/);
     expect(css).toMatch(/\.channel-badges \.badge\s*\{[^}]*display:\s*inline-flex;\s*align-items:\s*center;/);
     // No text glyph for the dot any more (the Connected and Disconnected ticks and crosses stay).

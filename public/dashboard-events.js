@@ -211,7 +211,8 @@ if (recentEventsList && hasStreamer) {
   // `error` only flags the drop, and the resync runs on the reconnect's `open`, so nothing between the snapshot and
   // the reconnect is missed. A stream the browser has closed for good will not reopen, so it resyncs once at once.
   // Known limitation: an event already in the snapshot whose live push arrives afterwards shows twice, because the
-  // dashboard payloads carry no id to match them on (see #1139).
+  // dashboard payloads carry no id to match them on. An `id` on the dashboard payloads (an additive change, as #664 did for
+  // the companion payloads, needing the owner's approval) would fix it; see #1139.
   eventsSource.onopen = () => {
     if (!needsResync) return;
     needsResync = false;

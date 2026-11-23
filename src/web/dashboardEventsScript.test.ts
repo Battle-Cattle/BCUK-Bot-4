@@ -357,6 +357,20 @@ describe('public/dashboard-events.js resync (#1139)', () => {
     expect(childAt(list, 0).className).toBe('empty-msg');
   });
 
+  it.each([
+    ['a non-OK response', { ok: false, json: () => Promise.resolve({ ok: true, events: [ev('sub')] }) }],
+    ['a body that says not ok', { ok: true, json: () => Promise.resolve({ ok: false }) }],
+    ['events that are not an array', { ok: true, json: () => Promise.resolve({ ok: true, events: 'nope' }) }],
+  ])('leaves the feed alone for %s', async (_name, response) => {
+    const { list, source } = runEvents({ fetchImpl: () => Promise.resolve(response) });
+    source!.onmessage!({ data: live('live_one') });
+    source!.onerror!();
+    source!.onopen!();
+    await flush();
+    expect(list.children).toHaveLength(1);
+    expect(childAt(list, 0).allText).toContain('live_one');
+  });
+
   it('shows the empty message when the snapshot is empty', async () => {
     const { list, source } = runEvents({ fetchEvents: [] });
     source!.onmessage!({ data: live('live_one') });
