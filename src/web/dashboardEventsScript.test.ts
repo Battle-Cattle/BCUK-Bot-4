@@ -91,7 +91,7 @@ interface RunOptions {
   hasStreamer?: boolean;
   fetchEvents?: unknown[];
   /** Replaces the default fetch (which answers at once with `fetchEvents`), for tests that answer by hand. */
-  fetchImpl?: () => Promise<unknown>;
+  fetchImpl?: (url?: string, init?: { signal?: AbortSignal }) => Promise<unknown>;
 }
 
 /** Runs public/dashboard-events.js in a fresh context with a stub DOM, EventSource and fetch. */
@@ -114,6 +114,10 @@ function runEvents({ initialEvents, hasStreamer = true, fetchEvents = [], fetchI
     },
     EventSource: FakeEventSource,
     fetch,
+    // The script's request deadline. Lazy lookups, so a test's fake timers apply to a context created after them.
+    AbortController,
+    setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms),
+    clearTimeout: (id: ReturnType<typeof setTimeout>) => clearTimeout(id),
     watchStreamContext,
     // The real helpers live in dashboard-utils.js, loaded before this script.
     relativeTime: (iso: string) => (iso ? `ago:${iso}` : '—'),
@@ -136,11 +140,13 @@ function childAt(node: FakeNode, index: number): FakeNode {
 /** A hand-answered fetch: each call waits for the test to resolve it with a snapshot (or a failure). */
 function manualFetch() {
   const pending: { resolve: (events: unknown[]) => void; fail: () => void }[] = [];
-  const impl = () => new Promise((resolve, reject) => {
+  const impl = (_url?: string, init?: { signal?: AbortSignal }) => new Promise((resolve, reject) => {
     pending.push({
       resolve: (events) => resolve({ ok: true, json: () => Promise.resolve({ ok: true, events }) }),
       fail: () => reject(new Error('offline')),
     });
+    // Like a real fetch, an aborted request rejects.
+    init?.signal?.addEventListener('abort', () => reject(new Error('aborted')));
   });
   return { impl, pending };
 }
@@ -228,7 +234,7 @@ describe('public/dashboard-events.js feed behaviour', () => {
     source!.onerror!();
     source!.onopen!();
     await waitFor(() => expect(list.children[0]?.className).toBe('event-item'));
-    expect(fetch).toHaveBeenCalledWith('/dashboard/events/recent');
+    expect(fetch).toHaveBeenCalledWith('/dashboard/events/recent', expect.objectContaining({ signal: expect.anything() }));
   });
 });
 
@@ -369,6 +375,27 @@ describe('public/dashboard-events.js resync (#1139)', () => {
     await flush();
     expect(list.children).toHaveLength(1);
     expect(childAt(list, 0).allText).toContain('live_one');
+  });
+
+  it('abandons a stalled snapshot after its deadline, so the next reconnect can resync', async () => {
+    vi.useFakeTimers();
+    try {
+      const { impl, pending } = manualFetch();
+      const { list, source } = runEvents({ fetchImpl: impl });
+      source!.onerror!();
+      source!.onopen!();
+      // The first request never answers; a second reconnect while it is stuck only queues a run.
+      source!.onerror!();
+      source!.onopen!();
+      expect(pending).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(15000);
+      expect(pending).toHaveLength(2);
+      pending[1]!.resolve([ev('sub')]);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(childAt(list, 0).className).toBe('event-item');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('shows the empty message when the snapshot is empty', async () => {

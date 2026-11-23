@@ -129,6 +129,8 @@ if (recentEventsList && initialEventsRaw) {
 
 /** `EventSource.readyState` once the browser has given up reconnecting (the constant, kept local to this script). */
 const EVENTS_STREAM_CLOSED = 2;
+/** How long one snapshot request (headers and body) may take before it is abandoned, so a stalled one can't block every later resync. */
+const RESYNC_TIMEOUT_MS = 15000;
 /** How many times one resync re-fetches because a live event arrived while its request was in flight. */
 const RESYNC_MAX_ATTEMPTS = 3;
 
@@ -142,18 +144,23 @@ let resyncInFlight = false;
 let resyncQueued = false;
 
 /**
- * Fetches the recent events snapshot.
- * @returns The events, newest first, or null when the request failed, wasn't OK or had a malformed body.
+ * Fetches the recent events snapshot, giving up after RESYNC_TIMEOUT_MS: the deadline aborts the request and the
+ * reading of its body, so the resync is released and a queued one can run.
+ * @returns The events, newest first, or null when the request failed, timed out, wasn't OK or had a malformed body.
  */
 async function fetchRecentEvents() {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), RESYNC_TIMEOUT_MS);
   try {
-    const res = await fetch('/dashboard/events/recent');
+    const res = await fetch('/dashboard/events/recent', { signal: controller.signal });
     if (!res.ok) return null;
     const data = await res.json();
     return data.ok && Array.isArray(data.events) ? data.events : null;
   } catch {
-    // EventSource itself keeps retrying the stream; ignore fetch failures here.
+    // EventSource itself keeps retrying the stream; ignore fetch failures (and timeouts) here.
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
