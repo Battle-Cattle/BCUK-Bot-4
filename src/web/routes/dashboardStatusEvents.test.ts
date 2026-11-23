@@ -396,6 +396,19 @@ describe('status-change push (registered via onStatusChanged)', () => {
     expect(resB.write).toHaveBeenCalledWith(`data: ${JSON.stringify({ guildId: 'guild-B' })}\n\n`);
   });
 
+  it('carries each channel\'s liveCheckedAt to the dashboards in the pushed snapshot (#1083)', async () => {
+    const res = { write: vi.fn() };
+    connections.set('guild-A', new Set([res] as any));
+    const checked = new Date('2026-11-23T10:00:00Z');
+    vi.mocked(getGuildScopedStatus).mockResolvedValue({ twitch: { streamer_one: { isLive: true, liveCheckedAt: checked }, streamer_two: { isLive: false, liveCheckedAt: null } } } as any);
+
+    await registeredListener('guild-A');
+
+    const pushed = JSON.parse((res.write.mock.calls[0]![0] as string).slice('data: '.length));
+    expect(pushed.twitch.streamer_one.liveCheckedAt).toBe('2026-11-23T10:00:00.000Z');
+    expect(pushed.twitch.streamer_two.liveCheckedAt).toBeNull();
+  });
+
   it('does nothing when guildId is null and there are no connected guilds', async () => {
     await registeredListener(null);
     expect(getGuildScopedStatus).not.toHaveBeenCalled();
