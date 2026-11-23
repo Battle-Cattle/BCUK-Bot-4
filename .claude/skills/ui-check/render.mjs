@@ -162,6 +162,21 @@ async function auditA11y(page, run) {
 }
 
 /**
+ * Sets sessionStorage keys before any page script runs, for states the page reads from it (such as a dismissed modal).
+ * @param context - The Playwright browser context (or a page: both take init scripts).
+ * @param items - Key to string value, from the fixture's `sessionStorage`.
+ */
+export async function seedSessionStorage(context, items) {
+  await context.addInitScript((entries) => {
+    try {
+      for (const [key, value] of Object.entries(entries)) globalThis.sessionStorage.setItem(key, value);
+    } catch {
+      // about:blank and opaque origins have no storage: the real page does.
+    }
+  }, items);
+}
+
+/**
  * Loads the page in one browser context and records what a reviewer needs to check.
  * @param browser - The Playwright browser.
  * @param baseUrl - The throwaway server's URL.
@@ -175,6 +190,7 @@ async function inspect(browser, baseUrl, run) {
     deviceScaleFactor: 1,
     reducedMotion: run.reducedMotion ? 'reduce' : 'no-preference',
   });
+  if (run.sessionStorage) await seedSessionStorage(context, run.sessionStorage);
   const page = await context.newPage();
   if (run.clock) await page.clock.install();
   const consoleErrors = [];
@@ -242,6 +258,7 @@ function planRuns(outDir, fixture, a11y) {
     contrastAudit: a11y && !r.greyscale,
     waitMs: fixture.waitMs,
     clock: fixture.clock,
+    sessionStorage: fixture.sessionStorage,
     screenshot: path.join(outDir, `${r.label}.png`),
     ariaPath: r.label === 'desktop' ? path.join(outDir, 'aria-snapshot.yml') : null,
   }));

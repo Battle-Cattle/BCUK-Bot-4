@@ -1,0 +1,12 @@
+{
+  "_comment": "Illustrative data for ui-check only. A busy event feed (so the feed is the tallest column) with the status feed unreachable: the 'status unknown' note shows above the status cards. The page must still fit at 1440x900 (#1134).",
+  "extends": "dashboard-busy-feed.json",
+  "statusPaths": "$remove",
+  "clock": {
+    "advanceMs": 200000,
+    "stepMs": 10000
+  },
+  "locals": {
+    "ownChannel": "streamer_one"
+  }
+}

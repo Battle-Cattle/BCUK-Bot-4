@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { auditContrast, auditFocus, contrastRatio, effectiveColours, hasFocusIndicator, requiredRatio } from './a11y.mjs';
 import { deepMerge, loadFixture } from './fixture.mjs';
 import { findClippedContent } from './layout.mjs';
-import { renderPage, settle, startServer } from './render.mjs';
+import { renderPage, seedSessionStorage, settle, startServer } from './render.mjs';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
@@ -408,7 +408,8 @@ describe('in the browser', () => {
       assert.ok((await page.locator('#recent-events-list > *').count()) >= 20, 'the fixture fills the feed');
       // The feed is the tallest column here, so the page only fits when its cap leaves room for everything around it,
       // the health indicator included. Below ~900px the main column (status cards, links, usage) is itself taller
-      // than the viewport, so the page scrolls by design whatever the feed does: sweep the heights above that.
+      // than the viewport, so the page scrolls by design whatever the feed does (#1132: measured 839px at 1440x768
+      // and 1064px at 1366x768, where the services stack; accepted, see views/CLAUDE.md): sweep the heights above that.
       for (const height of [900, 1000, 1080, 1200]) {
         await page.setViewportSize({ width: 1440, height });
         const over = await page.evaluate(() => globalThis.document.documentElement.scrollHeight - globalThis.document.documentElement.clientHeight);
@@ -436,6 +437,53 @@ describe('in the browser', () => {
     }
   });
 
+  it('keeps the page free of a scrollbar while the status feed is unreachable, with the note showing (#1134)', async () => {
+    const fixture = await loadFixture(path.join(FIXTURES, 'dashboard-feed-unavailable-busy.json'));
+    const { server, baseUrl } = await startServer(await renderPage(fixture), fixture);
+    const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+    try {
+      await page.clock.install();
+      await page.goto(baseUrl);
+      await settle(page, fixture);
+      assert.equal(await page.locator('#status-stale-note').isVisible(), true, 'the stale note shows');
+      for (const height of [900, 1000, 1080, 1200]) {
+        await page.setViewportSize({ width: 1440, height });
+        const over = await page.evaluate(() => globalThis.document.documentElement.scrollHeight - globalThis.document.documentElement.clientHeight);
+        assert.ok(over <= 0, `no page scrollbar at 1440x${height} while the feed is unavailable (page is ${over}px taller than the viewport)`);
+      }
+    } finally {
+      await page.close();
+      server.closeAllConnections();
+      server.close();
+    }
+  });
+
+  it('keeps a Reconnect link in the Twitch service, with the page still fitting and nothing clipped (#1136)', async () => {
+    const fixture = await loadFixture(path.join(FIXTURES, 'dashboard-needs-reconnect.json'));
+    const { server, baseUrl } = await startServer(await renderPage(fixture), fixture);
+    const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+    try {
+      await seedSessionStorage(page, fixture.sessionStorage);
+      assert.deepEqual(fixture.sessionStorage, { twitch_reconnect_dismissed: '1' });
+      await page.goto(baseUrl);
+      await settle(page, fixture);
+      assert.equal(await page.locator('#reconnect-modal').isVisible(), false, 'the modal stays dismissed');
+      assert.equal(await page.locator('#card-twitch #twitch-reconnect-link').isVisible(), true, 'the link shows in the Twitch service');
+      for (const height of [900, 1000, 1080, 1200]) {
+        await page.setViewportSize({ width: 1440, height });
+        const over = await page.evaluate(() => globalThis.document.documentElement.scrollHeight - globalThis.document.documentElement.clientHeight);
+        assert.ok(over <= 0, `no page scrollbar at 1440x${height} with the reconnect link (page is ${over}px taller than the viewport)`);
+      }
+      await page.setViewportSize({ width: 390, height: 844 });
+      const right = await page.evaluate(() => globalThis.document.querySelector('#twitch-reconnect-link').getBoundingClientRect().right);
+      assert.ok(right <= 390, `the link isn't clipped at 390px (right edge ${right})`);
+    } finally {
+      await page.close();
+      server.closeAllConnections();
+      server.close();
+    }
+  });
+
   it('renders each dashboard variant in its intended state', async () => {
     assert.equal((await renderTexts('dashboard.json', ['#discord-state']))['#discord-state'], 'Connected');
     assert.equal((await renderTexts('dashboard-discord-down.json', ['#discord-state']))['#discord-state'], 'Disconnected');
@@ -455,6 +503,8 @@ describe('in the browser', () => {
     assert.equal((await renderTexts('dashboard-stream-own-offline.json', ['#stream-own-state']))['#stream-own-state'], 'Offline');
     assert.equal((await renderTexts('dashboard-stream-not-monitored.json', ['#stream-own-state']))['#stream-own-state'], 'Not monitored');
     assert.equal((await renderTexts('dashboard.json', ['#stream-own-state']))['#stream-own-state'], 'No channel');
+    // The Twitch service's reconnect link (#1136) only while the viewer's token needs reconnecting.
+    assert.equal((await renderTexts('dashboard-needs-reconnect.json', ['#twitch-reconnect-link']))['#twitch-reconnect-link'], 'Reconnect your Twitch account');
     // The Twitch card's roll-up (#1074): some, all and no channels connected, and none configured.
     assert.equal((await renderTexts('dashboard.json', ['#twitch-state']))['#twitch-state'], 'Degraded (2 of 4)');
     assert.equal((await renderTexts('dashboard-all-connected.json', ['#twitch-state']))['#twitch-state'], 'Connected');

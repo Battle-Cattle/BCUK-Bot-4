@@ -1,0 +1,8 @@
+{
+  "_comment": "Illustrative data for ui-check only. A busy event feed plus the viewer's own Twitch token needing a reconnect: the modal was already dismissed (sessionStorage, as dashboard-reconnect.js reads it), and the Twitch service keeps a 'Reconnect your Twitch account' link that stays after the modal is dismissed. The page must still fit at 1440x900 (#1136).",
+  "extends": "dashboard-busy-feed.json",
+  "sessionStorage": { "twitch_reconnect_dismissed": "1" },
+  "locals": {
+    "needsReconnect": true
+  }
+}

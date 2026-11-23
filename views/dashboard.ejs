@@ -89,8 +89,16 @@ function htmlAttrJson(value) {
                 <span class="card-icon">🟣</span>
                 <h3 class="service-label">Twitch Channels</h3>
                 <span class="stat-value status-text" id="twitch-state">—</span>
+                <span class="dot dot--unknown" id="dot-twitch" role="img" aria-label="Twitch: Status unknown" title="Twitch: Status unknown"></span>
               </div>
               <div class="service-body dashboard-twitch-body dashboard-scroll" id="twitch-channels" tabindex="0" role="region" aria-label="Twitch channels"><p class="empty-msg">No Twitch channels configured.</p></div>
+              <% if (needsReconnect) { %>
+              <!-- The viewer's own Twitch token has failed (the modal below says so once). This keeps a way back to the reconnect page after
+                   the modal is dismissed. It is about the viewer's account, not a fault of the channels listed above. -->
+              <div class="service-foot">
+                <a href="/user/settings/twitch-connect" class="btn btn-sm" id="twitch-reconnect-link">Reconnect your Twitch account</a>
+              </div>
+              <% } %>
             </div>
 
           </div>

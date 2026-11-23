@@ -65,7 +65,7 @@ class FakeElement {
 const IDS = [
   'dot-discord', 'discord-state', 'discord-tag', 'discord-guild', 'dot-voice', 'voice-channel', 'voice-state',
   'btn-rejoin-voice', 'last-command', 'last-file', 'last-source', 'last-when', 'twitch-channels',
-  'health-indicator', 'bot-status', 'status-stale-note', 'twitch-state', 'twitch-channel-count',
+  'health-indicator', 'bot-status', 'status-stale-note', 'twitch-state', 'dot-twitch', 'twitch-channel-count',
   'stream-own-state', 'stream-own-name', 'stream-own-note', 'stream-own-link',
 ];
 
@@ -521,6 +521,21 @@ describe('public/dashboard-status.js Twitch connection roll-up', () => {
     expect(el('twitch-state').className).toBe(`stat-value status-text status-text--${modifier}`);
   });
 
+  it.each([
+    ['all channels connected', { a: up, b: up }, 'dot dot--online', 'Twitch: Connected'],
+    ['some channels connected', { a: up, b: down }, 'dot dot--degraded', 'Twitch: Degraded (1 of 2)'],
+    ['no channel connected', { a: down }, 'dot dot--offline', 'Twitch: Disconnected'],
+    ['no channels configured', {}, 'dot dot--inactive', 'Twitch: No channels configured'],
+    ['a channel with no connection state', { a: { isLive: false } }, 'dot dot--unknown', 'Twitch: Unknown'],
+  ])('draws the Twitch dot with its own shape and name for %s (#1137)', (_name, twitch, dotClass, label) => {
+    const { el, applyStatus } = runScripts();
+    applyStatus(status(true, { connected: true }, twitch));
+
+    expect(el('dot-twitch').className).toBe(dotClass);
+    expect(el('dot-twitch').attributes['aria-label']).toBe(label);
+    expect(el('dot-twitch').attributes.title).toBe(label);
+  });
+
   it('agrees with the header indicator about when Twitch is degraded or down', () => {
     const { el, applyStatus } = runScripts();
     applyStatus(status(true, { connected: true }, { a: up, b: down }));
@@ -548,6 +563,8 @@ describe('public/dashboard-status.js Twitch connection roll-up', () => {
 
     setStatusStreamOpen(false);
     for (let i = 0; i < 3; i++) await fetchStatus();
+    expect(el('dot-twitch').className).toBe('dot dot--unknown');
+    expect(el('dot-twitch').attributes['aria-label']).toBe('Twitch: Status unknown');
     expect(el('twitch-state').textContent).toBe('Unknown');
     expect(el('twitch-state').className).toBe('stat-value status-text status-text--unknown');
   });
