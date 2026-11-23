@@ -235,6 +235,63 @@ describe('public/dashboard-status.js Twitch channel badges', () => {
   });
 });
 
+describe('public/dashboard-status.js stale live check on channel rows (#1118)', () => {
+  const at = (minutesAgo: number) => new Date(Date.now() - minutesAgo * 60_000).toISOString();
+  const row = (extra: Record<string, unknown>) => ({ connected: true, isLive: true, lastConnectedAt: null, lastDisconnectedAt: null, ...extra });
+  const texts = (els: { descendants(): { className: string; textContent: string }[] }) => els.descendants().map((e) => e.textContent);
+
+  it('keeps LIVE with a recent check', () => {
+    const { el, applyStatus } = runScripts();
+    applyStatus(status(true, { connected: true }, { live_one: row({ liveCheckedAt: at(1) }) }));
+
+    expect(texts(el('twitch-channels'))).toContain('LIVE');
+    expect(texts(el('twitch-channels')).join('|')).not.toContain('last checked');
+  });
+
+  it('shows a stale live channel as last seen live, with its age in words and no LIVE badge', () => {
+    const { el, applyStatus } = runScripts();
+    applyStatus(status(true, { connected: true }, { live_one: row({ liveCheckedAt: at(5) }) }));
+
+    const all = texts(el('twitch-channels'));
+    expect(all).toContain('WAS LIVE');
+    expect(all).not.toContain('LIVE');
+    expect(all).toContain('Live status last checked 5 minutes ago');
+  });
+
+  it('says an offline channel\'s live status is stale too, with no LIVE or WAS LIVE badge', () => {
+    const { el, applyStatus } = runScripts();
+    applyStatus(status(true, { connected: true }, { quiet_one: row({ isLive: false, liveCheckedAt: at(6) }) }));
+
+    const all = texts(el('twitch-channels'));
+    expect(all).toContain('Live status last checked 6 minutes ago');
+    expect(all).not.toContain('LIVE');
+    expect(all).not.toContain('WAS LIVE');
+  });
+
+  it('leaves a row with liveCheckedAt but no isLive flag without stale text', () => {
+    const { el, applyStatus } = runScripts();
+    applyStatus(status(true, { connected: true }, { odd_one: row({ isLive: undefined, liveCheckedAt: at(9) }) }));
+
+    expect(texts(el('twitch-channels')).join('|')).not.toContain('last checked');
+  });
+
+  it('turns stale at exactly 3 minutes and not before', () => {
+    const { el, applyStatus } = runScripts();
+    applyStatus(status(true, { connected: true }, { edge_one: row({ liveCheckedAt: at(3) }), edge_two: row({ liveCheckedAt: at(2.9) }) }));
+
+    const all = texts(el('twitch-channels'));
+    expect(all.filter((t) => t === 'WAS LIVE')).toHaveLength(1);
+    expect(all.filter((t) => t === 'LIVE')).toHaveLength(1);
+  });
+
+  it.each([['absent', {}], ['null', { liveCheckedAt: null }]])('is unchanged when liveCheckedAt is %s', (_n, extra) => {
+    const { el, applyStatus } = runScripts();
+    applyStatus(status(true, { connected: true }, { live_one: row(extra) }));
+
+    expect(texts(el('twitch-channels'))).toContain('LIVE');
+  });
+});
+
 describe('public/dashboard-status.js Stream Overview', () => {
   const up = { connected: true, isLive: false, lastConnectedAt: null, lastDisconnectedAt: null };
   const liveButDisconnected = { connected: false, isLive: true, lastConnectedAt: null, lastDisconnectedAt: null };

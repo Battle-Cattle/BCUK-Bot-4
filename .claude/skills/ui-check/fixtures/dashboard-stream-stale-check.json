@@ -1,0 +1,10 @@
+{
+  "_comment": "Illustrative data for ui-check only. The monitor has not live-checked any channel for a long time (liveCheckedAt is old): the own channel and the Twitch Channels rows must show their last-known state with how long ago it was checked, never as current.",
+  "extends": "dashboard-stream-own-live.json",
+  "status": {
+    "twitch": {
+      "streamer_one": { "liveCheckedAt": "2026-11-20T10:00:00.000Z" },
+      "streamer_two": { "liveCheckedAt": "2026-11-20T10:00:00.000Z" }
+    }
+  }
+}

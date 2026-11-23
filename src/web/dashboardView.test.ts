@@ -96,7 +96,7 @@ describe('views/dashboard.ejs layout', () => {
     const stream = between(html, '<section class="section dashboard-stream"', '</section>');
 
     expect(stream).not.toMatch(/Live now|<ul|<li|stream-live/);
-    expect(fs.readFileSync(path.join(__dirname, '../../public/dashboard-status.js'), 'utf8')).toContain("liveBadge.textContent = 'LIVE'");
+    expect(fs.readFileSync(path.join(__dirname, '../../public/dashboard-status.js'), 'utf8')).toContain("liveBadge.textContent = liveStale ? 'WAS LIVE' : 'LIVE'");
   });
 
   it('loads the Stream Overview script before the status script that calls it (#1114)', async () => {
