@@ -219,7 +219,7 @@ describe('handleTwitchMessage', () => {
     // Guild resolution (Twitch-channel → discord_id → active voice guild) runs asynchronously
     // before handleCommand and executeCounterCommandForTwitch are invoked.
     await waitFor(() => expect(handleCommand).toHaveBeenCalledOnce());
-    expect(handleCommand).toHaveBeenCalledWith('!cmd', 'twitch', 'guild-A', '!cmd');
+    expect(handleCommand).toHaveBeenCalledWith('!cmd', 'twitch', 'guild-A', '!cmd', { user: 'Alice', channel: 'streamer' });
     await waitFor(() => expect(executeCounterCommandForTwitch).toHaveBeenCalledOnce());
     expect(executeCounterCommandForTwitch).toHaveBeenCalledWith('streamer', '!cmd', 'Alice', 'guild-A', '!cmd');
     expect(executeCountdownForTwitch).toHaveBeenCalledWith('streamer', '!cmd', '!cmd');
@@ -333,7 +333,7 @@ describe('handleTwitchMessage', () => {
     sendMessage('#streamer', 'alice', '!cmd');
 
     await waitFor(() => expect(handleCommand).toHaveBeenCalledOnce());
-    expect(handleCommand).toHaveBeenCalledWith('!cmd', 'twitch', null, '!cmd');
+    expect(handleCommand).toHaveBeenCalledWith('!cmd', 'twitch', null, '!cmd', { user: 'alice', channel: 'streamer' });
     await waitFor(() => expect(executeCounterCommandForTwitch).toHaveBeenCalledOnce());
     expect(executeCounterCommandForTwitch).toHaveBeenCalledWith('streamer', '!cmd', 'alice', null, '!cmd');
   });

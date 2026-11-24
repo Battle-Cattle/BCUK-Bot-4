@@ -6,10 +6,14 @@ import vm from 'vm';
 const utilsPath = path.join(__dirname, '../../public/dashboard-utils.js');
 const healthPath = path.join(__dirname, '../../public/dashboard-health.js');
 const streamPath = path.join(__dirname, '../../public/dashboard-stream.js');
+const lastPlayedPath = path.join(__dirname, '../../public/dashboard-last-played.js');
 const statusPath = path.join(__dirname, '../../public/dashboard-status.js');
 
 /** A minimal element: enough of the DOM for dashboard-utils.js and dashboard-status.js. */
 class FakeElement {
+  /** The tag name the script asked for (`createElement('bdi')`), so a test can check which names are isolated. */
+  tag = '';
+  dateTime = '';
   className = '';
   textContent = '';
   style: Record<string, string> = {};
@@ -32,6 +36,16 @@ class FakeElement {
     },
     contains: (cls: string) => this.className.split(/\s+/).includes(cls),
   };
+
+  /** Names written as text only: assigning markup must never happen (the real innerHTML would parse it). */
+  set innerHTML(_value: string) {
+    throw new Error('innerHTML must not be used for names');
+  }
+
+  /** All the text in this element and under it, in order (what a reader would see on the line). */
+  get allText(): string {
+    return this.textContent + this.children.map((c) => c.allText).join('');
+  }
 
   get firstChild(): FakeElement | undefined {
     return this.children[0];
@@ -64,8 +78,8 @@ class FakeElement {
 
 const IDS = [
   'dot-discord', 'discord-state', 'discord-tag', 'discord-guild', 'dot-voice', 'voice-channel', 'voice-state',
-  'btn-rejoin-voice', 'last-command', 'last-file', 'last-source', 'last-when', 'twitch-channels',
-  'health-indicator', 'bot-status', 'status-stale-note', 'twitch-state', 'dot-twitch', 'twitch-channel-count',
+  'btn-rejoin-voice', 'voice-last-played', 'twitch-channels',
+  'health-indicator', 'bot-status', 'status-stale-note', 'twitch-state', 'dot-twitch',
   'stream-own-state', 'stream-own-name', 'stream-own-note', 'stream-own-link',
 ];
 
@@ -104,7 +118,8 @@ function runScripts(responses: FetchResult[] = [], ownChannel: string | null = n
   const context: Record<string, unknown> = {
     document: {
       getElementById: (id: string) => els.get(id) ?? null,
-      createElement: () => new FakeElement(),
+      createElement: (tag: string) => Object.assign(new FakeElement(), { tag }),
+      createTextNode: (text: string) => Object.assign(new FakeElement(), { tag: '#text', textContent: text }),
       // The server puts the signed-in user's own channel on the body as data-own-channel (absent when they have none).
       body: { dataset: ownChannel ? { ownChannel } : {} },
     },
@@ -114,6 +129,7 @@ function runScripts(responses: FetchResult[] = [], ownChannel: string | null = n
   vm.runInContext(fs.readFileSync(utilsPath, 'utf8'), context);
   vm.runInContext(fs.readFileSync(healthPath, 'utf8'), context);
   vm.runInContext(fs.readFileSync(streamPath, 'utf8'), context);
+  vm.runInContext(fs.readFileSync(lastPlayedPath, 'utf8'), context);
   vm.runInContext(fs.readFileSync(statusPath, 'utf8'), context);
   return {
     el,
@@ -181,26 +197,88 @@ describe('public/dashboard-status.js Voice card', () => {
   });
 });
 
-describe('public/dashboard-status.js Last Played card', () => {
-  it('shows the last command, file, source and when it played', () => {
-    const { el, applyStatus } = runScripts();
+describe('public/dashboard-status.js last-played line in the Voice service (#1141)', () => {
+  const payloadWith = (voice: Record<string, unknown>) => {
     const payload = status(true, { connected: true });
-    applyStatus({
-      ...payload,
-      voice: { ...payload.voice, lastCommand: '!clap', currentFile: 'clap.mp3', lastSource: 'twitch', lastPlayedAt: new Date().toISOString() },
-    });
+    return { ...payload, voice: { ...payload.voice, ...voice } };
+  };
+  const played = { lastCommand: '!clap', lastFile: 'clap.mp3', lastPlayedAt: new Date().toISOString() };
 
-    expect(el('last-command').textContent).toBe('!clap');
-    expect(el('last-file').textContent).toBe('clap.mp3');
-    expect(el('last-source').textContent).toBe('twitch');
-    expect(el('last-when').textContent).toBe('just now');
+  it('shows the command, file, Twitch channel, who and when on one line', () => {
+    const { el, applyStatus } = runScripts();
+    applyStatus(payloadWith({ ...played, lastSource: 'twitch', lastChannel: 'streamer_one', lastUser: 'user1' }));
+
+    expect(el('voice-last-played').allText).toBe('!clap (clap.mp3) · Twitch #streamer_one · user1 · just now');
   });
 
-  it('shows dashes when nothing has played yet', () => {
+  it('names a Discord sound by Discord and its user only, never a channel', () => {
+    const { el, applyStatus } = runScripts();
+    applyStatus(payloadWith({ ...played, lastSource: 'discord', lastChannel: 'mod-secret', lastUser: 'user1' }));
+
+    expect(el('voice-last-played').allText).toBe('!clap (clap.mp3) · Discord · user1 · just now');
+    expect(el('voice-last-played').allText).not.toContain('mod-secret');
+  });
+
+  it('names a Stream Deck sound without a user when none is known', () => {
+    const { el, applyStatus } = runScripts();
+    applyStatus(payloadWith({ ...played, lastSource: 'streamdeck', lastUser: null }));
+
+    expect(el('voice-last-played').allText).toBe('!clap (clap.mp3) · Stream Deck · just now');
+  });
+
+  it('leaves out a part that is unknown instead of inventing it, and shows a bare time with nothing else', () => {
+    const { el, applyStatus } = runScripts();
+    applyStatus(payloadWith({ lastPlayedAt: played.lastPlayedAt, lastSource: 'nonsense', lastCommand: '', lastFile: 42, lastUser: null }));
+
+    expect(el('voice-last-played').allText).toBe('just now');
+  });
+
+  it('keeps the file after playback ends: it reads lastFile, not currentFile', () => {
+    const { el, applyStatus } = runScripts();
+    applyStatus(payloadWith({ ...played, currentFile: null, playing: false, lastSource: 'discord' }));
+
+    expect(el('voice-last-played').allText).toContain('clap.mp3');
+  });
+
+  it('says nothing has played since the bot started, as an explicit line', () => {
     const { el, applyStatus } = runScripts();
     applyStatus(status(true, { connected: false }));
 
-    for (const id of ['last-command', 'last-file', 'last-source', 'last-when']) expect(el(id).textContent).toBe('—');
+    expect(el('voice-last-played').textContent).toBe('Nothing played since the bot started');
+  });
+
+  it('treats an unparseable time as nothing played, never a made-up one', () => {
+    const { el, applyStatus } = runScripts();
+    applyStatus(payloadWith({ ...played, lastPlayedAt: 'not a date', lastSource: 'discord' }));
+
+    expect(el('voice-last-played').textContent).toBe('Nothing played since the bot started');
+  });
+
+  it('writes each name as text in its own isolating <bdi>, never as markup', () => {
+    const { el, applyStatus } = runScripts();
+    // The stub's innerHTML setter throws, so any markup path would fail this test outright.
+    applyStatus(payloadWith({ ...played, lastSource: 'twitch', lastChannel: 'streamer_one', lastUser: '<img src=x onerror=1> \u05d0\u05d1' }));
+
+    const line = el('voice-last-played');
+    const names = line.descendants().filter((e) => e.tag === 'bdi').map((e) => e.textContent);
+    expect(names).toEqual(['!clap', 'clap.mp3', 'streamer_one', '<img src=x onerror=1> \u05d0\u05d1']);
+    expect(line.descendants().filter((e) => e.tag === 'img')).toHaveLength(0);
+  });
+
+  it('puts the time in a <time> element with its date', () => {
+    const { el, applyStatus } = runScripts();
+    applyStatus(payloadWith({ ...played, lastSource: 'discord' }));
+
+    const time = el('voice-last-played').descendants().find((e) => e.tag === 'time');
+    expect(time?.dateTime).toBe(played.lastPlayedAt);
+  });
+
+  it('redraws from scratch on each status, so an earlier play never lingers', () => {
+    const { el, applyStatus } = runScripts();
+    applyStatus(payloadWith({ ...played, lastSource: 'twitch', lastChannel: 'streamer_one', lastUser: 'user1' }));
+    applyStatus(payloadWith({ ...played, lastCommand: '!ding', lastFile: 'ding.mp3', lastSource: 'streamdeck', lastChannel: null, lastUser: null }));
+
+    expect(el('voice-last-played').allText).toBe('!ding (ding.mp3) · Stream Deck · just now');
   });
 });
 
@@ -464,41 +542,6 @@ describe('public/dashboard-status.js zero Twitch channels', () => {
 
     expect(el('twitch-state').textContent).toBe('No channels configured');
     expect(el('twitch-state').className).toBe('stat-value status-text status-text--inactive');
-  });
-});
-
-describe('public/dashboard-status.js Usage tile Twitch Channels count (#1117)', () => {
-  const channel = { connected: true, isLive: false, lastConnectedAt: null, lastDisconnectedAt: null };
-
-  it('follows the channel list as channels are added, removed and cleared, without a reload', () => {
-    const { el, applyStatus } = runScripts();
-
-    applyStatus(status(true, { connected: true }, { streamer_one: channel }));
-    expect(el('twitch-channel-count').textContent).toBe('1');
-
-    applyStatus(status(true, { connected: true }, { streamer_one: channel, streamer_two: channel, streamer_three: channel }));
-    expect(el('twitch-channel-count').textContent).toBe('3');
-
-    applyStatus(status(true, { connected: true }, { streamer_two: channel }));
-    expect(el('twitch-channel-count').textContent).toBe('1');
-  });
-
-  it('shows 0, not a dash, when the last channel goes', () => {
-    const { el, applyStatus } = runScripts();
-    applyStatus(status(true, { connected: true }, { streamer_one: channel }));
-
-    applyStatus(status(true, { connected: true }, {}));
-
-    expect(el('twitch-channel-count').textContent).toBe('0');
-  });
-
-  it('counts the same channels the list shows', () => {
-    const { el, applyStatus } = runScripts();
-    applyStatus(status(true, { connected: true }, { streamer_one: channel, streamer_two: channel }));
-
-    const rows = el('twitch-channels').descendants().filter((e) => e.className === 'channel-item');
-    expect(rows).toHaveLength(2);
-    expect(el('twitch-channel-count').textContent).toBe(String(rows.length));
   });
 });
 

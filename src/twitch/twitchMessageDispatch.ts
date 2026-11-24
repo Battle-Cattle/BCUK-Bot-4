@@ -53,7 +53,7 @@ function dispatchGuildScopedCommands(
     log,
   );
   fireAndForget(
-    guildIdPromise.then((guildId) => handleCommand(message, 'twitch', guildId, command)),
+    guildIdPromise.then((guildId) => handleCommand(message, 'twitch', guildId, command, { user: displayName, channel: normalizedChannel })),
     'Command handler error',
     log,
   );

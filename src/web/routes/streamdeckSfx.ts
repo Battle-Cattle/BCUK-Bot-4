@@ -4,6 +4,7 @@ import { findCachedSfxTrigger, getAllSfxTriggers } from '../../db';
 import { pickWeightedRandom } from '../../audio/soundSelector';
 import { playFile, VoiceNotConnectedError } from '../../audio/sfxPlayer';
 import { setVoicePlaying } from '../../shared/statusStore';
+import { getVoiceMemberDisplayName } from '../../discord/voicePresence';
 import { requireApiKey } from '../middleware';
 import { resolvePresenceGuildOrRespond, getReadyDiscordClientOrRespond, ensureKeyApprovedAnywhere } from './streamdeckGuildResolution';
 
@@ -129,7 +130,11 @@ router.post('/sfx', stampRequestStart, requireApiKey, async (req, res) => {
 
   try {
     await playFile(filename, guildId);
-    setVoicePlaying(guildId, filename, normalizedCommand, 'streamdeck');
+    // Who pressed the button: the key owner's name in this guild's voice cache (null when not cached). No channel.
+    setVoicePlaying(guildId, filename, normalizedCommand, {
+      source: 'streamdeck',
+      user: getVoiceMemberDisplayName(discordClient, guildId, req.apiKeyOwner),
+    });
     const handledMs = elapsedMs(res);
     const message = `Playing '${filename.replace(/[\r\n]/g, '')}' for trigger '${normalizedCommand.replace(/[\r\n]/g, '')}' in guild ${guildId} (request handled in ${handledMs}ms)`;
     if (handledMs > SLOW_SFX_REQUEST_MS) log.warn(message);

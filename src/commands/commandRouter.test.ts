@@ -168,7 +168,28 @@ describe('handleCommand', () => {
 
     expect(vi.mocked(findCachedSfxTrigger)).toHaveBeenCalledWith('!ding');
     expect(vi.mocked(playFile)).toHaveBeenCalledWith('ding.mp3', GUILD_A);
-    expect(vi.mocked(setVoicePlaying)).toHaveBeenCalledWith(GUILD_A, 'ding.mp3', '!ding', 'discord');
+    expect(vi.mocked(setVoicePlaying)).toHaveBeenCalledWith(GUILD_A, 'ding.mp3', '!ding', { source: 'discord', user: null });
+  });
+
+  it('records who triggered a Twitch sound and from which channel', async () => {
+    vi.mocked(isPlaying).mockReturnValue(false);
+    vi.mocked(findCachedSfxTrigger).mockResolvedValue(LOOKUP);
+    vi.mocked(pickWeightedRandom).mockReturnValue('ding.mp3');
+
+    await handleCommand('!ding', 'twitch', GUILD_A, '!ding', { user: 'user1', channel: 'streamer_one' });
+
+    expect(vi.mocked(setVoicePlaying)).toHaveBeenCalledWith(GUILD_A, 'ding.mp3', '!ding', { source: 'twitch', user: 'user1', channel: 'streamer_one' });
+  });
+
+  it('records the sender of a Discord sound but drops any channel passed with it', async () => {
+    vi.mocked(isPlaying).mockReturnValue(false);
+    vi.mocked(findCachedSfxTrigger).mockResolvedValue(LOOKUP);
+    vi.mocked(pickWeightedRandom).mockReturnValue('ding.mp3');
+
+    await handleCommand('!ding', 'discord', GUILD_A, '!ding', { user: 'user1', channel: 'mod-secret' });
+
+    expect(vi.mocked(setVoicePlaying)).toHaveBeenCalledWith(GUILD_A, 'ding.mp3', '!ding', { source: 'discord', user: 'user1' });
+    expect(JSON.stringify(vi.mocked(setVoicePlaying).mock.calls)).not.toContain('mod-secret');
   });
 
   it('blocks a second concurrent call via the inFlight flag', async () => {
@@ -298,7 +319,7 @@ describe('handleCommand', () => {
       await handleCommand('!safe', 'twitch', GUILD_A);
 
       expect(vi.mocked(playFile)).toHaveBeenCalledWith('valid-sound.mp3', GUILD_A);
-      expect(vi.mocked(setVoicePlaying)).toHaveBeenCalledWith(GUILD_A, 'valid-sound.mp3', '!safe', 'twitch');
+      expect(vi.mocked(setVoicePlaying)).toHaveBeenCalledWith(GUILD_A, 'valid-sound.mp3', '!safe', { source: 'twitch', user: null, channel: null });
     });
 
     it('allows valid filenames in subdirectories within the SFX folder', async () => {
@@ -310,7 +331,7 @@ describe('handleCommand', () => {
       await handleCommand('!safe', 'twitch', GUILD_A);
 
       expect(vi.mocked(playFile)).toHaveBeenCalledWith('category/sound.mp3', GUILD_A);
-      expect(vi.mocked(setVoicePlaying)).toHaveBeenCalledWith(GUILD_A, 'category/sound.mp3', '!safe', 'twitch');
+      expect(vi.mocked(setVoicePlaying)).toHaveBeenCalledWith(GUILD_A, 'category/sound.mp3', '!safe', { source: 'twitch', user: null, channel: null });
     });
   });
 });

@@ -11,11 +11,6 @@ function htmlAttrJson(value) {
   <%- include('partials/nav') %>
 
   <main class="container container--wide">
-    <!-- The one overall health indicator: a roll-up of the required services (Discord, and the Twitch chat
-         connections when any are configured), never voice or live state. dashboard-health.js derives it from the
-         status feed; it starts Unknown so the page never claims health before data arrives. -->
-    <div id="health-indicator" class="health health--unknown" data-state="unknown" role="status">Status unknown</div>
-
     <div class="dashboard-layout">
 
       <%# Welcome hero: a short greeting (the page's h1) and the existing Quick Links as compact actions, in the left
@@ -27,10 +22,10 @@ function htmlAttrJson(value) {
           <p class="hero-subtitle">Your Battle Cattle dashboard at a glance.</p>
         </div>
         <nav class="hero-actions" aria-label="Quick links">
-          <a href="/sfx" class="hero-action"><span class="hero-action-icon" aria-hidden="true">🎧</span>SFX</a>
+          <a href="/sfx" class="hero-action"><span class="hero-action-icon" aria-hidden="true">🎧</span>SFX <span class="hero-count"><%= usageStats.sfxCount %></span></a>
           <% if (user && user.accessLevel >= 2) { %>
-          <a href="/commands" class="hero-action"><span class="hero-action-icon" aria-hidden="true">💻</span>Commands</a>
-          <a href="/counters" class="hero-action"><span class="hero-action-icon" aria-hidden="true">🔢</span>Counters</a>
+          <a href="/commands" class="hero-action"><span class="hero-action-icon" aria-hidden="true">💻</span>Commands <span class="hero-count"><%= usageStats.commandCount %></span></a>
+          <a href="/counters" class="hero-action"><span class="hero-action-icon" aria-hidden="true">🔢</span>Counters <span class="hero-count"><%= usageStats.counterCount %></span></a>
           <% } %>
           <a href="/channel-points" class="hero-action"><span class="hero-action-icon" aria-hidden="true">🪙</span>Channel Points</a>
           <a href="/loyalty-points" class="hero-action"><span class="hero-action-icon" aria-hidden="true">🏆</span>Loyalty Points</a>
@@ -38,10 +33,17 @@ function htmlAttrJson(value) {
         </nav>
       </section>
 
-      <!-- ── System Status: one panel for the bot's services (Discord, Voice, Twitch chat), with Last Played beside it.
+      <!-- ── System Status: one panel for the bot's services (Discord, Voice, Twitch chat), with the last sound played inside the Voice service.
            Each service keeps its own state text, dot and controls; broadcast state is not part of it. ── -->
       <section class="section dashboard-status" id="bot-status">
-        <h2 class="section-title">System Status</h2>
+        <%# The one overall health indicator: a roll-up of the required services (Discord, and the Twitch chat connections
+            when any are configured), never voice or live state. dashboard-health.js derives it from the status feed;
+            it starts Unknown so the page never claims health before data arrives. It sits on this heading row, so it
+            adds no height of its own and sits next to the panel it summarises. %>
+        <div class="section-header">
+          <h2 class="section-title">System Status</h2>
+          <div id="health-indicator" class="health health--unknown" data-state="unknown" role="status">Status unknown</div>
+        </div>
         <p id="status-stale-note" class="status-stale-note" hidden>Status unknown: these are the last values received, not live.</p>
         <div class="status-layout">
 
@@ -69,6 +71,10 @@ function htmlAttrJson(value) {
               </div>
               <div class="service-body">
                 <div class="stat-row"><span class="stat-label">Channel</span><span class="stat-value" id="voice-channel">—</span></div>
+                <%# The last sound played in this guild: its command, file, where it came from, who triggered it and when, on one
+                    wrapping line. Playback information, not a health state. dashboard-status.js fills it from the status feed
+                    (names are written as text only, never as markup), so nothing user-controlled is rendered here. %>
+                <p class="last-played"><span class="stat-label">Last played</span> <span class="last-played-line" id="voice-last-played">—</span></p>
                 <% if (user && user.accessLevel >= 1) { %>
                 <div class="stat-row stat-row-top-gap">
                   <div class="d-flex flex-wrap gap-05 items-center">
@@ -101,20 +107,6 @@ function htmlAttrJson(value) {
               <% } %>
             </div>
 
-          </div>
-
-          <!-- Last Played is playback information, not a service state, so it sits beside the panel. -->
-          <div class="card last-played">
-            <div class="card-header">
-              <span class="card-icon">🎵</span>
-              <span class="card-label">Last Played</span>
-            </div>
-            <div class="card-body">
-              <div class="stat-row"><span class="stat-label">Command</span><span class="stat-value mono" id="last-command">—</span></div>
-              <div class="stat-row"><span class="stat-label">File</span><span class="stat-value mono" id="last-file">—</span></div>
-              <div class="stat-row"><span class="stat-label">Source</span><span class="stat-value" id="last-source">—</span></div>
-              <div class="stat-row"><span class="stat-label">When</span><span class="stat-value" id="last-when">—</span></div>
-            </div>
           </div>
 
         </div>
@@ -162,17 +154,6 @@ function htmlAttrJson(value) {
 
       </div>
 
-      <!-- ── Usage ── -->
-      <section class="section dashboard-usage">
-        <h2 class="section-title">Usage</h2>
-        <div class="status-grid">
-          <div class="card"><div class="card-body stat-card-body"><span class="stat-big"><%= usageStats.sfxCount %></span><span class="stat-big-label">SFX Triggers</span></div></div>
-          <div class="card"><div class="card-body stat-card-body"><span class="stat-big"><%= usageStats.commandCount %></span><span class="stat-big-label">Custom Commands</span></div></div>
-          <div class="card"><div class="card-body stat-card-body"><span class="stat-big"><%= usageStats.counterCount %></span><span class="stat-big-label">Counters</span></div></div>
-          <div class="card"><div class="card-body stat-card-body"><span class="stat-big" id="twitch-channel-count"><%= Object.keys(status.twitch).length %></span><span class="stat-big-label">Twitch Channels</span></div></div>
-        </div>
-      </section>
-
     </div>
   </main>
 
@@ -183,6 +164,7 @@ function htmlAttrJson(value) {
   <script src="/dashboard-layout.js"></script>
   <script src="/dashboard-health.js"></script>
   <script src="/dashboard-stream.js"></script>
+  <script src="/dashboard-last-played.js"></script>
   <script src="/dashboard-status.js"></script>
   <script src="/dashboard-voice.js"></script>
   <script src="/dashboard-events.js"></script>

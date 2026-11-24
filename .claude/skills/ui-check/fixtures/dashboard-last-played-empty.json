@@ -1,0 +1,14 @@
+{
+  "_comment": "Illustrative data for ui-check only. Nothing has played since the bot started: the Voice service's last-played line says so in words (not a row of dashes).",
+  "extends": "dashboard.json",
+  "status": {
+    "voice": {
+      "lastCommand": null,
+      "lastSource": null,
+      "lastPlayedAt": null,
+      "lastFile": null,
+      "lastUser": null,
+      "lastChannel": null
+    }
+  }
+}

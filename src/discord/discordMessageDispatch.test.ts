@@ -59,8 +59,24 @@ describe('registerMessageCreateHandler', () => {
     const cb = getMessageCreateCb();
     const msg = { author: { bot: false, username: 'Alice' }, guildId: 'guild-id', content: '!test', member: { displayName: 'Alice' } };
     cb(msg);
-    expect(vi.mocked(handleCommand)).toHaveBeenCalledWith('!test', 'discord', 'guild-id', '!test');
+    expect(vi.mocked(handleCommand)).toHaveBeenCalledWith('!test', 'discord', 'guild-id', '!test', { user: 'Alice' });
     expect(vi.mocked(executeCustomCommandForDiscord)).toHaveBeenCalledWith(msg, 'Alice', 'guild-id', '!test');
+  });
+
+  it('passes the sender\'s name to the command router but never the message\'s channel', () => {
+    const cb = getMessageCreateCb();
+    const msg = { author: { bot: false, username: 'Alice' }, guildId: 'guild-id', channelId: 'mod-channel-999', channel: { name: 'mod-secret' }, content: '!test', member: { displayName: 'Alice D' } };
+    cb(msg);
+    expect(vi.mocked(handleCommand)).toHaveBeenCalledWith('!test', 'discord', 'guild-id', '!test', { user: 'Alice D' });
+    const sent = JSON.stringify(vi.mocked(handleCommand).mock.calls);
+    expect(sent).not.toContain('mod-channel-999');
+    expect(sent).not.toContain('mod-secret');
+  });
+
+  it('falls back to the author\'s username when the member is not cached', () => {
+    const cb = getMessageCreateCb();
+    cb({ author: { bot: false, username: 'Alice' }, guildId: 'guild-id', content: '!test', member: null });
+    expect(vi.mocked(handleCommand)).toHaveBeenCalledWith('!test', 'discord', 'guild-id', '!test', { user: 'Alice' });
   });
 
   it('dispatches to the health command handler for registered guild messages', () => {

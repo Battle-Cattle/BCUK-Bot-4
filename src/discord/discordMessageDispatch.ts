@@ -36,7 +36,8 @@ export function registerMessageCreateHandler(client: Client): void {
 
     fireAndForget(executeCustomCommandForDiscord(message, displayName, guildId, command), 'Custom command error', log);
     fireAndForget(executeCounterCommandForDiscord(message, displayName, guildId, command), 'Counter command error', log);
-    fireAndForget(handleCommand(message.content, 'discord', guildId, command), 'Command handler error', log);
+    // The sender's name only: the message's channel is never passed on (a Discord text channel's name may be private).
+    fireAndForget(handleCommand(message.content, 'discord', guildId, command, { user: displayName }), 'Command handler error', log);
     fireAndForget(executeHealthCommandForDiscord(message, command), 'Health command error', log);
   });
 }

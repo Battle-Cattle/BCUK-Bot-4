@@ -38,6 +38,7 @@ vi.mock('../../discord/discordClientStore', () => ({
 
 vi.mock('../../discord/voicePresence', () => ({
   getActiveGuildForUser: vi.fn(),
+  getVoiceMemberDisplayName: vi.fn(),
 }));
 
 // One shared logger instance, so tests can assert on the route's log lines.
@@ -51,7 +52,7 @@ import { pickWeightedRandom } from '../../audio/soundSelector';
 import { playFile, VoiceNotConnectedError } from '../../audio/sfxPlayer';
 import { setVoicePlaying } from '../../shared/statusStore';
 import { getDiscordClient } from '../../discord/discordClientStore';
-import { getActiveGuildForUser } from '../../discord/voicePresence';
+import { getActiveGuildForUser, getVoiceMemberDisplayName } from '../../discord/voicePresence';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 
 const TRIGGER: SfxTrigger = {
@@ -85,6 +86,7 @@ beforeEach(() => {
   vi.mocked(pickWeightedRandom).mockReturnValue('ding.mp3');
   vi.mocked(getDiscordClient).mockReturnValue(makeClient());
   vi.mocked(getActiveGuildForUser).mockReturnValue('guild-123');
+  vi.mocked(getVoiceMemberDisplayName).mockReturnValue(null);
   vi.mocked(isKeyApprovedForGuild).mockResolvedValue(true);
   vi.mocked(getApprovedGuildIdsForKey).mockResolvedValue(['guild-123']);
 });
@@ -113,7 +115,19 @@ describe('POST /sfx', () => {
       .expect(200);
 
     expect(res.body).toEqual({ ok: true, file: 'ding.mp3' });
-    expect(vi.mocked(setVoicePlaying)).toHaveBeenCalledWith('guild-123', 'ding.mp3', '!ding', 'streamdeck');
+    expect(vi.mocked(setVoicePlaying)).toHaveBeenCalledWith('guild-123', 'ding.mp3', '!ding', { source: 'streamdeck', user: null });
+  });
+
+  it('records the key owner\'s name from the guild voice cache as who pressed the button, with no channel', async () => {
+    vi.mocked(findCachedSfxTrigger).mockResolvedValue(LOOKUP);
+    vi.mocked(pickWeightedRandom).mockReturnValue('ding.mp3');
+    vi.mocked(getVoiceMemberDisplayName).mockReturnValue('Alice D');
+
+    await supertest(buildApp()).post('/sfx').send({ command: '!ding' }).expect(200);
+
+    expect(vi.mocked(getVoiceMemberDisplayName)).toHaveBeenCalledWith(expect.anything(), 'guild-123', API_KEY_OWNER);
+    expect(vi.mocked(setVoicePlaying)).toHaveBeenCalledWith('guild-123', 'ding.mp3', '!ding', { source: 'streamdeck', user: 'Alice D' });
+    expect(vi.mocked(setVoicePlaying).mock.calls[0]?.[3]).not.toHaveProperty('channel');
   });
 
   it('logs how long the request took to handle at info level when it was quick', async () => {

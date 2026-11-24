@@ -1,4 +1,4 @@
-/* global applyStreamOverview, clearChildren, deriveHealth, formatLiveCheckAge, isLiveCheckStale, liveCheckAgeMs, relativeTime, renderHealth, setStatusDot, setText, twitchHealth */
+/* global applyStreamOverview, clearChildren, deriveHealth, formatLiveCheckAge, isLiveCheckStale, liveCheckAgeMs, relativeTime, renderHealth, renderLastPlayed, setStatusDot, setText, twitchHealth */
 /* ── Status rendering & polling ──────────────────────────── */
 
 /**
@@ -177,7 +177,7 @@ function setStatusText(id, state) {
  * The cards go first, so a malformed payload that throws part-way never clears the not-current marking; instead
  * the indicator goes to Unknown and the error propagates (the stream handler drops it, fetchStatus counts it).
  * Each successful call counts as a newer update (see statusGeneration), so an in-flight fetch can't overwrite it.
- * @param status - The parsed /api/status JSON (`discord`, `voice`, `twitch` sections, plus the last played sound).
+ * @param status - The parsed /api/status JSON (`discord`, `voice` and `twitch` sections).
  */
 function applyStatus(status) {
   try {
@@ -197,7 +197,7 @@ function applyStatus(status) {
 }
 
 /**
- * Writes a status payload into the Discord, Voice, Last Played and Twitch cards; throws on a malformed payload.
+ * Writes a status payload into the Discord, Voice and Twitch cards (the Voice card includes the last-played line); throws on a malformed payload.
  * @param status - The parsed /api/status JSON (`discord`, `voice`, `twitch` sections, plus the last played sound).
  */
 function applyStatusCards(status) {
@@ -221,11 +221,8 @@ function applyStatusCards(status) {
     voiceBtn.textContent = voiceOn ? 'Leave Voice' : 'Join Voice';
   }
 
-  // Last played
-  setText('last-command', status.voice.lastCommand);
-  setText('last-file',    status.voice.currentFile || (status.voice.lastCommand && '—'));
-  setText('last-source',  status.voice.lastSource);
-  setText('last-when',    relativeTime(status.voice.lastPlayedAt));
+  // Last played: one line in the Voice service
+  renderLastPlayed(document.getElementById('voice-last-played'), status.voice);
 
   // Channels
   setStatusText('twitch-state', twitchRollupState(status.twitch));
@@ -233,8 +230,6 @@ function applyStatusCards(status) {
   setStatusDot('dot-twitch', twitchDot.dotClass, twitchDot.label);
   const twitchEl = document.getElementById('twitch-channels');
   if (twitchEl) renderChannels(twitchEl, status.twitch);
-  // The Usage tile's count follows the list: a channel added, removed or moved reaches an open dashboard live. String(), as setText turns 0 into a dash.
-  setText('twitch-channel-count', String(Object.keys(status.twitch).length));
 
   // Stream Overview: last, so a malformed payload that throws above never updates it. `false` and not
   // isStatusFeedStale(): applyStatus clears the stale flag only after the cards are written, so a recovering

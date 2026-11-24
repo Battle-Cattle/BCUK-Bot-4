@@ -106,6 +106,15 @@ describe('views/dashboard.ejs layout', () => {
     expect(html.indexOf('/dashboard-stream.js')).toBeLessThan(html.indexOf('/dashboard-status.js'));
   });
 
+  it('loads the last-played script after the utils it uses and before the status script that calls it (#1141)', async () => {
+    const html = await render();
+    const at = (name: string) => html.indexOf(`<script src="/${name}.js"></script>`);
+
+    expect(at('dashboard-last-played')).toBeGreaterThan(at('dashboard-utils'));
+    expect(at('dashboard-last-played')).toBeLessThan(at('dashboard-status'));
+    expect(html.match(/dashboard-last-played\.js/g)).toHaveLength(1);
+  });
+
   it('loads the context-change script before the two scripts that open the dashboard streams', async () => {
     const html = await render();
 
@@ -147,7 +156,7 @@ describe('views/dashboard.ejs layout', () => {
     expect(css).not.toMatch(/\.stream-card\s*\{[^}]*border/);
   });
 
-  it('presents the bot\'s services as one System Status panel, with Last Played beside it and no overall badge (#1076)', async () => {
+  it('presents the bot\'s services as one System Status panel, with the last sound inside the Voice service (#1076, #1141)', async () => {
     const html = await render();
     const status = between(html, '<section class="section dashboard-status" id="bot-status">', '</section>');
     const panel = divBlock(status, '<div class="card system-status">');
@@ -160,12 +169,12 @@ describe('views/dashboard.ejs layout', () => {
       'dot-voice', 'voice-state', 'voice-channel', 'twitch-state', 'twitch-channels']) {
       expect(panel).toContain(`id="${id}"`);
     }
-    // Last Played is playback information, not a service: beside the panel, inside the section (so staleness mutes it).
-    expect(status).toContain('class="card last-played"');
-    expect(panel).not.toContain('last-command');
-    for (const id of ['last-command', 'last-file', 'last-source', 'last-when']) expect(status).toContain(`id="${id}"`);
+    // The last sound is a line inside the Voice service (so staleness mutes it); the separate Last Played card is gone.
+    expect(divBlock(panel, '<div class="service service--voice"')).toContain('id="voice-last-played"');
+    expect(status).not.toContain('class="card last-played"');
+    for (const id of ['last-command', 'last-file', 'last-source', 'last-when']) expect(status).not.toContain(`id="${id}"`);
     // No second overall status, no Active Services card, no sparklines, no Hytale row.
-    expect(status).not.toMatch(/All Good|All Systems Operational|Active Services|<svg|<canvas|Hytale/i);
+    expect(status).not.toMatch(/All Good|Active Services|<svg|<canvas|Hytale/i);
   });
 
   it('keeps each service\'s state on its header line, beside its dot, so the panel stays compact (#1076)', async () => {
@@ -179,14 +188,13 @@ describe('views/dashboard.ejs layout', () => {
     expect(between(html, '<div class="service service--twitch"', 'id="twitch-channels"')).toContain('id="twitch-state"');
   });
 
-  it('puts the sections in source order welcome hero, System Status, events sidebar, Usage', async () => {
+  it('puts the sections in source order welcome hero, System Status, events sidebar', async () => {
     const layout = divBlock(await render(), '<div class="dashboard-layout">');
 
     const positions = [
       '<section class="dashboard-hero"',
       '<section class="section dashboard-status" id="bot-status">',
       '<aside class="dashboard-sidebar"',
-      '<section class="section dashboard-usage">',
     ].map((tag) => layout.indexOf(tag));
     expect(positions[0]).toBeGreaterThanOrEqual(0);
     expect(positions).toEqual([...positions].sort((a, b) => a - b));
@@ -207,13 +215,13 @@ describe('views/dashboard.ejs layout', () => {
     const narrowRules = /@media \(max-width: 1100px\) \{([\s\S]*?)\n\}/.exec(css)?.[1] ?? '';
 
     expect(narrowRules).toMatch(/\.dashboard-layout\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\);/);
-    expect(narrowRules).toMatch(/grid-template-areas:\s*"hero" "status" "events" "usage"/);
+    expect(narrowRules).toMatch(/grid-template-areas:\s*"hero" "status" "events"[^"]/);
   });
 
   it('keeps the welcome hero in the left column on desktop, above System Status', () => {
     const css = fs.readFileSync(stylePath, 'utf8');
 
-    expect(css).toMatch(/grid-template-areas:\s*"hero events" "status events" "usage events"/);
+    expect(css).toMatch(/grid-template-areas:\s*"hero events" "status events"[^"]/);
     expect(css).toMatch(/\.dashboard-hero\s*\{[^}]*grid-area:\s*hero/);
   });
 
@@ -247,24 +255,25 @@ describe('views/dashboard.ejs layout', () => {
 
     expect(html).toMatch(/class="[^"]*\bdashboard-twitch-body\b[^"]*" id="twitch-channels"/);
     // `flex: 1 1 0px`, never `flex: 1`: a 0% basis becomes the content's height when the container's is indefinite,
-    // which would stretch the row and push Usage down. The 7rem floor is what shows when nothing is spare.
+    // which would stretch the row and push the page taller. The 7rem floor is what shows when nothing is spare.
     expect(list).toMatch(/flex:\s*1 1 0px;/);
     expect(list).toMatch(/min-height:\s*7rem;/);
     expect(list).toMatch(/overflow-y:\s*auto/);
     expect(list).not.toContain('max-height');
-    // The status row is the 1fr one (between the hero and Usage), stretched, with min-height: 0 down the chain, so the spare height lands there.
-    expect(css).toMatch(/\.dashboard-layout\s*\{[^}]*grid-template-rows:\s*auto 1fr auto;/);
+    // The status row is the 1fr one (below the hero), stretched, with min-height: 0 down the chain, so the spare height lands there.
+    expect(css).toMatch(/\.dashboard-layout\s*\{[^}]*grid-template-rows:\s*auto 1fr;/);
     expect(css).toMatch(/\.dashboard-status\s*\{[^}]*align-self:\s*stretch;[^}]*container-type:\s*inline-size/);
     for (const rule of ['status-layout', 'system-status', 'service']) {
       expect(new RegExp(`\\n\\.${rule}\\s*\\{[^}]*min-height:\\s*0;`).test(css)).toBe(true);
     }
   });
 
-  it('lays the panel out by its own width: stacked on phones, two columns wider, with Last Played beside it when there is room (#1076)', () => {
+  it('lays the panel out by its own width: stacked on phones and two columns wider (#1076)', () => {
     const css = fs.readFileSync(stylePath, 'utf8');
 
     expect(css).toMatch(/@container \(min-width: 40rem\) \{[^@]*grid-template-areas:\s*"discord twitch" "voice twitch"/);
-    expect(css).toMatch(/@container \(min-width: 60rem\) \{[^@]*\.status-layout\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) 15rem/);
+    // No third column for Last Played any more: it is a line inside the Voice service.
+    expect(css).not.toContain('@container (min-width: 60rem)');
     // Phones stack, and there the page scrolls anyway, so the list gets a fixed height instead.
     expect(css).toMatch(/@container \(max-width: 39\.99rem\) \{[^@]*\.dashboard-twitch-body\s*\{[^}]*max-height:\s*13\.5rem/);
     // One line per channel: the name, then its time, then its badges.
@@ -310,15 +319,8 @@ describe('views/dashboard.ejs layout', () => {
     expect(html).toMatch(/<h3 class="service-label">Twitch Channels<\/h3>\s*<span class="stat-value status-text" id="twitch-state">/);
     expect(rollup).toBeGreaterThan(html.indexOf('id="card-twitch"'));
     expect(rollup).toBeLessThan(html.indexOf('id="twitch-channels"'));
-    // The scroll region keeps its label and focus stop, and the Usage tile keeps its count.
+    // The scroll region keeps its label and focus stop.
     expect(html).toMatch(/id="twitch-channels" tabindex="0" role="region" aria-label="Twitch channels"/);
-    expect(html).toMatch(/<span class="stat-big" id="twitch-channel-count">\d+<\/span><span class="stat-big-label">Twitch Channels<\/span>/);
-  });
-
-  it('renders the Usage tile\'s Twitch Channels count from the same channels the status carries, so the first paint agrees with later pushes (#1117)', async () => {
-    const html = await render();
-    // The fixture's status carries one channel.
-    expect(html).toMatch(/id="twitch-channel-count">1<\/span>/);
   });
 
   it.each([
@@ -342,10 +344,10 @@ describe('views/dashboard.ejs layout', () => {
     expect(css).toMatch(/\.service-header \.stat-value\s*\{[^}]*white-space:\s*normal/);
   });
 
-  it('caps the right-hand column to leave room for the navbar, the health indicator and the footer, and lets the feed take what the panel leaves (#1114)', () => {
+  it('caps the right-hand column to leave room for the navbar, and the footer, and lets the feed take what the panel leaves (#1114)', () => {
     const css = fs.readFileSync(stylePath, 'utf8');
     const desktopRules = css.slice(0, css.indexOf('@media (max-width: 1100px)'));
-    const cap = /\.dashboard-side\s*\{[^}]*max-height:\s*calc\(100vh - var\(--dashboard-nav-offset\) - var\(--dashboard-health-offset\) - ([\d.]+)rem\)/.exec(desktopRules);
+    const cap = /\.dashboard-side\s*\{[^}]*max-height:\s*calc\(100vh - var\(--dashboard-nav-offset\) - ([\d.]+)rem\)/.exec(desktopRules);
 
     // A static guard on the stylesheet, not a rendered check (the suite has no browser). The column holds Stream
     // Overview and the feed with its title and card chrome (~2.6rem, inside the column), so its reserve is the old 12rem
@@ -366,17 +368,14 @@ describe('views/dashboard.ejs layout', () => {
     expect(desktopRules).toMatch(/\.dashboard-sidebar \.section-title,\s*\.dashboard-stream \.section-title\s*\{[^}]*flex:\s*none;/);
   });
 
-  it('reserves room for the health indicator above the grid in the feed cap (#1130)', () => {
+  it('reserves nothing for the health indicator any more: it sits on the System Status heading row, not above the grid (#1178)', () => {
     const css = fs.readFileSync(stylePath, 'utf8');
-    const reserve = /--dashboard-health-offset:\s*([\d.]+)rem/.exec(css);
-    const health = /\n\.health\s*\{[^}]*margin-bottom:\s*([\d.]+)rem;\s*padding:\s*([\d.]+)rem[^}]*\}/.exec(css);
 
-    // The indicator's height is its margin, its top and bottom padding, a 1px border either side (0.125rem) and one
-    // line of text (the body's 14px at line-height 1.5 = 1.3125rem). The reserve must cover all of it, or the feed
-    // grows past the viewport and the page scrolls again. Changing .health's spacing fails this until the reserve follows.
-    const indicator = Number(health?.[1]) + 2 * Number(health?.[2]) + 0.125 + 1.3125;
-    expect(Number(reserve?.[1])).toBeGreaterThanOrEqual(indicator);
-    expect(Number(reserve?.[1])).toBeLessThanOrEqual(indicator + 0.25);
+    expect(css).not.toContain('--dashboard-health-offset');
+    // The pill is compact, and has no bottom margin of its own that would add a row's worth of height.
+    const health = /\n\.health\s*\{([^}]*)\}/.exec(css)?.[1] ?? '';
+    expect(health).not.toContain('margin-bottom');
+    expect(health).toMatch(/padding:\s*\.2rem \.75rem/);
   });
 
   it('gives the feed cap the stale note\'s height while the note shows, so the page keeps no scrollbar when the feed is down (#1134)', () => {
@@ -391,7 +390,7 @@ describe('views/dashboard.ejs layout', () => {
     expect(Number(reserve?.[1])).toBeGreaterThanOrEqual(height);
     expect(Number(reserve?.[1])).toBeLessThanOrEqual(height + 0.25);
     // It is taken off the same cap as the normal reserve, and only while the status section is marked stale.
-    expect(capRule).toMatch(/max-height:\s*calc\(100vh - var\(--dashboard-nav-offset\) - var\(--dashboard-health-offset\) - 9\.375rem - var\(--dashboard-stale-note-offset\)\)/);
+    expect(capRule).toMatch(/max-height:\s*calc\(100vh - var\(--dashboard-nav-offset\) - 9\.375rem - var\(--dashboard-stale-note-offset\)\)/);
   });
 });
 
@@ -512,22 +511,54 @@ describe('Discord and Voice card text states', () => {
     expect(voice.includes('id="btn-rejoin-voice"')).toBe(shown);
   });
 
-  it('keeps the Last Played card and its fields', async () => {
+  it('puts the last-played line in the Voice service, starting as a dash until status loads, and drops the old card (#1141)', async () => {
     const html = await render();
+    const voice = divBlock(html, '<div class="service service--voice"');
 
-    for (const id of ['last-command', 'last-file', 'last-source', 'last-when']) expect(html).toContain(`id="${id}"`);
+    expect(voice).toMatch(/<p class="last-played"><span class="stat-label">Last played<\/span> <span class="last-played-line" id="voice-last-played">—<\/span><\/p>/);
+    expect(html).not.toContain('Last Played');
+    for (const id of ['last-command', 'last-file', 'last-source', 'last-when']) expect(html).not.toContain(`id="${id}"`);
+  });
+
+  it('renders no user-controlled name on the server: the line is filled by the script as text (#1141)', async () => {
+    const html = await render({ status: { voice: { connected: false, lastUser: '<script>x</script>', lastChannel: 'secret' }, twitch: {} } });
+    const voice = divBlock(html, '<div class="service service--voice"');
+
+    expect(voice).not.toContain('<script>x');
+    expect(voice).toContain('id="voice-last-played">—<');
+  });
+
+  it('draws the last-played line without a status colour, one wrapping line with isolated names (#1141)', () => {
+    const css = fs.readFileSync(stylePath, 'utf8');
+    const rules = (css.match(/\n\.last-played[^{]*\{[^}]*\}/g) ?? []).join('\n');
+
+    expect(rules).not.toMatch(/--danger|--success|--warning/);
+    expect(css).toMatch(/\.last-played-line bdi\s*\{[^}]*unicode-bidi:\s*isolate/);
+    expect(css).toMatch(/\.last-played\s*\{[^}]*overflow-wrap:\s*anywhere/);
+    // The time stays whole ("6d ago") however the line wraps.
+    expect(css).toMatch(/\.last-played-line time\s*\{[^}]*white-space:\s*nowrap/);
   });
 });
 
 describe('overall health indicator', () => {
   const css = fs.readFileSync(stylePath, 'utf8');
 
-  it('renders exactly one indicator, as a polite live region above the dashboard layout', async () => {
+  it('renders exactly one indicator, as a polite live region on the System Status heading row (#1178)', async () => {
     const html = await render();
+    const status = between(html, '<section class="section dashboard-status" id="bot-status">', '</section>');
 
     expect(html.match(/id="health-indicator"/g)).toHaveLength(1);
     expect(html).toMatch(/<div id="health-indicator" class="health health--unknown" data-state="unknown" role="status">Status unknown<\/div>/);
-    expect(html.indexOf('id="health-indicator"')).toBeLessThan(html.indexOf('<div class="dashboard-layout">'));
+    // On the heading row with the title, ahead of the stale note and the panel; nothing above the layout any more.
+    expect(status).toMatch(/<div class="section-header">\s*<h2 class="section-title">System Status<\/h2>\s*<div id="health-indicator"[^>]*>Status unknown<\/div>\s*<\/div>/);
+    expect(status.indexOf('id="health-indicator"')).toBeLessThan(status.indexOf('id="status-stale-note"'));
+    expect(html.indexOf('<main class="container container--wide">')).toBeLessThan(html.indexOf('<div class="dashboard-layout">'));
+    expect(between(html, '<main class="container container--wide">', '<div class="dashboard-layout">')).not.toContain('health');
+  });
+
+  it('leaves the navbar alone: the indicator is not in it (#1178)', async () => {
+    const html = await render();
+    expect(between(html, '<nav class="navbar">', '</nav>')).not.toContain('health');
   });
 
   it.each([
@@ -636,5 +667,53 @@ describe('views/dashboard.ejs welcome hero', () => {
     expect(heroOf(html).match(/class="hero-action-icon" aria-hidden="true"/g)).toHaveLength(6);
     expect(html).not.toContain('Quick Links</h2>');
     expect(html).not.toContain('quick-link-card');
+  });
+
+  it('shows the SFX, command and counter counts as chips on their own quick links (#1189)', async () => {
+    const hero = heroOf(await render({ user: { ...USER, accessLevel: 2 }, usageStats: { sfxCount: 220, commandCount: 17, counterCount: 25 } }));
+
+    expect(hero).toMatch(/<a href="\/sfx" class="hero-action">[^]*?SFX <span class="hero-count">220<\/span><\/a>/);
+    expect(hero).toMatch(/<a href="\/commands" class="hero-action">[^]*?Commands <span class="hero-count">17<\/span><\/a>/);
+    expect(hero).toMatch(/<a href="\/counters" class="hero-action">[^]*?Counters <span class="hero-count">25<\/span><\/a>/);
+    // Only those three links get a count; the others and every destination are unchanged.
+    expect(hero.match(/class="hero-count"/g)).toHaveLength(3);
+    for (const href of ['/channel-points', '/loyalty-points', '/alerts/settings']) {
+      expect(between(hero, `<a href="${href}"`, '</a>')).not.toContain('hero-count');
+    }
+  });
+
+  it('shows the SFX chip wherever the SFX link shows, and the other two only for a Manager and above (#1189)', async () => {
+    const hero = heroOf(await render({ user: { ...USER, accessLevel: 1 }, usageStats: { sfxCount: 220, commandCount: 17, counterCount: 25 } }));
+
+    expect(hero.match(/class="hero-count"/g)).toHaveLength(1);
+    expect(hero).toContain('SFX <span class="hero-count">220</span>');
+    expect(hero).not.toContain('>17<');
+    expect(hero).not.toContain('>25<');
+  });
+
+  it('keeps a zero count as 0 and a long one whole, so a chip never reads blank or cut (#1189)', async () => {
+    const hero = heroOf(await render({ user: { ...USER, accessLevel: 2 }, usageStats: { sfxCount: 0, commandCount: 12345, counterCount: 5 } }));
+
+    expect(hero).toContain('SFX <span class="hero-count">0</span>');
+    expect(hero).toContain('Commands <span class="hero-count">12345</span>');
+  });
+
+  it('has no Usage row and no Twitch channel count any more (#1189)', async () => {
+    const html = await render();
+    const css = fs.readFileSync(stylePath, 'utf8');
+
+    expect(html).not.toContain('dashboard-usage');
+    expect(html).not.toContain('>Usage<');
+    expect(html).not.toContain('twitch-channel-count');
+    expect(html).not.toContain('stat-big');
+    expect(css).not.toMatch(/dashboard-usage|\.stat-big|\.stat-card-body|\.status-grid/);
+  });
+
+  it('draws the chip as plain text on a pill, no status colour (#1189)', () => {
+    const css = fs.readFileSync(stylePath, 'utf8');
+    const chip = /\n\.hero-count\s*\{([^}]*)\}/.exec(css)?.[1] ?? '';
+
+    expect(chip).toMatch(/border-radius:\s*99px/);
+    expect(chip).not.toMatch(/--danger|--success|--warning/);
   });
 });

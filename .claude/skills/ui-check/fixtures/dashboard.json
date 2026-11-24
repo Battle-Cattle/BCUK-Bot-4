@@ -14,7 +14,10 @@
       "currentFile": null,
       "lastCommand": "!clap",
       "lastSource": "twitch",
-      "lastPlayedAt": "2026-11-18T10:40:00.000Z"
+      "lastPlayedAt": "2026-11-18T10:40:00.000Z",
+      "lastFile": "clap.mp3",
+      "lastUser": "user1",
+      "lastChannel": "streamer_one"
     },
     "twitch": {
       "streamer_one": {

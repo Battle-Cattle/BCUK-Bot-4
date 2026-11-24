@@ -44,7 +44,7 @@ describe('Voice status', () => {
 
   it('setVoiceDisconnected clears connected, playing, file, and channelName', () => {
     mod.setVoiceConnected('guild-A', 'General');
-    mod.setVoicePlaying('guild-A', 'clap.mp3', '!clap', 'discord');
+    mod.setVoicePlaying('guild-A', 'clap.mp3', '!clap', { source: 'discord', user: 'user1' });
     mod.setVoiceDisconnected('guild-A');
     const { voice } = mod.getStatus('guild-A');
     expect(voice.connected).toBe(false);
@@ -54,7 +54,7 @@ describe('Voice status', () => {
   });
 
   it('setVoicePlaying sets playing, file, command, source, and lastPlayedAt', () => {
-    mod.setVoicePlaying('guild-A', 'clap.mp3', '!clap', 'discord');
+    mod.setVoicePlaying('guild-A', 'clap.mp3', '!clap', { source: 'discord', user: 'user1' });
     const { voice } = mod.getStatus('guild-A');
     expect(voice.playing).toBe(true);
     expect(voice.currentFile).toBe('clap.mp3');
@@ -64,7 +64,7 @@ describe('Voice status', () => {
   });
 
   it('setVoiceIdle clears playing and currentFile but preserves lastPlayedAt', () => {
-    mod.setVoicePlaying('guild-A', 'clap.mp3', '!clap', 'discord');
+    mod.setVoicePlaying('guild-A', 'clap.mp3', '!clap', { source: 'discord', user: 'user1' });
     mod.setVoiceIdle('guild-A');
     const { voice } = mod.getStatus('guild-A');
     expect(voice.playing).toBe(false);
@@ -72,9 +72,47 @@ describe('Voice status', () => {
     expect(voice.lastPlayedAt).toBeInstanceOf(Date);
   });
 
+  it('records who, from where and which file, and keeps them after playback ends', () => {
+    mod.setVoicePlaying('guild-A', 'clap.mp3', '!clap', { source: 'twitch', user: 'user1', channel: 'streamer_one' });
+    mod.setVoiceIdle('guild-A');
+    const { voice } = mod.getStatus('guild-A');
+    expect([voice.lastSource, voice.lastUser, voice.lastChannel, voice.lastFile]).toEqual(['twitch', 'user1', 'streamer_one', 'clap.mp3']);
+    expect(voice.currentFile).toBeNull();
+  });
+
+  it('keeps the last-played fields when the bot leaves voice, and resets them only when the guild is forgotten', () => {
+    mod.setVoicePlaying('guild-A', 'clap.mp3', '!clap', { source: 'discord', user: 'user1' });
+    mod.setVoiceDisconnected('guild-A');
+    expect(mod.getStatus('guild-A').voice.lastFile).toBe('clap.mp3');
+    expect(mod.getStatus('guild-A').voice.lastUser).toBe('user1');
+    mod.clearVoiceStatus('guild-A');
+    const { voice } = mod.getStatus('guild-A');
+    expect([voice.lastFile, voice.lastUser, voice.lastChannel, voice.lastSource, voice.lastCommand]).toEqual([null, null, null, null, null]);
+  });
+
+  it('never stores a channel for a Discord or Stream Deck origin, even one forced in past the types', () => {
+    mod.setVoicePlaying('guild-A', 'clap.mp3', '!clap', { source: 'discord', user: 'user1', channel: 'mod-secret' } as never);
+    expect(mod.getStatus('guild-A').voice.lastChannel).toBeNull();
+    mod.setVoicePlaying('guild-A', 'clap.mp3', '!clap', { source: 'streamdeck', user: 'user1', channel: 'mod-secret' } as never);
+    expect(mod.getStatus('guild-A').voice.lastChannel).toBeNull();
+  });
+
+  it('overwrites every last-played field on each play, so a later play never shows an earlier one\'s user or channel', () => {
+    mod.setVoicePlaying('guild-A', 'clap.mp3', '!clap', { source: 'twitch', user: 'user1', channel: 'streamer_one' });
+    mod.setVoicePlaying('guild-A', 'ding.mp3', '!ding', { source: 'streamdeck', user: null });
+    const { voice } = mod.getStatus('guild-A');
+    expect([voice.lastSource, voice.lastUser, voice.lastChannel, voice.lastFile, voice.lastCommand]).toEqual(['streamdeck', null, null, 'ding.mp3', '!ding']);
+  });
+
+  it('puts exactly the agreed voice fields in the status snapshot', () => {
+    expect(Object.keys(mod.getStatus('guild-A').voice).sort()).toEqual([
+      'channelName', 'connected', 'currentFile', 'lastChannel', 'lastCommand', 'lastFile', 'lastPlayedAt', 'lastSource', 'lastUser', 'playing',
+    ]);
+  });
+
   it('scopes voice status per guild — one guild playing does not affect another', () => {
     mod.setVoiceConnected('guild-A', 'General');
-    mod.setVoicePlaying('guild-A', 'clap.mp3', '!clap', 'discord');
+    mod.setVoicePlaying('guild-A', 'clap.mp3', '!clap', { source: 'discord', user: 'user1' });
     const { voice: voiceB } = mod.getStatus('guild-B');
     expect(voiceB.connected).toBe(false);
     expect(voiceB.playing).toBe(false);
@@ -87,12 +125,42 @@ describe('Voice status', () => {
 
   it('clearVoiceStatus removes a guild entirely, resetting it to default on next read', () => {
     mod.setVoiceConnected('guild-A', 'General');
-    mod.setVoicePlaying('guild-A', 'clap.mp3', '!clap', 'discord');
+    mod.setVoicePlaying('guild-A', 'clap.mp3', '!clap', { source: 'discord', user: 'user1' });
     mod.clearVoiceStatus('guild-A');
     const { voice } = mod.getStatus('guild-A');
     expect(voice.connected).toBe(false);
     expect(voice.playing).toBe(false);
     expect(voice.currentFile).toBeNull();
+  });
+});
+
+describe('cleanDisplayText', () => {
+  it.each([
+    ['plain text is kept', 'user1', 'user1'],
+    ['a right-to-left override is removed', 'user\u202E1', 'user 1'],
+    ['control characters and newlines become spaces and collapse', 'a\nb\u0000c\t d', 'a b c d'],
+    ['line and paragraph separators are removed', 'a\u2028b\u2029c', 'a b c'],
+    ['edges are trimmed', '  user1  ', 'user1'],
+    ['whitespace only is null', ' \n\t ', null],
+    ['an empty string is null', '', null],
+    ['null stays null', null, null],
+    ['undefined is null', undefined, null],
+  ])('%s', (_name, input, expected) => {
+    expect(mod.cleanDisplayText(input as string | null | undefined)).toBe(expected);
+  });
+
+  it('caps the length in code points, never cutting an emoji in half', () => {
+    const emoji = '\u{1F600}'.repeat(70);
+    const cleaned = mod.cleanDisplayText(emoji);
+    expect(Array.from(cleaned ?? '')).toHaveLength(64);
+    expect(cleaned).toBe('\u{1F600}'.repeat(64));
+    expect(mod.cleanDisplayText('x'.repeat(200))).toHaveLength(64);
+  });
+
+  it('cleans the user and channel on the way into the store', () => {
+    mod.setVoicePlaying('guild-A', 'clap.mp3', '!clap', { source: 'twitch', user: 'user\u202E1\n', channel: ' streamer_one ' });
+    const { voice } = mod.getStatus('guild-A');
+    expect([voice.lastUser, voice.lastChannel]).toEqual(['user 1', 'streamer_one']);
   });
 });
 
@@ -272,7 +340,7 @@ describe('onStatusChanged', () => {
   it('setVoicePlaying notifies with the guildId', () => {
     const listener = vi.fn();
     mod.onStatusChanged(listener);
-    mod.setVoicePlaying('guild-A', 'clap.mp3', '!clap', 'discord');
+    mod.setVoicePlaying('guild-A', 'clap.mp3', '!clap', { source: 'discord', user: 'user1' });
     expect(listener).toHaveBeenCalledWith('guild-A');
   });
 

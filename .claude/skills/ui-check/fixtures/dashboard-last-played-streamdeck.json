@@ -1,0 +1,14 @@
+{
+  "_comment": "Illustrative data for ui-check only. A sound triggered from a Stream Deck button: the Voice service's last-played line names the source and the key owner's name, with no channel (#1141).",
+  "extends": "dashboard.json",
+  "status": {
+    "voice": {
+      "lastCommand": "!clap",
+      "lastSource": "streamdeck",
+      "lastPlayedAt": "2026-11-18T10:40:00.000Z",
+      "lastFile": "clap.mp3",
+      "lastUser": "user1",
+      "lastChannel": null
+    }
+  }
+}
