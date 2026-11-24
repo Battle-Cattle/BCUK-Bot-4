@@ -177,7 +177,7 @@ function setStatusText(id, state) {
  * The cards go first, so a malformed payload that throws part-way never clears the not-current marking; instead
  * the indicator goes to Unknown and the error propagates (the stream handler drops it, fetchStatus counts it).
  * Each successful call counts as a newer update (see statusGeneration), so an in-flight fetch can't overwrite it.
- * @param status - The parsed /api/status JSON (`discord`, `voice`, `twitch` sections, plus the last played sound).
+ * @param status - The parsed /api/status JSON (`discord`, `voice` and `twitch` sections).
  */
 function applyStatus(status) {
   try {
@@ -196,8 +196,98 @@ function applyStatus(status) {
   markStatusStale(false);
 }
 
+/** How each trigger source is named on the last-played line. */
+const LAST_PLAYED_SOURCES = { discord: 'Discord', twitch: 'Twitch', streamdeck: 'Stream Deck' };
+
 /**
- * Writes a status payload into the Discord, Voice, Last Played and Twitch cards; throws on a malformed payload.
+ * Reads the last-played fields of a status payload's `voice` section into the parts of the line. Pure. A field that is
+ * not a non-empty string (or, for the time, a valid date) counts as absent, so nothing is ever invented.
+ * @param voice - The `voice` section of an /api/status payload.
+ * @returns `null` when nothing has played since the bot started, else `{ command, file, source, channel, user, playedAt }`
+ *   where each part is a string or null (`source` is the display name: Discord, Twitch or Stream Deck).
+ */
+function formatLastPlayed(voice) {
+  const text = (value) => (typeof value === 'string' && value !== '' ? value : null);
+  const playedAt = text(voice && voice.lastPlayedAt);
+  if (!playedAt || Number.isNaN(Date.parse(playedAt))) return null;
+  const source = typeof voice.lastSource === 'string' && Object.hasOwn(LAST_PLAYED_SOURCES, voice.lastSource)
+    ? LAST_PLAYED_SOURCES[voice.lastSource]
+    : null;
+  return {
+    command: text(voice.lastCommand),
+    file: text(voice.lastFile),
+    source,
+    channel: source === 'Twitch' ? text(voice.lastChannel) : null,
+    user: text(voice.lastUser),
+    playedAt,
+  };
+}
+
+/**
+ * Appends a name to the line inside its own `<bdi>`, so a right-to-left name can't reorder what is around it. Text only.
+ * @param parent - The element the name is added to.
+ * @param value - The name (a command, file, channel or user).
+ * @param className - Optional class for the `<bdi>`.
+ * @returns The `<bdi>` that was added.
+ */
+function appendIsolatedText(parent, value, className) {
+  const bdi = document.createElement('bdi');
+  if (className) bdi.className = className;
+  bdi.textContent = value;
+  parent.appendChild(bdi);
+  return bdi;
+}
+
+/**
+ * Draws the last-played line into `el`: "!clap (clap.mp3) · Twitch #streamer_one · user1 · 2m ago", leaving out any
+ * part that is unknown, or "Nothing played since the bot started" when nothing has played. Every value is written with
+ * `textContent`, never as markup. Does nothing when the element is missing.
+ * @param el - The last-played line element.
+ * @param voice - The `voice` section of an /api/status payload.
+ */
+function renderLastPlayed(el, voice) {
+  if (!el) return;
+  clearChildren(el);
+  const parts = formatLastPlayed(voice);
+  if (!parts) {
+    el.textContent = 'Nothing played since the bot started';
+    return;
+  }
+  const pieces = [];
+  if (parts.command || parts.file) {
+    const sound = document.createElement('span');
+    if (parts.command) appendIsolatedText(sound, parts.command, 'mono');
+    if (parts.command && parts.file) sound.appendChild(document.createTextNode(' ('));
+    if (parts.file) appendIsolatedText(sound, parts.file, 'mono');
+    if (parts.command && parts.file) sound.appendChild(document.createTextNode(')'));
+    pieces.push(sound);
+  }
+  if (parts.source) {
+    const origin = document.createElement('span');
+    origin.appendChild(document.createTextNode(parts.source));
+    if (parts.channel) {
+      origin.appendChild(document.createTextNode(' #'));
+      appendIsolatedText(origin, parts.channel);
+    }
+    pieces.push(origin);
+  }
+  if (parts.user) {
+    const who = document.createElement('span');
+    appendIsolatedText(who, parts.user);
+    pieces.push(who);
+  }
+  const when = document.createElement('time');
+  when.dateTime = parts.playedAt;
+  when.textContent = relativeTime(parts.playedAt);
+  pieces.push(when);
+  pieces.forEach((piece, index) => {
+    if (index > 0) el.appendChild(document.createTextNode(' · '));
+    el.appendChild(piece);
+  });
+}
+
+/**
+ * Writes a status payload into the Discord, Voice and Twitch cards (the Voice card includes the last-played line); throws on a malformed payload.
  * @param status - The parsed /api/status JSON (`discord`, `voice`, `twitch` sections, plus the last played sound).
  */
 function applyStatusCards(status) {
@@ -221,11 +311,8 @@ function applyStatusCards(status) {
     voiceBtn.textContent = voiceOn ? 'Leave Voice' : 'Join Voice';
   }
 
-  // Last played
-  setText('last-command', status.voice.lastCommand);
-  setText('last-file',    status.voice.currentFile || (status.voice.lastCommand && '—'));
-  setText('last-source',  status.voice.lastSource);
-  setText('last-when',    relativeTime(status.voice.lastPlayedAt));
+  // Last played: one line in the Voice service
+  renderLastPlayed(document.getElementById('voice-last-played'), status.voice);
 
   // Channels
   setStatusText('twitch-state', twitchRollupState(status.twitch));
@@ -233,8 +320,6 @@ function applyStatusCards(status) {
   setStatusDot('dot-twitch', twitchDot.dotClass, twitchDot.label);
   const twitchEl = document.getElementById('twitch-channels');
   if (twitchEl) renderChannels(twitchEl, status.twitch);
-  // The Usage tile's count follows the list: a channel added, removed or moved reaches an open dashboard live. String(), as setText turns 0 into a dash.
-  setText('twitch-channel-count', String(Object.keys(status.twitch).length));
 
   // Stream Overview: last, so a malformed payload that throws above never updates it. `false` and not
   // isStatusFeedStale(): applyStatus clears the stale flag only after the cards are written, so a recovering

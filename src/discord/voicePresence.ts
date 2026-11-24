@@ -45,3 +45,18 @@ export function resolveGuildIdForDiscordId(discordId: string | null): string | n
   if (!discordClient) return null;
   return getActiveGuildForUser(discordClient, discordId);
 }
+
+/**
+ * Returns the display name a Discord user has in a guild, read from the cached voice state, so no lookup is made.
+ * Used to say who pressed a Stream Deck button: the key's owner is in voice in that guild, so the guild can already see
+ * the name. Returns null when the user isn't in that guild's voice cache or has no cached member.
+ *
+ * @param client - Ready Discord client, used to read cached voice states.
+ * @param guildId - Guild whose voice states to read.
+ * @param discordId - Discord snowflake of the user, or null/undefined when unknown.
+ * @returns The user's display name in that guild, or null.
+ */
+export function getVoiceMemberDisplayName(client: Client, guildId: string, discordId: string | null | undefined): string | null {
+  if (!discordId) return null;
+  return client.guilds.cache.get(guildId)?.voiceStates.cache.get(discordId)?.member?.displayName ?? null;
+}

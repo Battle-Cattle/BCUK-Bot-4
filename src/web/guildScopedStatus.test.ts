@@ -21,7 +21,7 @@ import { notifyGuildInfoChanged } from '../db/guildInfoEvents';
 
 const BASE_STATUS = {
   discord: { ready: true, tag: 'Bot#1234' },
-  voice: { connected: false, channelName: null, playing: false, currentFile: null, lastCommand: null, lastSource: null, lastPlayedAt: null },
+  voice: { connected: false, channelName: null, playing: false, currentFile: null, lastCommand: null, lastSource: null, lastPlayedAt: null, lastFile: null, lastUser: null, lastChannel: null },
   twitch: {
     ourstreamer: { connected: true, lastConnectedAt: null, lastDisconnectedAt: null, isLive: false },
     otherguildstreamer: { connected: true, lastConnectedAt: null, lastDisconnectedAt: null, isLive: true },
@@ -103,6 +103,13 @@ describe('getGuildScopedStatus — voice', () => {
   it('passes through the already guild-scoped voice status unchanged', async () => {
     const result = await getGuildScopedStatus('guild-A');
     expect(result.voice).toEqual(BASE_STATUS.voice);
+  });
+
+  it('carries the last-played fields in both the guild and the no-guild snapshot, and nothing else is added', async () => {
+    const expected = Object.keys(BASE_STATUS.voice).sort();
+    expect(expected).toEqual(expect.arrayContaining(['lastFile', 'lastUser', 'lastChannel']));
+    expect(Object.keys((await getGuildScopedStatus('guild-A')).voice).sort()).toEqual(expected);
+    expect(Object.keys((await getGuildScopedStatus(null)).voice).sort()).toEqual(expected);
   });
 });
 

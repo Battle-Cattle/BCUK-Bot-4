@@ -1,0 +1,21 @@
+{
+  "_comment": "Illustrative data for ui-check only. The widest last-played line: a long right-to-left display name (Hebrew letters, no real person), a long file name and a Twitch channel name, plus long counts on the Quick Links chips. It must wrap inside the Voice service with no overflow or clipping, the separators and time staying in order.",
+  "extends": "dashboard.json",
+  "status": {
+    "voice": {
+      "lastCommand": "!averyverylongtriggercommand",
+      "lastSource": "twitch",
+      "lastPlayedAt": "2026-11-18T10:40:00.000Z",
+      "lastFile": "category/a-very-long-sound-file-name-with-many-words-in-it-v2-final.mp3",
+      "lastUser": "אבגדהוזחטיכלמנסעפצקרשת אבגדהוזחטיכלמנסעפצקרשת",
+      "lastChannel": "a_very_long_streamer_channel_name"
+    }
+  },
+  "locals": {
+    "usageStats": {
+      "sfxCount": 12345,
+      "commandCount": 23456,
+      "counterCount": 34567
+    }
+  }
+}

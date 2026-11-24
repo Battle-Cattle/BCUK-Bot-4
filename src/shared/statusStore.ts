@@ -46,8 +46,42 @@ export interface VoiceStatus {
   playing: boolean;
   currentFile: string | null;
   lastCommand: string | null;
-  lastSource: string | null;
+  lastSource: PlaySource | null;
   lastPlayedAt: Date | null;
+  /** File name of the last sound played, kept after playback ends (`currentFile` is only set while playing). */
+  lastFile: string | null;
+  /** Display name of whoever triggered the last sound; null when unknown. Cleaned by {@link cleanDisplayText}. */
+  lastUser: string | null;
+  /** Twitch channel the last sound was triggered from; null for every other source (never a Discord channel). */
+  lastChannel: string | null;
+}
+
+/** Where a sound's trigger came from. */
+export type PlaySource = 'discord' | 'twitch' | 'streamdeck';
+
+/**
+ * Who triggered a sound and from where. Discriminated on `source` so the privacy rule lives in the type: only a
+ * Twitch origin carries a channel (public); a Discord text channel's name could be private and a Stream Deck has none.
+ */
+export type PlayOrigin =
+  | { source: 'twitch'; user: string | null; channel: string | null }
+  | { source: 'discord' | 'streamdeck'; user: string | null; channel?: never };
+
+/** Longest user or channel text kept, in code points: a display name is free text and ends up on every dashboard. */
+const MAX_DISPLAY_TEXT = 64;
+
+/**
+ * Cleans user-controlled text before it reaches the status payload: removes control, bidirectional-control and
+ * line/paragraph-separator characters, collapses whitespace, trims, and caps the length in code points (never in UTF-16
+ * units, which could cut an emoji in half).
+ * @param value - Raw display name or channel name, or null/undefined when unknown.
+ * @returns The cleaned text, or null when nothing is left.
+ */
+export function cleanDisplayText(value: string | null | undefined): string | null {
+  if (typeof value !== 'string') return null;
+  const cleaned = value.replace(/[\p{Cc}\p{Bidi_Control}\p{Zl}\p{Zp}]/gu, ' ').replace(/\s+/g, ' ').trim();
+  const capped = Array.from(cleaned).slice(0, MAX_DISPLAY_TEXT).join('').trim();
+  return capped === '' ? null : capped;
 }
 
 /**
@@ -63,6 +97,9 @@ function defaultVoiceStatus(): VoiceStatus {
     lastCommand: null,
     lastSource: null,
     lastPlayedAt: null,
+    lastFile: null,
+    lastUser: null,
+    lastChannel: null,
   };
 }
 
@@ -138,15 +175,20 @@ export function setVoiceDisconnected(guildId: string): void {
  * @param guildId - Guild the sound is playing in.
  * @param file - File name being played.
  * @param command - Trigger command that caused playback.
- * @param source - Where the command came from (e.g. 'discord', 'twitch', 'streamdeck').
+ * @param origin - Who triggered it and from where. All the `last*` fields are written in this one call, overwriting
+ *   anything missing with null, so a later play never shows an earlier play's user or channel. The channel is kept only
+ *   for a Twitch origin, whatever the caller passed.
  */
-export function setVoicePlaying(guildId: string, file: string, command: string, source: string): void {
+export function setVoicePlaying(guildId: string, file: string, command: string, origin: PlayOrigin): void {
   const voice = getVoiceState(guildId);
   voice.playing = true;
   voice.currentFile = file;
   voice.lastCommand = command;
-  voice.lastSource = source;
+  voice.lastSource = origin.source;
   voice.lastPlayedAt = new Date();
+  voice.lastFile = file;
+  voice.lastUser = cleanDisplayText(origin.user);
+  voice.lastChannel = origin.source === 'twitch' ? cleanDisplayText(origin.channel) : null;
   notifyStatusChanged(guildId);
 }
 

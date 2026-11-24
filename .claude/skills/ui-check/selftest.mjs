@@ -119,7 +119,7 @@ describe('audit maths', () => {
 /**
  * Measures the System Status panel's Twitch list in the page (runs in the browser).
  * @returns How many channel rows sit fully inside the list, its height and widths, how many badges poke out of the
- *   panel's right edge, and the bottoms of the Usage section and the sidebar.
+ *   panel's right edge, and the bottoms of the System Status section (the main column's last section) and the sidebar.
  */
 function measureTwitchList() {
   const doc = globalThis.document;
@@ -135,7 +135,7 @@ function measureTwitchList() {
     scrollWidth: list.scrollWidth,
     clientWidth: list.clientWidth,
     badgesOutside: badges.filter((b) => rect(b).right > panel.right + 1).length,
-    usageBottom: rect(doc.querySelector('.dashboard-usage')).bottom,
+    mainBottom: rect(doc.querySelector('.dashboard-status')).bottom,
     sidebarBottom: rect(doc.querySelector('.dashboard-sidebar')).bottom,
     pageOver: doc.documentElement.scrollHeight - doc.documentElement.clientHeight,
   };
@@ -381,10 +381,12 @@ describe('in the browser', () => {
         const m = await at(1440, height);
         assert.ok(m.pageOver <= 0, `no page scrollbar at 1440x${height} (${m.pageOver}px over)`);
         assert.ok(m.visible >= previous, `the visible count never drops as the viewport grows (${m.visible} at ${height})`);
-        assert.ok(m.usageBottom <= m.sidebarBottom, `Usage doesn't extend past the sidebar at ${height} (${m.usageBottom} > ${m.sidebarBottom})`);
+        assert.ok(m.mainBottom <= m.sidebarBottom, `System Status doesn't extend past the sidebar at ${height} (${m.mainBottom} > ${m.sidebarBottom})`);
         previous = m.visible;
       }
-      assert.ok(previous >= base.visible + 3, `the list gains at least 3 rows by 1200px high (${base.visible} to ${previous})`);
+      // The page is shorter now (no health row above the grid, no Usage row), so the list already shows most of the
+      // fourteen channels at 900px high: by 1200px every one shows.
+      assert.equal(previous, 14, `all fourteen channels show by 1200px high (${previous})`);
     });
   });
 
@@ -406,28 +408,28 @@ describe('in the browser', () => {
       await page.goto(baseUrl);
       await settle(page, fixture);
       assert.ok((await page.locator('#recent-events-list > *').count()) >= 20, 'the fixture fills the feed');
-      // The feed is the tallest column here, so the page only fits when its cap leaves room for everything around it,
-      // the health indicator included. Below ~900px the main column (status cards, links, usage) is itself taller
-      // than the viewport, so the page scrolls by design whatever the feed does (#1132: measured 839px at 1440x768
-      // and 1064px at 1366x768, where the services stack; accepted, see views/CLAUDE.md): sweep the heights above that.
-      for (const height of [900, 1000, 1080, 1200]) {
+      // The feed is the tallest column here, so the page only fits when its cap leaves room for everything around it.
+      // With no health row above the grid and no Usage row (#1178, #1189) the main column is about 670px tall with a
+      // short feed, so the page fits down to a 700px-high window and 768px laptops no longer scroll (#1132 is solved,
+      // not just accepted: it measured 839px tall at 1440x768 and 1064px at 1366x768 before; see views/CLAUDE.md).
+      for (const height of [700, 768, 900, 1000, 1080, 1200]) {
         await page.setViewportSize({ width: 1440, height });
         const over = await page.evaluate(() => globalThis.document.documentElement.scrollHeight - globalThis.document.documentElement.clientHeight);
         assert.ok(over <= 0, `no page scrollbar at 1440x${height} (page is ${over}px taller than the viewport)`);
       }
-      // At 768px high the page scrolls by design, but the feed must not be the reason: it scrolls inside itself, ends
-      // above the bottom of the layout (the main column sets that), and the sticky sidebar still clears the navbar
-      // once scrolled to the end.
+      await page.setViewportSize({ width: 1366, height: 768 });
+      const laptop = await page.evaluate(() => globalThis.document.documentElement.scrollHeight - globalThis.document.documentElement.clientHeight);
+      assert.ok(laptop <= 0, `no page scrollbar at 1366x768 (page is ${laptop}px taller than the viewport)`);
+      // The feed scrolls inside itself, and the sticky sidebar still clears the navbar once scrolled to the end.
       for (const height of [768, 900]) {
         await page.setViewportSize({ width: 1440, height });
         await page.evaluate(() => globalThis.scrollTo(0, globalThis.document.documentElement.scrollHeight));
         const m = await page.evaluate(() => {
           const rect = (sel) => globalThis.document.querySelector(sel).getBoundingClientRect();
           const feed = globalThis.document.querySelector('.dashboard-events-body');
-          return { scrolls: feed.scrollHeight > feed.clientHeight, feedBottom: rect('.dashboard-events-body').bottom, usageBottom: rect('.dashboard-usage').bottom, sidebarTop: rect('.dashboard-sidebar').top, navBottom: rect('.navbar').bottom };
+          return { scrolls: feed.scrollHeight > feed.clientHeight, sidebarTop: rect('.dashboard-sidebar').top, navBottom: rect('.navbar').bottom };
         });
         assert.ok(m.scrolls, `the feed scrolls inside itself at 1440x${height}`);
-        if (height === 768) assert.ok(m.feedBottom <= m.usageBottom, `the feed doesn't set the page height at 1440x${height} (feed ends ${m.feedBottom}, main column ${m.usageBottom})`);
         assert.ok(m.sidebarTop >= m.navBottom, `the sidebar stays below the navbar at the end of the scroll at 1440x${height} (${m.sidebarTop} vs ${m.navBottom})`);
       }
     } finally {
@@ -446,7 +448,8 @@ describe('in the browser', () => {
       await page.goto(baseUrl);
       await settle(page, fixture);
       assert.equal(await page.locator('#status-stale-note').isVisible(), true, 'the stale note shows');
-      for (const height of [900, 1000, 1080, 1200]) {
+      // The note takes ~3rem more, so this sweep starts at 768px high (a 700px window overflows by ~16px with it showing).
+      for (const height of [768, 900, 1000, 1080, 1200]) {
         await page.setViewportSize({ width: 1440, height });
         const over = await page.evaluate(() => globalThis.document.documentElement.scrollHeight - globalThis.document.documentElement.clientHeight);
         assert.ok(over <= 0, `no page scrollbar at 1440x${height} while the feed is unavailable (page is ${over}px taller than the viewport)`);
@@ -469,7 +472,7 @@ describe('in the browser', () => {
       await settle(page, fixture);
       assert.equal(await page.locator('#reconnect-modal').isVisible(), false, 'the modal stays dismissed');
       assert.equal(await page.locator('#card-twitch #twitch-reconnect-link').isVisible(), true, 'the link shows in the Twitch service');
-      for (const height of [900, 1000, 1080, 1200]) {
+      for (const height of [768, 900, 1000, 1080, 1200]) {
         await page.setViewportSize({ width: 1440, height });
         const over = await page.evaluate(() => globalThis.document.documentElement.scrollHeight - globalThis.document.documentElement.clientHeight);
         assert.ok(over <= 0, `no page scrollbar at 1440x${height} with the reconnect link (page is ${over}px taller than the viewport)`);
@@ -505,6 +508,14 @@ describe('in the browser', () => {
     assert.equal((await renderTexts('dashboard.json', ['#stream-own-state']))['#stream-own-state'], 'No channel');
     // The Twitch service's reconnect link (#1136) only while the viewer's token needs reconnecting.
     assert.equal((await renderTexts('dashboard-needs-reconnect.json', ['#twitch-reconnect-link']))['#twitch-reconnect-link'], 'Reconnect your Twitch account');
+    // The last-played line in the Voice service (#1141): the sound, where it came from, who and when, or an explicit empty state.
+    const lastPlayed = (await renderTexts('dashboard.json', ['#voice-last-played']))['#voice-last-played'];
+    assert.match(lastPlayed, /^!clap \(clap\.mp3\) · Twitch #streamer_one · user1 · .+ ago$/);
+    assert.equal((await renderTexts('dashboard-last-played-empty.json', ['#voice-last-played']))['#voice-last-played'], 'Nothing played since the bot started');
+    // The Quick Links carry the counts (#1189), including a long one.
+    const chips = (await renderTexts('dashboard-last-played-long.json', ['.hero-actions']))['.hero-actions'];
+    assert.match(chips, /SFX\s+12345/);
+    assert.match(chips, /Counters\s+34567/);
     // The Twitch card's roll-up (#1074): some, all and no channels connected, and none configured.
     assert.equal((await renderTexts('dashboard.json', ['#twitch-state']))['#twitch-state'], 'Degraded (2 of 4)');
     assert.equal((await renderTexts('dashboard-all-connected.json', ['#twitch-state']))['#twitch-state'], 'Connected');

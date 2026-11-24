@@ -4,7 +4,7 @@ import { pickWeightedRandom } from '../audio/soundSelector';
 import { isPlaying } from '../audio/audioPlayer';
 import { playFile, VoiceNotConnectedError } from '../audio/sfxPlayer';
 import { GLOBAL_COOLDOWN_MS } from '../shared/config';
-import { setVoicePlaying } from '../shared/statusStore';
+import { setVoicePlaying, type PlayOrigin } from '../shared/statusStore';
 import { getOrCreate } from '../shared/mapUtils';
 import { resolveCommand } from './commandUtils';
 
@@ -44,17 +44,18 @@ export function forgetGuildCommandState(guildId: string): void {
  *
  * @param command - Lowercased trigger command, used for logging/status.
  * @param lookup - The trigger's lookup result (from `findCachedSfxTrigger`).
- * @param source - Where the command came from, used for logging/status.
+ * @param origin - Who triggered it and from where; its source is used for logging and recorded for the dashboard.
  * @param guildId - Guild to play the sound into.
  * @param state - The guild's cooldown/in-flight state; `lastPlayedAt` is updated on success.
  */
 async function playTrigger(
   command: string,
   lookup: SfxLookupResult,
-  source: 'twitch' | 'discord',
+  origin: PlayOrigin,
   guildId: string,
   state: GuildCommandState,
 ): Promise<void> {
+  const { source } = origin;
   const { files } = lookup;
   if (files.length === 0) {
     log.warn(`[${source}] Trigger '${command}' has no sound files in DB`);
@@ -70,7 +71,7 @@ async function playTrigger(
   try {
     await playFile(filename, guildId);
     state.lastPlayedAt = Date.now();
-    setVoicePlaying(guildId, filename, command, source);
+    setVoicePlaying(guildId, filename, command, origin);
   } catch (err) {
     if (err instanceof VoiceNotConnectedError) {
       log.info(`[${source}] Skipping '${command}' — not connected to voice channel`);
@@ -134,12 +135,16 @@ function tryClaimGuildSlot(
  *   non-trigger would otherwise log this warning too).
  * @param precomputedCommand - Already-parsed command token from the caller's single
  *   `extractCommand` call for this message, or omit to parse `rawMessage` here.
+ * @param sender - Who sent the message, shown on the dashboard's last-played line: their display name and, for Twitch,
+ *   the channel. A Discord sender's `channel` is dropped here (a Discord text channel's name may be private); omit the
+ *   whole object when unknown.
  */
 export async function handleCommand(
   rawMessage: string,
   source: 'twitch' | 'discord',
   guildId: string | null,
   precomputedCommand?: string | null,
+  sender?: { user: string | null; channel?: string | null },
 ): Promise<void> {
   // The message's first word (null without a !/# prefix) — matched directly against
   // trigger_command in the DB, which already includes the prefix
@@ -158,7 +163,9 @@ export async function handleCommand(
   if (!tryClaimGuildSlot(guildId, source, command, state)) return;
 
   try {
-    await playTrigger(command, lookup, source, guildId, state);
+    const user = sender?.user ?? null;
+    const origin: PlayOrigin = source === 'twitch' ? { source, user, channel: sender?.channel ?? null } : { source, user };
+    await playTrigger(command, lookup, origin, guildId, state);
   } finally {
     state.inFlight = false;
   }

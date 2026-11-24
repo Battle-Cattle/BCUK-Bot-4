@@ -5,7 +5,7 @@ vi.mock('./discordClientStore', () => ({ getDiscordClient: vi.fn() }));
 
 import { getRegisteredGuildIds } from './guildRegistry';
 import { getDiscordClient } from './discordClientStore';
-import { getActiveGuildForUser, resolveGuildIdForDiscordId } from './voicePresence';
+import { getActiveGuildForUser, getVoiceMemberDisplayName, resolveGuildIdForDiscordId } from './voicePresence';
 
 function makeClient(guildVoiceChannels: Record<string, Record<string, string>>) {
   const cache = new Map(
@@ -100,5 +100,31 @@ describe('resolveGuildIdForDiscordId', () => {
     vi.mocked(getRegisteredGuildIds).mockReturnValue(['guild-A']);
 
     expect(resolveGuildIdForDiscordId('user-1')).toBeNull();
+  });
+});
+
+describe('getVoiceMemberDisplayName', () => {
+  /** A client whose guild voice-state cache holds the given members' display names by user id. */
+  function clientWithMembers(guildId: string, members: Record<string, { displayName: string } | null>) {
+    return {
+      guilds: {
+        cache: new Map([[guildId, { voiceStates: { cache: { get: (id: string) => (id in members ? { member: members[id] } : undefined) } } }]]),
+      },
+    } as any;
+  }
+
+  it('returns the display name the user has in that guild', () => {
+    const client = clientWithMembers('guild-A', { 'user-1': { displayName: 'Alice D' } });
+    expect(getVoiceMemberDisplayName(client, 'guild-A', 'user-1')).toBe('Alice D');
+  });
+
+  it.each([
+    ['the guild is not cached', clientWithMembers('guild-A', {}), 'guild-B', 'user-1'],
+    ['the user is not in the guild\'s voice cache', clientWithMembers('guild-A', {}), 'guild-A', 'user-1'],
+    ['the voice state has no cached member', clientWithMembers('guild-A', { 'user-1': null }), 'guild-A', 'user-1'],
+    ['the user id is null', clientWithMembers('guild-A', { 'user-1': { displayName: 'x' } }), 'guild-A', null],
+    ['the user id is undefined', clientWithMembers('guild-A', { 'user-1': { displayName: 'x' } }), 'guild-A', undefined],
+  ])('returns null when %s', (_name, client, guildId, discordId) => {
+    expect(getVoiceMemberDisplayName(client, guildId, discordId)).toBeNull();
   });
 });
