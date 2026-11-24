@@ -487,6 +487,44 @@ describe('in the browser', () => {
     }
   });
 
+  it('keeps the health indicator visible and the Quick Links chips inside their links at every width (#1178, #1189)', async () => {
+    const fixture = await loadFixture(path.join(FIXTURES, 'dashboard-last-played-long.json'));
+    const { server, baseUrl } = await startServer(await renderPage(fixture), fixture);
+    const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+    try {
+      await page.goto(baseUrl);
+      await settle(page, fixture);
+      for (const width of [390, 820, 1440]) {
+        await page.setViewportSize({ width, height: 900 });
+        const m = await page.evaluate(() => {
+          const doc = globalThis.document;
+          const rect = (el) => el.getBoundingClientRect();
+          const pill = rect(doc.getElementById('health-indicator'));
+          const heroActions = doc.querySelector('.hero-actions');
+          const links = [...doc.querySelectorAll('.hero-action')];
+          return {
+            pillRight: pill.right,
+            pillVisible: pill.width > 0 && pill.height > 0,
+            sideways: doc.documentElement.scrollWidth - doc.documentElement.clientWidth,
+            heroOver: heroActions.scrollWidth - heroActions.clientWidth,
+            linkRight: Math.max(...links.map((l) => rect(l).right)),
+            chipsOutside: [...doc.querySelectorAll('.hero-count')].filter((c) => rect(c).right > rect(c.parentElement).right + 1).length,
+          };
+        });
+        assert.ok(m.pillVisible, `the health indicator is visible at ${width}px`);
+        assert.ok(m.pillRight <= width, `the health indicator is inside the viewport at ${width}px (right edge ${m.pillRight})`);
+        assert.ok(m.sideways <= 0, `no sideways overflow at ${width}px (${m.sideways}px)`);
+        assert.ok(m.heroOver <= 0, `the Quick Links don't scroll sideways at ${width}px (${m.heroOver}px)`);
+        assert.ok(m.linkRight <= width, `no Quick Link pokes out of the viewport at ${width}px (right edge ${m.linkRight})`);
+        assert.equal(m.chipsOutside, 0, `no count chip pokes out of its link at ${width}px, long counts included`);
+      }
+    } finally {
+      await page.close();
+      server.closeAllConnections();
+      server.close();
+    }
+  });
+
   it('renders each dashboard variant in its intended state', async () => {
     assert.equal((await renderTexts('dashboard.json', ['#discord-state']))['#discord-state'], 'Connected');
     assert.equal((await renderTexts('dashboard-discord-down.json', ['#discord-state']))['#discord-state'], 'Disconnected');
@@ -512,6 +550,8 @@ describe('in the browser', () => {
     const lastPlayed = (await renderTexts('dashboard.json', ['#voice-last-played']))['#voice-last-played'];
     assert.match(lastPlayed, /^!clap \(clap\.mp3\) · Twitch #streamer_one · user1 · .+ ago$/);
     assert.equal((await renderTexts('dashboard-last-played-empty.json', ['#voice-last-played']))['#voice-last-played'], 'Nothing played since the bot started');
+    const deck = (await renderTexts('dashboard-last-played-streamdeck.json', ['#voice-last-played']))['#voice-last-played'];
+    assert.match(deck, /^!clap \(clap\.mp3\) · Stream Deck · user1 · .+ ago$/, 'a Stream Deck sound names the source and the user, no channel');
     // The Quick Links carry the counts (#1189), including a long one.
     const chips = (await renderTexts('dashboard-last-played-long.json', ['.hero-actions']))['.hero-actions'];
     assert.match(chips, /SFX\s+12345/);

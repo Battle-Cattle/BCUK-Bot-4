@@ -668,6 +668,9 @@ describe('views/dashboard.ejs welcome hero', () => {
     expect(hero).toMatch(/<a href="\/counters" class="hero-action">[^]*?Counters <span class="hero-count">25<\/span><\/a>/);
     // Only those three links get a count; the others and every destination are unchanged.
     expect(hero.match(/class="hero-count"/g)).toHaveLength(3);
+    for (const href of ['/channel-points', '/loyalty-points', '/alerts/settings']) {
+      expect(between(hero, `<a href="${href}"`, '</a>')).not.toContain('hero-count');
+    }
   });
 
   it('shows the SFX chip wherever the SFX link shows, and the other two only for a Manager and above (#1189)', async () => {

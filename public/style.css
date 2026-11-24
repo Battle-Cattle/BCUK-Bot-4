@@ -270,10 +270,10 @@ a:hover { text-decoration: underline; }
 .dashboard-scroll::-webkit-scrollbar-thumb:hover { background: var(--muted); }
 /* The right-hand column (Stream Overview above the live feed) is sticky and capped to the viewport, and the feed takes
    whatever height the panel leaves. When the feed is the tallest column it sets the page height, so the column's cap
-   leaves room for everything else in the viewport: the navbar, the health indicator above the grid
-   the container's top padding (1.5rem), the feed's section title and card chrome
-   (~2.6rem, which is inside the column) and the container padding + footer below the layout (~7.6rem). The reserve
-   outside the column is therefore 9.375rem (the old 12rem feed cap less that 2.625rem of chrome): the column's total
+   leaves room for everything else in the viewport: the navbar, the container's top padding (1.5rem), the feed's section
+   title and card chrome (~2.6rem, which is inside the column) and the container padding + footer below the layout
+   (~7.6rem). There is no row above the grid any more (the health indicator sits on the System Status heading row), so
+   the reserve outside the column is 9.375rem (the old 12rem feed cap less that 2.625rem of chrome): the column's total
    height is what the feed alone used to be, so the page stays clear of a scrollbar with a few pixels to spare and the
    column's top stays below the navbar at the end of the scroll. Every flex link down to the feed needs min-height: 0,
    or the feed's content would size the column and grow the page. The feed's 6rem floor keeps a few rows visible on very
