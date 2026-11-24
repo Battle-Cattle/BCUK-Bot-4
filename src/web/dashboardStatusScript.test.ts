@@ -6,6 +6,7 @@ import vm from 'vm';
 const utilsPath = path.join(__dirname, '../../public/dashboard-utils.js');
 const healthPath = path.join(__dirname, '../../public/dashboard-health.js');
 const streamPath = path.join(__dirname, '../../public/dashboard-stream.js');
+const lastPlayedPath = path.join(__dirname, '../../public/dashboard-last-played.js');
 const statusPath = path.join(__dirname, '../../public/dashboard-status.js');
 
 /** A minimal element: enough of the DOM for dashboard-utils.js and dashboard-status.js. */
@@ -128,6 +129,7 @@ function runScripts(responses: FetchResult[] = [], ownChannel: string | null = n
   vm.runInContext(fs.readFileSync(utilsPath, 'utf8'), context);
   vm.runInContext(fs.readFileSync(healthPath, 'utf8'), context);
   vm.runInContext(fs.readFileSync(streamPath, 'utf8'), context);
+  vm.runInContext(fs.readFileSync(lastPlayedPath, 'utf8'), context);
   vm.runInContext(fs.readFileSync(statusPath, 'utf8'), context);
   return {
     el,

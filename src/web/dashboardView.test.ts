@@ -106,6 +106,15 @@ describe('views/dashboard.ejs layout', () => {
     expect(html.indexOf('/dashboard-stream.js')).toBeLessThan(html.indexOf('/dashboard-status.js'));
   });
 
+  it('loads the last-played script after the utils it uses and before the status script that calls it (#1141)', async () => {
+    const html = await render();
+    const at = (name: string) => html.indexOf(`<script src="/${name}.js"></script>`);
+
+    expect(at('dashboard-last-played')).toBeGreaterThan(at('dashboard-utils'));
+    expect(at('dashboard-last-played')).toBeLessThan(at('dashboard-status'));
+    expect(html.match(/dashboard-last-played\.js/g)).toHaveLength(1);
+  });
+
   it('loads the context-change script before the two scripts that open the dashboard streams', async () => {
     const html = await render();
 
