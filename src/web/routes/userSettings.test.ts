@@ -8,6 +8,7 @@ vi.mock('../../db', () => ({
   saveEventConfig: vi.fn(),
   clearStreamerToken: vi.fn(),
   listPasskeysForUser: vi.fn(),
+  bumpSessionGeneration: vi.fn(),
   AccessLevel: ACCESS_LEVEL_MOCK,
 }));
 
@@ -30,6 +31,9 @@ vi.mock('../../twitch/eventsub/twitchEventSubCreate', () => ({
   hasAuthFailedSubs: vi.fn().mockReturnValue(false),
 }));
 
+// The fake status stream in the real-session test is never attached through attachSseConnection, so its cleanup chain is stubbed (as in sessionStreams.test.ts).
+vi.mock('./sseChannel', () => ({ chainConnectionCleanup: () => true }));
+
 vi.mock('../../shared/config', () => ({
   TWITCH_CLIENT_ID: 'test-client-id',
   TWITCH_EVENTSUB_REDIRECT_URI: 'http://localhost/callback',
@@ -38,15 +42,24 @@ vi.mock('../../shared/config', () => ({
 
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 
-vi.mock('../loginSession', () => ({ signOutOtherSessions: vi.fn() }));
+// The real sign-out is kept (as `actualSignOut`) for the real-session test; every other test stubs it.
+const actualSignOut = vi.hoisted(() => ({ run: undefined as undefined | ((req: any) => Promise<void>) }));
+vi.mock('../loginSession', async (importOriginal) => {
+  actualSignOut.run = (await importOriginal<typeof import('../loginSession')>()).signOutOtherSessions;
+  return { signOutOtherSessions: vi.fn() };
+});
 
 import express from 'express';
+import session from 'express-session';
 import supertest from 'supertest';
 import router, { buildEventSubConfig, findBotEnabledStreamer, hasOverlongMessage } from './userSettings';
-import { findUser, getStreamerByDiscordId, saveEventConfig, clearStreamerToken, listPasskeysForUser } from '../../db';
+import { findUser, getStreamerByDiscordId, saveEventConfig, clearStreamerToken, listPasskeysForUser, bumpSessionGeneration } from '../../db';
 import { reloadEventSubSubscriptions } from '../../twitch/eventsub/twitchEventSub';
 import { signOutOtherSessions } from '../loginSession';
 import { AccessLevel } from '../../db';
+import { createHungDestroyStore, fakeStatusStream, SECURE_COOKIE } from '../../test-utils/hungDestroySession';
+import { registerSessionStream, CONTEXT_CHANGED_FRAME } from '../sessionStreams';
+import { waitFor } from '../../test-utils/waitFor';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 import { makeSessionUser, type SessionUserFixture } from '../../test-utils/fixtures';
 
@@ -575,6 +588,39 @@ describe('POST /sign-out-other-sessions', () => {
     const res = await supertest(buildApp()).post('/sign-out-other-sessions');
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/user/settings?error=sign_out_others_failed');
+  });
+});
+
+describe('POST /sign-out-other-sessions with a real session whose store destroy never calls back (#1193)', () => {
+  it('has already told the user\'s other dashboard streams to reload, and ended them, while the store is still hung; it redirects once the store answers', async () => {
+    vi.mocked(signOutOtherSessions).mockImplementationOnce(actualSignOut.run!); // set by the mock factory above
+    vi.mocked(bumpSessionGeneration).mockResolvedValueOnce(2);
+    const { store, release } = createHungDestroyStore();
+    const app = express();
+    app.set('trust proxy', 1);
+    app.use(session({ secret: 'x'.repeat(32), resave: false, saveUninitialized: false, store, cookie: SECURE_COOKIE }));
+    app.get('/login', (req, res) => {
+      (req.session as any).user = { discordId: '42' };
+      res.sendStatus(204);
+    });
+    app.use('/', router);
+    const https = { 'X-Forwarded-Proto': 'https' };
+    const cookie = (await supertest(app).get('/login').set(https)).headers['set-cookie']?.[0]?.split(';')[0] ?? '';
+    // Another session of the same user (a different session ID, so it is not the one signing out).
+    const { req: otherReq, res: otherStream } = fakeStatusStream('other-session-id', '42');
+    expect(registerSessionStream(otherReq, otherStream, 'status')).toBe(true);
+
+    let responded = false;
+    const request = supertest(app).post('/sign-out-other-sessions').set(https).set('Cookie', cookie).then((res) => { responded = true; return res; });
+    await waitFor(() => expect(otherStream.end).toHaveBeenCalledTimes(1));
+
+    // The frame and the end came before the store answered: nothing waited on it.
+    expect(otherStream.write).toHaveBeenCalledWith(CONTEXT_CHANGED_FRAME);
+    expect(responded).toBe(false);
+    release();
+    const res = await request;
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('/user/settings?success=signed_out_others');
   });
 });
 
