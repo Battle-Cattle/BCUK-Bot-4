@@ -21,6 +21,7 @@ vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 vi.mock('../sessionStreams', () => ({ switchSessionGuild: vi.fn() }));
 
 import express from 'express';
+import session from 'express-session';
 import supertest from 'supertest';
 import router from './guild';
 import { findUser, getAllGuilds, getEffectiveAccessLevelForUser, getGuildsForMember } from '../../db';
@@ -458,5 +459,76 @@ describe('POST /guild/select', () => {
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/guild/select?error=select_failed');
     expect(user.currentGuildId).toBeNull();
+  });
+});
+
+describe('POST /guild/select with a real express-session whose store write fails (#1164, #1193)', () => {
+  const OLD = '100000000000000001';
+  const NEW = '100000000000000002';
+  const HTTPS = { 'X-Forwarded-Proto': 'https' };
+
+  /** A store whose next write can fail either without writing or after writing (a lost reply), then behaves again. */
+  class FlakyStore extends session.MemoryStore {
+    next: 'ok' | 'fail-before-write' | 'write-then-fail' = 'ok';
+
+    override set(sid: string, sess: session.SessionData, callback?: (err?: unknown) => void): void {
+      const mode = this.next;
+      this.next = 'ok';
+      if (mode === 'fail-before-write') {
+        callback?.(new Error('store down'));
+      } else if (mode === 'write-then-fail') {
+        super.set(sid, sess, () => callback?.(new Error('lost reply')));
+      } else {
+        super.set(sid, sess, callback);
+      }
+    }
+  }
+
+  /** An app with a real session middleware, a login route that stores a fixture user, and a route reading the stored guild back. */
+  function boot() {
+    const store = new FlakyStore();
+    const app = express();
+    app.set('trust proxy', 1);
+    app.use(express.urlencoded({ extended: false }));
+    // As in production: a secure, httpOnly cookie behind the proxy (the requests below send X-Forwarded-Proto: https).
+    app.use(session({ secret: 'x'.repeat(32), resave: false, saveUninitialized: false, store, cookie: { secure: true, httpOnly: true, sameSite: 'lax' } }));
+    app.get('/login', (req, res) => {
+      req.session.user = { discordId: 'u1', discordName: 'user1', discordAvatar: null, isOwner: false, accessLevel: AccessLevel.USER, currentGuildId: OLD, guilds: TWO_GUILDS };
+      res.sendStatus(204);
+    });
+    app.use((req: any, res: any, next: any) => {
+      req.csrfToken = () => 'csrf-token';
+      res.render = (view: string, locals: unknown) => res.status(200).json({ view, locals });
+      next();
+    });
+    app.use('/guild', router);
+    app.get('/stored', (req, res) => { res.json({ guild: req.session.user?.currentGuildId, level: req.session.user?.accessLevel }); });
+    return { store, app };
+  }
+
+  it.each(['fail-before-write', 'write-then-fail'] as const)('ends with the old guild and access level stored when the save %s', async (mode) => {
+    vi.mocked(getEffectiveAccessLevelForUser).mockResolvedValue(AccessLevel.MANAGER);
+    const { store, app } = boot();
+    const cookie = (await supertest(app).get('/login').set(HTTPS)).headers['set-cookie']?.[0]?.split(';')[0] ?? '';
+    store.next = mode;
+
+    const res = await supertest(app).post('/guild/select').set(HTTPS).set('Cookie', cookie).type('form').send({ guild_id: NEW });
+    const stored = await supertest(app).get('/stored').set(HTTPS).set('Cookie', cookie);
+
+    expect(res.headers.location).toBe('/guild/select?error=select_failed');
+    expect(stored.body).toEqual({ guild: OLD, level: AccessLevel.USER });
+    expect(switchSessionGuild).not.toHaveBeenCalled();
+  });
+
+  it('stores the new guild and announces the switch when the save works', async () => {
+    vi.mocked(getEffectiveAccessLevelForUser).mockResolvedValue(AccessLevel.MANAGER);
+    const { app } = boot();
+    const cookie = (await supertest(app).get('/login').set(HTTPS)).headers['set-cookie']?.[0]?.split(';')[0] ?? '';
+
+    await supertest(app).post('/guild/select').set(HTTPS).set('Cookie', cookie).type('form').send({ guild_id: NEW });
+    const stored = await supertest(app).get('/stored').set(HTTPS).set('Cookie', cookie);
+
+    expect(stored.body).toEqual({ guild: NEW, level: AccessLevel.MANAGER });
+    expect(switchSessionGuild).toHaveBeenCalledTimes(1);
   });
 });

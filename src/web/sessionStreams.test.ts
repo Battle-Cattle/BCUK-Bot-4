@@ -557,6 +557,24 @@ describe('wrapStoreDestroy', () => {
     expect(returned).toBe('result');
   });
 
+  it('has already written the frame and ended the stream when the real destroy never calls back: no barrier waits for the store (#1164, #1193)', () => {
+    const res = fakeRes();
+    res.end = vi.fn(() => { res.emit('close'); return res; });
+    registerSessionStream(fakeReq('s1'), res, 'status');
+    // A store whose destroy never invokes its callback (a hung write): the wrapper must not hold the close back for it.
+    const destroy = vi.fn();
+    const store = { destroy } as unknown as session.Store;
+    wrapStoreDestroy(store);
+    const cb = vi.fn();
+
+    (store.destroy as unknown as (sid: string, cb: () => void) => unknown)('s1', cb);
+
+    expect(res.write).toHaveBeenCalledWith(CONTEXT_CHANGED_FRAME);
+    expect(res.end).toHaveBeenCalledTimes(1);
+    expect(destroy).toHaveBeenCalledWith('s1', cb);
+    expect(cb).not.toHaveBeenCalled();
+  });
+
   it('still destroys the session, and passes its error on, when closing a stream throws', async () => {
     const bad = fakeRes();
     bad.end = vi.fn(() => { throw new Error('socket gone'); });
