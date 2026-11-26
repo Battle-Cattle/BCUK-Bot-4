@@ -78,7 +78,7 @@
     "eslint-plugin-jsdoc": "^65.5.1",
     "eslint-plugin-sonarjs": "^4.2.2",
     "globals": "^17.14.0",
-    "knip": "6.47.0",
+    "knip": "6.48.0",
     "madge": "^8.0.0",
     "supertest": "^7.3.2",
     "ts-node": "^10.9.2",
