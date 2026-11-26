@@ -134,6 +134,8 @@ async function handleChangeTwitchChannel(params: ChangeTwitchChannelParams): Pro
   } catch (err) {
     try {
       await rollbackUserRow(params);
+      // The row is back on the previous channel: a stats stream opened for the committed one while this ran no longer matches it.
+      closeStreamStatsForUser(params.discordId);
 
       const rollbackEnabledChannels = await getTwitchEnabledChannels();
       const shouldRejoinPreviousChannel = !!previousChannel

@@ -477,6 +477,42 @@ describe('shutdown, restart, multitwitch lookup, and live-state ordering', () =>
     expect(getStreamStats('removedstreamer')).toBeUndefined();
   });
 
+  it('forgets a removed login\'s stream stats even when the restart then fails before getUsers resolves', async () => {
+    vi.mocked(getAllStreamersWithGroups).mockResolvedValue([
+      makeStreamer(), makeStreamer({ id: 6, twitch_name: 'RemovedStreamer' }),
+    ] as any);
+    vi.mocked(getUsers).mockResolvedValue([{ login: 'teststreamer', id: 'uid-5' }, { login: 'removedstreamer', id: 'uid-6' }]);
+    await startTwitchMonitor();
+    vi.mocked(getStreams).mockResolvedValue([]);
+    await triggerImmediateLiveCheck('removedstreamer');
+    expect(getStreamStats('removedstreamer')).toBeDefined();
+
+    vi.mocked(getAllStreamersWithGroups).mockResolvedValue([makeStreamer()] as any);
+    vi.mocked(getUsers).mockRejectedValue(new Error('helix down'));
+    await expect(restartTwitchMonitor()).rejects.toThrow('helix down');
+
+    expect(getStreamStats('removedstreamer')).toBeUndefined();
+  });
+
+  it('does not write a login\'s stream stats back when a restart removed it while its immediate check was in flight', async () => {
+    vi.mocked(getAllStreamersWithGroups).mockResolvedValue([
+      makeStreamer(), makeStreamer({ id: 6, twitch_name: 'removedstreamer' }),
+    ] as any);
+    vi.mocked(getUsers).mockResolvedValue([{ login: 'teststreamer', id: 'uid-5' }, { login: 'removedstreamer', id: 'uid-6' }]);
+    await startTwitchMonitor();
+    let answer!: (streams: unknown[]) => void;
+    vi.mocked(getStreams).mockImplementationOnce(() => new Promise((resolve) => { answer = resolve as any; }));
+    const check = triggerImmediateLiveCheck('removedstreamer');
+
+    vi.mocked(getAllStreamersWithGroups).mockResolvedValue([makeStreamer()] as any);
+    vi.mocked(getUsers).mockResolvedValue([{ login: 'teststreamer', id: 'uid-5' }]);
+    await restartTwitchMonitor();
+    answer([]);
+    await check;
+
+    expect(getStreamStats('removedstreamer')).toBeUndefined();
+  });
+
   it('still clears a removed login\'s live flag when the restart fails after loading the streamer list', async () => {
     vi.mocked(getAllStreamersWithGroups).mockResolvedValue([
       makeStreamer(), makeStreamer({ id: 6, twitch_name: 'removedstreamer' }),

@@ -182,6 +182,39 @@ describe('addOrUpdateUserMutation — handleChangeTwitchChannel rollback', () =>
   });
 });
 
+describe('addOrUpdateUserMutation — stats streams when the channel change is rolled back (#1183)', () => {
+  it('closes the stats streams again after the row is restored, so none keeps showing the rolled-back channel', async () => {
+    vi.mocked(findUser)
+      .mockResolvedValueOnce({ ...BASE_USER, twitch_name: 'oldchan', is_twitch_bot_enabled: true } as any)
+      .mockResolvedValueOnce({ ...BASE_USER, twitch_name: 'newchan', is_twitch_bot_enabled: true } as any);
+    vi.mocked(getTwitchEnabledChannels).mockResolvedValue(['newchan', 'oldchan']);
+    vi.mocked(joinTwitchChannel).mockRejectedValue(new Error('Join failed'));
+
+    await expect(
+      addOrUpdateUserMutation({ discordId: '111', discordName: 'TestUser', normalizedTwitchName: 'newchan', shouldClearTwitchName: false }),
+    ).rejects.toThrow('Join failed');
+
+    // Once when the channel changed, once more after the rollback restored the previous one.
+    expect(closeStreamStatsForUser).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(closeStreamStatsForUser).mock.invocationCallOrder[1]).toBeGreaterThan(vi.mocked(upsertUser).mock.invocationCallOrder.at(-1)!);
+  });
+
+  it('leaves the streams for the committed channel open when the rollback itself fails', async () => {
+    vi.mocked(findUser)
+      .mockResolvedValueOnce({ ...BASE_USER, twitch_name: 'oldchan', is_twitch_bot_enabled: true } as any)
+      .mockResolvedValueOnce({ ...BASE_USER, twitch_name: 'newchan', is_twitch_bot_enabled: true } as any);
+    vi.mocked(getTwitchEnabledChannels).mockResolvedValue(['newchan']);
+    vi.mocked(joinTwitchChannel).mockRejectedValue(new Error('Join failed'));
+    vi.mocked(upsertUser).mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('rollback failed'));
+
+    await expect(
+      addOrUpdateUserMutation({ discordId: '111', discordName: 'TestUser', normalizedTwitchName: 'newchan', shouldClearTwitchName: false }),
+    ).rejects.toThrow('Join failed');
+
+    expect(closeStreamStatsForUser).toHaveBeenCalledTimes(1); // only the one for the change itself
+  });
+});
+
 describe('toggleTwitchMutation — validation and no-op', () => {
   it('throws when the target user does not exist', async () => {
     vi.mocked(findUser).mockResolvedValue(null as any);

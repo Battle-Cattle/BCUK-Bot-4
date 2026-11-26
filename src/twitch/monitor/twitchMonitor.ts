@@ -100,7 +100,9 @@ export async function triggerImmediateLiveCheck(login: string): Promise<void> {
     const liveByUserId = new Map(
       streams.filter((s) => s.type === 'live').map((s) => [s.user_id, s]),
     );
-    recordStreamStatsPoll(new Map([[loginKey, userId]]), liveByUserId);
+    // A restart may have removed or remapped the login while getStreams was in flight: recording then would write a
+    // removed channel's stats back after the restart pruned them.
+    if (loginToUserId.get(loginKey) === userId) recordStreamStatsPoll(new Map([[loginKey, userId]]), liveByUserId);
     for (const streamer of matching) {
       try {
         await withLoginLock(loginKey, () => handlePollStreamer(liveStates, loginToUserId, streamer, liveByUserId));
@@ -141,6 +143,8 @@ export async function startTwitchMonitor(): Promise<void> {
   streamersData = await getAllStreamersWithGroups();
   // Straight after the authoritative list loads, so a later failure (e.g. getUsers) can't skip it.
   clearLiveFlagForUnmonitored();
+  // Likewise the stream stats of a removed login, before getUsers can fail and leave the start half-done.
+  dropUnmonitoredStreamStats(monitoredLogins());
   if (streamersData.length === 0) {
     log.warn('No streamers configured in DB — nothing to monitor');
   }
