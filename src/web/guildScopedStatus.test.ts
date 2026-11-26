@@ -18,6 +18,7 @@ import { getGuildScopedStatus, clearGuildScopedStatusCache, onGuildStatusInvalid
 import { getStatus } from '../shared/statusStore';
 import { getGuildById, getGuildMemberUsers } from '../db';
 import { notifyGuildInfoChanged } from '../db/guildInfoEvents';
+import { recordStreamStatsPoll, resetStreamStatsForTests } from '../twitch/monitor/streamStatsStore';
 
 const BASE_STATUS = {
   discord: { ready: true, tag: 'Bot#1234' },
@@ -359,5 +360,22 @@ describe('getGuildScopedStatus — liveCheckedAt', () => {
     const result = await getGuildScopedStatus('guild-A');
 
     expect(Object.keys(result.twitch)).toEqual(['ourstreamer']);
+  });
+});
+
+describe('getGuildScopedStatus — own-channel stream stats (#1182)', () => {
+  it('never carries them: the status payload stays as it was', async () => {
+    recordStreamStatsPoll(new Map([['ourstreamer', 'u1']]), new Map([['u1', {
+      user_id: 'u1', user_login: 'ourstreamer', game_name: 'Just Chatting', title: 'A title', thumbnail_url: '', type: 'live',
+      started_at: '2026-11-26T09:00:00Z', viewer_count: 42,
+    }]]));
+    vi.mocked(getStatus).mockReturnValue(BASE_STATUS as any);
+    vi.mocked(getGuildById).mockResolvedValue({ guild_id: 'g1', name: 'Guild One' } as any);
+    vi.mocked(getGuildMemberUsers).mockResolvedValue([{ discord_id: '1', twitch_name: 'ourstreamer', is_twitch_bot_enabled: true }] as any);
+
+    const text = JSON.stringify(await getGuildScopedStatus('g1'));
+
+    for (const key of ['viewerCount', 'viewer_count', 'A title', 'Just Chatting', 'startedAt']) expect(text).not.toContain(key);
+    resetStreamStatsForTests();
   });
 });

@@ -255,14 +255,45 @@ describe('switchSessionGuild (the session picked another guild)', () => {
     expect(otherSession.end).not.toHaveBeenCalled();
   });
 
-  it('leaves an own-channel stats stream open across a guild switch: it belongs to the user, not a guild (#1183)', () => {
-    const stats = fakeRes();
-    registerSessionStream(guildReq('s1', 'gX'), stats, 'stats');
+  it('closes an own-channel stats stream on a guild switch, like the status stream, and refuses a late one under the old guild (#1183)', () => {
+    const oldGuild = fakeRes();
+    const newGuild = fakeRes();
+    registerSessionStream(guildReq('s1', 'gX'), oldGuild, 'stats');
+    registerSessionStream(guildReq('s1', 'gY'), newGuild, 'stats');
 
     switchSessionGuild('s1', 'gY');
 
-    expect(stats.end).not.toHaveBeenCalled();
-    expect(registerSessionStream(guildReq('s1', 'gX'), fakeRes(), 'stats')).toBe(true);
+    expect(oldGuild.write).toHaveBeenCalledWith(CONTEXT_CHANGED_FRAME);
+    expect(oldGuild.end).toHaveBeenCalledTimes(1);
+    expect(newGuild.end).not.toHaveBeenCalled();
+    const late = fakeRes();
+    expect(registerSessionStream(guildReq('s1', 'gX'), late, 'stats')).toBe(false);
+    expect(late.end).toHaveBeenCalledTimes(1);
+  });
+
+  it('closes a stats stream opened under a guild the session lost (a revoked membership)', () => {
+    const lost = fakeRes();
+    const kept = fakeRes();
+    registerSessionStream(guildReq('s1', 'gX'), lost, 'stats');
+    registerSessionStream(guildReq('s1', 'gY'), kept, 'stats');
+
+    closeSessionStreamsForGuild('s1', 'gX');
+
+    expect(lost.end).toHaveBeenCalledTimes(1);
+    expect(kept.end).not.toHaveBeenCalled();
+  });
+
+  it('closes a user\'s stats streams from older session generations on "sign out other sessions"', () => {
+    const old = fakeRes();
+    const current = fakeRes();
+    registerSessionStream(fakeReq('s1', '42', 1), old, 'stats');
+    registerSessionStream(fakeReq('s2', '42', 2), current, 'stats');
+
+    closeUserStreams('42', 2);
+
+    expect(old.write).toHaveBeenCalledWith(CONTEXT_CHANGED_FRAME);
+    expect(old.end).toHaveBeenCalledTimes(1);
+    expect(current.end).not.toHaveBeenCalled();
   });
 
   it('closes a stats stream, with the reload frame, when its session is destroyed', () => {

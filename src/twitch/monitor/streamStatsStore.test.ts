@@ -43,6 +43,12 @@ describe('recordStreamStatsPoll', () => {
     expect(getStreamStats('streamer_one')).not.toHaveProperty('startedAt');
   });
 
+  it('has no stats for a login that was never checked', () => {
+    expect(getStreamStats('streamer_one')).toBeUndefined();
+    recordStreamStatsPoll(new Map([['streamer_one', 'u1']]), new Map(), NOW);
+    expect(getStreamStats('streamer_unknown')).toBeUndefined();
+  });
+
   it('keeps a zero viewer count (a live stream nobody is watching yet)', () => {
     recordStreamStatsPoll(new Map([['streamer_one', 'u1']]), new Map([['u1', stream({ viewer_count: 0 })]]), NOW);
     expect(getStreamStats('streamer_one')?.viewerCount).toBe(0);

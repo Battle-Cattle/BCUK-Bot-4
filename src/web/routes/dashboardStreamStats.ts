@@ -93,8 +93,8 @@ async function stillEntitled(discordId: string, login: string): Promise<boolean>
  * verified, then one after each poll that checked the channel. Keyed by the user, and registered with
  * {@link registerSessionStream} straight after attaching (nothing awaited between) so it closes when the session ends, as
  * the other dashboard streams do. Access and the linked channel are re-checked once after attaching; until that passes the
- * stream receives nothing, and it is ended if access is gone or the re-check fails. Not tied to a guild: the stats belong
- * to the user's own channel, so a guild switch leaves it open.
+ * stream receives nothing, and it is ended if access is gone or the re-check fails. Like the status stream it follows the
+ * session's guild: a guild switch (or losing the guild) closes it and the page reloads under the new context.
  * @param req - Express request; reads `req.session.user`.
  * @param res - Express response; upgrades to `text/event-stream`, or 403 when the user has no linked Twitch account, or 429
  *   at the per-user or process-wide connection limit.

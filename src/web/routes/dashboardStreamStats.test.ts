@@ -117,6 +117,13 @@ describe('GET /stream/stats', () => {
     });
   });
 
+  it('answers 200 with live: false and the check time for an offline channel (not an empty or 404 result, so the page can show how fresh it is)', async () => {
+    recordStreamStatsPoll(new Map([['streamer_one', 'u1']]), new Map());
+    const res = await supertest(app()).get('/stream/stats');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ ok: true, tracked: true, serverTime: expect.any(String), live: false, checkedAt: expect.any(String) });
+  });
+
   it('normalises a mixed-case or prefixed linked name to the monitored login', async () => {
     setUser('Streamer_One');
     recordStreamStatsPoll(new Map([['streamer_one', 'u1']]), new Map());
@@ -304,5 +311,22 @@ describe('closeStreamStatsForUser', () => {
     res.end.mockImplementation(() => { throw new Error('broken pipe'); });
     expect(() => closeStreamStatsForUser('user1')).not.toThrow();
     triggerClose();
+  });
+});
+
+describe('mounting (#1182)', () => {
+  it('mounts both routes behind requireAuth, with the other /dashboard routers', async () => {
+    const { readFileSync } = await import('fs');
+    const { join } = await import('path');
+    const source = readFileSync(join(__dirname, 'index.ts'), 'utf8');
+    expect(source).toContain("app.use('/dashboard', requireAuth, dashboardStreamStatsRouter);");
+  });
+
+  it('runs requireGuildContext as the first handler of each route', () => {
+    for (const path of ['/stream/stats', '/stream/events']) {
+      const layer = (router as any).stack.find((l: any) => l.route?.path === path);
+      expect(layer.route.stack).toHaveLength(2);
+      expect(layer.route.stack[0].name).toBe('requireGuildContext');
+    }
   });
 });
