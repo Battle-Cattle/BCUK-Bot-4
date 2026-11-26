@@ -5,10 +5,12 @@ vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 vi.mock('../../db', () => ({ findUser: vi.fn(), getGuildsForMember: vi.fn() }));
 vi.mock('./dashboardStatusEvents', () => ({ disconnectGuildStatusConnectionsForMember: vi.fn() }));
 vi.mock('./companionEvents', () => ({ disconnectCompanionConnections: vi.fn() }));
+vi.mock('./dashboardStreamStats', () => ({ closeStreamStatsForUser: vi.fn() }));
 
 import { findUser, getGuildsForMember } from '../../db';
 import { disconnectGuildStatusConnectionsForMember } from './dashboardStatusEvents';
 import { disconnectCompanionConnections } from './companionEvents';
+import { closeStreamStatsForUser } from './dashboardStreamStats';
 import { closeRemovedMemberConnections } from './memberRemovalConnections';
 
 const GUILD_ID = '900000000000000001';
@@ -26,6 +28,7 @@ describe('closeRemovedMemberConnections (#1004)', () => {
     expect(disconnectGuildStatusConnectionsForMember).toHaveBeenCalledWith(GUILD_ID, MEMBER);
     expect(getGuildsForMember).toHaveBeenCalledWith(MEMBER);
     expect(disconnectCompanionConnections).toHaveBeenCalledWith(MEMBER);
+    expect(closeStreamStatsForUser).toHaveBeenCalledWith(MEMBER);
   });
 
   it('leaves the companion app connected when the member still belongs to another guild', async () => {
@@ -33,12 +36,14 @@ describe('closeRemovedMemberConnections (#1004)', () => {
     await closeRemovedMemberConnections(GUILD_ID, MEMBER);
     expect(disconnectGuildStatusConnectionsForMember).toHaveBeenCalled();
     expect(disconnectCompanionConnections).not.toHaveBeenCalled();
+    expect(closeStreamStatsForUser).not.toHaveBeenCalled();
   });
 
   it('leaves the bot owner\'s companion app connected with no guild left', async () => {
     vi.mocked(findUser).mockResolvedValue({ discord_id: MEMBER, is_owner: true } as any);
     await closeRemovedMemberConnections(GUILD_ID, MEMBER);
     expect(disconnectCompanionConnections).not.toHaveBeenCalled();
+    expect(closeStreamStatsForUser).not.toHaveBeenCalled();
   });
 
   it('logs rather than throws when the access check fails', async () => {

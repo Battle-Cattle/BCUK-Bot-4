@@ -36,6 +36,7 @@ import { cancelOfflineTimersForLogin, handleStreamOffline } from './twitchMonito
 import { getDiscordClient } from '../../discord/discordClientStore';
 import * as twitchMonitorAnnouncements from './twitchMonitorAnnouncements';
 import { getHealthSnapshot } from '../../shared/healthStore';
+import { getStreamStats, resetStreamStatsForTests } from './streamStatsStore';
 
 function makeTextChannel(msgOverrides: Record<string, unknown> = {}) {
   const message = { id: 'msg1', channelId: '111', delete: vi.fn().mockResolvedValue(undefined), edit: vi.fn().mockResolvedValue(undefined), ...msgOverrides };
@@ -50,6 +51,9 @@ function makeTextChannel(msgOverrides: Record<string, unknown> = {}) {
 function makeDiscordClient(channel: ReturnType<typeof makeTextChannel> = makeTextChannel()) {
   return { channels: { fetch: vi.fn().mockResolvedValue(channel) } };
 }
+
+// The store is process-wide, so each test starts from an empty one.
+beforeEach(() => resetStreamStatsForTests());
 
 function makeStreamer(overrides: Record<string, unknown> = {}) {
   return {
@@ -97,6 +101,14 @@ describe('triggerImmediateLiveCheck', () => {
   it('no-ops without calling getStreams when the login is not monitored', async () => {
     await triggerImmediateLiveCheck('unknownstreamer');
     expect(getStreams).not.toHaveBeenCalled();
+  });
+
+  it('records the stream stats on an immediate check too', async () => {
+    vi.mocked(getStreams).mockResolvedValue([makeStream({ viewer_count: 3 })] as any);
+
+    await triggerImmediateLiveCheck('teststreamer');
+
+    expect(getStreamStats('teststreamer')).toMatchObject({ live: true, viewerCount: 3 });
   });
 
   it('records the streamer as live on the first immediate check', async () => {
@@ -246,6 +258,29 @@ describe('60s poll interval', () => {
     vi.mocked(getStreams).mockResolvedValue([]);
     await vi.advanceTimersByTimeAsync(60_000);
     expect(markTwitchChannelsLiveChecked).toHaveBeenCalledTimes(2);
+  });
+
+  it('records the stream stats of every resolved login after a successful poll: live with its details, then offline', async () => {
+    vi.mocked(getStreams).mockResolvedValue([makeStream({ viewer_count: 12, started_at: '2026-11-26T09:00:00Z' })] as any);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(getStreamStats('teststreamer')).toMatchObject({
+      live: true, title: 'hello', category: 'Just Chatting', viewerCount: 12, startedAt: '2026-11-26T09:00:00Z',
+    });
+
+    vi.mocked(getStreams).mockResolvedValue([]);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(getStreamStats('teststreamer')).toEqual({ live: false, checkedAt: expect.any(String) });
+  });
+
+  it('leaves the stream stats, and their check time, alone when the poll fails', async () => {
+    vi.mocked(getStreams).mockResolvedValueOnce([makeStream({ viewer_count: 5 })] as any);
+    await vi.advanceTimersByTimeAsync(60_000);
+    const before = getStreamStats('teststreamer');
+
+    vi.mocked(getStreams).mockRejectedValueOnce(new Error('API down'));
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(getStreamStats('teststreamer')).toEqual(before);
   });
 
   it('does not record a live-check time when the poll fails, so a stalled monitor leaves it behind', async () => {
@@ -423,6 +458,59 @@ describe('shutdown, restart, multitwitch lookup, and live-state ordering', () =>
 
     expect(setTwitchChannelLive).toHaveBeenCalledWith('removedstreamer', false);
     expect(setTwitchChannelLive).not.toHaveBeenCalledWith('teststreamer', false);
+  });
+
+  it('forgets the stream stats of a login no longer monitored after a restart', async () => {
+    vi.mocked(getAllStreamersWithGroups).mockResolvedValue([
+      makeStreamer(), makeStreamer({ id: 6, twitch_name: 'removedstreamer' }),
+    ] as any);
+    vi.mocked(getUsers).mockResolvedValue([{ login: 'teststreamer', id: 'uid-5' }, { login: 'removedstreamer', id: 'uid-6' }]);
+    await startTwitchMonitor();
+    vi.mocked(getStreams).mockResolvedValue([]);
+    await triggerImmediateLiveCheck('removedstreamer');
+    expect(getStreamStats('removedstreamer')).toBeDefined();
+
+    vi.mocked(getAllStreamersWithGroups).mockResolvedValue([makeStreamer()] as any);
+    vi.mocked(getUsers).mockResolvedValue([{ login: 'teststreamer', id: 'uid-5' }]);
+    await restartTwitchMonitor();
+
+    expect(getStreamStats('removedstreamer')).toBeUndefined();
+  });
+
+  it('forgets a removed login\'s stream stats even when the restart then fails before getUsers resolves', async () => {
+    vi.mocked(getAllStreamersWithGroups).mockResolvedValue([
+      makeStreamer(), makeStreamer({ id: 6, twitch_name: 'RemovedStreamer' }),
+    ] as any);
+    vi.mocked(getUsers).mockResolvedValue([{ login: 'teststreamer', id: 'uid-5' }, { login: 'removedstreamer', id: 'uid-6' }]);
+    await startTwitchMonitor();
+    vi.mocked(getStreams).mockResolvedValue([]);
+    await triggerImmediateLiveCheck('removedstreamer');
+    expect(getStreamStats('removedstreamer')).toBeDefined();
+
+    vi.mocked(getAllStreamersWithGroups).mockResolvedValue([makeStreamer()] as any);
+    vi.mocked(getUsers).mockRejectedValue(new Error('helix down'));
+    await expect(restartTwitchMonitor()).rejects.toThrow('helix down');
+
+    expect(getStreamStats('removedstreamer')).toBeUndefined();
+  });
+
+  it('does not write a login\'s stream stats back when a restart removed it while its immediate check was in flight', async () => {
+    vi.mocked(getAllStreamersWithGroups).mockResolvedValue([
+      makeStreamer(), makeStreamer({ id: 6, twitch_name: 'removedstreamer' }),
+    ] as any);
+    vi.mocked(getUsers).mockResolvedValue([{ login: 'teststreamer', id: 'uid-5' }, { login: 'removedstreamer', id: 'uid-6' }]);
+    await startTwitchMonitor();
+    let answer!: (streams: unknown[]) => void;
+    vi.mocked(getStreams).mockImplementationOnce(() => new Promise((resolve) => { answer = resolve as any; }));
+    const check = triggerImmediateLiveCheck('removedstreamer');
+
+    vi.mocked(getAllStreamersWithGroups).mockResolvedValue([makeStreamer()] as any);
+    vi.mocked(getUsers).mockResolvedValue([{ login: 'teststreamer', id: 'uid-5' }]);
+    await restartTwitchMonitor();
+    answer([]);
+    await check;
+
+    expect(getStreamStats('removedstreamer')).toBeUndefined();
   });
 
   it('still clears a removed login\'s live flag when the restart fails after loading the streamer list', async () => {

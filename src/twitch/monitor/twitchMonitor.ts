@@ -19,6 +19,7 @@ import { handlePollStreamer, dispatchStreamerPolls } from './twitchMonitorPoll';
 import { withLoginLock } from './twitchMonitorLoginLock';
 import { recordMonitorPoll, normalizeError } from '../../shared/healthStore';
 import { setTwitchChannelLive, markTwitchChannelsLiveChecked } from '../../shared/statusStore';
+import { recordStreamStatsPoll, dropUnmonitoredStreamStats } from './streamStatsStore';
 
 const log = createLogger('TwitchMonitor');
 
@@ -64,6 +65,7 @@ async function pollStreams(): Promise<void> {
       const liveByUserId = new Map(
         liveStreams.filter((s) => s.type === 'live').map((s) => [s.user_id, s]),
       );
+      recordStreamStatsPoll(loginToUserId, liveByUserId);
       await dispatchStreamerPolls(liveStates, loginToUserId, streamersData, liveByUserId);
       recordMonitorPoll(true);
     } catch (err) {
@@ -98,6 +100,9 @@ export async function triggerImmediateLiveCheck(login: string): Promise<void> {
     const liveByUserId = new Map(
       streams.filter((s) => s.type === 'live').map((s) => [s.user_id, s]),
     );
+    // A restart may have removed or remapped the login while getStreams was in flight: recording then would write a
+    // removed channel's stats back after the restart pruned them.
+    if (loginToUserId.get(loginKey) === userId) recordStreamStatsPoll(new Map([[loginKey, userId]]), liveByUserId);
     for (const streamer of matching) {
       try {
         await withLoginLock(loginKey, () => handlePollStreamer(liveStates, loginToUserId, streamer, liveByUserId));
@@ -138,6 +143,8 @@ export async function startTwitchMonitor(): Promise<void> {
   streamersData = await getAllStreamersWithGroups();
   // Straight after the authoritative list loads, so a later failure (e.g. getUsers) can't skip it.
   clearLiveFlagForUnmonitored();
+  // Likewise the stream stats of a removed login, before getUsers can fail and leave the start half-done.
+  dropUnmonitoredStreamStats(monitoredLogins());
   if (streamersData.length === 0) {
     log.warn('No streamers configured in DB — nothing to monitor');
   }
@@ -145,6 +152,8 @@ export async function startTwitchMonitor(): Promise<void> {
   const logins = streamersData.map((s) => s.twitch_name).filter((n): n is string => n !== null);
   const users = await getUsers(logins);
   loginToUserId = new Map(users.map((u) => [u.login.toLowerCase(), u.id]));
+  // A login no longer watched must not keep serving its last stats.
+  dropUnmonitoredStreamStats(loginToUserId.keys());
 
   // Startup live-check: sync with any streams that went live/offline while bot was down
   await performStartupLiveCheck(liveStates, loginToUserId, streamersData);

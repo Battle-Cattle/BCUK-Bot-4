@@ -249,12 +249,13 @@ describe('public/dashboard-events.js feed behaviour', () => {
   });
 
   it('shows an event pushed live once when a later resync snapshot also holds it (#1177)', async () => {
-    const { list, source } = runEvents({ fetchEvents: [{ ...ev('sub'), id: 11 }] });
-    source!.onmessage!({ data: JSON.stringify({ ...ev('sub'), id: 11 }) });
+    // The snapshot's copy has its own name, so waiting for it proves the resync really applied.
+    const { list, source } = runEvents({ fetchEvents: [{ ...ev('sub'), displayName: 'snapshot_viewer', id: 11 }] });
+    source!.onmessage!({ data: JSON.stringify({ ...ev('sub'), displayName: 'live_viewer', id: 11 }) });
     source!.onerror!();
     source!.onopen!();
-    // The live event made the first snapshot suspect, so the resync re-fetches; the settled feed is the snapshot alone.
-    await waitFor(() => expect(list.children).toHaveLength(1));
+    await waitFor(() => expect(childAt(list, 0).allText).toContain('snapshot_viewer'));
+    expect(list.children).toHaveLength(1);
     expect(childAt(list, 0).dataset.eventId).toBe('11');
   });
 

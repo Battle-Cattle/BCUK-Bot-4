@@ -23,7 +23,7 @@ import { sessionEndsAt } from './sessionLifetime';
 const log = createLogger('SessionStreams');
 
 /** Which dashboard stream a registered connection is. */
-export type SessionStreamKind = 'status' | 'events';
+export type SessionStreamKind = 'status' | 'events' | 'stats';
 
 /** The named SSE frame that tells a dashboard page its stream was closed because its context (session, account or guild) changed, so it reloads. It has no payload and is written once, just before the stream ends. */
 export const CONTEXT_CHANGED_FRAME = 'event: context-changed\ndata: {}\n\n';
@@ -48,7 +48,7 @@ interface StreamEntry {
   sessionId: string;
   discordId: string;
   generation: number;
-  /** The guild the stream was opened under: set for a `status` stream (which is per guild), null for an `events` stream (per streamer). */
+  /** The guild the stream was opened under: set for a `status` and a `stats` stream (both follow the session's guild), null for an `events` stream (per streamer). */
   guildId: string | null;
   timer: NodeJS.Timeout | null;
 }
@@ -217,14 +217,14 @@ function isRefused(sessionId: string, discordId: string, generation: number, gui
  * frame beyond the handshake is sent.
  * @param req - The stream's request, carrying the signed-in session.
  * @param res - The attached SSE response.
- * @param kind - Which dashboard stream this is: a `status` stream is per guild (it is opened under the session's current guild), an `events` stream is not.
+ * @param kind - Which dashboard stream this is: a `status` stream and a `stats` stream (the user's own channel) are opened under the session's current guild, so they close when it changes; an `events` stream (per streamer) is not.
  * @returns False when the stream was refused (no signed-in user, a destroyed session, a session signed out by "sign out other sessions", or a status stream opened under a guild the session has since left) and has been ended.
  */
 export function registerSessionStream(req: Request, res: Response, kind: SessionStreamKind): boolean {
   const sessionId = req.sessionID;
   const discordId = req.session.user?.discordId;
   const generation = req.session.sessionGeneration ?? 0;
-  const guildId = kind === 'status' ? (req.session.user?.currentGuildId ?? null) : null;
+  const guildId = kind === 'events' ? null : (req.session.user?.currentGuildId ?? null);
   if (!sessionId || !discordId || isRefused(sessionId, discordId, generation, guildId)) {
     closeStream(res, req);
     return false;

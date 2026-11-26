@@ -114,6 +114,7 @@ export const ALERT_MAX_SOUND_MB = parsePositiveIntEnv(process.env.ALERT_MAX_SOUN
 export const ALERT_MAX_SSE_PER_CHANNEL = parsePositiveIntEnv(process.env.ALERT_MAX_SSE_PER_CHANNEL, 10);
 export const CHANNEL_POINTS_MAX_SSE_PER_STREAMER = parsePositiveIntEnv(process.env.CHANNEL_POINTS_MAX_SSE_PER_STREAMER, 5);
 export const DASHBOARD_EVENTS_MAX_SSE_PER_STREAMER = parsePositiveIntEnv(process.env.DASHBOARD_EVENTS_MAX_SSE_PER_STREAMER, 5);
+export const DASHBOARD_STREAM_STATS_MAX_SSE_PER_USER = parsePositiveIntEnv(process.env.DASHBOARD_STREAM_STATS_MAX_SSE_PER_USER, 5);
 export const DASHBOARD_STATUS_MAX_SSE_PER_GUILD = parsePositiveIntEnv(process.env.DASHBOARD_STATUS_MAX_SSE_PER_GUILD, 10);
 export const OVERLAY_STATUS_MAX_SSE_PER_STREAMER = parsePositiveIntEnv(process.env.OVERLAY_STATUS_MAX_SSE_PER_STREAMER, 3);
 export const ALERT_STATUS_MAX_SSE_PER_STREAMER = parsePositiveIntEnv(process.env.ALERT_STATUS_MAX_SSE_PER_STREAMER, 3);

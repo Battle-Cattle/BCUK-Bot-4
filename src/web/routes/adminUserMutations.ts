@@ -9,6 +9,7 @@ import {
 } from '../../db';
 import { joinTwitchChannel, partTwitchChannel } from '../../twitch/twitchChannelMembership';
 import { normalizeTwitchChannelName } from '../../twitch/twitchChannelName';
+import { closeStreamStatsForUser } from './dashboardStreamStats';
 
 const log = createLogger('Web');
 
@@ -92,7 +93,8 @@ interface ChangeTwitchChannelParams {
  * Restores the user's DB row after a failed channel change. A row this edit created is deleted
  * outright, so a failed add doesn't leave behind a user that never existed; if that delete is
  * refused because something now references the row, falls back to the existing-user restore.
- * An existing user's row gets its previous Twitch name and bot-enabled flag back.
+ * An existing user's row gets its previous Twitch name and bot-enabled flag back. Once the channel is restored (the row
+ * deleted, or the previous name written back) the user's open own-channel stats streams are closed, before the flag restore.
  * @param params The same before/after state passed to {@link handleChangeTwitchChannel}.
  * @returns Resolves once the row is restored; rejects if a DB write fails.
  */
@@ -100,10 +102,16 @@ async function rollbackUserRow({
   discordId, discordName, previousChannel, wasBotEnabled, isNewUser,
 }: ChangeTwitchChannelParams): Promise<void> {
   if (isNewUser) {
-    if (await deleteUnlinkedUser(discordId)) return;
+    if (await deleteUnlinkedUser(discordId)) {
+      closeStreamStatsForUser(discordId);
+      return;
+    }
     log.warn(`Add user rollback: new user ${discordId} is already referenced elsewhere; clearing Twitch fields instead of deleting`);
   }
   await upsertUser(discordId, discordName, previousChannel ?? null);
+  // As soon as the channel is back, before the flag restore below can reject: a stats stream opened for the committed
+  // channel while the change ran no longer matches the user's channel.
+  closeStreamStatsForUser(discordId);
   await updateTwitchBotEnabled(discordId, wasBotEnabled);
 }
 
@@ -214,6 +222,9 @@ export async function addOrUpdateUserMutation({
   // A brand-new user (no existing row) still goes through channel reconciliation below;
   // only an existing user with the bot explicitly disabled is skipped.
   const botDisabledForExistingUser = !!existingUser && !wasBotEnabled;
+  // Their open "Your channel" stats streams were opened for the old channel: end them (the page reloads) so none keeps
+  // showing a channel that is no longer theirs.
+  if (previousChannel !== committedChannel) closeStreamStatsForUser(discordId);
   if (botDisabledForExistingUser || previousChannel === committedChannel) {
     return;
   }

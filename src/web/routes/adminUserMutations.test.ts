@@ -16,6 +16,8 @@ vi.mock('../../twitch/twitchChannelMembership', () => ({
   partTwitchChannel: vi.fn(),
 }));
 
+vi.mock('./dashboardStreamStats', () => ({ closeStreamStatsForUser: vi.fn() }));
+
 vi.mock('../../twitch/twitchChannelName', () => ({
   normalizeTwitchChannelName: vi.fn((name: string | null) => name?.toLowerCase() ?? null),
 }));
@@ -37,6 +39,7 @@ import {
 } from '../../db';
 import { joinTwitchChannel, partTwitchChannel } from '../../twitch/twitchChannelMembership';
 import { normalizeTwitchChannelName } from '../../twitch/twitchChannelName';
+import { closeStreamStatsForUser } from './dashboardStreamStats';
 
 type MockDbUser = {
   discord_id: string;
@@ -76,6 +79,38 @@ describe('addOrUpdateUserMutation — shouldClearTwitchName', () => {
     });
 
     expect(vi.mocked(upsertUser)).toHaveBeenCalledWith('111', 'TestUser', null);
+  });
+});
+
+describe('addOrUpdateUserMutation — own-channel stats streams (#1183)', () => {
+  it('closes the user\'s stats streams when their linked Twitch channel changes, even with the bot disabled', async () => {
+    vi.mocked(findUser)
+      .mockResolvedValueOnce({ ...BASE_USER, twitch_name: 'oldchan', is_twitch_bot_enabled: false } as any)
+      .mockResolvedValueOnce({ ...BASE_USER, twitch_name: 'newchan', is_twitch_bot_enabled: false } as any);
+
+    await addOrUpdateUserMutation({ discordId: '111', discordName: 'TestUser', normalizedTwitchName: 'newchan', shouldClearTwitchName: false });
+
+    expect(closeStreamStatsForUser).toHaveBeenCalledExactlyOnceWith('111');
+  });
+
+  it('closes them when the channel is cleared', async () => {
+    vi.mocked(findUser)
+      .mockResolvedValueOnce({ ...BASE_USER, twitch_name: 'oldchan', is_twitch_bot_enabled: true } as any)
+      .mockResolvedValueOnce({ ...BASE_USER, twitch_name: null } as any);
+
+    await addOrUpdateUserMutation({ discordId: '111', discordName: 'TestUser', normalizedTwitchName: null, shouldClearTwitchName: true });
+
+    expect(closeStreamStatsForUser).toHaveBeenCalledWith('111');
+  });
+
+  it('leaves them open when only the name changed and the channel did not', async () => {
+    vi.mocked(findUser)
+      .mockResolvedValueOnce({ ...BASE_USER, twitch_name: 'samechan', is_twitch_bot_enabled: false } as any)
+      .mockResolvedValueOnce({ ...BASE_USER, twitch_name: 'samechan', is_twitch_bot_enabled: false } as any);
+
+    await addOrUpdateUserMutation({ discordId: '111', discordName: 'Renamed', normalizedTwitchName: null, shouldClearTwitchName: false });
+
+    expect(closeStreamStatsForUser).not.toHaveBeenCalled();
   });
 });
 
@@ -144,6 +179,69 @@ describe('addOrUpdateUserMutation — handleChangeTwitchChannel rollback', () =>
     const rollbackCall = upsertCalls[upsertCalls.length - 1];
     // previousChannel was null — rollback must use null, not ''
     expect(rollbackCall![2]).toBeNull();
+  });
+});
+
+describe('addOrUpdateUserMutation — stats streams when the channel change is rolled back (#1183)', () => {
+  it('closes the stats streams again after the row is restored, so none keeps showing the rolled-back channel', async () => {
+    vi.mocked(findUser)
+      .mockResolvedValueOnce({ ...BASE_USER, twitch_name: 'oldchan', is_twitch_bot_enabled: true } as any)
+      .mockResolvedValueOnce({ ...BASE_USER, twitch_name: 'newchan', is_twitch_bot_enabled: true } as any);
+    vi.mocked(getTwitchEnabledChannels).mockResolvedValue(['newchan', 'oldchan']);
+    vi.mocked(joinTwitchChannel).mockRejectedValue(new Error('Join failed'));
+
+    await expect(
+      addOrUpdateUserMutation({ discordId: '111', discordName: 'TestUser', normalizedTwitchName: 'newchan', shouldClearTwitchName: false }),
+    ).rejects.toThrow('Join failed');
+
+    // Once when the channel changed, once more after the rollback restored the previous one.
+    expect(closeStreamStatsForUser).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(closeStreamStatsForUser).mock.invocationCallOrder[1]).toBeGreaterThan(vi.mocked(upsertUser).mock.invocationCallOrder.at(-1)!);
+  });
+
+  it('closes them as soon as the channel is restored, even when restoring the bot flag then fails, and still throws the original error', async () => {
+    vi.mocked(findUser)
+      .mockResolvedValueOnce({ ...BASE_USER, twitch_name: 'oldchan', is_twitch_bot_enabled: true } as any)
+      .mockResolvedValueOnce({ ...BASE_USER, twitch_name: 'newchan', is_twitch_bot_enabled: true } as any);
+    vi.mocked(getTwitchEnabledChannels).mockResolvedValue(['newchan']);
+    vi.mocked(joinTwitchChannel).mockRejectedValue(new Error('Join failed'));
+    vi.mocked(updateTwitchBotEnabled).mockRejectedValueOnce(new Error('flag restore failed'));
+
+    await expect(
+      addOrUpdateUserMutation({ discordId: '111', discordName: 'TestUser', normalizedTwitchName: 'newchan', shouldClearTwitchName: false }),
+    ).rejects.toThrow('Join failed');
+
+    expect(closeStreamStatsForUser).toHaveBeenCalledTimes(2); // the change, then the restored channel
+  });
+
+  it('closes them when a new user\'s row is deleted by the rollback', async () => {
+    vi.mocked(findUser)
+      .mockResolvedValueOnce(null as any)
+      .mockResolvedValueOnce({ ...BASE_USER, twitch_name: 'newchan', is_twitch_bot_enabled: true } as any);
+    vi.mocked(getTwitchEnabledChannels).mockResolvedValue(['newchan']);
+    vi.mocked(joinTwitchChannel).mockRejectedValue(new Error('Join failed'));
+    vi.mocked(deleteUnlinkedUser).mockResolvedValue(true);
+
+    await expect(
+      addOrUpdateUserMutation({ discordId: '111', discordName: 'TestUser', normalizedTwitchName: 'newchan', shouldClearTwitchName: false }),
+    ).rejects.toThrow('Join failed');
+
+    expect(closeStreamStatsForUser).toHaveBeenCalledTimes(2);
+  });
+
+  it('leaves the streams for the committed channel open when the rollback itself fails', async () => {
+    vi.mocked(findUser)
+      .mockResolvedValueOnce({ ...BASE_USER, twitch_name: 'oldchan', is_twitch_bot_enabled: true } as any)
+      .mockResolvedValueOnce({ ...BASE_USER, twitch_name: 'newchan', is_twitch_bot_enabled: true } as any);
+    vi.mocked(getTwitchEnabledChannels).mockResolvedValue(['newchan']);
+    vi.mocked(joinTwitchChannel).mockRejectedValue(new Error('Join failed'));
+    vi.mocked(upsertUser).mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('rollback failed'));
+
+    await expect(
+      addOrUpdateUserMutation({ discordId: '111', discordName: 'TestUser', normalizedTwitchName: 'newchan', shouldClearTwitchName: false }),
+    ).rejects.toThrow('Join failed');
+
+    expect(closeStreamStatsForUser).toHaveBeenCalledTimes(1); // only the one for the change itself
   });
 });
 
