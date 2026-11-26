@@ -465,6 +465,7 @@ describe('POST /guild/select', () => {
 describe('POST /guild/select with a real express-session whose store write fails (#1164, #1193)', () => {
   const OLD = '100000000000000001';
   const NEW = '100000000000000002';
+  const HTTPS = { 'X-Forwarded-Proto': 'https' };
 
   /** A store whose next write can fail either without writing or after writing (a lost reply), then behaves again. */
   class FlakyStore extends session.MemoryStore {
@@ -487,8 +488,10 @@ describe('POST /guild/select with a real express-session whose store write fails
   function boot() {
     const store = new FlakyStore();
     const app = express();
+    app.set('trust proxy', 1);
     app.use(express.urlencoded({ extended: false }));
-    app.use(session({ secret: 'x'.repeat(32), resave: false, saveUninitialized: false, store }));
+    // As in production: a secure, httpOnly cookie behind the proxy (the requests below send X-Forwarded-Proto: https).
+    app.use(session({ secret: 'x'.repeat(32), resave: false, saveUninitialized: false, store, cookie: { secure: true, httpOnly: true, sameSite: 'lax' } }));
     app.get('/login', (req, res) => {
       req.session.user = { discordId: 'u1', discordName: 'user1', discordAvatar: null, isOwner: false, accessLevel: AccessLevel.USER, currentGuildId: OLD, guilds: TWO_GUILDS };
       res.sendStatus(204);
@@ -506,11 +509,11 @@ describe('POST /guild/select with a real express-session whose store write fails
   it.each(['fail-before-write', 'write-then-fail'] as const)('ends with the old guild and access level stored when the save %s', async (mode) => {
     vi.mocked(getEffectiveAccessLevelForUser).mockResolvedValue(AccessLevel.MANAGER);
     const { store, app } = boot();
-    const cookie = (await supertest(app).get('/login')).headers['set-cookie']?.[0]?.split(';')[0] ?? '';
+    const cookie = (await supertest(app).get('/login').set(HTTPS)).headers['set-cookie']?.[0]?.split(';')[0] ?? '';
     store.next = mode;
 
-    const res = await supertest(app).post('/guild/select').set('Cookie', cookie).type('form').send({ guild_id: NEW });
-    const stored = await supertest(app).get('/stored').set('Cookie', cookie);
+    const res = await supertest(app).post('/guild/select').set(HTTPS).set('Cookie', cookie).type('form').send({ guild_id: NEW });
+    const stored = await supertest(app).get('/stored').set(HTTPS).set('Cookie', cookie);
 
     expect(res.headers.location).toBe('/guild/select?error=select_failed');
     expect(stored.body).toEqual({ guild: OLD, level: AccessLevel.USER });
@@ -520,10 +523,10 @@ describe('POST /guild/select with a real express-session whose store write fails
   it('stores the new guild and announces the switch when the save works', async () => {
     vi.mocked(getEffectiveAccessLevelForUser).mockResolvedValue(AccessLevel.MANAGER);
     const { app } = boot();
-    const cookie = (await supertest(app).get('/login')).headers['set-cookie']?.[0]?.split(';')[0] ?? '';
+    const cookie = (await supertest(app).get('/login').set(HTTPS)).headers['set-cookie']?.[0]?.split(';')[0] ?? '';
 
-    await supertest(app).post('/guild/select').set('Cookie', cookie).type('form').send({ guild_id: NEW });
-    const stored = await supertest(app).get('/stored').set('Cookie', cookie);
+    await supertest(app).post('/guild/select').set(HTTPS).set('Cookie', cookie).type('form').send({ guild_id: NEW });
+    const stored = await supertest(app).get('/stored').set(HTTPS).set('Cookie', cookie);
 
     expect(stored.body).toEqual({ guild: NEW, level: AccessLevel.MANAGER });
     expect(switchSessionGuild).toHaveBeenCalledTimes(1);
