@@ -1,0 +1,21 @@
+{
+  "_comment": "Illustrative data for ui-check only. A very long title and category (one unbroken word in each) and a seven-figure viewer count: the panel must not widen, clip or overflow, and the title keeps to two lines.",
+  "extends": "dashboard-stream-own-live.json",
+  "sse": {
+    "/dashboard/stream/events": [
+      {
+        "data": {
+          "ok": true,
+          "tracked": true,
+          "serverTime": "2026-11-26T12:00:30.000Z",
+          "live": true,
+          "title": "An extremely long stream title that keeps going and going with a_very_long_unbroken_word_that_would_widen_the_panel_if_it_could_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 and then some more words to fill a third line",
+          "category": "A_very_long_category_name_without_any_spaces_ABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789_and_more",
+          "viewerCount": 1234567,
+          "startedAt": "2026-11-26T10:36:15.000Z",
+          "checkedAt": "2026-11-26T12:00:00.000Z"
+        }
+      }
+    ]
+  }
+}

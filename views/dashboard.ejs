@@ -130,6 +130,16 @@ function htmlAttrJson(value) {
               <p class="stream-channel" id="stream-own-name" hidden></p>
               <p class="stream-note" id="stream-own-note">Waiting for live data.</p>
               <a class="stream-link" id="stream-own-link" target="_blank" rel="noopener noreferrer" hidden></a>
+              <!-- Live stats for your own channel (dashboard-stream-stats.js, from /dashboard/stream/events): shown only
+                   while it is live, each row only when Twitch gave a value for it. Title and category are Twitch's text:
+                   the script writes them with textContent, inside <bdi> so a right-to-left title can't reorder the label. -->
+              <dl class="stream-stats" id="stream-stats" hidden>
+                <div class="stream-stat" id="stream-stat-viewers" hidden><dt>Viewers</dt><dd id="stream-stat-viewers-value"></dd></div>
+                <div class="stream-stat" id="stream-stat-uptime" hidden><dt>Uptime</dt><dd id="stream-stat-uptime-value"></dd></div>
+                <div class="stream-stat stream-stat--wide" id="stream-stat-category" hidden><dt>Category</dt><dd id="stream-stat-category-dd"><bdi id="stream-stat-category-value"></bdi></dd></div>
+                <div class="stream-stat stream-stat--wide" id="stream-stat-title" hidden><dt>Title</dt><dd id="stream-stat-title-dd"><bdi id="stream-stat-title-value"></bdi></dd></div>
+              </dl>
+              <p class="stream-note" id="stream-stats-note" hidden></p>
             </div>
           </div>
         </section>
@@ -164,6 +174,7 @@ function htmlAttrJson(value) {
   <script src="/dashboard-layout.js"></script>
   <script src="/dashboard-health.js"></script>
   <script src="/dashboard-stream.js"></script>
+  <script src="/dashboard-stream-stats.js"></script>
   <script src="/dashboard-last-played.js"></script>
   <script src="/dashboard-status.js"></script>
   <script src="/dashboard-voice.js"></script>

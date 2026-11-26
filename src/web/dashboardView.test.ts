@@ -106,6 +106,41 @@ describe('views/dashboard.ejs layout', () => {
     expect(html.indexOf('/dashboard-stream.js')).toBeLessThan(html.indexOf('/dashboard-status.js'));
   });
 
+  it('has the own-channel stats block inside Your channel: four rows hidden until the stream sends values, title and category in <bdi> (#1184)', async () => {
+    const html = await render({ ownChannel: 'streamer_one' });
+    const own = divBlock(html, '<div class="stream-own" id="stream-own">');
+
+    const block = between(own, '<dl class="stream-stats" id="stream-stats" hidden>', '</dl>');
+    for (const name of ['viewers', 'uptime', 'category', 'title']) {
+      expect(block).toContain(`id="stream-stat-${name}" hidden`);
+      expect(block).toContain(`id="stream-stat-${name}-value"`);
+    }
+    expect(block).toContain('<bdi id="stream-stat-title-value"></bdi>');
+    expect(block).toContain('<bdi id="stream-stat-category-value"></bdi>');
+    expect(block).toMatch(/<dt>Viewers<\/dt>[\s\S]*<dt>Uptime<\/dt>[\s\S]*<dt>Category<\/dt>[\s\S]*<dt>Title<\/dt>/);
+    expect(own).toContain('<p class="stream-note" id="stream-stats-note" hidden></p>');
+    // Nothing from the server is written into it: the script fills it from the stream.
+    expect(block).not.toMatch(/<%/);
+  });
+
+  it('loads the stats script after the context watcher and the Stream Overview script it uses, once (#1184)', async () => {
+    const html = await render({ ownChannel: 'streamer_one' });
+    const at = (name: string) => html.indexOf(`<script src="/${name}.js"></script>`);
+
+    expect(at('dashboard-stream-stats')).toBeGreaterThan(at('dashboard-context'));
+    expect(at('dashboard-stream-stats')).toBeGreaterThan(at('dashboard-stream'));
+    expect(html.match(/<script src="\/dashboard-stream-stats\.js"><\/script>/g)).toHaveLength(1);
+  });
+
+  it('styles the stats so Twitch\'s text can never widen the panel: anywhere-wrapping, and the title on two lines (#1184)', () => {
+    const css = fs.readFileSync(stylePath, 'utf8');
+
+    expect(css).toMatch(/\.stream-stat dd\s*\{[^}]*overflow-wrap:\s*anywhere/);
+    expect(css).toMatch(/\.stream-stat--wide dd\s*\{[^}]*-webkit-line-clamp:\s*2[^}]*overflow:\s*hidden/);
+    expect(css).toMatch(/\.stream-stats\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/);
+    expect(css).toMatch(/\.stream-stats\[hidden\][^{]*\{\s*display:\s*none/);
+  });
+
   it('loads the last-played script after the utils it uses and before the status script that calls it (#1141)', async () => {
     const html = await render();
     const at = (name: string) => html.indexOf(`<script src="/${name}.js"></script>`);

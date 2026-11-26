@@ -1,0 +1,21 @@
+{
+  "_comment": "Illustrative data for ui-check only. The stats were last checked 12 minutes before the server's time: Your channel shows the last known values with their age, and the uptime stops at the last check instead of counting on.",
+  "extends": "dashboard-stream-own-live.json",
+  "sse": {
+    "/dashboard/stream/events": [
+      {
+        "data": {
+          "ok": true,
+          "tracked": true,
+          "serverTime": "2026-11-26T12:12:00.000Z",
+          "live": true,
+          "title": "Late night run, chat picks the route",
+          "category": "Just Chatting",
+          "viewerCount": 1234,
+          "startedAt": "2026-11-26T10:36:15.000Z",
+          "checkedAt": "2026-11-26T12:00:00.000Z"
+        }
+      }
+    ]
+  }
+}

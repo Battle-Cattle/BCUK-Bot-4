@@ -1,0 +1,18 @@
+{
+  "_comment": "Illustrative data for ui-check only. Live, but Twitch gave no viewer count, category or title: only the Uptime row shows, with no placeholders.",
+  "extends": "dashboard-stream-own-live.json",
+  "sse": {
+    "/dashboard/stream/events": [
+      {
+        "data": {
+          "ok": true,
+          "tracked": true,
+          "serverTime": "2026-11-26T12:00:30.000Z",
+          "live": true,
+          "checkedAt": "2026-11-26T12:00:00.000Z",
+          "startedAt": "2026-11-26T10:36:15.000Z"
+        }
+      }
+    ]
+  }
+}
