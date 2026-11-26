@@ -248,6 +248,16 @@ describe('public/dashboard-events.js feed behaviour', () => {
     expect(list.children).toHaveLength(1);
   });
 
+  it('shows an event pushed live once when a later resync snapshot also holds it (#1177)', async () => {
+    const { list, source } = runEvents({ fetchEvents: [{ ...ev('sub'), id: 11 }] });
+    source!.onmessage!({ data: JSON.stringify({ ...ev('sub'), id: 11 }) });
+    source!.onerror!();
+    source!.onopen!();
+    // The live event made the first snapshot suspect, so the resync re-fetches; the settled feed is the snapshot alone.
+    await waitFor(() => expect(list.children).toHaveLength(1));
+    expect(childAt(list, 0).dataset.eventId).toBe('11');
+  });
+
   it('still shows events with no id, or with the same id missing on one side, as before (older payloads)', () => {
     const { list, source } = runEvents({ initialEvents: [ev('follow')] });
     source!.onmessage!({ data: JSON.stringify(ev('follow')) });

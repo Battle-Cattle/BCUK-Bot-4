@@ -249,6 +249,16 @@ describe('pushDashboardEvent', () => {
     expect(res2.write).toHaveBeenCalledWith(expectedPayload);
   });
 
+  it('writes the event id in the payload so a page can skip an event it already shows (#1177)', () => {
+    const res = { write: vi.fn() };
+    connections.set(123, new Set([res] as any));
+
+    pushDashboardEvent(123, { ...sample, id: 77 });
+
+    const written = String(res.write.mock.calls[0]![0]);
+    expect(JSON.parse(written.replace(/^data: /, ''))).toMatchObject({ id: 77, eventType: 'follow' });
+  });
+
   it('drops a client whose write throws but keeps the others', () => {
     const good = { write: vi.fn() };
     const dead = { write: vi.fn(() => { throw new Error('broken pipe'); }) };
