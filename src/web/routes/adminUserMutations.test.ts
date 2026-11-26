@@ -199,6 +199,36 @@ describe('addOrUpdateUserMutation — stats streams when the channel change is r
     expect(vi.mocked(closeStreamStatsForUser).mock.invocationCallOrder[1]).toBeGreaterThan(vi.mocked(upsertUser).mock.invocationCallOrder.at(-1)!);
   });
 
+  it('closes them as soon as the channel is restored, even when restoring the bot flag then fails, and still throws the original error', async () => {
+    vi.mocked(findUser)
+      .mockResolvedValueOnce({ ...BASE_USER, twitch_name: 'oldchan', is_twitch_bot_enabled: true } as any)
+      .mockResolvedValueOnce({ ...BASE_USER, twitch_name: 'newchan', is_twitch_bot_enabled: true } as any);
+    vi.mocked(getTwitchEnabledChannels).mockResolvedValue(['newchan']);
+    vi.mocked(joinTwitchChannel).mockRejectedValue(new Error('Join failed'));
+    vi.mocked(updateTwitchBotEnabled).mockRejectedValueOnce(new Error('flag restore failed'));
+
+    await expect(
+      addOrUpdateUserMutation({ discordId: '111', discordName: 'TestUser', normalizedTwitchName: 'newchan', shouldClearTwitchName: false }),
+    ).rejects.toThrow('Join failed');
+
+    expect(closeStreamStatsForUser).toHaveBeenCalledTimes(2); // the change, then the restored channel
+  });
+
+  it('closes them when a new user\'s row is deleted by the rollback', async () => {
+    vi.mocked(findUser)
+      .mockResolvedValueOnce(null as any)
+      .mockResolvedValueOnce({ ...BASE_USER, twitch_name: 'newchan', is_twitch_bot_enabled: true } as any);
+    vi.mocked(getTwitchEnabledChannels).mockResolvedValue(['newchan']);
+    vi.mocked(joinTwitchChannel).mockRejectedValue(new Error('Join failed'));
+    vi.mocked(deleteUnlinkedUser).mockResolvedValue(true);
+
+    await expect(
+      addOrUpdateUserMutation({ discordId: '111', discordName: 'TestUser', normalizedTwitchName: 'newchan', shouldClearTwitchName: false }),
+    ).rejects.toThrow('Join failed');
+
+    expect(closeStreamStatsForUser).toHaveBeenCalledTimes(2);
+  });
+
   it('leaves the streams for the committed channel open when the rollback itself fails', async () => {
     vi.mocked(findUser)
       .mockResolvedValueOnce({ ...BASE_USER, twitch_name: 'oldchan', is_twitch_bot_enabled: true } as any)

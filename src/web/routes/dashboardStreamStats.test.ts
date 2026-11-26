@@ -23,7 +23,7 @@ import router, { connections, closeStreamStatsForUser } from './dashboardStreamS
 import { findUser, getGuildsForMember } from '../../db';
 import { getLiveAccessForRequest } from '../guildAccess';
 import { registerSessionStream } from '../sessionStreams';
-import { recordStreamStatsPoll, resetStreamStatsForTests } from '../../twitch/monitor/streamStatsStore';
+import { recordStreamStatsPoll, dropUnmonitoredStreamStats, resetStreamStatsForTests } from '../../twitch/monitor/streamStatsStore';
 import { buildTestApp } from '../../test-utils/expressTestApp';
 import type { TwitchStream } from '../../twitch/twitchApi';
 
@@ -267,6 +267,17 @@ describe('pushes after each poll', () => {
     expect(framesOf(two.res)).toEqual([expect.objectContaining({ viewerCount: 99 })]);
     one.triggerClose();
     two.triggerClose();
+  });
+
+  it('sends an open stream a tracked: false payload when its login stops being monitored', async () => {
+    recordStreamStatsPoll(new Map([['streamer_one', 'u1']]), new Map([['u1', stream('u1')]]));
+    const { res, triggerClose } = await openStream();
+    res.write.mockClear();
+
+    dropUnmonitoredStreamStats([].values());
+
+    expect(framesOf(res)).toEqual([{ ok: true, tracked: false, serverTime: expect.any(String) }]);
+    triggerClose();
   });
 
   it('sends nothing to a stream whose channel the poll did not check', async () => {

@@ -74,16 +74,26 @@ export function getStreamStats(login: string): StreamStats | undefined {
 }
 
 /**
- * Forgets every login that is no longer monitored, so a removed channel's last stats can't be served.
+ * Forgets every login that is no longer monitored, so a removed channel's last stats can't be served, and tells the
+ * listeners (see {@link onStreamStatsUpdated}) which logins were removed.
  * @param monitored - The lowercased logins the monitor now watches.
  */
 export function dropUnmonitoredStreamStats(monitored: Iterable<string>): void {
   const keep = new Set(monitored);
-  for (const login of Array.from(stats.keys())) if (!keep.has(login)) stats.delete(login);
+  const removed: string[] = [];
+  for (const login of Array.from(stats.keys())) {
+    if (keep.has(login)) continue;
+    stats.delete(login);
+    removed.push(login);
+  }
+  // Listeners are told too, so a stream open for a removed login is sent its `tracked: false` payload at once rather
+  // than keeping the last live one.
+  if (removed.length > 0) for (const listener of listeners) listener(removed);
 }
 
 /**
- * Registers a listener called after each poll with the logins whose stats were just written. Never removed: it lives for
+ * Registers a listener called after each poll with the logins whose stats were just written, and after a prune with the
+ * logins it removed (which then have no stats). Never removed: it lives for
  * the process, like `onStatusChanged`.
  * @param listener - Called with the logins written.
  */

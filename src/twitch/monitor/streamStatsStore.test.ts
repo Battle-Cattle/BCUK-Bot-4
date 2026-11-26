@@ -82,4 +82,18 @@ describe('dropUnmonitoredStreamStats', () => {
     expect(getStreamStats('streamer_one')).toBeDefined();
     expect(getStreamStats('streamer_two')).toBeUndefined();
   });
+
+  it('tells the listeners which logins it removed (so an open stream gets its tracked: false payload), and nothing when none were', () => {
+    const listener = vi.fn();
+    onStreamStatsUpdated(listener);
+    recordStreamStatsPoll(new Map([['streamer_one', 'u1'], ['streamer_two', 'u2']]), new Map(), NOW);
+    listener.mockClear();
+
+    dropUnmonitoredStreamStats(['streamer_one'].values());
+    expect(listener).toHaveBeenCalledExactlyOnceWith(['streamer_two']);
+
+    listener.mockClear();
+    dropUnmonitoredStreamStats(['streamer_one'].values());
+    expect(listener).not.toHaveBeenCalled();
+  });
 });
