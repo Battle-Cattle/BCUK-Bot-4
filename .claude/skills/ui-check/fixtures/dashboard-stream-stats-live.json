@@ -1,0 +1,21 @@
+{
+  "_comment": "Illustrative data for ui-check only. The signed-in user's own channel is live and its stats stream sends all four values: Your channel shows Viewers, Uptime, Category and Title (the uptime counts on from the server's time).",
+  "extends": "dashboard-stream-own-live.json",
+  "sse": {
+    "/dashboard/stream/events": [
+      {
+        "data": {
+          "ok": true,
+          "tracked": true,
+          "serverTime": "2026-11-26T12:00:30.000Z",
+          "live": true,
+          "title": "Late night run, chat picks the route",
+          "category": "Just Chatting",
+          "viewerCount": 1234,
+          "startedAt": "2026-11-26T10:36:15.000Z",
+          "checkedAt": "2026-11-26T12:00:00.000Z"
+        }
+      }
+    ]
+  }
+}

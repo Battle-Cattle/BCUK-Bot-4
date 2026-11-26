@@ -349,6 +349,103 @@ describe('in the browser', () => {
     }
   });
 
+  /**
+   * Reads the own-channel stats block of a loaded fixture.
+   * @param {string} name - Fixture file name in the fixtures folder.
+   * @returns {Promise<{ blockHidden: boolean, rows: Record<string, string | null>, note: string | null }>} Whether the block is hidden, each row's text (null when its row is hidden) and the note's text (null when hidden).
+   */
+  async function readStreamStats(name) {
+    const fixture = await loadFixture(path.join(FIXTURES, name));
+    const { server, baseUrl } = await startServer(await renderPage(fixture), fixture);
+    const page = await browser.newPage();
+    try {
+      await page.goto(baseUrl);
+      await settle(page, fixture);
+      return await page.evaluate(() => {
+        const doc = globalThis.document;
+        const rows = {};
+        for (const row of ['viewers', 'uptime', 'category', 'title']) {
+          rows[row] = doc.getElementById(`stream-stat-${row}`).hidden ? null : doc.getElementById(`stream-stat-${row}-value`).textContent;
+        }
+        const note = doc.getElementById('stream-stats-note');
+        return { blockHidden: doc.getElementById('stream-stats').hidden, rows, note: note.hidden ? null : note.textContent };
+      });
+    } finally {
+      await page.close();
+      server.closeAllConnections();
+      server.close();
+    }
+  }
+
+  it('shows the own channel\'s live stats from the stream: all four rows, partial data without placeholders, the last known age when stale, nothing offline (#1184)', async () => {
+    const live = await readStreamStats('dashboard-stream-stats-live.json');
+    assert.equal(live.blockHidden, false);
+    assert.equal(live.rows.viewers, '1,234');
+    assert.match(live.rows.uptime, /^1:24:[0-9]{2}$/, 'uptime counts on from the server time (1:24:15 at the first payload)');
+    assert.equal(live.rows.category, 'Just Chatting');
+    assert.equal(live.rows.title, 'Late night run, chat picks the route');
+    assert.equal(live.note, null, 'current stats carry no note');
+
+    const partial = await readStreamStats('dashboard-stream-stats-partial.json');
+    assert.deepEqual({ ...partial.rows, uptime: Boolean(partial.rows.uptime) }, { viewers: null, uptime: true, category: null, title: null }, 'only the uptime row shows');
+
+    const stale = await readStreamStats('dashboard-stream-stats-stale.json');
+    assert.match(stale.note, /^Last known; stats last checked 12 minutes ago\.$/);
+    assert.equal(stale.rows.uptime, '1:23:45', 'the uptime stops at the last check');
+
+    assert.equal((await readStreamStats('dashboard-stream-own-offline.json')).blockHidden, true, 'an offline channel shows no stats');
+    assert.equal((await readStreamStats('dashboard.json')).blockHidden, true, 'no channel, no stats');
+  });
+
+  it('keeps the longest own-channel stats inside the panel, unclipped at every width, with readable text (#1184)', async () => {
+    const fixture = await loadFixture(path.join(FIXTURES, 'dashboard-stream-stats-long.json'));
+    const { server, baseUrl } = await startServer(await renderPage(fixture), fixture);
+    const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+    try {
+      await page.goto(baseUrl);
+      await settle(page, fixture);
+      for (const width of [390, 768, 820, 1101, 1250, 1440, 1700]) {
+        await page.setViewportSize({ width, height: 900 });
+        assert.deepEqual(await findClippedContent(page), [], `nothing is clipped at ${width}px`);
+        const m = await page.evaluate(() => {
+          const rect = (sel) => globalThis.document.querySelector(sel).getBoundingClientRect();
+          const panel = rect('.stream-card');
+          const title = globalThis.document.getElementById('stream-stat-title-dd');
+          return { panelRight: panel.right, viewport: globalThis.innerWidth, scrollOver: title.scrollWidth - title.clientWidth, lines: Math.round(title.clientHeight / parseFloat(globalThis.getComputedStyle(title).lineHeight)) };
+        });
+        assert.ok(m.panelRight <= m.viewport, `the panel stays inside the viewport at ${width}px`);
+        assert.ok(m.scrollOver <= 1, `the title doesn't overflow sideways at ${width}px`);
+        assert.ok(m.lines <= 2, `the title keeps to two lines at ${width}px (${m.lines})`);
+      }
+      assert.deepEqual((await auditContrast(page)).failures, [], 'the stats text meets AA contrast');
+    } finally {
+      await page.close();
+      server.closeAllConnections();
+      server.close();
+    }
+  });
+
+  it('still fits the page when the right-hand column carries the longest own-channel stats (#1184)', async () => {
+    const fixture = await loadFixture(path.join(FIXTURES, 'dashboard-stream-stats-busy-feed.json'));
+    const { server, baseUrl } = await startServer(await renderPage(fixture), fixture);
+    const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+    try {
+      await page.goto(baseUrl);
+      await settle(page, fixture);
+      for (const height of [768, 900, 1000, 1200]) {
+        await page.setViewportSize({ width: 1440, height });
+        const m = await page.evaluate(measureRightColumn);
+        assert.ok(m.pageOver <= 0, `no page scrollbar at 1440x${height} (${m.pageOver}px over)`);
+        assert.ok(m.feedTitleHeight > 10, `the feed's heading is still there at ${height}`);
+        assert.ok(m.feedBodyHeight >= 90, `the feed keeps a few rows at ${height} (${m.feedBodyHeight}px)`);
+      }
+    } finally {
+      await page.close();
+      server.closeAllConnections();
+      server.close();
+    }
+  });
+
   it('tells the Stream Overview states apart by icon as well as colour, and nothing in it moves (#1114)', async () => {
     const fixture = await loadFixture(path.join(FIXTURES, 'dashboard-stream-own-live.json'));
     const { server, baseUrl } = await startServer(await renderPage(fixture), fixture);
