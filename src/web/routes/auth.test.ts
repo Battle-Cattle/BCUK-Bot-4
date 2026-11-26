@@ -44,7 +44,7 @@ import express from 'express';
 import session from 'express-session';
 import supertest from 'supertest';
 import router from './auth';
-import { createHungDestroyStore, fakeStatusStream, SECURE_COOKIE } from '../../test-utils/hungDestroySession';
+import { createHungDestroyStore, fakeStatusStream } from '../../test-utils/hungDestroySession';
 import { registerSessionStream, CONTEXT_CHANGED_FRAME } from '../sessionStreams';
 import { waitFor } from '../../test-utils/waitFor';
 import {
@@ -553,7 +553,8 @@ describe('POST /logout with a real session whose store destroy never calls back 
     const { store, release } = createHungDestroyStore();
     const app = express();
     app.set('trust proxy', 1);
-    app.use(session({ secret: 'x'.repeat(32), resave: false, saveUninitialized: false, store, cookie: SECURE_COOKIE }));
+    // As in production: a secure, httpOnly cookie behind the proxy (the requests below send X-Forwarded-Proto: https).
+    app.use(session({ secret: 'x'.repeat(32), resave: false, saveUninitialized: false, store, cookie: { secure: true, httpOnly: true, sameSite: 'lax' } }));
     let sessionId = '';
     app.get('/login', (req, res) => {
       (req.session as any).user = { discordId: '42' };

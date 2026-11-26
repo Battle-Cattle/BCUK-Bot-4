@@ -57,7 +57,7 @@ import { findUser, getStreamerByDiscordId, saveEventConfig, clearStreamerToken, 
 import { reloadEventSubSubscriptions } from '../../twitch/eventsub/twitchEventSub';
 import { signOutOtherSessions } from '../loginSession';
 import { AccessLevel } from '../../db';
-import { createHungDestroyStore, fakeStatusStream, SECURE_COOKIE } from '../../test-utils/hungDestroySession';
+import { createHungDestroyStore, fakeStatusStream } from '../../test-utils/hungDestroySession';
 import { registerSessionStream, CONTEXT_CHANGED_FRAME } from '../sessionStreams';
 import { waitFor } from '../../test-utils/waitFor';
 import { buildTestApp } from '../../test-utils/expressTestApp';
@@ -598,7 +598,8 @@ describe('POST /sign-out-other-sessions with a real session whose store destroy 
     const { store, release } = createHungDestroyStore();
     const app = express();
     app.set('trust proxy', 1);
-    app.use(session({ secret: 'x'.repeat(32), resave: false, saveUninitialized: false, store, cookie: SECURE_COOKIE }));
+    // As in production: a secure, httpOnly cookie behind the proxy (the requests below send X-Forwarded-Proto: https).
+    app.use(session({ secret: 'x'.repeat(32), resave: false, saveUninitialized: false, store, cookie: { secure: true, httpOnly: true, sameSite: 'lax' } }));
     app.get('/login', (req, res) => {
       (req.session as any).user = { discordId: '42' };
       res.sendStatus(204);

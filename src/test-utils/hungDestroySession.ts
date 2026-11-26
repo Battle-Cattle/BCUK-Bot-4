@@ -4,9 +4,6 @@ import session from 'express-session';
 import { vi } from 'vitest';
 import { wrapStoreDestroy } from '../web/sessionStreams';
 
-/** Cookie options a real deployment uses behind the proxy; requests in tests send `X-Forwarded-Proto: https`. */
-export const SECURE_COOKIE = { secure: true, httpOnly: true, sameSite: 'lax' } as const;
-
 /**
  * A MemoryStore whose `destroy` never calls back until `release()` is called (a hung store write), wrapped by
  * `wrapStoreDestroy` exactly as production wraps its store, so a session's streams are closed before the destroy.
