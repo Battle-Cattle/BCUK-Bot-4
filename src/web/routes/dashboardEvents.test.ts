@@ -219,7 +219,7 @@ describe('GET /events/recent', () => {
     expect(getRecentStreamerEvents).toHaveBeenCalledWith(123, RECENT_EVENTS_LIMIT);
     expect(res.body).toEqual({
       ok: true,
-      events: [{ eventType: 'raid', displayName: 'raider1', detail: '12 viewers', occurredAt: occurredAt.toISOString() }],
+      events: [{ id: 42, eventType: 'raid', displayName: 'raider1', detail: '12 viewers', occurredAt: occurredAt.toISOString() }],
     });
   });
 

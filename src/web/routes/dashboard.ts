@@ -46,7 +46,7 @@ router.get('/', csrfProtection, async (req, res) => {
     if (streamer) {
       const events = await getRecentStreamerEvents(streamer.id, RECENT_EVENTS_LIMIT);
       recentEvents = events.map((e) => ({
-        eventType: e.eventType, displayName: e.displayName, detail: e.detail, occurredAt: e.occurredAt.toISOString(),
+        id: e.id, eventType: e.eventType, displayName: e.displayName, detail: e.detail, occurredAt: e.occurredAt.toISOString(),
       }));
     }
 

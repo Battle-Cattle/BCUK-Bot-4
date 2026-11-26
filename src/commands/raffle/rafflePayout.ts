@@ -88,14 +88,16 @@ async function payWithRetries(streamerId: number, payout: RafflePayout, signal: 
  */
 async function notifyStreamerOfFailedPayout(streamerId: number, winner: string, detail: string): Promise<void> {
   const fitted = fitStreamerEventText(winner, detail);
+  let eventId: number | null = null;
   try {
-    await recordStreamerEvent(streamerId, 'raffle_payout_failed', fitted.displayName, fitted.detail);
+    eventId = await recordStreamerEvent(streamerId, 'raffle_payout_failed', fitted.displayName, fitted.detail);
   } catch (err) {
     log.error(`Failed to record unpaid raffle winner ${winner} for streamer ${streamerId}:`, err);
   }
   try {
     dashboardEventRuntimeRegistry.get()?.pushDashboardEvent(streamerId, {
-      eventType: 'raffle_payout_failed', ...fitted, occurredAt: new Date().toISOString(),
+      // No id when the row couldn't be recorded: the page then shows the push without de-duplicating it.
+      ...(eventId === null ? {} : { id: eventId }), eventType: 'raffle_payout_failed', ...fitted, occurredAt: new Date().toISOString(),
     });
   } catch (err) {
     log.error(`Failed to push unpaid raffle winner ${winner} to streamer ${streamerId}'s dashboard:`, err);

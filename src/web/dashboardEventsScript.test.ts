@@ -13,6 +13,7 @@ class FakeNode {
   dateTime = '';
   children: FakeNode[] = [];
   attributes: Record<string, string> = {};
+  dataset: Record<string, string> = {};
   parent: FakeNode | null = null;
 
   constructor(public tag: string) {}
@@ -227,6 +228,41 @@ describe('public/dashboard-events.js feed behaviour', () => {
     const { list, source } = runEvents();
     source!.onmessage!({ data: 'not json' });
     expect(childAt(list, 0).className).toBe('empty-msg');
+  });
+
+  it('skips a live event whose id the feed already shows, so a snapshot and its late push never double up (#1177)', () => {
+    const { list, source } = runEvents({ initialEvents: [{ ...ev('follow'), id: 7 }] });
+    expect(list.children).toHaveLength(1);
+    source!.onmessage!({ data: JSON.stringify({ ...ev('follow'), id: 7 }) });
+    expect(list.children).toHaveLength(1);
+    source!.onmessage!({ data: JSON.stringify({ ...ev('follow'), id: 8 }) });
+    expect(list.children).toHaveLength(2);
+  });
+
+  it('skips a live event already shown by a resync snapshot', async () => {
+    const { list, source } = runEvents({ fetchEvents: [{ ...ev('sub'), id: 11 }] });
+    source!.onerror!();
+    source!.onopen!();
+    await waitFor(() => expect(list.children[0]?.className).toBe('event-item'));
+    source!.onmessage!({ data: JSON.stringify({ ...ev('sub'), id: 11 }) });
+    expect(list.children).toHaveLength(1);
+  });
+
+  it('still shows events with no id, or with the same id missing on one side, as before (older payloads)', () => {
+    const { list, source } = runEvents({ initialEvents: [ev('follow')] });
+    source!.onmessage!({ data: JSON.stringify(ev('follow')) });
+    source!.onmessage!({ data: JSON.stringify({ ...ev('follow'), id: 1 }) });
+    source!.onmessage!({ data: JSON.stringify({ ...ev('follow'), id: 'not-a-number' }) });
+    expect(list.children).toHaveLength(4);
+  });
+
+  it('forgets an id once its row is trimmed off the end of the feed', () => {
+    const { list, source } = runEvents();
+    source!.onmessage!({ data: JSON.stringify({ ...ev('raid'), id: 1 }) });
+    for (let i = 2; i <= 22; i++) source!.onmessage!({ data: JSON.stringify({ ...ev('raid'), id: i }) });
+    expect(list.children).toHaveLength(20);
+    source!.onmessage!({ data: JSON.stringify({ ...ev('raid'), id: 1 }) });
+    expect(childAt(list, 0).dataset.eventId).toBe('1');
   });
 
   it('resyncs the feed from /dashboard/events/recent once the stream has reconnected', async () => {
