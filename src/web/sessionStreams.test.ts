@@ -255,6 +255,26 @@ describe('switchSessionGuild (the session picked another guild)', () => {
     expect(otherSession.end).not.toHaveBeenCalled();
   });
 
+  it('leaves an own-channel stats stream open across a guild switch: it belongs to the user, not a guild (#1183)', () => {
+    const stats = fakeRes();
+    registerSessionStream(guildReq('s1', 'gX'), stats, 'stats');
+
+    switchSessionGuild('s1', 'gY');
+
+    expect(stats.end).not.toHaveBeenCalled();
+    expect(registerSessionStream(guildReq('s1', 'gX'), fakeRes(), 'stats')).toBe(true);
+  });
+
+  it('closes a stats stream, with the reload frame, when its session is destroyed', () => {
+    const stats = fakeRes();
+    registerSessionStream(guildReq('s1', 'gX'), stats, 'stats');
+
+    closeSessionStreams('s1');
+
+    expect(stats.write).toHaveBeenCalledWith(CONTEXT_CHANGED_FRAME);
+    expect(stats.end).toHaveBeenCalledTimes(1);
+  });
+
   it('refuses a status stream that registers afterwards under the old guild (its request loaded the session before the switch)', () => {
     switchSessionGuild('s1', 'gY');
     const late = fakeRes();

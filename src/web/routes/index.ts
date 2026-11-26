@@ -10,6 +10,7 @@ import botAuthCallbackRouter from './botAuthCallback';
 import dashboardRouter from './dashboard';
 import dashboardEventsRouter from './dashboardEvents';
 import dashboardStatusEventsRouter from './dashboardStatusEvents';
+import dashboardStreamStatsRouter from './dashboardStreamStats';
 import adminRouter from './admin';
 import apiRouter from './api';
 import sfxRouter from './sfx';
@@ -150,4 +151,5 @@ export function mountRoutes(app: Express, { streamdeckLimiter }: MountRoutesOpti
   app.use('/channel-points', requireAuth, channelPointsAdminRouter);
   app.use('/dashboard', requireAuth, dashboardEventsRouter);
   app.use('/dashboard', requireAuth, dashboardStatusEventsRouter);
+  app.use('/dashboard', requireAuth, dashboardStreamStatsRouter);
 }

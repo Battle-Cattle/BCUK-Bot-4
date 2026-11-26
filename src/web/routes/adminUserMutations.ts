@@ -9,6 +9,7 @@ import {
 } from '../../db';
 import { joinTwitchChannel, partTwitchChannel } from '../../twitch/twitchChannelMembership';
 import { normalizeTwitchChannelName } from '../../twitch/twitchChannelName';
+import { closeStreamStatsForUser } from './dashboardStreamStats';
 
 const log = createLogger('Web');
 
@@ -214,6 +215,9 @@ export async function addOrUpdateUserMutation({
   // A brand-new user (no existing row) still goes through channel reconciliation below;
   // only an existing user with the bot explicitly disabled is skipped.
   const botDisabledForExistingUser = !!existingUser && !wasBotEnabled;
+  // Their open "Your channel" stats streams were opened for the old channel: end them (the page reloads) so none keeps
+  // showing a channel that is no longer theirs.
+  if (previousChannel !== committedChannel) closeStreamStatsForUser(discordId);
   if (botDisabledForExistingUser || previousChannel === committedChannel) {
     return;
   }

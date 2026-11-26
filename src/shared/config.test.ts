@@ -207,6 +207,11 @@ describe('config — parsePositiveIntEnv-backed values', () => {
     const config = await loadConfig({ DASHBOARD_STATUS_MAX_SSE_PER_GUILD: undefined });
     expect(config.DASHBOARD_STATUS_MAX_SSE_PER_GUILD).toBe(10);
   });
+
+  it('defaults DASHBOARD_STREAM_STATS_MAX_SSE_PER_USER to 5 when unset, and reads an override', async () => {
+    expect((await loadConfig({ DASHBOARD_STREAM_STATS_MAX_SSE_PER_USER: undefined })).DASHBOARD_STREAM_STATS_MAX_SSE_PER_USER).toBe(5);
+    expect((await loadConfig({ DASHBOARD_STREAM_STATS_MAX_SSE_PER_USER: '2' })).DASHBOARD_STREAM_STATS_MAX_SSE_PER_USER).toBe(2);
+  });
 });
 
 describe('config — GLOBAL_COOLDOWN_MS', () => {

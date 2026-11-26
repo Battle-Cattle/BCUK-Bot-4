@@ -16,6 +16,8 @@ vi.mock('../../twitch/twitchChannelMembership', () => ({
   partTwitchChannel: vi.fn(),
 }));
 
+vi.mock('./dashboardStreamStats', () => ({ closeStreamStatsForUser: vi.fn() }));
+
 vi.mock('../../twitch/twitchChannelName', () => ({
   normalizeTwitchChannelName: vi.fn((name: string | null) => name?.toLowerCase() ?? null),
 }));
@@ -37,6 +39,7 @@ import {
 } from '../../db';
 import { joinTwitchChannel, partTwitchChannel } from '../../twitch/twitchChannelMembership';
 import { normalizeTwitchChannelName } from '../../twitch/twitchChannelName';
+import { closeStreamStatsForUser } from './dashboardStreamStats';
 
 type MockDbUser = {
   discord_id: string;
@@ -76,6 +79,38 @@ describe('addOrUpdateUserMutation — shouldClearTwitchName', () => {
     });
 
     expect(vi.mocked(upsertUser)).toHaveBeenCalledWith('111', 'TestUser', null);
+  });
+});
+
+describe('addOrUpdateUserMutation — own-channel stats streams (#1183)', () => {
+  it('closes the user\'s stats streams when their linked Twitch channel changes, even with the bot disabled', async () => {
+    vi.mocked(findUser)
+      .mockResolvedValueOnce({ ...BASE_USER, twitch_name: 'oldchan', is_twitch_bot_enabled: false } as any)
+      .mockResolvedValueOnce({ ...BASE_USER, twitch_name: 'newchan', is_twitch_bot_enabled: false } as any);
+
+    await addOrUpdateUserMutation({ discordId: '111', discordName: 'TestUser', normalizedTwitchName: 'newchan', shouldClearTwitchName: false });
+
+    expect(closeStreamStatsForUser).toHaveBeenCalledExactlyOnceWith('111');
+  });
+
+  it('closes them when the channel is cleared', async () => {
+    vi.mocked(findUser)
+      .mockResolvedValueOnce({ ...BASE_USER, twitch_name: 'oldchan', is_twitch_bot_enabled: true } as any)
+      .mockResolvedValueOnce({ ...BASE_USER, twitch_name: null } as any);
+
+    await addOrUpdateUserMutation({ discordId: '111', discordName: 'TestUser', normalizedTwitchName: null, shouldClearTwitchName: true });
+
+    expect(closeStreamStatsForUser).toHaveBeenCalledWith('111');
+  });
+
+  it('leaves them open when only the name changed and the channel did not', async () => {
+    vi.mocked(findUser)
+      .mockResolvedValueOnce({ ...BASE_USER, twitch_name: 'samechan', is_twitch_bot_enabled: false } as any)
+      .mockResolvedValueOnce({ ...BASE_USER, twitch_name: 'samechan', is_twitch_bot_enabled: false } as any);
+
+    await addOrUpdateUserMutation({ discordId: '111', discordName: 'Renamed', normalizedTwitchName: null, shouldClearTwitchName: false });
+
+    expect(closeStreamStatsForUser).not.toHaveBeenCalled();
   });
 });
 

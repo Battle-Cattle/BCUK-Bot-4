@@ -211,6 +211,8 @@ export interface TwitchStream {
   type: string;
   /** ISO 8601 time the stream went live (Helix always sends it; optional for older fixtures). */
   started_at?: string;
+  /** Current viewer count (Helix sends it for a live stream; optional for older fixtures). */
+  viewer_count?: number;
 }
 
 /**
