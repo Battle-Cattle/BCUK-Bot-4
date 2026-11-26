@@ -9,7 +9,7 @@ import { renderView } from './viewHelpers';
 import { logAndRedirectError } from './errorHandling';
 import { fetchLiveGuildsForUser, resolveAccessLevelForGuild } from '../guildAccess';
 import { promisify } from 'util';
-import { switchSessionGuild, closeStreamsOutsideGuild } from '../sessionStreams';
+import { switchSessionGuild } from '../sessionStreams';
 
 const log = createLogger('Web');
 const router = Router();
@@ -62,9 +62,12 @@ router.get('/select', requireAuth, csrfProtection, (req, res) => {
  * `GET /auth/login` would see a still-populated `session.user` and bounce straight to `/`
  * without ever rendering the error.
  *
- * As soon as the new guild is assigned it records the switch, so the session's dashboard status streams opened
- * under any other guild can't reattach; it closes them (with the context-changed frame) once the session holding the
- * new guild has been saved, so another tab's reload reads it (see `switchSessionGuild`, `closeStreamsOutsideGuild`).
+ * Once the session holding the new guild has been saved it records the switch and closes the session's dashboard status
+ * streams opened under any other guild (with the context-changed frame), in one synchronous step: a stream that registers
+ * before it is closed, one that registers after it is refused, and another tab's reload reads the new guild (see
+ * `switchSessionGuild`). A switch that fails part-way (the access lookup or the save) announces nothing: the session's
+ * guild and access level are put back and the streams are left alone (#1164). The save is explicit, so a failed one marks
+ * the session as saved for express-session; the revert changes it again, so the end-of-response save writes the old guild.
  * @param req - Express request; reads `req.session.user` and the `guild_id` form field.
  * @param res - Express response; redirects to `/` on success, or back to `/guild/select` /
  *   `/auth/login` when the selection can't be accepted.
@@ -79,7 +82,9 @@ router.post('/select', requireAuth, csrfProtection, async (req, res) => {
     return res.redirect('/guild/select?error=invalid_guild');
   }
 
-  let switched = false;
+  const previousGuildId = user.currentGuildId;
+  const previousAccessLevel = user.accessLevel;
+  let assigned = false;
   try {
     const dbUser = await findUser(user.discordId);
     if (!dbUser) {
@@ -100,17 +105,20 @@ router.post('/select', requireAuth, csrfProtection, async (req, res) => {
       return res.redirect('/guild/select?error=guild_not_found');
     }
     user.currentGuildId = requestedGuildId;
-    // The session's open status streams belong to the old guild (#1116). Record the switch right after the assignment, before
-    // the awaited lookup below, so none can reattach under the old guild; they close once the new guild is saved.
-    switchSessionGuild(req.sessionID, requestedGuildId, false);
-    switched = true;
+    assigned = true;
     user.accessLevel = await resolveAccessLevelForGuild(dbUser, requestedGuildId, accessLevelByGuildId);
     // Save now rather than when the redirect ends, so the streams' close frame can't reach another tab before the new guild is stored.
     await promisify(req.session.save.bind(req.session))();
-    closeStreamsOutsideGuild(req.sessionID, requestedGuildId);
+    // The session's open status streams belong to the old guild (#1116). Record the switch and close them in one synchronous
+    // step, only now that the new guild is stored: a failed switch must announce nothing (#1164).
+    switchSessionGuild(req.sessionID, requestedGuildId);
   } catch (err) {
-    // The session still moves to the new guild (express-session saves it as the redirect ends), so the old guild's streams close.
-    if (switched) closeStreamsOutsideGuild(req.sessionID, requestedGuildId);
+    // A failed switch leaves the session as it was: both fields together (the old guild with the new guild's access level
+    // would be inconsistent), no stream closed, nothing recorded. The refreshed isOwner and guilds are live values and stay.
+    if (assigned) {
+      user.currentGuildId = previousGuildId;
+      user.accessLevel = previousAccessLevel;
+    }
     return logAndRedirectError({
       res,
       log,

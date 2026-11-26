@@ -9,7 +9,7 @@
 const CONTEXT_RELOAD_KEY = 'dashboardContextReloadAt';
 /** The shortest gap between two context reloads of one tab, so a stream that keeps failing can't cause a reload loop. */
 const CONTEXT_RELOAD_MIN_INTERVAL_MS = 30000;
-/** How long a reload waits after the server's frame, so the session change that caused it (a new guild, a re-issued session cookie) has been saved and delivered first: the server writes the frame as it closes the stream, before the response that carries the change has reached the browser. */
+/** How long a reload waits after the server's frame, so the session change that caused it (a new guild, a re-issued session cookie) has been saved and delivered first: the server writes the frame as it closes the stream, before the response that carries the change has reached the browser. This is a best-effort delay, not a barrier (accepted in #1164): if the store write or the response takes longer, the reload sends the old cookie. After a sign-out of other sessions or a regenerated session the tab lands on login; after a logout it can stay stale (its new stream is refused and the probe-driven reload is dropped inside the 30 s window). It is never an access leak: the tombstone, generation and destroy checks are server-side. A guild switch needs no delay of its own: the server announces it only after the new guild is saved. */
 const CONTEXT_SETTLE_MS = 1500;
 /** EventSource.readyState once the browser has given up on the stream for good. */
 const EVENT_SOURCE_CLOSED = 2;
