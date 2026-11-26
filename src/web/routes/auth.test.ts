@@ -2,6 +2,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mockLogger } from '../../test-utils/loggerMock';
 import { ACCESS_LEVEL_MOCK } from '../../test-utils/accessLevelMock';
 
+// The fake status stream below is never attached through attachSseConnection, so its cleanup chain is stubbed (as in sessionStreams.test.ts).
+vi.mock('./sseChannel', () => ({ chainConnectionCleanup: () => true }));
+
 vi.mock('../../shared/config', () => ({
   DISCORD_CLIENT_ID: 'client_id',
   DISCORD_CLIENT_SECRET: 'client_secret',
@@ -38,8 +41,12 @@ vi.mock('../../shared/fetchWithRetry', async (importOriginal) => {
 });
 
 import express from 'express';
+import session from 'express-session';
 import supertest from 'supertest';
 import router from './auth';
+import { createHungDestroyStore, fakeStatusStream } from '../../test-utils/hungDestroySession';
+import { registerSessionStream, CONTEXT_CHANGED_FRAME } from '../sessionStreams';
+import { waitFor } from '../../test-utils/waitFor';
 import {
   findUser,
   updateDiscordName,
@@ -538,5 +545,39 @@ describe('POST /logout', () => {
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/auth/login');
     expect(destroy).toHaveBeenCalled();
+  });
+});
+
+describe('POST /logout with a real session whose store destroy never calls back (#1193)', () => {
+  it('has already told the session\'s dashboard streams to reload, and ended them, while the store is still hung; it redirects once the store answers', async () => {
+    const { store, release } = createHungDestroyStore();
+    const app = express();
+    app.set('trust proxy', 1);
+    // As in production: a secure, httpOnly cookie behind the proxy (the requests below send X-Forwarded-Proto: https).
+    app.use(session({ secret: 'x'.repeat(32), resave: false, saveUninitialized: false, store, cookie: { secure: true, httpOnly: true, sameSite: 'lax' } }));
+    let sessionId = '';
+    app.get('/login', (req, res) => {
+      (req.session as any).user = { discordId: '42' };
+      sessionId = req.sessionID;
+      res.sendStatus(204);
+    });
+    app.use((req: any, _res: any, next: any) => { req.csrfToken = () => 'csrf-token'; next(); });
+    app.use('/', router);
+    const https = { 'X-Forwarded-Proto': 'https' };
+    const cookie = (await supertest(app).get('/login').set(https)).headers['set-cookie']?.[0]?.split(';')[0] ?? '';
+    const { req: streamReq, res: stream } = fakeStatusStream(sessionId, '42');
+    expect(registerSessionStream(streamReq, stream, 'status')).toBe(true);
+
+    let responded = false;
+    const request = supertest(app).post('/logout').set(https).set('Cookie', cookie).then((res) => { responded = true; return res; });
+    await waitFor(() => expect(stream.end).toHaveBeenCalledTimes(1));
+
+    // The frame and the end came before the store answered: nothing waited on it.
+    expect(stream.write).toHaveBeenCalledWith(CONTEXT_CHANGED_FRAME);
+    expect(responded).toBe(false);
+    release();
+    const res = await request;
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe('/auth/login');
   });
 });
