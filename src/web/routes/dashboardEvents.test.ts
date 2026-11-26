@@ -219,7 +219,7 @@ describe('GET /events/recent', () => {
     expect(getRecentStreamerEvents).toHaveBeenCalledWith(123, RECENT_EVENTS_LIMIT);
     expect(res.body).toEqual({
       ok: true,
-      events: [{ eventType: 'raid', displayName: 'raider1', detail: '12 viewers', occurredAt: occurredAt.toISOString() }],
+      events: [{ id: 42, eventType: 'raid', displayName: 'raider1', detail: '12 viewers', occurredAt: occurredAt.toISOString() }],
     });
   });
 
@@ -247,6 +247,16 @@ describe('pushDashboardEvent', () => {
     const expectedPayload = `data: ${JSON.stringify(sample)}\n\n`;
     expect(res1.write).toHaveBeenCalledWith(expectedPayload);
     expect(res2.write).toHaveBeenCalledWith(expectedPayload);
+  });
+
+  it('writes the event id in the payload so a page can skip an event it already shows (#1177)', () => {
+    const res = { write: vi.fn() };
+    connections.set(123, new Set([res] as any));
+
+    pushDashboardEvent(123, { ...sample, id: 77 });
+
+    const written = String(res.write.mock.calls[0]![0]);
+    expect(JSON.parse(written.replace(/^data: /, ''))).toMatchObject({ id: 77, eventType: 'follow' });
   });
 
   it('drops a client whose write throws but keeps the others', () => {

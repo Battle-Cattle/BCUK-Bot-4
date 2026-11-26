@@ -485,7 +485,7 @@ describe('dashboard events push', () => {
 
     expect(recordStreamerEvent).toHaveBeenCalledWith(STREAMER_ID, 'follow', 'TestUser', null);
     expect(mockPushDashboardEvent).toHaveBeenCalledWith(STREAMER_ID, {
-      eventType: 'follow', displayName: 'TestUser', detail: null, occurredAt: expect.any(String),
+      id: 101, eventType: 'follow', displayName: 'TestUser', detail: null, occurredAt: expect.any(String),
     });
   });
 
@@ -590,7 +590,7 @@ describe('companion events push', () => {
 
     expect(mockPushCompanionEvent).not.toHaveBeenCalled();
     expect(mockPushDashboardEvent).toHaveBeenCalledWith(STREAMER_ID, {
-      eventType: 'follow', displayName: 'TestUser', detail: null, occurredAt: expect.any(String),
+      id: 101, eventType: 'follow', displayName: 'TestUser', detail: null, occurredAt: expect.any(String),
     });
   });
 
@@ -602,7 +602,7 @@ describe('companion events push', () => {
     }, makeConfig({ follow_enabled: false }), STREAMER_ID);
 
     expect(mockPushDashboardEvent).toHaveBeenCalledWith(STREAMER_ID, {
-      eventType: 'follow', displayName: 'TestUser', detail: null, occurredAt: expect.any(String),
+      id: 101, eventType: 'follow', displayName: 'TestUser', detail: null, occurredAt: expect.any(String),
     });
   });
 });

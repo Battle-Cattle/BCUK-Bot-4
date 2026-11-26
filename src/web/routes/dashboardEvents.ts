@@ -17,6 +17,11 @@ export const RECENT_EVENTS_LIMIT = 20;
 
 /** A live streamer activity event, pushed to the dashboard's "Recent Events" feed. */
 export interface DashboardEvent {
+  /**
+   * The event's `streamer_event_log` row id, so a page can tell that a live push is an event it already shows from a
+   * snapshot (#1177). Additive: absent when the row couldn't be recorded, and pages ignore a payload without one.
+   */
+  id?: number;
   eventType: StreamerEventType;
   displayName: string;
   detail: string | null;
@@ -78,7 +83,7 @@ router.get('/events/recent', async (req, res) => {
   try {
     const events = await getRecentStreamerEvents(streamer.id, RECENT_EVENTS_LIMIT);
     const dashboardEvents: DashboardEvent[] = events.map((e) => ({
-      eventType: e.eventType, displayName: e.displayName, detail: e.detail, occurredAt: e.occurredAt.toISOString(),
+      id: e.id, eventType: e.eventType, displayName: e.displayName, detail: e.detail, occurredAt: e.occurredAt.toISOString(),
     }));
     res.json({ ok: true, events: dashboardEvents });
   } catch (err) {

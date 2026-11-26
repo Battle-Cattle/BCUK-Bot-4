@@ -38,12 +38,14 @@ const MAX_DISPLAYED_EVENTS = 20;
 /**
  * Builds one activity-feed row: one icon for the event type (decorative, with a visually hidden source
  * name ahead of the description), who did what (with any detail) and a `<time>` saying how long ago.
- * @param ev - One recent event: `eventType`, `displayName`, optional `detail` and ISO `occurredAt`.
+ * @param ev - One recent event: `eventType`, `displayName`, optional `detail`, ISO `occurredAt` and optional numeric `id`
+ *   (kept on the row so a later push of the same event can be recognised, see `isEventShown`).
  * @returns The `.event-item` element for the feed.
  */
 function renderEventItem(ev) {
   const item = document.createElement('div');
   item.className = 'event-item';
+  if (Number.isInteger(ev.id)) item.dataset.eventId = String(ev.id);
 
   const icon = document.createElement('span');
   icon.className = 'event-icon';
@@ -98,11 +100,25 @@ function renderEvents(container, events) {
 }
 
 /**
- * Adds a newly arrived event to the top of the feed, keeping at most MAX_DISPLAYED_EVENTS rows.
+ * Whether the feed already shows an event, matched on its server-side `id`. A payload without an integer `id` (an older
+ * server, or an event that couldn't be recorded) never matches, so it is shown as before.
+ * @param container - The activity feed element.
+ * @param ev - An event from the live stream.
+ * @returns True when a row for the same `id` is in the feed.
+ */
+function isEventShown(container, ev) {
+  if (!Number.isInteger(ev.id)) return false;
+  return Array.from(container.children).some((row) => row.dataset.eventId === String(ev.id));
+}
+
+/**
+ * Adds a newly arrived event to the top of the feed, keeping at most MAX_DISPLAYED_EVENTS rows. An event the feed
+ * already shows (a snapshot that included it before its live push arrived) is skipped.
  * @param container - The activity feed element.
  * @param ev - The event that just arrived over the live stream.
  */
 function prependEvent(container, ev) {
+  if (isEventShown(container, ev)) return;
   const emptyMsg = container.querySelector('.empty-msg');
   if (emptyMsg) emptyMsg.remove();
   container.insertBefore(renderEventItem(ev), container.firstChild);
@@ -217,9 +233,8 @@ if (recentEventsList && hasStreamer) {
   // server restart) would otherwise leave this feed stale until the next real event. Subscribe first, then snapshot:
   // `error` only flags the drop, and the resync runs on the reconnect's `open`, so nothing between the snapshot and
   // the reconnect is missed. A stream the browser has closed for good will not reopen, so it resyncs once at once.
-  // Known limitation: an event already in the snapshot whose live push arrives afterwards shows twice, because the
-  // dashboard payloads carry no id to match them on. An `id` on the dashboard payloads (an additive change, as #664 did for
-  // the companion payloads, needing the owner's approval) would fix it; see #1139.
+  // An event already in the snapshot whose live push arrives afterwards is skipped: both carry the event's `id` (#1177).
+  // A payload without one (an older server, or an event that couldn't be recorded) is shown as before.
   eventsSource.onopen = () => {
     if (!needsResync) return;
     needsResync = false;

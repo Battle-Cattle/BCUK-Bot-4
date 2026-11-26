@@ -74,7 +74,7 @@ async function recordAndPushDashboardEventOrThrow(
   // never 0 (auto-increment starts at 1), so `!eventId` only catches the genuine null-skip case.
   if (!eventId) return;
   dashboardEventRuntimeRegistry.get()?.pushDashboardEvent(streamerId, {
-    eventType, ...fitted, occurredAt: new Date().toISOString(),
+    id: eventId, eventType, ...fitted, occurredAt: new Date().toISOString(),
   });
 }
 

@@ -90,7 +90,7 @@ describe('payRaffleWinners', () => {
     expect(logErrorSpy).toHaveBeenCalledWith(expect.stringContaining('Failed to pay raffle winner b'), expect.any(Error));
     expect(recordStreamerEvent).toHaveBeenCalledExactlyOnceWith(7, 'raffle_payout_failed', 'b', "1,500 points couldn't be added");
     expect(pushSpy).toHaveBeenCalledExactlyOnceWith(7, expect.objectContaining({
-      eventType: 'raffle_payout_failed', displayName: 'b', detail: "1,500 points couldn't be added",
+      id: 1, eventType: 'raffle_payout_failed', displayName: 'b', detail: "1,500 points couldn't be added",
     }));
   });
 
@@ -147,6 +147,8 @@ describe('payRaffleWinners', () => {
     expect(await payRaffleWinners(7, ['a'], 50, liveSignal())).toEqual({ paid: [], unpaid: ['a'], unconfirmed: [] });
     expect(logErrorSpy).toHaveBeenCalledWith('Failed to record unpaid raffle winner a for streamer 7:', expect.any(Error));
     expect(pushSpy).toHaveBeenCalledExactlyOnceWith(7, expect.objectContaining({ eventType: 'raffle_payout_failed', displayName: 'a' }));
+    // No row id to send: the push carries none rather than an invented one.
+    expect(pushSpy.mock.calls[0]![1]).not.toHaveProperty('id');
   });
 
   it('logs, rather than throwing, when the live dashboard push fails', async () => {

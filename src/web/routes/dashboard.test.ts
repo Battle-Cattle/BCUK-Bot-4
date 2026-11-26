@@ -220,7 +220,7 @@ describe('GET /', () => {
     expect(res.body.hasStreamer).toBe(true);
     expect(getRecentStreamerEvents).toHaveBeenCalledWith(42, 20);
     expect(res.body.recentEvents).toEqual([
-      { eventType: 'follow', displayName: 'someviewer', detail: null, occurredAt: occurredAt.toISOString() },
+      { id: 1, eventType: 'follow', displayName: 'someviewer', detail: null, occurredAt: occurredAt.toISOString() },
     ]);
   });
 });

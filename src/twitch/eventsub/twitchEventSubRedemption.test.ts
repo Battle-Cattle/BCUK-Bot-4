@@ -362,7 +362,7 @@ describe('handleRedemption', () => {
 
     expect(recordStreamerEvent).toHaveBeenCalledWith(streamerId, 'redemption', 'Redeemer', 'Cool Reward', 'redemption-1');
     expect(mockPushDashboardEvent).toHaveBeenCalledWith(streamerId, expect.objectContaining({
-      eventType: 'redemption', displayName: 'Redeemer', detail: 'Cool Reward',
+      id: 101, eventType: 'redemption', displayName: 'Redeemer', detail: 'Cool Reward',
     }));
   });
 

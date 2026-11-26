@@ -134,7 +134,7 @@ export async function recordAndPushDashboardEvent(
     const fitted = fitStreamerEventText(displayName, detail);
     const eventId = (await recordStreamerEvent(streamerId, eventType, fitted.displayName, fitted.detail))!;
     const occurredAt = new Date().toISOString();
-    dashboardEventRuntimeRegistry.get()?.pushDashboardEvent(streamerId, { eventType, ...fitted, occurredAt });
+    dashboardEventRuntimeRegistry.get()?.pushDashboardEvent(streamerId, { id: eventId, eventType, ...fitted, occurredAt });
     await pushCompanionActivityEvent(streamerId, {
       type: eventType as CompanionActivityEventType, id: eventId, ...fitted, occurredAt,
     });
