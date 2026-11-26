@@ -53,7 +53,8 @@ const livePayload = (overrides: Record<string, unknown> = {}) => ({
 function runStats({ ownChannel = 'streamer_one' as string | null, machineTime = SERVER_TIME } = {}) {
   FakeEventSource.instances = [];
   const els = new Map(IDS.map((id) => [id, new FakeElement()]));
-  const clock = { now: Date.parse(machineTime) };
+  // Two clocks, as in a browser: the wall clock (Date) can be stepped; the monotonic clock (performance) only runs forward.
+  const clock = { now: Date.parse(machineTime), mono: 1000 };
   const ticks: (() => void)[] = [];
   const watchStreamContext = vi.fn();
   /** The fake element with this id; throws if it isn't defined, so a typo fails here. */
@@ -72,6 +73,7 @@ function runStats({ ownChannel = 'streamer_one' as string | null, machineTime = 
     document: { getElementById: (id: string) => els.get(id) ?? null, body: { dataset: ownChannel ? { ownChannel } : {} } },
     EventSource: FakeEventSource,
     Date: FakeDate,
+    performance: { now: () => clock.mono },
     setInterval: (fn: () => void) => { ticks.push(fn); return ticks.length; },
     watchStreamContext,
   };
@@ -79,12 +81,23 @@ function runStats({ ownChannel = 'streamer_one' as string | null, machineTime = 
   vm.runInContext(fs.readFileSync(streamPath, 'utf8'), context);
   vm.runInContext(fs.readFileSync(statsPath, 'utf8'), context);
   const source = FakeEventSource.instances[0];
+  /** The opened stream with its handlers; throws a clear error when the script subscribed to nothing. */
+  const subscribed = (): FakeEventSource & { onmessage: NonNullable<FakeEventSource['onmessage']>; onerror: NonNullable<FakeEventSource['onerror']> } => {
+    if (!source?.onmessage || !source.onerror) throw new Error('the script did not subscribe to the stream with message and error handlers');
+    return source as ReturnType<typeof subscribed>;
+  };
   return {
     context, el, watchStreamContext, source, ticks,
     /** Delivers a payload over the stream. */
-    send: (payload: unknown) => source!.onmessage!({ data: JSON.stringify(payload) }),
-    /** Moves the machine's clock on and runs the one-second tick. */
-    advance: (ms: number) => { clock.now += ms; for (const tick of ticks) tick(); },
+    send: (payload: unknown) => subscribed().onmessage({ data: JSON.stringify(payload) }),
+    /** Delivers raw message text over the stream. */
+    sendRaw: (data: string) => subscribed().onmessage({ data }),
+    /** Makes the stream error, as when the connection drops. */
+    fail: () => subscribed().onerror(),
+    /** Moves both clocks on and runs the one-second tick. */
+    advance: (ms: number) => { clock.now += ms; clock.mono += ms; for (const tick of ticks) tick(); },
+    /** Steps only the wall clock (an NTP correction or a manual change) and runs the tick. */
+    stepWallClock: (ms: number) => { clock.now += ms; for (const tick of ticks) tick(); },
     /** The text of a stat row, or null when its row is hidden. */
     row: (name: string): string | null => (el(`stream-stat-${name}`).hidden ? null : el(`stream-stat-${name}-value`).textContent),
     /** The note under the stats, or null when it is hidden. */
@@ -154,7 +167,7 @@ describe('public/dashboard-stream-stats.js stream', () => {
   it('ignores a malformed message and shows nothing before the first payload', () => {
     const s = runStats();
     expect(s.blockHidden()).toBe(false); // the markup starts hidden; the script draws only once it has something
-    s.source!.onmessage!({ data: 'not json' });
+    s.sendRaw('not json');
     s.send(null);
     expect(s.blockHidden()).toBe(true);
   });
@@ -201,7 +214,7 @@ describe('public/dashboard-stream-stats.js last known values', () => {
   it('keeps the last values, marked last known, when the stream errors, and clears the mark on the next payload', () => {
     const s = runStats();
     s.send(livePayload());
-    s.source!.onerror!();
+    s.fail();
     expect(s.row('viewers')).toBe('1,234');
     expect(s.note()).toBe('Live updates paused; showing the last known values.');
     s.advance(30_000);
@@ -212,8 +225,22 @@ describe('public/dashboard-stream-stats.js last known values', () => {
 
   it('shows nothing for an error before any payload (there are no values to keep)', () => {
     const s = runStats();
-    s.source!.onerror!();
+    s.fail();
     expect(s.blockHidden()).toBe(true);
+  });
+
+  it('is not moved by the wall clock stepping, backward or forward, between payloads', () => {
+    const s = runStats();
+    s.send(livePayload());
+    s.stepWallClock(-60 * 60_000);
+    s.advance(45_000);
+    expect(s.row('uptime')).toBe('1:25:00');
+    expect(s.note()).toBeNull();
+    s.stepWallClock(2 * 60 * 60_000);
+    expect(s.row('uptime')).toBe('1:25:00');
+    // Five more minutes of real time with no payload: 6m15s since the check, stale on the monotonic clock whatever the wall clock did.
+    s.advance(5 * 60_000);
+    expect(s.note()).toBe('Last known; stats last checked 6 minutes ago.');
   });
 
   it('works from the server\'s clock: a machine clock an hour ahead changes neither the uptime nor the staleness', () => {

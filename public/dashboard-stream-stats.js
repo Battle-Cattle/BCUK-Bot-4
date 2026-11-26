@@ -4,8 +4,9 @@
 // (#1183). Shown only while the channel is live; offline, not monitored and no channel leave the panel as it was. A
 // field Twitch gave no value for has no row, and nothing is made up to fill it. Title and category are Twitch's text, so
 // they are only ever written with textContent. Uptime is worked out here from `startedAt` and ticks on a timer: nothing
-// is polled. The server's own clock (`serverTime`) is used for every age and uptime, so a wrong clock on this machine
-// can't make the stats look stale or the stream look like it started in the future.
+// is polled. The server's own clock (`serverTime`) is used for every age and uptime: it is read once per payload and
+// carried forward on the browser's monotonic clock, so a wrong or stepped wall clock on this machine (an NTP correction, a
+// manual change) can't make the stats look stale or the stream look like it started in the future.
 
 /** Stats older than this (about 3 polls) are shown as last known with their age, as the status panel does for the channel's live state. */
 const STREAM_STATS_STALE_MS = 3 * 60 * 1000;
@@ -14,12 +15,28 @@ const STREAM_STATS_TICK_MS = 1000;
 
 /** The last stats payload from the stream, or null before the first. */
 let streamStats = null;
-/** The server's clock minus this machine's, in ms, as of the last payload. */
-let streamStatsClockOffset = 0;
+/** The last payload's server time and the monotonic reading taken when it arrived, or null when it had no usable server time. */
+let streamStatsAnchor = null;
 /** True after the stream errored and until its next payload: what is shown may be out of date. */
 let streamStatsDown = false;
 /** The last view that was drawn, as JSON, so an unchanged view leaves the DOM alone. */
 let lastStreamStatsView = '';
+
+/**
+ * A reading of the browser's monotonic clock, which a change to the wall clock doesn't move.
+ * @returns Milliseconds from an arbitrary start, or the wall clock where no monotonic clock exists.
+ */
+function streamStatsMonotonic() {
+  return typeof performance !== 'undefined' ? performance.now() : Date.now();
+}
+
+/**
+ * The server's time now: the last payload's server time plus the monotonic time since it arrived.
+ * @returns Milliseconds since the epoch; this machine's wall clock when no payload has given a server time.
+ */
+function streamStatsNow() {
+  return streamStatsAnchor ? streamStatsAnchor.server + (streamStatsMonotonic() - streamStatsAnchor.mono) : Date.now();
+}
 
 /**
  * The time in a stats payload field as milliseconds since the epoch.
@@ -117,7 +134,7 @@ function renderStreamStats(view) {
 
 /** Redraws the stats from the last payload and the server's clock, only when what would show has changed. */
 function refreshStreamStats() {
-  const view = deriveStreamStats(streamStats, Date.now() + streamStatsClockOffset, streamStatsDown);
+  const view = deriveStreamStats(streamStats, streamStatsNow(), streamStatsDown);
   const key = JSON.stringify(view);
   if (key === lastStreamStatsView) return;
   lastStreamStatsView = key;
@@ -125,14 +142,14 @@ function refreshStreamStats() {
 }
 
 /**
- * Takes a payload from the stream: keeps it, notes how far the server's clock is from this machine's, and redraws.
+ * Takes a payload from the stream: keeps it, anchors the server's time to the monotonic clock, and redraws.
  * @param stats - The parsed payload (the same shape as GET /dashboard/stream/stats).
  */
 function applyStreamStats(stats) {
   streamStats = stats;
   streamStatsDown = false;
   const server = stats ? streamStatsTime(stats.serverTime) : null;
-  streamStatsClockOffset = server === null ? 0 : server - Date.now();
+  streamStatsAnchor = server === null ? null : { server, mono: streamStatsMonotonic() };
   refreshStreamStats();
 }
 
