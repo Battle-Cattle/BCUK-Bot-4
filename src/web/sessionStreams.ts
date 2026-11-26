@@ -271,6 +271,8 @@ export function closeSessionStreams(sessionId: string): void {
  * login that raced the bump) keep their streams.
  * @param discordId - Discord snowflake of the user who signed out their other sessions.
  * @param belowGeneration - The user's new session generation; streams from lower generations close.
+ * (The frame goes out as the streams close, before the response carrying the new cookie; the browser's 1.5 s settle delay is
+ * best-effort and accepted as such, #1164: see `CONTEXT_SETTLE_MS` in public/dashboard-context.js.)
  */
 export function closeUserStreams(discordId: string, belowGeneration: number): void {
   const current = minGenerations.get(discordId)?.generation ?? 0;
@@ -287,7 +289,7 @@ export function closeUserStreams(discordId: string, belowGeneration: number): vo
  * it is left open.
  * @param sessionId - ID of the session that switched guild (from `POST /guild/select`).
  * @param guildId - The guild the session switched to.
- * @param closeNow - False to only record the switch, leaving the caller to run {@link closeStreamsOutsideGuild} once the new guild has been saved to the session (the frame would otherwise reach another tab before the save does).
+ * @param closeNow - False to only record the switch and leave the closing to {@link closeStreamsOutsideGuild}. `POST /guild/select` calls this with the default, after the new guild has been saved (a failed switch records and closes nothing, #1164); false is kept for the registry's own tests.
  */
 export function switchSessionGuild(sessionId: string, guildId: string, closeNow = true): void {
   remember(sessionGuilds, sessionId, { guildId, expiresAt: Date.now() + SESSION_GUILD_TTL_MS });

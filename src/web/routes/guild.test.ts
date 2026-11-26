@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { waitFor } from '../../test-utils/waitFor';
 import { mockLogger } from '../../test-utils/loggerMock';
 import { ACCESS_LEVEL_MOCK } from '../../test-utils/accessLevelMock';
 
@@ -17,14 +18,14 @@ vi.mock('../middleware', () => ({
 }));
 vi.mock('../../shared/logger', () => ({ createLogger: mockLogger }));
 // The registry itself is tested in sessionStreams.test.ts; here only that POST /select hands it the new guild.
-vi.mock('../sessionStreams', () => ({ switchSessionGuild: vi.fn(), closeStreamsOutsideGuild: vi.fn() }));
+vi.mock('../sessionStreams', () => ({ switchSessionGuild: vi.fn() }));
 
 import express from 'express';
 import supertest from 'supertest';
 import router from './guild';
 import { findUser, getAllGuilds, getEffectiveAccessLevelForUser, getGuildsForMember } from '../../db';
 import { AccessLevel } from '../../db';
-import { switchSessionGuild, closeStreamsOutsideGuild } from '../sessionStreams';
+import { switchSessionGuild } from '../sessionStreams';
 
 const TWO_GUILDS = [
   { guildId: '100000000000000001', name: 'Alpha' },
@@ -56,7 +57,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   callOrder.length = 0;
   saveError = undefined;
-  vi.mocked(closeStreamsOutsideGuild).mockImplementation(() => { callOrder.push('close'); });
+  saveGate = undefined;
+  vi.mocked(switchSessionGuild).mockImplementation(() => { callOrder.push('switch'); });
   vi.mocked(getEffectiveAccessLevelForUser).mockResolvedValue(AccessLevel.USER);
   vi.mocked(getGuildsForMember).mockResolvedValue(TWO_DB_GUILDS as any);
   vi.mocked(getAllGuilds).mockResolvedValue(TWO_DB_GUILDS as any);
@@ -100,13 +102,15 @@ describe('GET /guild/select', () => {
 /** Order in which the session's `save` and the registry's close ran in a request, and what `save` fails with (none by default). */
 const callOrder: string[] = [];
 let saveError: Error | undefined;
+/** When set, `save` waits for it before calling back, to stand in for a slow session store. */
+let saveGate: Promise<void> | undefined;
 
 /** An app mounting the guild router for a session with ID `sid-1` and the given session user. */
 function buildSessionApp(user: unknown) {
   const app = express();
   app.use(express.urlencoded({ extended: false }));
   app.use((req: any, _res: any, next: any) => {
-    req.session = { user, destroy: (cb: () => void) => cb(), save: (cb: (err?: Error) => void) => { callOrder.push('save'); cb(saveError); } };
+    req.session = { user, destroy: (cb: () => void) => cb(), save: (cb: (err?: Error) => void) => { callOrder.push('save'); if (saveGate) void saveGate.then(() => cb(saveError)); else cb(saveError); } };
     req.sessionID = 'sid-1';
     req.csrfToken = () => 'csrf-token';
     next();
@@ -115,46 +119,74 @@ function buildSessionApp(user: unknown) {
   return app;
 }
 
-describe('POST /guild/select — open dashboard streams (#1116)', () => {
-  it('tells the stream registry the session switched guild, once the selection is accepted', async () => {
-    const user = { discordId: 'u1', currentGuildId: '100000000000000001', accessLevel: AccessLevel.USER, guilds: TWO_GUILDS };
+describe('POST /guild/select — open dashboard streams (#1116, #1164)', () => {
+  const OLD = '100000000000000001';
+  const NEW = '100000000000000002';
+  const sessionUser = (guildId: string | null = OLD) => ({ discordId: 'u1', currentGuildId: guildId, accessLevel: AccessLevel.USER, guilds: TWO_GUILDS });
+  const select = (user: unknown) => supertest(buildSessionApp(user)).post('/guild/select').type('form').send({ guild_id: NEW });
 
-    const res = await supertest(buildSessionApp(user)).post('/guild/select').type('form').send({ guild_id: '100000000000000002' });
+  it('records the switch and closes the old guild\'s streams in one step, once the selection is accepted', async () => {
+    const res = await select(sessionUser());
 
     expect(res.headers.location).toBe('/');
-    expect(switchSessionGuild).toHaveBeenCalledExactlyOnceWith('sid-1', '100000000000000002', false);
+    expect(switchSessionGuild).toHaveBeenCalledExactlyOnceWith('sid-1', NEW);
   });
 
-  it('closes the old guild\'s streams only after the session holding the new guild has been saved, so another tab\'s reload reads it', async () => {
-    const user = { discordId: 'u1', currentGuildId: '100000000000000001', accessLevel: AccessLevel.USER, guilds: TWO_GUILDS };
+  it('does so only after the session holding the new guild has been saved, so another tab\'s reload reads it', async () => {
+    await select(sessionUser());
 
-    await supertest(buildSessionApp(user)).post('/guild/select').type('form').send({ guild_id: '100000000000000002' });
-
-    expect(closeStreamsOutsideGuild).toHaveBeenCalledExactlyOnceWith('sid-1', '100000000000000002');
-    expect(callOrder).toEqual(['save', 'close']);
+    expect(callOrder).toEqual(['save', 'switch']);
   });
 
-  it('still closes them, and sends select_failed, when saving the session fails', async () => {
+  it('waits for a slow save, however long it takes, before announcing the switch (#1164)', async () => {
+    let release!: () => void;
+    saveGate = new Promise<void>((resolve) => { release = resolve; });
+    const request = select(sessionUser()).then((res) => res);
+
+    await waitFor(() => expect(callOrder).toEqual(['save']));
+    await new Promise((resolve) => setTimeout(resolve, 1600)); // longer than the browser's 1.5 s settle delay
+    expect(switchSessionGuild).not.toHaveBeenCalled();
+    release();
+    const res = await request;
+
+    expect(res.headers.location).toBe('/');
+    expect(callOrder).toEqual(['save', 'switch']);
+  });
+
+  it('announces nothing, and puts the session\'s guild and access level back, when saving the session fails (#1164)', async () => {
     saveError = new Error('store down');
-    const user = { discordId: 'u1', currentGuildId: '100000000000000001', accessLevel: AccessLevel.USER, guilds: TWO_GUILDS };
+    vi.mocked(getEffectiveAccessLevelForUser).mockResolvedValue(AccessLevel.MANAGER);
+    const user = sessionUser();
 
-    const res = await supertest(buildSessionApp(user)).post('/guild/select').type('form').send({ guild_id: '100000000000000002' });
+    const res = await select(user);
 
     expect(res.headers.location).toBe('/guild/select?error=select_failed');
-    expect(closeStreamsOutsideGuild).toHaveBeenCalledExactlyOnceWith('sid-1', '100000000000000002');
+    expect(user.currentGuildId).toBe(OLD);
+    expect(user.accessLevel).toBe(AccessLevel.USER);
+    expect(switchSessionGuild).not.toHaveBeenCalled();
   });
 
-  it('closes the old guild\'s streams even when the access-level lookup that follows fails, since the session still moves to the new guild', async () => {
+  it('does the same when the access-level lookup that follows the assignment fails (#1164)', async () => {
     vi.mocked(findUser).mockResolvedValue({ discord_id: 'u1', is_owner: true } as any);
     vi.mocked(getEffectiveAccessLevelForUser).mockRejectedValue(new Error('db down'));
-    const user = { discordId: 'u1', currentGuildId: '100000000000000001', accessLevel: AccessLevel.USER, guilds: TWO_GUILDS };
+    const user = sessionUser();
 
-    const res = await supertest(buildSessionApp(user)).post('/guild/select').type('form').send({ guild_id: '100000000000000002' });
+    const res = await select(user);
 
     expect(res.headers.location).toBe('/guild/select?error=select_failed');
-    expect(user.currentGuildId).toBe('100000000000000002'); // express-session saves this
-    expect(switchSessionGuild).toHaveBeenCalledExactlyOnceWith('sid-1', '100000000000000002', false);
-    expect(closeStreamsOutsideGuild).toHaveBeenCalledExactlyOnceWith('sid-1', '100000000000000002');
+    expect(user.currentGuildId).toBe(OLD);
+    expect(user.accessLevel).toBe(AccessLevel.USER);
+    expect(switchSessionGuild).not.toHaveBeenCalled();
+  });
+
+  it('puts a missing previous guild back as null after a failed first pick (#1164)', async () => {
+    saveError = new Error('store down');
+    const user = sessionUser(null);
+
+    await select(user);
+
+    expect(user.currentGuildId).toBeNull();
+    expect(switchSessionGuild).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -169,7 +201,6 @@ describe('POST /guild/select — open dashboard streams (#1116)', () => {
     await supertest(app).post('/guild/select').type('form').send(body);
 
     expect(switchSessionGuild).not.toHaveBeenCalled();
-    expect(closeStreamsOutsideGuild).not.toHaveBeenCalled();
     expect(user.currentGuildId).toBe('100000000000000001');
   });
 
