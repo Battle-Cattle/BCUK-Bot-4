@@ -49,19 +49,10 @@
       <div class="card card-spaced">
         <div class="card-body">
           <p class="hint hint-compact">Streamers add <code class="mono"><%= baseUrl %>/overlay/shared/&lt;their Twitch login&gt;</code> as a Browser Source in OBS. Any Stream Deck key can then play one of these videos on every connected overlay at once.</p>
-          <p class="mt-05"><strong><%= connectedCount %></strong> shared overlay<%= connectedCount === 1 ? '' : 's' %> connected right now.</p>
-        </div>
-      </div>
-
-      <div class="card card-spaced">
-        <div class="card-body">
-          <h3 class="section-title">Readiness</h3>
+          <p id="readiness-summary" class="mt-05" aria-live="polite">Loading…</p>
+          <p id="readiness-status" class="hint hint-compact" role="status" hidden>⚠ Connection lost — showing the last known state while reconnecting.</p>
+          <ul id="readiness-overlays"></ul>
           <p class="hint hint-compact">Each overlay reports which videos it has stored (self-reported; it only affects this page). Updates live.</p>
-          <p id="readiness-status" class="hint hint-compact" hidden>Connection lost — showing the last known state while reconnecting.</p>
-          <h4>Per overlay</h4>
-          <ul id="readiness-overlays"><li class="hint">Loading…</li></ul>
-          <h4>Per video</h4>
-          <ul id="readiness-videos"><li class="hint">Loading…</li></ul>
         </div>
       </div>
 
@@ -98,7 +89,7 @@
         <div class="table-scroll">
           <table class="table full-width">
             <thead>
-              <tr><th>Name</th><th>Added by</th><th>Added</th><th>Status</th><th></th><th></th></tr>
+              <tr><th>Name</th><th>Added by</th><th>Added</th><th>Status</th><th>Readiness</th><th></th><th></th><th></th></tr>
             </thead>
             <tbody>
               <% for (const v of videos) { %>
@@ -113,6 +104,13 @@
                 <td><%= v.uploader_login || 'unknown' %></td>
                 <td><%= new Date(v.created_at).toLocaleDateString() %></td>
                 <td><%= v.enabled ? 'Enabled' : 'Disabled' %></td>
+                <% if (v.enabled) { %>
+                <td data-readiness-video="<%= v.id %>">Loading…</td>
+                <td data-readiness-push="<%= v.id %>"></td>
+                <% } else { %>
+                <td>—</td>
+                <td></td>
+                <% } %>
                 <td>
                   <form method="POST" action="/overlay/shared/settings/<%= v.id %>/enabled" class="m-0">
                     <input type="hidden" name="_csrf" value="<%= csrfToken %>">

@@ -5,10 +5,10 @@ import vm from 'vm';
 
 const source = fs.readFileSync(path.join(__dirname, '../../public/sharedOverlayReadiness.js'), 'utf8');
 
-/** A minimal element: enough of the DOM for the list renderer. */
-function fakeElement() {
+/** A minimal element: enough of the DOM for the renderer. */
+function fakeElement(dataset: Record<string, string> = {}) {
   const el: any = {
-    children: [] as any[], textContent: '',
+    children: [] as any[], textContent: '', dataset,
     appendChild(child: unknown) { el.children.push(child); },
     replaceChildren() { el.children = []; },
     hidden: true,
@@ -18,23 +18,28 @@ function fakeElement() {
   return el;
 }
 
-/** Runs the script with fake lists and returns its functions and the lists. */
-function load() {
-  const lists: Record<string, any> = { 'readiness-overlays': fakeElement(), 'readiness-videos': fakeElement(), 'readiness-status': fakeElement() };
+/** Runs the script with fake page elements (one table cell pair per video id) and returns its functions and elements. */
+function load(rowIds: string[] = []) {
+  const els: Record<string, any> = { 'readiness-overlays': fakeElement(), 'readiness-summary': fakeElement(), 'readiness-status': fakeElement() };
+  const videoCells = rowIds.map((id) => fakeElement({ readinessVideo: id }));
+  const pushCells = rowIds.map((id) => fakeElement({ readinessPush: id }));
   const connectSse = vi.fn();
   const context: Record<string, unknown> = {
     document: {
-      getElementById: (id: string) => lists[id] ?? null, createElement: () => fakeElement(),
+      getElementById: (id: string) => els[id] ?? null, createElement: () => fakeElement(),
+      querySelectorAll: (sel: string) => {
+        if (sel === '[data-readiness-video]') return videoCells;
+        if (sel === '[data-readiness-push]') return pushCells;
+        return [...videoCells, ...pushCells];
+      },
       body: { dataset: { csrfToken: 'tok' } },
     },
     connectSse,
   };
   vm.createContext(context);
   vm.runInContext(`${source}\nthis.api = { describeOverlay, describeVideo, renderReadiness, setReadinessStale, buildPushForm };`, context);
-  return { api: (context as any).api, lists, connectSse };
+  return { api: (context as any).api, els, videoCells, pushCells, connectSse };
 }
-
-const texts = (list: any) => list.children.map((c: any) => c.textContent);
 
 describe('readiness page script', () => {
   it('describes an online overlay with its count and download', () => {
@@ -53,10 +58,10 @@ describe('readiness page script', () => {
 
   it('describes a video: tick when all ready, otherwise who is missing it', () => {
     const { api } = load();
-    expect(api.describeVideo({ name: 'Clap', ready: 5, online: 5, missing: [], allReady: true }))
-      .toBe('✅ Clap — ready on 5/5 connected overlays');
-    expect(api.describeVideo({ name: 'Boo', ready: 3, online: 5, allReady: false, missing: [{ login: 'a', percent: 40 }, { login: 'b', percent: null }] }))
-      .toBe('Boo — ready on 3/5 connected overlays; missing on a (40%), b');
+    expect(api.describeVideo({ ready: 5, online: 5, missing: [], allReady: true }))
+      .toBe('✅ Ready on 5/5 connected overlays');
+    expect(api.describeVideo({ ready: 3, online: 5, allReady: false, missing: [{ login: 'a', percent: 40 }, { login: 'b', percent: null }] }))
+      .toBe('Ready on 3/5 connected overlays; missing on a (40%), b');
   });
 
   it('builds a push form that posts with the CSRF token, greyed out when every connected overlay has the video', () => {
@@ -69,34 +74,53 @@ describe('readiness page script', () => {
     expect(api.buildPushForm({ id: 7, allReady: false, online: 0 }).children[1].disabled).toBe(true);
   });
 
-  it('puts a push form on each video row but not on the placeholder', () => {
-    const { api, lists } = load();
-    api.renderReadiness({ overlays: [], videos: [{ id: 1, name: 'Clap', ready: 0, online: 1, missing: [], allReady: false }] });
-    expect(lists['readiness-videos'].children[0].children).toHaveLength(1);
-    api.renderReadiness({ overlays: [], videos: [] });
-    expect(lists['readiness-videos'].children[0].children).toHaveLength(0);
+  it('fills each video row from the snapshot, with its own push form', () => {
+    const { api, videoCells, pushCells } = load(['1', '2']);
+    api.renderReadiness({ overlays: [], videos: [
+      { id: 1, ready: 0, online: 1, missing: [{ login: 'a', percent: null }], allReady: false },
+      { id: 2, ready: 1, online: 1, missing: [], allReady: true },
+    ] });
+    expect(videoCells.map((c) => c.textContent)).toEqual(['Ready on 0/1 connected overlays; missing on a', '✅ Ready on 1/1 connected overlays']);
+    expect(pushCells[0].children[0].action).toBe('/overlay/shared/settings/videos/1/push');
+    expect(pushCells[0].children[0].children[1].disabled).toBe(false);
+    expect(pushCells[1].children[0].children[1].disabled).toBe(true);
   });
 
-  it('renders both lists, with placeholders when empty, and opens the stream', () => {
-    const { api, lists, connectSse } = load();
+  it('handles a row with no snapshot entry (video added since) and a snapshot with no videos', () => {
+    const { api, videoCells, pushCells } = load(['5']);
     api.renderReadiness({ overlays: [], videos: [] });
-    expect(texts(lists['readiness-overlays'])).toEqual(['No shared overlays have connected yet.']);
-    expect(texts(lists['readiness-videos'])).toEqual(['No enabled shared videos.']);
-    api.renderReadiness({ overlays: [{ login: 'a', online: true, stored: 0, total: 1, downloading: null, reportedAt: 1 }], videos: [] });
-    expect(texts(lists['readiness-overlays'])).toEqual(['a — online — 0/1 stored']);
+    expect(videoCells[0].textContent).toBe('Waiting for the next update…');
+    expect(pushCells[0].children).toHaveLength(0);
+  });
+
+  it('shows the live connected count and per-overlay list, with an empty state', () => {
+    const { api, els } = load();
+    api.renderReadiness({ overlays: [], videos: [] });
+    expect(els['readiness-summary'].textContent).toBe('No shared overlays have connected yet.');
+    expect(els['readiness-overlays'].children).toHaveLength(0);
+    api.renderReadiness({ overlays: [
+      { login: 'a', online: true, stored: 0, total: 1, downloading: null, reportedAt: 1 },
+      { login: 'b', online: false, stored: 1, total: 1, downloading: null, reportedAt: null },
+    ], videos: [] });
+    expect(els['readiness-summary'].textContent).toBe('1 shared overlay connected right now.');
+    expect(els['readiness-overlays'].children.map((c: any) => c.textContent)).toEqual(['a — online — 0/1 stored', 'b — offline (no report yet) — 1/1 stored']);
+    expect(els['readiness-summary'].textContent).not.toContain('overlays connected');
+  });
+
+  it('opens the stream', () => {
+    const { connectSse } = load();
     expect(connectSse).toHaveBeenCalledWith('/overlay/shared/settings/readiness/events', expect.any(Function), { onError: expect.any(Function) });
   });
 
-  it('marks the lists stale when the stream errors and clears it on the next snapshot', () => {
-    const { api, lists, connectSse } = load();
+  it('marks every place stale when the stream errors and clears it on the next snapshot', () => {
+    const { api, els, videoCells, pushCells, connectSse } = load(['1']);
     const options = connectSse.mock.lastCall?.[2];
     expect(options).toBeDefined();
     options.onError();
-    expect(lists['readiness-status'].hidden).toBe(false);
-    expect(lists['readiness-overlays'].classes.has('stale')).toBe(true);
-    expect(lists['readiness-videos'].classes.has('stale')).toBe(true);
+    expect(els['readiness-status'].hidden).toBe(false);
+    for (const el of [els['readiness-overlays'], els['readiness-summary'], videoCells[0], pushCells[0]]) expect(el.classes.has('stale')).toBe(true);
     api.renderReadiness({ overlays: [], videos: [] });
-    expect(lists['readiness-status'].hidden).toBe(true);
-    expect(lists['readiness-overlays'].classes.has('stale')).toBe(false);
+    expect(els['readiness-status'].hidden).toBe(true);
+    for (const el of [els['readiness-overlays'], els['readiness-summary'], videoCells[0], pushCells[0]]) expect(el.classes.has('stale')).toBe(false);
   });
 });
