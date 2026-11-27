@@ -13,8 +13,19 @@ export const TOOLCHAIN_TEST = 'src/shared/tsNodeDevToolchain.test.ts';
  */
 export const DB_TESTS = 'src/**/*.db.test.ts';
 
+/** Vitest's own default per-test timeout, kept for local runs. */
+export const DEFAULT_TEST_TIMEOUT_MS = 5_000;
+
+/** Per-test timeout when `CI` is set: headroom for a loaded GitHub Actions runner (see `testTimeout` below). */
+export const CI_TEST_TIMEOUT_MS = 15_000;
+
 export default defineConfig({
   test: {
+    // Vitest's 5s default is tight for a CI runner that stalls under load: on windows-latest, tests
+    // that render a view or call a mocked route (10-25ms locally) have timed out at 5s, a different
+    // one on each run, with no assertion failing. GitHub Actions sets CI, so CI gets 15s of headroom
+    // while a local run keeps the fast 5s default that flags a test that really hangs.
+    testTimeout: process.env.CI ? CI_TEST_TIMEOUT_MS : DEFAULT_TEST_TIMEOUT_MS,
     include: ['src/**/*.test.ts'],
     exclude: [...configDefaults.exclude, TOOLCHAIN_TEST, DB_TESTS],
     // Run each test file in a fresh VM context on a reused worker thread instead of a fresh
