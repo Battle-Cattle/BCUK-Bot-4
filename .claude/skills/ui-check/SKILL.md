@@ -59,4 +59,3 @@ After changing anything in this folder, run its own tests: `node --test .claude/
 
 ## Known findings on `main` (Nov 2026)
 - A channel that is live while its bot is disconnected shows no LIVE badge on its Twitch Channels row (the badge needs the connection, and the owner chose to keep it as it is, #1114). Stream Overview does say Live for the signed-in user's own channel in that case.
-- `.disclosure-toggle:focus-visible` uses `--primary` instead of `--focus-ring` (`public/style.css`). The focus audit passes it, since it has an outline; only its colour is off.

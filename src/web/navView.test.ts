@@ -198,7 +198,7 @@ describe('views/partials/nav.ejs navbar end', () => {
   it('offers a server switcher with several guilds, naming the current one', async () => {
     const user = { ...makeUser(AccessLevel.USER), guilds: [guild('1', 'Alpha'), guild('2', 'Beta')], currentGuildId: '2' };
 
-    expect(endOf(await renderNav(user))).toContain('<a href="/guild/select" class="nav-item guild-switcher" title="Switch server">🏠 Beta ▾</a>');
+    expect(endOf(await renderNav(user))).toContain('<a href="/guild/select" class="nav-item guild-switcher" title="Switch server (current: Beta)">🏠 Beta ▾</a>');
   });
 
   it('asks to choose a server when several guilds and none current', async () => {
@@ -210,7 +210,7 @@ describe('views/partials/nav.ejs navbar end', () => {
   it('shows the single guild as plain text, not a switcher', async () => {
     const end = endOf(await renderNav({ ...makeUser(AccessLevel.USER), guilds: [guild('1', 'Alpha')], currentGuildId: '1' }));
 
-    expect(end).toContain('<span class="guild-name">🏠 Alpha</span>');
+    expect(end).toContain('<span class="guild-name" title="Alpha">🏠 Alpha</span>');
     expect(end).not.toContain('guild-switcher');
   });
 
@@ -239,7 +239,16 @@ describe('views/partials/nav.ejs navbar end', () => {
   });
 
   it("shows the signed-in user's name", async () => {
-    expect(endOf(await renderNav(makeUser(AccessLevel.USER)))).toContain('<span class="username">Someone</span>');
+    expect(endOf(await renderNav(makeUser(AccessLevel.USER)))).toContain('<span class="username" title="Someone">Someone</span>');
+  });
+
+  it('escapes quotes and tags in the full-name title attributes', async () => {
+    const user = { ...makeUser(AccessLevel.USER), discordName: 'a"<b>', guilds: [guild('1', 'x"<i>')], currentGuildId: '1' };
+    const end = endOf(await renderNav(user));
+
+    expect(end).toContain('title="a&#34;&lt;b&gt;"');
+    expect(end).toContain('title="x&#34;&lt;i&gt;"');
+    expect(end).not.toContain('<b>');
   });
 
   it('shows the avatar only when the user has one', async () => {
@@ -306,6 +315,10 @@ describe('public/style.css nav collapse breakpoint (#1109)', () => {
     for (const selector of ['.navbar-toggle', '.navbar-collapse', '.navbar-menu', '.navbar-end', '.nav-group']) {
       expect(phone).not.toContain(selector);
     }
+  });
+
+  it('draws the disclosure toggle focus ring with --focus-ring like every other control', () => {
+    expect(css).toMatch(/\.disclosure-toggle:focus-visible\s*\{[^}]*outline:\s*2px solid var\(--focus-ring\)/);
   });
 
   it('caps the username and server name with an ellipsis, so the full nav has a worst-case width', () => {
