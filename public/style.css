@@ -809,3 +809,7 @@ details[open] > .disclosure-toggle::before { transform: rotate(90deg); }
 
 /* ── Public video library previews (overlay settings) ─── */
 .library-preview { display: block; width: 10rem; max-width: 100%; aspect-ratio: 16 / 9; background: #000; border-radius: var(--radius); }
+
+/* Shared overlay admin: readiness values shown while the stream is down are the last known state, not live.
+   The note at the top says so; the dashed underline and muted text are the non-colour cue. */
+.stale { color: var(--muted); text-decoration: underline dashed; text-underline-offset: .2em; }

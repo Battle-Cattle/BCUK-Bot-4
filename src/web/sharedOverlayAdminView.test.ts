@@ -32,13 +32,33 @@ describe('sharedOverlayAdmin view', () => {
     expect(html).toContain('Disable');
     expect(html).toContain('Enable');
     expect(html).toContain('/overlay/shared/settings/2/delete');
-    expect(html).toContain('<strong>1</strong> shared overlay connected');
+    expect(html).toMatch(/id="readiness-summary"[^>]*>Loading…</);
     expect(html).toContain('/overlay/shared/settings/import/9');
   });
 
-  it('uses the plural for several connected overlays and hides the import list when empty', async () => {
-    const html = await render({ connectedCount: 3, ownVideos: [] });
-    expect(html).toContain('shared overlays connected');
+  it('has no separate Readiness card; readiness lives in the connection card and the video table', async () => {
+    const html = await render();
+    expect(html).not.toContain('Per video');
+    expect(html).not.toContain('id="readiness-videos"');
+    expect(html).toContain('id="readiness-status"');
+    expect(html.match(/self-reported/g)).toHaveLength(1);
+    expect(html).toContain('<th>Readiness</th>');
+    expect(html).toContain('data-readiness-video="1">Loading…');
+    expect(html).toContain('data-readiness-push="1"');
+    expect(html.match(/Clap/g)).toHaveLength(1);
+  });
+
+  it('shows no readiness cell for a disabled video', async () => {
+    const html = await render();
+    expect(html).not.toContain('data-readiness-video="2"');
+    expect(html).not.toContain('data-readiness-push="2"');
+    expect(html).toMatch(/Disabled<\/td>\s*<td>—<\/td>/);
+  });
+
+  it('shows no video table when there are no videos, and hides the import list when empty', async () => {
+    const html = await render({ videos: [], ownVideos: [] });
+    expect(html).toContain('No shared videos yet.');
+    expect(html).not.toContain('data-readiness-video');
     expect(html).not.toContain('Add one of your overlay videos');
   });
 

@@ -20,12 +20,12 @@ function describeOverlay(o) {
 }
 
 /**
- * Describes one video for the per-video list.
- * @param {{name: string, ready: number, online: number, missing: Array<{login: string, percent: (number|null)}>, allReady: boolean}} v - The video's row.
- * @returns {string} For example "✅ Clap — ready on 5/5 connected overlays", or which overlays miss it.
+ * Describes one video's readiness for its table row.
+ * @param {{ready: number, online: number, missing: Array<{login: string, percent: (number|null)}>, allReady: boolean}} v - The video's row.
+ * @returns {string} For example "✅ Ready on 5/5 connected overlays", or which overlays miss it.
  */
 function describeVideo(v) {
-  const head = (v.allReady ? '✅ ' : '') + v.name + ' — ready on ' + v.ready + '/' + v.online + ' connected overlays';
+  const head = (v.allReady ? '✅ ' : '') + 'Ready on ' + v.ready + '/' + v.online + ' connected overlays';
   if (v.missing.length === 0) return head;
   const missing = v.missing.map(function (m) { return m.login + (m.percent === null ? '' : ' (' + m.percent + '%)'); });
   return head + '; missing on ' + missing.join(', ');
@@ -41,6 +41,7 @@ function buildPushForm(v) {
   const form = document.createElement('form');
   form.method = 'POST';
   form.action = '/overlay/shared/settings/videos/' + v.id + '/push';
+  form.className = 'm-0';
   const token = document.createElement('input');
   token.type = 'hidden';
   token.name = '_csrf';
@@ -56,46 +57,67 @@ function buildPushForm(v) {
 }
 
 /**
- * Replaces a list's items with one line per entry.
- * @param {HTMLElement} list - The `ul` to fill.
- * @param {string[]} lines - The text of each item.
- * @param {string} emptyText - Shown when there are no lines.
- * @param {HTMLElement[]} [extras] - An element appended to each item, in order (optional).
+ * Writes the live connected-overlay sentence and the per-overlay list into the connection card.
+ * @param {Array<object>} overlays - The overlay rows from the snapshot.
  * @returns {void}
  */
-function fillList(list, lines, emptyText, extras) {
+function renderOverlays(overlays) {
+  const online = overlays.filter(function (o) { return o.online; }).length;
+  document.getElementById('readiness-summary').textContent = overlays.length === 0
+    ? 'No shared overlays have connected yet.'
+    : online + ' shared overlay' + (online === 1 ? '' : 's') + ' connected right now.';
+  const list = document.getElementById('readiness-overlays');
   list.replaceChildren();
-  const texts = lines.length > 0 ? lines : [emptyText];
-  texts.forEach(function (text, i) {
+  overlays.forEach(function (o) {
     const item = document.createElement('li');
-    item.textContent = text;
-    if (extras && lines.length > 0) item.appendChild(extras[i]);
+    item.textContent = describeOverlay(o);
     list.appendChild(item);
   });
 }
 
 /**
- * Shows or clears the "connection lost" state: the lists keep the last snapshot, but the page says
- * it may be out of date until the next snapshot arrives.
+ * Fills each enabled video's readiness cell and push cell from the snapshot. A row with no snapshot
+ * entry (uploaded since the snapshot) shows a waiting note and no push button.
+ * @param {Array<{id: number}>} videos - The enabled videos' rows from the snapshot.
+ * @returns {void}
+ */
+function renderVideos(videos) {
+  const byId = new Map(videos.map(function (v) { return [String(v.id), v]; }));
+  document.querySelectorAll('[data-readiness-video]').forEach(function (cell) {
+    const v = byId.get(cell.dataset.readinessVideo);
+    cell.textContent = v ? describeVideo(v) : 'Waiting for the next update…';
+  });
+  document.querySelectorAll('[data-readiness-push]').forEach(function (cell) {
+    const v = byId.get(cell.dataset.readinessPush);
+    cell.replaceChildren();
+    if (v) cell.appendChild(buildPushForm(v));
+  });
+}
+
+/**
+ * Shows or clears the "connection lost" state: the page keeps the last snapshot, but one note says
+ * it may be out of date, and every place the data lives is marked stale until the next snapshot.
  * @param {boolean} stale - True when the stream has dropped.
  * @returns {void}
  */
 function setReadinessStale(stale) {
   document.getElementById('readiness-status').hidden = !stale;
-  for (const id of ['readiness-overlays', 'readiness-videos']) {
-    document.getElementById(id).classList.toggle('stale', stale);
-  }
+  document.getElementById('readiness-overlays').classList.toggle('stale', stale);
+  document.getElementById('readiness-summary').classList.toggle('stale', stale);
+  document.querySelectorAll('[data-readiness-video], [data-readiness-push]').forEach(function (cell) {
+    cell.classList.toggle('stale', stale);
+  });
 }
 
 /**
- * Renders a readiness snapshot into the page's two lists (and clears any stale marking).
+ * Renders a readiness snapshot into the connection card and the video table (and clears any stale marking).
  * @param {{overlays: Array<object>, videos: Array<object>}} snapshot - The snapshot from the stream.
  * @returns {void}
  */
 function renderReadiness(snapshot) {
   setReadinessStale(false);
-  fillList(document.getElementById('readiness-overlays'), snapshot.overlays.map(describeOverlay), 'No shared overlays have connected yet.');
-  fillList(document.getElementById('readiness-videos'), snapshot.videos.map(describeVideo), 'No enabled shared videos.', snapshot.videos.map(buildPushForm));
+  renderOverlays(snapshot.overlays);
+  renderVideos(snapshot.videos);
 }
 
 if (document.getElementById('readiness-overlays')) {
