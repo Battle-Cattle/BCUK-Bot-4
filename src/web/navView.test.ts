@@ -207,6 +207,20 @@ describe('views/partials/nav.ejs navbar end', () => {
     expect(endOf(await renderNav(user))).toContain('🏠 Choose server ▾</a>');
   });
 
+  it('escapes the current server name in the switcher link title', async () => {
+    const user = { ...makeUser(AccessLevel.USER), guilds: [guild('1', 'x"<i>'), guild('2', 'Beta')], currentGuildId: '1' };
+    const end = endOf(await renderNav(user));
+
+    expect(end).toContain('title="Switch server (current: x&#34;&lt;i&gt;)"');
+    expect(end).not.toContain('<i>');
+  });
+
+  it('says no server is current in the switcher title when none is chosen', async () => {
+    const user = { ...makeUser(AccessLevel.USER), guilds: [guild('1', 'Alpha'), guild('2', 'Beta')], currentGuildId: null };
+
+    expect(endOf(await renderNav(user))).toContain('title="Switch server (current: none)"');
+  });
+
   it('shows the single guild as plain text, not a switcher', async () => {
     const end = endOf(await renderNav({ ...makeUser(AccessLevel.USER), guilds: [guild('1', 'Alpha')], currentGuildId: '1' }));
 

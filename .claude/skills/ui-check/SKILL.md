@@ -59,3 +59,4 @@ After changing anything in this folder, run its own tests: `node --test .claude/
 
 ## Known findings on `main` (Nov 2026)
 - A channel that is live while its bot is disconnected shows no LIVE badge on its Twitch Channels row (the badge needs the connection, and the owner chose to keep it as it is, #1114). Stream Overview does say Live for the signed-in user's own channel in that case.
+- `.disclosure-toggle` text is `--primary` (`#5865f2`), which the contrast audit puts below AA on the card backgrounds (4.2:1 on the page background for "Create new reward", 3.8:1 on the card background for "Edit reward", both on `channel-points-admin.json`). Found while checking #1125; only the focus ring was in that issue's scope.
