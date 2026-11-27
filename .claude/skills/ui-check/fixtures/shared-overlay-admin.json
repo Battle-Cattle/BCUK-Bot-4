@@ -1,0 +1,37 @@
+{
+  "_comment": "Illustrative data for ui-check only. Shared overlay admin: two enabled videos (one missing on two overlays, one ready everywhere), one disabled, three overlays, the readiness snapshot arriving on the SSE stream.",
+  "view": "sharedOverlayAdmin",
+  "waitMs": 600,
+  "locals": {
+    "user": { "discordId": "1", "discordName": "Mod", "accessLevel": 2, "isOwner": false, "currentGuildId": null, "guilds": [] },
+    "csrfToken": "tok",
+    "videos": [
+      { "id": 1, "name": "Chase", "filename": "a.webm", "enabled": true, "uploader_login": "bob", "created_at": "2026-11-01T00:00:00.000Z" },
+      { "id": 2, "name": "Confetti Explosion", "filename": "b.webm", "enabled": true, "uploader_login": "alice", "created_at": "2026-11-02T00:00:00.000Z" },
+      { "id": 3, "name": "Old clip", "filename": "c.webm", "enabled": false, "uploader_login": null, "created_at": "2026-11-03T00:00:00.000Z" }
+    ],
+    "ownVideos": [],
+    "connectedCount": 3,
+    "pushedCount": 0,
+    "baseUrl": "https://bot.example",
+    "streamer": { "id": 5 },
+    "maxFileMb": 100,
+    "error": null,
+    "success": null
+  },
+  "sse": {
+    "/overlay/shared/settings/readiness/events": [
+      { "data": {
+        "overlays": [
+          { "login": "bob", "online": true, "stored": 1, "total": 2, "downloading": { "name": "Chase", "percent": 40 }, "reportedAt": 1795000000000 },
+          { "login": "alice", "online": true, "stored": 1, "total": 2, "downloading": null, "reportedAt": 1795000000000 },
+          { "login": "carol", "online": false, "stored": 2, "total": 2, "downloading": null, "reportedAt": 1794990000000 }
+        ],
+        "videos": [
+          { "id": 1, "name": "Chase", "ready": 0, "online": 2, "allReady": false, "missing": [ { "login": "bob", "percent": 40 }, { "login": "alice", "percent": null } ] },
+          { "id": 2, "name": "Confetti Explosion", "ready": 2, "online": 2, "allReady": true, "missing": [] }
+        ]
+      } }
+    ]
+  }
+}
