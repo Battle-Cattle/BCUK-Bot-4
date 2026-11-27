@@ -1,0 +1,68 @@
+{
+  "_comment": "Illustrative data for ui-check only. Channel Points admin for a connected streamer with one reward and no pricing config: the page has several <details> disclosure toggles (.disclosure-toggle), so it shows their keyboard focus ring.",
+  "view": "channelPointsAdmin",
+  "locals": {
+    "user": {
+      "discordId": "1",
+      "discordName": "Streamer",
+      "accessLevel": 0,
+      "isOwner": false,
+      "currentGuildId": null,
+      "guilds": []
+    },
+    "csrfToken": "tok",
+    "streamer": {
+      "id": 7,
+      "twitch_name": "streamer"
+    },
+    "isConnected": true,
+    "needsReconnect": false,
+    "rewards": [
+      {
+        "rewardId": "rwd1",
+        "twitchReward": {
+          "id": "rwd1",
+          "title": "Hydrate",
+          "cost": 200,
+          "is_enabled": true,
+          "is_paused": false,
+          "prompt": "Drink some water",
+          "background_color": "#9147FF",
+          "is_user_input_required": false,
+          "should_redemptions_skip_request_queue": false,
+          "global_cooldown_setting": {
+            "is_enabled": false,
+            "global_cooldown_seconds": 0
+          },
+          "max_per_stream_setting": {
+            "is_enabled": false,
+            "max_per_stream": 0
+          },
+          "max_per_user_per_stream_setting": {
+            "is_enabled": false,
+            "max_per_user_per_stream": 0
+          }
+        },
+        "config": null,
+        "previewPrice": 200,
+        "historyChartSafeHtml": "",
+        "simulationChartSafeHtml": "",
+        "simulationSummary": "",
+        "companionConfirmation": false
+      }
+    ],
+    "pricingSettings": {
+      "half_life_seconds": 1800,
+      "time_to_max_multiplier": 2
+    },
+    "historyHours": 24,
+    "historyHourOptions": [
+      6,
+      24,
+      72
+    ],
+    "error": null,
+    "success": null
+  },
+  "waitMs": 300
+}
