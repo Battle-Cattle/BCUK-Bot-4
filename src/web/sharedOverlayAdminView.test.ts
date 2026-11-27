@@ -32,7 +32,7 @@ describe('sharedOverlayAdmin view', () => {
     expect(html).toContain('Disable');
     expect(html).toContain('Enable');
     expect(html).toContain('/overlay/shared/settings/2/delete');
-    expect(html).toContain('id="readiness-summary"');
+    expect(html).toMatch(/id="readiness-summary"[^>]*>Loading…</);
     expect(html).toContain('/overlay/shared/settings/import/9');
   });
 
@@ -52,6 +52,7 @@ describe('sharedOverlayAdmin view', () => {
     const html = await render();
     expect(html).not.toContain('data-readiness-video="2"');
     expect(html).not.toContain('data-readiness-push="2"');
+    expect(html).toMatch(/Disabled<\/td>\s*<td>—<\/td>/);
   });
 
   it('shows no video table when there are no videos, and hides the import list when empty', async () => {

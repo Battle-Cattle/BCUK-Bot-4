@@ -104,7 +104,13 @@ describe('readiness page script', () => {
     ], videos: [] });
     expect(els['readiness-summary'].textContent).toBe('1 shared overlay connected right now.');
     expect(els['readiness-overlays'].children.map((c: any) => c.textContent)).toEqual(['a — online — 0/1 stored', 'b — offline (no report yet) — 1/1 stored']);
-    expect(els['readiness-summary'].textContent).not.toContain('overlays connected');
+    api.renderReadiness({ overlays: [
+      { login: 'a', online: true, stored: 0, total: 1, downloading: null, reportedAt: 1 },
+      { login: 'b', online: true, stored: 1, total: 1, downloading: null, reportedAt: 1 },
+    ], videos: [] });
+    expect(els['readiness-summary'].textContent).toBe('2 shared overlays connected right now.');
+    api.renderReadiness({ overlays: [{ login: 'a', online: false, stored: 0, total: 1, downloading: null, reportedAt: 1 }], videos: [] });
+    expect(els['readiness-summary'].textContent).toBe('0 shared overlays connected right now.');
   });
 
   it('opens the stream', () => {
