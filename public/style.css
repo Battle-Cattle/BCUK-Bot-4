@@ -71,6 +71,12 @@ a:hover { text-decoration: underline; }
    width, which --nav-collapse-max (below) is set above. */
 .username { max-width: 9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .guild-name, .guild-switcher { max-width: 11rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* On wide windows the nav has hundreds of spare pixels (the breakpoint is sized for 1201px), so let names show in full
+   instead of cutting a 18-character server name. The extra (~224px) is far below the room gained over 1201px. */
+@media (min-width: 1600px) {
+  .username { max-width: 14rem; }
+  .guild-name, .guild-switcher { max-width: 20rem; }
+}
 
 /* Nav groups (dropdown) */
 .nav-group { position: relative; }
