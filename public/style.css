@@ -702,7 +702,7 @@ textarea.input, .stream-textarea { width: 100%; resize: vertical; font-family: v
    as an explicit link-colored control with a chevron that rotates on open. */
 .disclosure-toggle {
   display: inline-flex; align-items: center; gap: .35rem; cursor: pointer;
-  color: var(--primary); list-style: none;
+  color: var(--accent-indigo); list-style: none;
 }
 .disclosure-toggle::-webkit-details-marker { display: none; }
 .disclosure-toggle:hover { text-decoration: underline; }
