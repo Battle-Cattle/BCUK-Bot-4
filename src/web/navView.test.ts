@@ -335,6 +335,12 @@ describe('public/style.css nav collapse breakpoint (#1109)', () => {
     expect(css).toMatch(/\.disclosure-toggle:focus-visible\s*\{[^}]*outline:\s*2px solid var\(--focus-ring\)/);
   });
 
+  it('colours the disclosure toggle text with a light token, not --primary, which fails WCAG AA on the dark backgrounds', () => {
+    const rule = /\.disclosure-toggle\s*\{([^}]*)\}/.exec(css)?.[1] ?? '';
+    expect(rule).toMatch(/(?<![-\w])color:\s*var\(--accent-indigo\)/);
+    expect(rule).not.toMatch(/(?<![-\w])color:\s*var\(--primary\)/);
+  });
+
   it('caps the username and server name with an ellipsis, so the full nav has a worst-case width', () => {
     expect(css).toMatch(/\.username\s*\{[^}]*max-width:\s*9rem;[^}]*overflow:\s*hidden;[^}]*text-overflow:\s*ellipsis;[^}]*white-space:\s*nowrap;/);
     expect(css).toMatch(/\.guild-name,\s*\.guild-switcher\s*\{[^}]*max-width:\s*11rem;[^}]*text-overflow:\s*ellipsis;/);
