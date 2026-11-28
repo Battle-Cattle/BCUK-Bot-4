@@ -48,6 +48,10 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
+const CHALLENGE = 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM';
+const VERIFIER = 'dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk';
+const PKCE_QUERY = `code_challenge=${CHALLENGE}&code_challenge_method=S256`;
+
 // ─── GET /companion/login ─────────────────────────────────────────────────────
 
 describe('GET /companion/login', () => {
@@ -79,6 +83,11 @@ describe('GET /companion/login', () => {
     expect(res.status).toBe(400);
   });
 
+  it('renders error 400 when no PKCE challenge is sent', async () => {
+    const res = await supertest(buildApp()).get('/companion/login?redirect_uri=http://127.0.0.1:9999/callback&state=s');
+    expect(res.status).toBe(400);
+  });
+
   it('accepts a 127.0.0.1 loopback redirect_uri, stashes session state, and redirects to /auth/discord', async () => {
     let capturedSession: any;
     const app = express();
@@ -89,7 +98,7 @@ describe('GET /companion/login', () => {
     });
     app.use(router);
     const res = await supertest(app)
-      .get('/companion/login?redirect_uri=http://127.0.0.1:9999/callback&state=appstate1');
+      .get('/companion/login?redirect_uri=http://127.0.0.1:9999/callback&state=appstate1&' + PKCE_QUERY);
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/auth/discord');
     expect(capturedSession.companionOAuth).toMatchObject({
@@ -100,7 +109,7 @@ describe('GET /companion/login', () => {
 
   it('accepts a localhost loopback redirect_uri', async () => {
     const res = await supertest(buildApp())
-      .get('/companion/login?redirect_uri=http://localhost:9999/callback&state=abc');
+      .get('/companion/login?redirect_uri=http://localhost:9999/callback&state=abc&' + PKCE_QUERY);
     expect(res.status).toBe(302);
     expect(res.headers.location).toBe('/auth/discord');
   });
@@ -117,43 +126,46 @@ describe('POST /api/companion/oauth/token', () => {
 
   it('returns 400 when exchangeCodeForToken reports the code is invalid/expired/used', async () => {
     vi.mocked(exchangeCodeForToken).mockResolvedValue(null);
-    const res = await supertest(buildApp()).post('/api/companion/oauth/token').send({ code: 'bad' });
+    const res = await supertest(buildApp()).post('/api/companion/oauth/token').send({ code: 'bad', code_verifier: VERIFIER });
     expect(res.status).toBe(400);
   });
 
   it('returns a token when the code is valid', async () => {
     vi.mocked(exchangeCodeForToken).mockResolvedValue({ token: 'plain-token-value', discordId: 'user1' });
-    const res = await supertest(buildApp()).post('/api/companion/oauth/token').send({ code: 'good' });
+    const res = await supertest(buildApp()).post('/api/companion/oauth/token').send({ code: 'good', code_verifier: VERIFIER });
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ token: 'plain-token-value' });
-    expect(exchangeCodeForToken).toHaveBeenCalledWith('good', null);
+    expect(exchangeCodeForToken).toHaveBeenCalledWith('good', VERIFIER);
+  });
+
+  it('returns 400 without a code_verifier', async () => {
+    const res = await supertest(buildApp()).post('/api/companion/oauth/token').send({ code: 'good' });
+    expect(res.status).toBe(400);
+    expect(exchangeCodeForToken).not.toHaveBeenCalled();
   });
 
   it('ends any open companion SSE connections for the user after issuing a new token', async () => {
     // A new token invalidates any prior one, so a connection still open under the old token
     // must be disconnected — otherwise it would keep streaming under a now-replaced credential.
     vi.mocked(exchangeCodeForToken).mockResolvedValue({ token: 'plain-token-value', discordId: 'user1' });
-    await supertest(buildApp()).post('/api/companion/oauth/token').send({ code: 'good' });
+    await supertest(buildApp()).post('/api/companion/oauth/token').send({ code: 'good', code_verifier: VERIFIER });
     expect(disconnectCompanionConnections).toHaveBeenCalledWith('user1');
   });
 
   it('does not disconnect connections when the code is invalid/expired/used', async () => {
     vi.mocked(exchangeCodeForToken).mockResolvedValue(null);
-    await supertest(buildApp()).post('/api/companion/oauth/token').send({ code: 'bad' });
+    await supertest(buildApp()).post('/api/companion/oauth/token').send({ code: 'bad', code_verifier: VERIFIER });
     expect(disconnectCompanionConnections).not.toHaveBeenCalled();
   });
 
   it('returns 500 when exchangeCodeForToken throws', async () => {
     vi.mocked(exchangeCodeForToken).mockRejectedValue(new Error('DB error'));
-    const res = await supertest(buildApp()).post('/api/companion/oauth/token').send({ code: 'good' });
+    const res = await supertest(buildApp()).post('/api/companion/oauth/token').send({ code: 'good', code_verifier: VERIFIER });
     expect(res.status).toBe(500);
   });
 });
 
 // ─── PKCE ─────────────────────────────────────────────────────────────────────
-
-const CHALLENGE = 'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM';
-const VERIFIER = 'dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk';
 
 describe('PKCE on the companion login', () => {
   it('stashes an S256 code_challenge with the pending login', async () => {
