@@ -31,7 +31,7 @@ beforeEach(() => {
 describe('companion auth routes rate limiting', () => {
   it.each([
     ['POST', '/api/companion/oauth/token'] as const,
-    ['GET', '/companion/login?redirect_uri=http://127.0.0.1:9999/cb&state=abc'] as const,
+    ['GET', '/companion/login?redirect_uri=http://127.0.0.1:9999/cb&state=abc&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256'] as const,
   ])('rate-limits repeated %s %s requests (authLimiter is wired, not skipped)', async (method, path) => {
     const app = buildApp();
     let sawRateLimited = false;

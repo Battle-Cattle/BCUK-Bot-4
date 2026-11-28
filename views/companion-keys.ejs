@@ -70,10 +70,10 @@
 
         <p><strong>Login flow (loopback OAuth, RFC 8252):</strong></p>
         <ol>
-          <li>Start a local HTTP listener on an ephemeral loopback port and generate a random <code>state</code> value.</li>
-          <li>Open the user's browser to <code>/companion/login?redirect_uri=http://127.0.0.1:&lt;port&gt;/callback&amp;state=&lt;state&gt;</code>.</li>
+          <li>Start a local HTTP listener on an ephemeral loopback port and generate a random <code>state</code> value and a PKCE <code>code_verifier</code> (RFC 7636: 43&ndash;128 characters from <code>A-Z a-z 0-9 - . _ ~</code>). Its <code>code_challenge</code> is the base64url (no padding) SHA-256 of the verifier.</li>
+          <li>Open the user's browser to <code>/companion/login?redirect_uri=http://127.0.0.1:&lt;port&gt;/callback&amp;state=&lt;state&gt;&amp;code_challenge=&lt;challenge&gt;&amp;code_challenge_method=S256</code>. The challenge is required and only <code>S256</code> is accepted.</li>
           <li>The user logs in with Discord. On success, the browser is redirected back to your <code>redirect_uri</code> with <code>code</code> and <code>state</code> query parameters.</li>
-          <li>Verify <code>state</code> matches, then exchange the code directly (no browser involved): <code>POST /api/companion/oauth/token</code> with JSON body <code>{ "code": "..." }</code>. The response is <code>{ "token": "..." }</code> — store this token; it is shown only once.</li>
+          <li>Verify <code>state</code> matches, then exchange the code directly (no browser involved): <code>POST /api/companion/oauth/token</code> with JSON body <code>{ "code": "...", "code_verifier": "..." }</code>. The verifier is required. The response is <code>{ "token": "..." }</code> — store this token; it is shown only once.</li>
         </ol>
         <p class="muted">Only loopback redirect URIs (<code>http://127.0.0.1:*</code> or <code>http://localhost:*</code>) are accepted.</p>
 
