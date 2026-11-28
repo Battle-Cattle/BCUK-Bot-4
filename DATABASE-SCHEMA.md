@@ -795,7 +795,7 @@ Short-lived, single-use authorization codes for the companion app's loopback OAu
 | `discord_id` | `BIGINT` | FK to `user.discord_id` ON DELETE CASCADE; the user the code resolves to once consumed |
 | `expires_at` | `DATETIME` | Computed DB-side as `NOW() + 60 seconds` at creation, so it stays consistent with the consuming query even if the app and DB clocks drift |
 | `used_at` | `DATETIME` nullable | Set when the code is consumed; `NULL` while still redeemable |
-| `code_challenge` | `VARCHAR(64)` nullable | PKCE S256 challenge (base64url SHA-256 of the app's `code_verifier`) sent to `/companion/login`; when set, the code only exchanges with the matching verifier. `NULL` for an app that didn't send one |
+| `code_challenge` | `VARCHAR(64)` nullable | PKCE S256 challenge (base64url SHA-256 of the app's `code_verifier`) sent to `/companion/login`; when set, the code only exchanges with the matching verifier. `NULL` only on codes issued before `/companion/login` required PKCE (they expire after 60 seconds) |
 
 Expected constraints and behavior:
 

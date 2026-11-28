@@ -19,15 +19,13 @@ const PKCE_CHALLENGE_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const PKCE_VERIFIER_PATTERN = /^[A-Za-z0-9._~-]{43,128}$/;
 
 /**
- * Reads the optional PKCE parameters from `/companion/login`. Only S256 is accepted: `plain`
+ * Reads the required PKCE parameters from `/companion/login`. Only S256 is accepted: `plain`
  * would send the verifier itself through the browser, which is what PKCE exists to avoid.
  * @param query - The request query.
- * @returns The challenge, null when the app sent none (an app that predates PKCE), or undefined
- *   when the parameters are present but invalid.
+ * @returns The challenge, or undefined when it is missing or invalid.
  */
-function parsePkceChallenge(query: Record<string, unknown>): string | null | undefined {
+function parsePkceChallenge(query: Record<string, unknown>): string | undefined {
   const { code_challenge: challenge, code_challenge_method: method } = query;
-  if (challenge === undefined && method === undefined) return null;
   if (method !== 'S256' || typeof challenge !== 'string' || !PKCE_CHALLENGE_PATTERN.test(challenge)) return undefined;
   return challenge;
 }
@@ -40,8 +38,8 @@ function parsePkceChallenge(query: Record<string, unknown>): string | null | und
  * Rate-limited by `authLimiter`, which responds 429 before this handler runs.
  * @param req.query.redirect_uri - Loopback URL the companion app is listening on.
  * @param req.query.state - Opaque value echoed back to the app for CSRF binding.
- * @param req.query.code_challenge - Optional PKCE S256 challenge; the token exchange then needs
- *   the matching `code_verifier`. Sent with `code_challenge_method=S256`.
+ * @param req.query.code_challenge - Required PKCE S256 challenge; the token exchange needs the
+ *   matching `code_verifier`. Sent with `code_challenge_method=S256`.
  */
 router.get('/companion/login', authLimiter, (req, res) => {
   const { redirect_uri: redirectUri, state } = req.query as { redirect_uri?: string; state?: string };
@@ -50,14 +48,14 @@ router.get('/companion/login', authLimiter, (req, res) => {
   }
   const codeChallenge = parsePkceChallenge(req.query);
   if (codeChallenge === undefined) {
-    return renderError(res, 400, 'Invalid code_challenge: only an S256 challenge is supported.', undefined);
+    return renderError(res, 400, 'Missing or invalid code_challenge: an S256 challenge is required.', undefined);
   }
 
   req.session.companionOAuth = {
     redirectUri,
     appState: state,
     expiresAt: Date.now() + COMPANION_OAUTH_TTL_MS,
-    ...(codeChallenge ? { codeChallenge } : {}),
+    codeChallenge,
   };
 
   res.redirect('/auth/discord');
@@ -72,7 +70,7 @@ router.get('/companion/login', authLimiter, (req, res) => {
  * any companion SSE connection still open under the token just replaced — otherwise it
  * would keep streaming under a token that's no longer valid for new connections.
  * @param req.body.code - Plaintext one-time code from the loopback redirect.
- * @param req.body.code_verifier - The PKCE verifier, required when the login sent a challenge.
+ * @param req.body.code_verifier - The PKCE verifier, always required.
  * @returns `{ token }` on success, or a 400/429/500 JSON error response —
  *   429 comes from `authLimiter` and short-circuits before this handler runs.
  */
@@ -82,13 +80,13 @@ router.post('/api/companion/oauth/token', authLimiter, async (req, res) => {
     res.status(400).json({ ok: false, error: 'Missing code' });
     return;
   }
-  if (codeVerifier !== undefined && (typeof codeVerifier !== 'string' || !PKCE_VERIFIER_PATTERN.test(codeVerifier))) {
-    res.status(400).json({ ok: false, error: 'Invalid code_verifier' });
+  if (typeof codeVerifier !== 'string' || !PKCE_VERIFIER_PATTERN.test(codeVerifier)) {
+    res.status(400).json({ ok: false, error: 'Missing or invalid code_verifier' });
     return;
   }
 
   try {
-    const result = await exchangeCodeForToken(code, codeVerifier ?? null);
+    const result = await exchangeCodeForToken(code, codeVerifier);
     if (!result) {
       res.status(400).json({ ok: false, error: 'Invalid or expired code' });
       return;
