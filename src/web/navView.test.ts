@@ -340,6 +340,10 @@ describe('public/style.css nav collapse breakpoint (#1109)', () => {
     expect(css).toMatch(/\.guild-name,\s*\.guild-switcher\s*\{[^}]*max-width:\s*11rem;[^}]*text-overflow:\s*ellipsis;/);
   });
 
+  it('raises the name caps only on wide windows, where the nav has room to show names in full', () => {
+    expect(css).toMatch(/@media \(min-width: 1600px\) \{[^}]*\.username \{ max-width: 14rem; \}[^}]*\.guild-name, \.guild-switcher \{ max-width: 20rem; \}/);
+  });
+
   it('lets the navbar wrap to a second row rather than clip when the menu does not fit beside the brand', () => {
     expect(/\.navbar\s*\{[^}]*flex-wrap:\s*wrap;/.test(css)).toBe(true);
   });
